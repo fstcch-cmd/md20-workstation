@@ -176,6 +176,12 @@ def cmd_pipeline(a):
     return 0
 
 
+def cmd_gui(a):
+    from .gui.app import main as gui_main
+    gui_main(projects_dir=a.dir, port=a.port, show=not a.no_browser)
+    return 0
+
+
 def cmd_status(a):
     proj = _open_project(a)
     for c in proj.cases():
@@ -249,6 +255,8 @@ def main(argv=None) -> int:
     pl.add_argument("action", choices=["run", "example"]); pl.add_argument("config", nargs="?")
     pl.add_argument("--project", default="MD20_Pipelines"); pl.add_argument("--hours"); pl.add_argument("--ignore-battery", action="store_true")
     pl.add_argument("--fake", action="store_true"); pl.set_defaults(fn=cmd_pipeline)
+    g = sub.add_parser("gui", help="圖形介面（瀏覽器）"); g.add_argument("--port", type=int, default=8020)
+    g.add_argument("--no-browser", action="store_true"); g.set_defaults(fn=cmd_gui)
     rp = sub.add_parser("report"); rp.add_argument("--project", required=True); rp.add_argument("--case", required=True)
     rp.add_argument("--run"); rp.add_argument("--bundle", action="store_true"); rp.set_defaults(fn=cmd_report)
     m = sub.add_parser("demo"); m.add_argument("--dir"); m.set_defaults(fn=cmd_demo)
