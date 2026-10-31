@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write   # failure logs are posted as commit comments (readable through the REST API)
+
 jobs:
   pure-python:
     # Fast gate: no chemistry stack; runs the 27 pure-Python tests on all three OSes.
@@ -20,9 +23,17 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "${{ matrix.python }}" }
       - run: pip install -e ".[dev]"
-      - run: pytest -q --ignore=tests/test_openmm_integration.py
+      - shell: bash
+        run: pytest -q --ignore=tests/test_openmm_integration.py --ignore=tests/test_real_case_integration.py 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
       - run: python -m md20.cli demo --dir ${{ runner.temp }}/md20demo
       - run: python -m md20.cli doctor --no-benchmark || true   # degraded mode (no openmm): must not crash
+      - name: Post failure log as commit comment
+        if: failure()
+        shell: bash
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          body="### CI failure: pure-python (${{ matrix.os }}, py${{ matrix.python }})"$'\n```\n'"$(tail -c 60000 pytest.log 2>/dev/null || echo 'no pytest.log')"$'\n```'
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$body" >/dev/null || true
 
   openmm-stack:
     # Full stack via micromamba (same environment files the installer uses); real OpenMM on the CPU platform.
@@ -60,7 +71,14 @@ jobs:
         run: md20 doctor --seconds 5 || true
       - name: Full test suite incl. real OpenMM
         shell: bash -el {0}
-        run: pytest -v
+        run: pytest -v 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
+      - name: Post failure log as commit comment
+        if: failure()
+        shell: bash
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          body="### CI failure: openmm-stack (${{ matrix.os }})"$'\n```\n'"$(tail -c 60000 pytest.log 2>/dev/null || echo 'no pytest.log')"$'\n```'
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$body" >/dev/null || true
       - name: Upload doctor report
         if: always()
         uses: actions/upload-artifact@v4
