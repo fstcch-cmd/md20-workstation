@@ -22,7 +22,10 @@ md20 project new 課堂A
 md20 build --project 課堂A --case kinase --receptor 1ABC.pdb --ligand lig_ref.sdf --pose vina_pose.sdf
 md20 run   --project 課堂A --case kinase_xxxxxx --tier classroom
 md20 status --project 課堂A
-md20 demo                        # 不需 OpenMM：用合成後端跑完整流程，產生圖表與決策日誌
+md20 report --project 課堂A --case kinase_xxxxxx --bundle    # HTML 報告 + 可重現包
+md20 queue add --project 課堂A --case kinase_xxxxxx --tier teaching --replicas 3
+md20 queue run --project 課堂A --hours 22-7                   # 只在夜間跑；電池供電或建立 PAUSE 檔即暫停
+md20 demo                        # 不需 OpenMM：用合成後端跑完整流程，產生圖表、決策日誌與報告
 ```
 
 ## 架構
@@ -38,8 +41,9 @@ md20/
               ＋ HMR ＋ tier 預設 protocol ＋ 驗收與自動延長；Backend 抽象（OpenMM／Fake）
   analysis/   log 解析、驗收、自動圖表（PNG+SVG+plotly HTML）
   sampling/   0913 `MDH` 函式庫（WHAM/MBAR/overlap/bootstrap）＋ window 規劃
+  report/     自含 HTML 報告（方法段落自動產生）＋ 可重現包
   cli.py      命令列
-tests/        20 個純 Python 測試（任何機器可跑）＋ OpenMM 整合測試（有 openmm 時自動啟用）
+tests/        26 個純 Python 測試（任何機器可跑）＋ OpenMM 整合測試（有 openmm 時自動啟用）
 ```
 
 ## 狀態（誠實分層）

@@ -177,6 +177,10 @@ def run_doctor(*, do_benchmark: bool = True, benchmark_seconds: float = 20.0, wo
                 try:
                     bench = benchmark(choice.name, choice.properties, seconds=benchmark_seconds)
                     findings.append(Finding("Benchmark", "OK", f"{bench['ns_per_day']} ns/day @ {bench['n_atoms']} 原子, dt {bench['timestep_fs']} fs", ""))
+                    rec = recommend_tier(bench["ns_per_day"], n_atoms_benchmark=bench["n_atoms"])
+                    bench["tier_recommendation"] = rec
+                    findings.append(Finding("建議 tier", "OK", rec["recommended"],
+                                            "; ".join(f"{r['tier']}: {r['total_ns']} ns ≈ {r['eta_hours']} h" for r in rec["rows"])))
                 except Exception as exc:  # noqa: BLE001
                     findings.append(Finding("Benchmark", "WARN", f"{type(exc).__name__}: {exc}", "平台可建立但 PME benchmark 失敗；請回報。"))
         except Exception as exc:  # noqa: BLE001
@@ -193,3 +197,24 @@ def run_doctor(*, do_benchmark: bool = True, benchmark_seconds: float = 20.0, wo
 
 def estimate_eta_hours(ns_per_day: float, total_ns: float) -> float:
     return float("inf") if ns_per_day <= 0 else 24.0 * total_ns / ns_per_day
+
+
+def recommend_tier(ns_per_day: float, *, n_atoms_benchmark: int = 24000, n_atoms_system: int | None = None,
+                   max_hours: float = 48.0) -> dict:
+    """Pick the largest teaching tier whose total simulated time fits in `max_hours` on this machine.
+
+    Scales ns/day inversely with system size relative to the benchmark box.
+    """
+    from ..engine.protocol import TIERS, make_protocol
+    scale = (n_atoms_benchmark / n_atoms_system) if n_atoms_system else 1.0
+    rate = max(1e-9, ns_per_day * scale)
+    rows = []
+    for tier in ("classroom", "teaching", "research"):
+        total = make_protocol(tier).total_ns()
+        hours = estimate_eta_hours(rate, total)
+        rows.append({"tier": tier, "total_ns": round(total, 3), "eta_hours": round(hours, 1), "fits": hours <= max_hours})
+    best = [r for r in rows if r["fits"]]
+    chosen = best[-1]["tier"] if best else "classroom"
+    why = (f"以 {rate:.1f} ns/day（依系統大小換算）估算；{chosen} tier 可在 {max_hours:.0f} 小時內完成。"
+           if best else f"即使最小的 classroom tier 也超過 {max_hours:.0f} 小時；建議縮小系統（padding 0.8 nm）或改用工作站佇列。")
+    return {"recommended": chosen, "rate_ns_per_day": round(rate, 2), "rows": rows, "why": why}

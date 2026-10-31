@@ -34,6 +34,15 @@ class WatchdogError(RuntimeError):
     """Raised internally when a chunk is judged unstable."""
 
 
+class Paused(RuntimeError):
+    """Stage paused at a chunk boundary (battery, user request, schedule); resumable as-is."""
+
+    def __init__(self, reason: str, *, stage: str, completed_local_steps: int):
+        super().__init__(reason)
+        self.stage = stage
+        self.completed_local_steps = completed_local_steps
+
+
 class NeedsHuman(RuntimeError):
     """Stage cannot continue automatically; message is student-readable."""
 
@@ -88,7 +97,8 @@ def _verify_chunks(progress: dict, stage_dir: Path) -> tuple[list[dict], int, Pa
 def run_stage(stage_dir: Path | str, spec: StageSpec, make_backend: BackendFactory, *, identity: dict,
               initial_state: Path | None, decisions: DecisionLog | None = None, write_dcd: bool = True,
               max_retries: int = 3, min_timestep_fs: float = 0.5, progress_cb: Callable[[dict], None] | None = None,
-              batch_steps: int | None = None, clock: Callable[[], float] = time.monotonic) -> StageResult:
+              batch_steps: int | None = None, clock: Callable[[], float] = time.monotonic,
+              should_pause: Callable[[], str | None] | None = None) -> StageResult:
     stage_dir = Path(stage_dir)
     stage_dir.mkdir(parents=True, exist_ok=True)
     name = spec.name
@@ -128,6 +138,14 @@ def run_stage(stage_dir: Path | str, spec: StageSpec, make_backend: BackendFacto
         absolute_start = backend.current_step() - completed
         retries = 0
         while completed < total:
+            if should_pause is not None:
+                reason = should_pause()
+                if reason:
+                    atomic_write_json({**identity, "status": "PAUSED", "stage": name, "reason": reason, "total_steps": total,
+                                       "completed_local_steps": completed, "chunks": chunks,
+                                       "watchdog_events": events, "updated_at": now_iso()}, progress_path)
+                    heartbeat_path.unlink(missing_ok=True)
+                    raise Paused(reason, stage=name, completed_local_steps=completed)
             chunk_id = len(chunks) + 1
             todo = min(chunk_steps, total - completed)
             tmp = stage_dir / f"_tmp_chunk_{chunk_id:05d}"

@@ -13,7 +13,7 @@ from typing import Callable
 from ..util import atomic_write_json, load_json, now_iso, DecisionLog
 from ..analysis import read_state_log, evaluate_acceptance, plot_stage_log, plot_minimization, plot_overview
 from .protocol import Protocol, StageSpec
-from .chunks import run_stage, NeedsHuman, StageResult
+from .chunks import run_stage, NeedsHuman, Paused, StageResult
 
 
 def _minimize(stage_dir: Path, spec: StageSpec, make_backend, *, identity: dict, decisions: DecisionLog | None) -> dict:
@@ -55,7 +55,7 @@ def _minimize(stage_dir: Path, spec: StageSpec, make_backend, *, identity: dict,
 
 def run_protocol(run_dir: Path | str, protocol: Protocol, make_backend: Callable, *, identity: dict,
                  decisions: DecisionLog | None = None, progress_cb=None, max_extensions: int = 2,
-                 write_dcd: bool = True, batch_steps: int | None = None) -> dict:
+                 write_dcd: bool = True, batch_steps: int | None = None, should_pause=None) -> dict:
     run_dir = Path(run_dir)
     stages_dir = run_dir / "stages"
     figures = run_dir / "figures"
@@ -79,7 +79,7 @@ def run_protocol(run_dir: Path | str, protocol: Protocol, make_backend: Callable
             for attempt in range(max_extensions + 1):
                 res: StageResult = run_stage(sdir, spec_run, make_backend, identity=ident, initial_state=prev_state,
                                              decisions=decisions, write_dcd=write_dcd, progress_cb=progress_cb,
-                                             batch_steps=batch_steps)
+                                             batch_steps=batch_steps, should_pause=should_pause)
                 df = read_state_log(res.log_path)
                 frames[spec.name] = df
                 acc = evaluate_acceptance(df, ensemble=spec.ensemble, target_temperature_k=spec.temperature_k,
@@ -115,6 +115,11 @@ def run_protocol(run_dir: Path | str, protocol: Protocol, make_backend: Callable
         status.update({"status": "COMPLETE", "results": results, "finished_at": now_iso()})
         atomic_write_json(status, run_dir / "run.json")
         return status
+    except Paused as exc:
+        status.update({"status": "PAUSED", "results": results, "reason": str(exc), "stage": exc.stage,
+                       "updated_at": now_iso()})
+        atomic_write_json(status, run_dir / "run.json")
+        raise
     except NeedsHuman as exc:
         status.update({"status": "NEEDS_HUMAN", "results": results, "error": str(exc), "stage": exc.stage,
                        "evidence": exc.evidence, "updated_at": now_iso()})

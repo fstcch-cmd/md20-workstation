@@ -116,6 +116,45 @@ def cmd_run(a):
     return 0
 
 
+def cmd_report(a):
+    from .report import build_run_report, reproducibility_bundle
+    proj = _open_project(a)
+    case = proj.case(a.case)
+    run = case.active_run() if not a.run else __import__("md20.project", fromlist=["Run"]).Run(case, a.run)
+    if run is None:
+        raise SystemExit("此 case 沒有 run。")
+    out = build_run_report(run)
+    _p(f"report: {out}")
+    if a.bundle:
+        _p(f"bundle: {reproducibility_bundle(run)}")
+    return 0
+
+
+def cmd_queue(a):
+    from .engine import JobQueue, PausePolicy
+    from .env.hardware import _power_state
+    proj = _open_project(a)
+    q = JobQueue(proj)
+    if a.action == "add":
+        j = q.add(a.case, tier=a.tier, replicas=a.replicas, production_ns=a.ns)
+        _p(f"queued {j['id']}: case={j['case_id']} tier={j['tier']} replicas={j['replicas']}")
+    elif a.action == "list":
+        for j in q.jobs():
+            _p(f"{j['id']}  {j['case_id']}  {j['tier']}×{j['replicas']}  {j['status']}  {j.get('reason', '')}")
+    elif a.action == "run":
+        hours = tuple(int(x) for x in a.hours.split("-")) if a.hours else None
+        policy = PausePolicy(pause_file=proj.dir / "PAUSE", pause_on_battery=not a.ignore_battery,
+                             allowed_hours=hours, power_probe=_power_state)
+        while True:
+            j = q.run_next(lambda case, proto: _make_backend_factory(case, proto, a.fake), should_pause=policy)
+            if j is None:
+                _p("佇列已空。"); break
+            _p(f"{j['id']} → {j['status']} {j.get('reason', '')}")
+            if j["status"] != "COMPLETE":
+                break
+    return 0
+
+
 def cmd_status(a):
     proj = _open_project(a)
     for c in proj.cases():
@@ -143,7 +182,9 @@ def cmd_demo(a):
     make = lambda spec, dt: FakeBackend(timestep_fs=dt, temperature_k=spec.temperature_k, ensemble=spec.ensemble)  # noqa: E731
     st = run_protocol(run.dir, proto, make, identity={"case_id": case.case_id, "run_id": run.run_id}, decisions=proj.decisions,
                       batch_steps=500)
+    from .report import build_run_report
     _p(f"demo status: {st['status']}")
+    _p(f"report: {build_run_report(run)}")
     _p(f"figures: {run.figures_dir}")
     _p(proj.decisions.to_markdown())
     return 0
@@ -167,6 +208,12 @@ def main(argv=None) -> int:
     r.add_argument("--fake", action="store_true", help="use the synthetic backend (no OpenMM)")
     r.set_defaults(fn=cmd_run)
     s = sub.add_parser("status"); s.add_argument("--project", required=True); s.set_defaults(fn=cmd_status)
+    qp = sub.add_parser("queue"); qp.add_argument("action", choices=["add", "list", "run"]); qp.add_argument("--project", required=True)
+    qp.add_argument("--case"); qp.add_argument("--tier", default="teaching"); qp.add_argument("--replicas", type=int, default=1)
+    qp.add_argument("--ns", type=float); qp.add_argument("--hours", help="允許時段，如 22-7"); qp.add_argument("--ignore-battery", action="store_true")
+    qp.add_argument("--fake", action="store_true"); qp.set_defaults(fn=cmd_queue)
+    rp = sub.add_parser("report"); rp.add_argument("--project", required=True); rp.add_argument("--case", required=True)
+    rp.add_argument("--run"); rp.add_argument("--bundle", action="store_true"); rp.set_defaults(fn=cmd_report)
     m = sub.add_parser("demo"); m.add_argument("--dir"); m.set_defaults(fn=cmd_demo)
     a = ap.parse_args(argv)
     return int(a.fn(a) or 0)
