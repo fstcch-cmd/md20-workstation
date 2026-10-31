@@ -3,7 +3,6 @@
 Skips cleanly when the chemistry stack or RCSB is unavailable, so it is a CI-only test.
 """
 from pathlib import Path
-import urllib.request
 
 import pytest
 
@@ -17,17 +16,6 @@ from md20.build.pipeline import build_case
 from md20.engine import make_protocol, run_protocol, OpenMMBackend
 from md20.env import choose_platform
 from md20.report import build_run_report
-
-
-@pytest.fixture(scope="module")
-def pdb_3ptb(tmp_path_factory):
-    d = tmp_path_factory.mktemp("rcsb")
-    p = d / "3PTB.pdb"
-    try:
-        urllib.request.urlretrieve("https://files.rcsb.org/download/3PTB.pdb", p)
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"RCSB unreachable: {exc}")
-    return p
 
 
 def test_3ptb_build_and_short_md(pdb_3ptb, tmp_path):

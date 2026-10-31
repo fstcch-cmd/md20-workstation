@@ -16,6 +16,8 @@ dependencies:
   - openff-toolkit>=0.16
   - openff-nagl
   - openff-nagl-models
+  - vina>=1.2.5        # AutoDock Vina python bindings
+  - meeko>=0.5         # ligand PDBQT + pose → RDKit with bond orders
   - pdb2pqr
   - propka
   - nicegui
