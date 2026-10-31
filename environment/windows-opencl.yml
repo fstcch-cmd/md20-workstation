@@ -1,4 +1,7 @@
-# Windows + AMD/Intel GPU (OpenCL) or CPU only.  Driver must provide the OpenCL ICD.
+# Windows + AMD/Intel GPU (OpenCL) or CPU only.
+# conda-forge ships only CUDA-linked openmm builds for win-64, so the installer sets
+# CONDA_OVERRIDE_CUDA=12.4 on machines without an NVIDIA driver; the CUDA plugin simply
+# fails to load at runtime and OpenCL/CPU are used.  Driver must provide the OpenCL ICD.
 name: md20
 channels: [conda-forge]
 dependencies:

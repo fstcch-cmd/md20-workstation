@@ -24,7 +24,7 @@ if [ "$IS_WIN" = 1 ]; then
   if [ "$GPU" = auto ]; then
     if command -v nvidia-smi >/dev/null 2>&1 || [ -f "/c/Windows/System32/nvidia-smi.exe" ]; then GPU=cuda; else GPU=opencl; fi
   fi
-  case "$GPU" in cuda) GPUYML="$HERE/../environment/windows-cuda.yml" ;; *) GPUYML="$HERE/../environment/windows-opencl.yml" ;; esac
+  case "$GPU" in cuda) GPUYML="$HERE/../environment/windows-cuda.yml" ;; *) GPUYML="$HERE/../environment/windows-opencl.yml"; export CONDA_OVERRIDE_CUDA=12.4 ;; esac
   PREFIX="$ROOT/envs/md20"
   # micromamba.exe wants Windows-style paths
   W_PREFIX="$(cygpath -w "$PREFIX")"; W_BASE="$(cygpath -w "$HERE/../environment/base.yml")"; W_GPU="$(cygpath -w "$GPUYML")"; W_PKG="$(cygpath -w "$HERE/..")"

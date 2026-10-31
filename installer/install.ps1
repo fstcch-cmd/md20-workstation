@@ -16,6 +16,7 @@ $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Base = Join-Path $Here "..\environment\base.yml"
 $GpuYml = Join-Path $Here ("..\environment\windows-" + ($(if ($Gpu -eq "cpu") {"opencl"} else {$Gpu})) + ".yml")
 $Prefix = Join-Path $Root "envs\md20"
+if ($Gpu -ne "cuda") { $env:CONDA_OVERRIDE_CUDA = "12.4" }   # win-64 openmm builds are CUDA-linked; override the virtual package
 Write-Host "[2/4] 建立環境 ($Gpu) ..."
 & $Mamba create -y -p $Prefix -f $Base -f $GpuYml
 Write-Host "[3/4] 安裝 md20 ..."

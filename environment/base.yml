@@ -16,9 +16,12 @@ dependencies:
   - openff-toolkit>=0.16
   - openff-nagl
   - openff-nagl-models
-  - openmmforcefields
   - pdb2pqr
   - propka
   - nicegui
   - pytest
   - pip
+  - pip:
+      # conda-forge openmmforcefields requires ambertools (not on win-64); the pip package does not.
+      # GAFF rung then needs antechamber (Linux/macOS only); OpenFF rung works everywhere.
+      - openmmforcefields>=0.14
