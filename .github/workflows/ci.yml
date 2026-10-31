@@ -1,0 +1,73 @@
+name: MD20 CI (Windows / macOS / Linux, CPU)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pure-python:
+    # Fast gate: no chemistry stack; runs the 27 pure-Python tests on all three OSes.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        python: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ matrix.python }}" }
+      - run: pip install -e ".[dev]"
+      - run: pytest -q --ignore=tests/test_openmm_integration.py
+      - run: python -m md20.cli demo --dir ${{ runner.temp }}/md20demo
+      - run: python -m md20.cli doctor --no-benchmark || true   # degraded mode (no openmm): must not crash
+
+  openmm-stack:
+    # Full stack via micromamba (same environment files the installer uses); real OpenMM on the CPU platform.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            gpu_yml: environment/windows-opencl.yml
+            override_cuda: "12.4"
+          - os: macos-latest
+            gpu_yml: environment/macos.yml
+            override_cuda: ""
+          - os: ubuntu-latest
+            gpu_yml: environment/linux-cuda.yml
+            override_cuda: "12.4"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment/base.yml
+          environment-name: md20
+          cache-environment: true
+          create-args: -f ${{ matrix.gpu_yml }}
+          init-shell: bash
+        env:
+          CONDA_OVERRIDE_CUDA: ${{ matrix.override_cuda }}
+      - name: Install md20 (+ openmmforcefields via pip)
+        shell: bash -el {0}
+        run: pip install --no-cache-dir "openmmforcefields>=0.14" -e .
+      - name: Doctor (CPU platform)
+        shell: bash -el {0}
+        run: md20 doctor --seconds 5 || true
+      - name: Full test suite incl. real OpenMM
+        shell: bash -el {0}
+        run: pytest -v
+      - name: Upload doctor report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: doctor-${{ matrix.os }}
+          path: |
+            ~/AppData/Local/MD20/doctor/*
+            ~/Library/Application Support/MD20/doctor/*
+            ~/.local/share/MD20/doctor/*
+          if-no-files-found: ignore
