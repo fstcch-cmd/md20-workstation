@@ -78,3 +78,24 @@ def test_gate_report_status_precedence():
     assert rep.status == AUTO_FIXED and rep.ok
     rep.add(Gate("c", NEEDS_HUMAN, options=["x"]))
     assert rep.status == NEEDS_HUMAN and not rep.ok and rep.blocking[0].name == "c"
+
+
+def test_cocrystal_ligand_and_junk_are_auto_handled():
+    lines, serial = _protein(4)
+    lines.append(_atom(serial, "C1", "BEN", "A", 300, rec="HETATM", element="C"))
+    lines.append(_atom(serial + 1, "S", "SO4", "A", 301, rec="HETATM", element="S"))
+    lines.append(_atom(serial + 2, "CA", "CA", "A", 302, rec="HETATM", element="CA"))
+    insp = inspect_pdb_text("\n".join(lines))
+    rep = gate_inspection(insp, keep_hetero=set(), ligand_resnames={"BEN"})
+    names = {g.name: g.status for g in rep.gates}
+    assert names["co-crystal ligand"] == AUTO_FIXED and names["buffer / additives"] == AUTO_FIXED
+    assert "hetero groups" not in names and rep.ok
+
+
+def test_extract_hetatm_pose(tmp_path):
+    from md20.build import extract_hetatm_pose
+    lines = [_atom(1, "C1", "BEN", "A", 300, rec="HETATM", element="C"), _atom(2, "C2", "BEN", "A", 300, rec="HETATM", element="C"),
+             _atom(3, "C1", "BEN", "B", 300, rec="HETATM", element="C")]
+    out = extract_hetatm_pose("\n".join(lines), "BEN", tmp_path / "pose.pdb")
+    txt = out.read_text()
+    assert txt.count("HETATM") == 2 and " B " not in txt
