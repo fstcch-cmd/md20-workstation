@@ -35,7 +35,7 @@ def test_3ptb_build_and_short_md(pdb_3ptb, tmp_path):
     case = proj.new_case("trypsin_benzamidine")
     s = build_case(case, receptor=pdb_3ptb, ligand_references=["NC(=[NH2+])c1ccccc1"], cocrystal_resnames=["BEN"],
                    keep_hetero=set(), padding_nm=0.8, run_smoke_test=True)
-    assert s["status"] == "PASS", s
+    assert s["status"] == "PASS", (s.get("blocking"), s.get("blocking_detail"))
     lig = s["ligands"][0]
     assert lig["mapping"] in {"substructure", "order"} and lig["formal_charge"] == 1
     assert lig["provider"] == "openff-sage", lig

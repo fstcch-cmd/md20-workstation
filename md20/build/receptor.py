@@ -48,7 +48,8 @@ class PDBInspection:
     duplicate_atom_names: list = field(default_factory=list)
     ca_count: int = 0
     seqres_present: bool = False
-    gaps: list = field(default_factory=list)             # (chain, resid_before, resid_after)
+    gaps: list = field(default_factory=list)             # (chain, resid_before, resid_after) — physical breaks only
+    numbering_jumps: list = field(default_factory=list)  # resid jumps with contiguous backbone (e.g. chymotrypsin numbering)
     format: str = "pdb"
 
     def to_dict(self) -> dict:
@@ -60,6 +61,7 @@ def inspect_pdb_text(text: str) -> PDBInspection:
     insp = PDBInspection()
     seen_names: dict[tuple, Counter] = defaultdict(Counter)
     last_res: dict[str, int | None] = {}
+    last_ca: dict[str, tuple] = {}
     chain_res: dict[str, set] = defaultdict(set)
     for line in text.splitlines():
         rec = line[:6].strip()
@@ -103,10 +105,24 @@ def inspect_pdb_text(text: str) -> PDBInspection:
                 insp.nonstandard_residues[resname] = insp.nonstandard_residues.get(resname, 0) + 1
             if name == "CA" and altloc in {"", "A"}:
                 insp.ca_count += 1
-                prev = last_res.get(chain)
-                if prev is not None and resid is not None and resid - prev > 1:
-                    insp.gaps.append((chain, prev, resid))
+                try:
+                    xyz = (float(line[30:38]), float(line[38:46]), float(line[46:54]))
+                except ValueError:
+                    xyz = None
+                prev, prev_xyz = last_res.get(chain), last_ca.get(chain)
+                if prev is not None and resid is not None and xyz is not None and prev_xyz is not None:
+                    d = sum((a - b) ** 2 for a, b in zip(xyz, prev_xyz)) ** 0.5
+                    jump = resid - prev
+                    # A real chain break is physical (CA–CA > 4.2 Å), not a numbering jump.
+                    # Chymotrypsin/kabat-style numbering jumps with CA–CA ≈ 3.8 Å are NOT missing residues.
+                    if d > 4.2:
+                        n_missing = jump - 1 if jump > 1 else max(1, round(d / 3.8) - 1)
+                        insp.gaps.append((chain, prev, prev + n_missing + 1))
+                    elif jump > 1:
+                        insp.numbering_jumps.append((chain, prev, resid))
                 last_res[chain] = resid
+                if xyz is not None:
+                    last_ca[chain] = xyz
         if resid is not None and resname not in WATER:
             chain_res[chain].add((resid, icode))
     insp.chains = {c: len(v) for c, v in chain_res.items()}
@@ -146,6 +162,10 @@ def gate_inspection(insp: PDBInspection, *, keep_hetero: set[str], max_auto_gap:
             rep.add(Gate("unknown residues", NEEDS_HUMAN,
                          f"無法自動對應的殘基：{', '.join(unknown)}。它們可能是修飾殘基或共價配體；Amber 力場沒有參數。",
                          options=["移除並記錄", "視為配體走參數化階梯", "手動提供參數"], evidence={"residues": unknown}))
+    if insp.numbering_jumps:
+        rep.add(Gate("numbering jumps", PASS, f"{len(insp.numbering_jumps)} 處殘基編號跳號但主鏈連續（CA–CA ≈ 3.8 Å），"
+                     "屬於編號慣例（例如 chymotrypsin numbering），不是缺失殘基。",
+                     diff=[f"chain {c}: {a}→{b}" for c, a, b in insp.numbering_jumps[:12]]))
     long_gaps = [g for g in insp.gaps if g[2] - g[1] - 1 > max_auto_gap]
     short_gaps = [g for g in insp.gaps if g[2] - g[1] - 1 <= max_auto_gap]
     if short_gaps:

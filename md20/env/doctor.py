@@ -100,50 +100,37 @@ def _package_report() -> tuple[dict, list[Finding]]:
 
 def benchmark(platform_name: str, properties: dict, *, n_atoms_target: int = 24000, seconds: float = 20.0,
               timestep_fs: float = 4.0) -> dict:
-    """Water-box benchmark sized like a teaching system (~24k atoms); returns ns/day.
+    """TIP3P water box (~24k atoms, the size of a teaching system) built with Modeller; returns ns/day.
 
-    Uses a pure-LJ+Coulomb TIP3P-like box built in code so it needs no files.
+    Water is rigid (SETTLE), so 4 fs is stable here exactly as with HMR on a protein system.
     """
-    import numpy as np
     import openmm as mm
-    from openmm import unit
-    n_w = max(100, n_atoms_target // 3)
-    side = (n_w / 33.4) ** (1 / 3)  # nm, water number density
-    system = mm.System()
-    system.setDefaultPeriodicBoxVectors(mm.Vec3(side, 0, 0), mm.Vec3(0, side, 0), mm.Vec3(0, 0, side))
-    nb = mm.NonbondedForce()
-    nb.setNonbondedMethod(mm.NonbondedForce.PME)
-    nb.setCutoffDistance(1.0)
-    rng = np.random.default_rng(7)
-    pos = []
-    for i in range(n_w):
-        o = rng.uniform(0, side, 3)
-        for mass, q, sig, eps, off in ((15.999, -0.834, 0.315, 0.636, (0, 0, 0)),
-                                       (1.008, 0.417, 0.1, 0.0, (0.0957, 0, 0)),
-                                       (1.008, 0.417, 0.1, 0.0, (-0.024, 0.0927, 0))):
-            idx = system.addParticle(mass)
-            nb.addParticle(q, sig, eps)
-            pos.append(o + np.array(off))
-        b = 3 * i
-        system.addConstraint(b, b + 1, 0.09572)
-        system.addConstraint(b, b + 2, 0.09572)
-        system.addConstraint(b + 1, b + 2, 0.15139)
-        nb.addException(b, b + 1, 0, 1, 0); nb.addException(b, b + 2, 0, 1, 0); nb.addException(b + 1, b + 2, 0, 1, 0)
-    system.addForce(nb)
+    from openmm import app, unit
+    n_w = max(300, n_atoms_target // 3)
+    side = (n_w / 33.4) ** (1 / 3)
+    ff = app.ForceField("amber14/tip3p.xml")
+    modeller = app.Modeller(app.Topology(), [])
+    modeller.addSolvent(ff, model="tip3p", boxSize=mm.Vec3(side, side, side) * unit.nanometer)
+    system = ff.createSystem(modeller.topology, nonbondedMethod=app.PME, nonbondedCutoff=0.9 * unit.nanometer,
+                             constraints=app.HBonds, rigidWater=True)
     integ = mm.LangevinMiddleIntegrator(300 * unit.kelvin, 1 / unit.picosecond, timestep_fs * unit.femtoseconds)
     ctx = mm.Context(system, integ, mm.Platform.getPlatformByName(platform_name), properties)
-    ctx.setPositions(np.array(pos) * unit.nanometer)
+    ctx.setPositions(modeller.positions)
     mm.LocalEnergyMinimizer.minimize(ctx, maxIterations=200)
     ctx.setVelocitiesToTemperature(300 * unit.kelvin, 1)
     integ.step(200)  # warm-up / kernel compile
     steps, t0 = 0, time.perf_counter()
     while time.perf_counter() - t0 < seconds:
-        integ.step(500)
-        steps += 500
+        integ.step(250)
+        steps += 250
     dt = time.perf_counter() - t0
+    e = ctx.getState(getEnergy=True).getPotentialEnergy()._value
+    if e != e:
+        raise RuntimeError("benchmark energy NaN")
     ns_per_day = steps * timestep_fs * 1e-6 / dt * 86400
+    n_atoms = system.getNumParticles()
     del ctx
-    return {"platform": platform_name, "n_atoms": 3 * n_w, "timestep_fs": timestep_fs, "steps": steps,
+    return {"platform": platform_name, "n_atoms": n_atoms, "timestep_fs": timestep_fs, "steps": steps,
             "seconds": round(dt, 2), "ns_per_day": round(ns_per_day, 2)}
 
 

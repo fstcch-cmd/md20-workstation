@@ -27,6 +27,7 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
     if rman["status"] == NEEDS_HUMAN:
         summary["status"] = NEEDS_HUMAN
         summary["blocking"] = "receptor"
+        summary["blocking_detail"] = [g for g in (rman.get("gates") or {}).get("gates", []) if g.get("status") == NEEDS_HUMAN] or rman.get("error")
         atomic_write_json(summary, bdir / "build_manifest.json")
         _update_case(case, summary)
         return summary
@@ -51,11 +52,15 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
         if rec.status == NEEDS_HUMAN:
             summary["status"] = NEEDS_HUMAN
             summary["blocking"] = f"ligand {name}"
+            summary["blocking_detail"] = [g for g in (rec.gates or {}).get("gates", []) if g.get("status") == NEEDS_HUMAN]
             atomic_write_json(summary, bdir / "build_manifest.json")
             _update_case(case, summary)
             return summary
     res = assemble_system(rman["receptor_pdb"], ligs, bdir, padding_nm=padding_nm,
                           ionic_strength_molar=ionic_strength_molar, decisions=decisions)
+    if res.status == NEEDS_HUMAN:
+        summary["blocking"] = "assembly"
+        summary["blocking_detail"] = [g for g in (res.gates or {}).get("gates", []) if g.get("status") == NEEDS_HUMAN]
     summary.update({"status": "PASS" if res.status != NEEDS_HUMAN else NEEDS_HUMAN, "assembly": res.to_dict(),
                     "system_xml": res.system_xml, "topology_pdb": res.topology_pdb})
     atomic_write_json(summary, bdir / "build_manifest.json")

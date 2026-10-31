@@ -9,16 +9,21 @@ def _atom(serial, name, resname, chain, resid, x=0.0, rec="ATOM", altloc=" ", ic
             f"{x:8.3f}{0.0:8.3f}{0.0:8.3f}{1.0:6.2f}{0.0:6.2f}          {element:>2}")
 
 
-def _protein(n=5, chain="A", start=1, gap_after=None, gap_len=0):
+def _protein(n=5, chain="A", start=1, gap_after=None, gap_len=0, numbering_only=False):
+    """CA atoms placed 3.8 Å apart along x per *physical* residue; a gap adds physical distance unless numbering_only."""
     lines = []
     serial = 1
     resid = start
+    pos = 0
     for i in range(n):
         for name in ("N", "CA", "C", "O"):
-            lines.append(_atom(serial, name, "ALA", chain, resid)); serial += 1
+            lines.append(_atom(serial, name, "ALA", chain, resid, x=3.8 * pos)); serial += 1
         resid += 1
+        pos += 1
         if gap_after is not None and i == gap_after:
             resid += gap_len
+            if not numbering_only:
+                pos += gap_len
     return lines, serial
 
 
@@ -99,3 +104,12 @@ def test_extract_hetatm_pose(tmp_path):
     out = extract_hetatm_pose("\n".join(lines), "BEN", tmp_path / "pose.pdb")
     txt = out.read_text()
     assert txt.count("HETATM") == 2 and " B " not in txt
+
+
+def test_numbering_jump_is_not_a_gap():
+    lines, _ = _protein(6, gap_after=2, gap_len=10, numbering_only=True)   # chymotrypsin-style jump, contiguous backbone
+    insp = inspect_pdb_text("\n".join(lines))
+    assert not insp.gaps and insp.numbering_jumps
+    rep = gate_inspection(insp, keep_hetero=set())
+    names = {g.name: g.status for g in rep.gates}
+    assert names["numbering jumps"] == PASS and "missing loops (long)" not in names and rep.ok
