@@ -38,7 +38,8 @@ def test_platform_ladder_returns_working_platform():
 
 def test_doctor_runs(tmp_path):
     rep = run_doctor(do_benchmark=True, benchmark_seconds=2.0, save=False)
-    assert rep.platform and rep.benchmark["ns_per_day"] > 0
+    assert rep.platform, rep.to_markdown()
+    assert rep.benchmark and rep.benchmark.get("ns_per_day", 0) > 0, f"benchmark failed: {rep.benchmark}\n{rep.to_markdown()}"
 
 
 def test_backend_hmr_and_summary(water_box):
@@ -58,8 +59,9 @@ def test_full_protocol_real(water_box, tmp_path):
     proto = make_protocol("classroom")
     for s in proto.stages:
         if s.ensemble != "MIN":
-            s.length_ps = 4.0; s.checkpoint_interval_ps = 2.0; s.report_interval_ps = 0.1; s.trajectory_interval_ps = 1.0
-        s.accept = {}  # a 4 ps box will not meet density gates; this test checks mechanics only
+            # 10 ps per stage: short enough for a laptop test, long enough for the 50→300 K ramp (6 ps) to be physical
+            s.length_ps = 10.0; s.checkpoint_interval_ps = 5.0; s.report_interval_ps = 0.1; s.trajectory_interval_ps = 1.0
+        s.accept = {}  # a 10 ps box will not meet density gates; this test checks mechanics only
 
     def make(spec, dt):
         return OpenMMBackend(water_box / "system.xml", water_box / "topology.pdb", platform_name=choice.name,

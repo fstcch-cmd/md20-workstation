@@ -270,14 +270,30 @@ def _ramp_target(spec: StageSpec, frac: float) -> float:
     return spec.start_temperature_k + (spec.temperature_k - spec.start_temperature_k) * min(1.0, frac / r)
 
 
+THERMOSTAT_SETTLE_PS = 2.0     # no temperature judgement during the first picoseconds of a stage
+THERMOSTAT_LAG_PS = 3.0        # a Langevin thermostat (γ ≈ 1/ps) trails a ramp by a few ps
+
+
 def _watch(s: StateSummary, spec: StageSpec, frac: float, chunk_id: int) -> None:
+    """Catch real blow-ups (NaN, runaway temperature) without false alarms during heating.
+
+    Verified on a real OpenMM run (Windows, OpenCL): a 50→300 K ramp compressed into a
+    few ps made the instantaneous target run ahead of the thermostat; the tolerance now
+    includes the lag a thermostat physically needs to follow the ramp rate.
+    """
     if not s.finite():
         raise WatchdogError(f"NaN/Inf 能量或座標（chunk {chunk_id}）")
+    local_ps = frac * spec.length_ps
+    if local_ps < THERMOSTAT_SETTLE_PS:
+        return
     target = _ramp_target(spec, frac)
     tol = max(60.0, 0.25 * target)
-    # Allow the thermostat a short settle after (re)initialisation.
-    if frac > 0.05 and abs(s.temperature_k - target) > tol:
-        raise WatchdogError(f"溫度失控：{s.temperature_k:.0f} K vs 目標 {target:.0f} K（chunk {chunk_id}）")
+    if spec.start_temperature_k is not None and spec.length_ps > 0:
+        ramp_ps = max(1e-6, spec.ramp_fraction * spec.length_ps)
+        rate = abs(spec.temperature_k - spec.start_temperature_k) / ramp_ps     # K per ps
+        tol += THERMOSTAT_LAG_PS * rate
+    if abs(s.temperature_k - target) > tol:
+        raise WatchdogError(f"溫度失控：{s.temperature_k:.0f} K vs 目標 {target:.0f} K（容許 ±{tol:.0f} K，chunk {chunk_id}）")
 
 
 def _concat_logs(paths: list[str], target: Path) -> None:

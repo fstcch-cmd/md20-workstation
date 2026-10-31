@@ -187,7 +187,8 @@ def run_doctor(*, do_benchmark: bool = True, benchmark_seconds: float = 20.0, wo
                     findings.append(Finding("建議 tier", "OK", rec["recommended"],
                                             "; ".join(f"{r['tier']}: {r['total_ns']} ns ≈ {r['eta_hours']} h" for r in rec["rows"])))
                 except Exception as exc:  # noqa: BLE001
-                    findings.append(Finding("Benchmark", "WARN", f"{type(exc).__name__}: {exc}", "平台可建立但 PME benchmark 失敗；請回報。"))
+                    bench = {"error": f"{type(exc).__name__}: {str(exc)[:500]}", "platform": choice.name}
+                    findings.append(Finding("Benchmark", "WARN", bench["error"][:200], "平台可建立但 PME benchmark 失敗；請把這行回報。"))
         except Exception as exc:  # noqa: BLE001
             findings.append(Finding("OpenMM 平台", "FAIL", str(exc)[:300], "連 CPU 平台都失敗：openmm 安裝損毀，請重新建立環境。"))
     else:
