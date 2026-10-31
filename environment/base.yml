@@ -6,7 +6,7 @@ dependencies:
   - numpy>=1.26
   - pandas>=2
   - scipy
-  - matplotlib
+  - matplotlib-base   # not 'matplotlib': that pulls Qt6 (~150 MB) which MD20 never uses
   - plotly
   - rdkit>=2024.03
   - pdbfixer

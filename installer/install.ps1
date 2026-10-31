@@ -1,8 +1,13 @@
 # MD20 Windows installer (PowerShell).  Downloads micromamba, creates the md20 env, installs the package.
 # Usage:  powershell -ExecutionPolicy Bypass -File installer\install.ps1 [-Gpu cuda|opencl|cpu]
-param([ValidateSet("cuda","opencl","cpu")] [string]$Gpu = "auto")
+param([ValidateSet("auto","cuda","opencl","cpu")] [string]$Gpu = "auto", [string]$Root = "")
 $ErrorActionPreference = "Stop"
-$Root = Join-Path $env:LOCALAPPDATA "MD20"
+if (-not $Root) { $Root = if ($env:MD20_ROOT) { $env:MD20_ROOT } else { Join-Path $env:LOCALAPPDATA "MD20" } }
+$env:MAMBA_ROOT_PREFIX = $Root
+$drive = (Get-Item $Root -ErrorAction SilentlyContinue)?.PSDrive ?? (Get-PSDrive -Name ($Root.Substring(0,1)))
+$freeGB = [math]::Round($drive.Free / 1GB)
+Write-Host "安裝位置：$Root（可用空間 $freeGB GB；環境約需 6 GB）"
+if ($freeGB -lt 8) { Write-Host "!! 可用空間不足 8 GB。請清出空間，或改裝到其他磁碟：  .\installer\install.ps1 -Root D:\MD20"; exit 2 }
 $Mamba = Join-Path $Root "micromamba.exe"
 New-Item -ItemType Directory -Force -Path $Root | Out-Null
 if (-not (Test-Path $Mamba)) {

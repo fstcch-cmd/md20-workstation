@@ -11,9 +11,16 @@ case "$OS" in
 esac
 
 if [ "$IS_WIN" = 1 ]; then
-  # Git Bash on Windows: use the win-64 micromamba.exe under %LOCALAPPDATA%\MD20
-  ROOT="$(cygpath -u "${LOCALAPPDATA:-$USERPROFILE/AppData/Local}")/MD20"
+  # Git Bash on Windows.  Default root %LOCALAPPDATA%\MD20; override with MD20_ROOT=/d/MD20 to use another drive.
+  ROOT="${MD20_ROOT:-$(cygpath -u "${LOCALAPPDATA:-$USERPROFILE/AppData/Local}")/MD20}"
   mkdir -p "$ROOT"
+  export MAMBA_ROOT_PREFIX="$(cygpath -w "$ROOT")"   # keep the package cache under the same root (not AppData\Roaming)
+  FREE_GB=$(df -k "$ROOT" | awk 'NR==2{printf "%d", $4/1048576}')
+  echo "安裝位置：$ROOT（可用空間 ${FREE_GB} GB；環境約需 6 GB）"
+  if [ "${FREE_GB:-0}" -lt 8 ]; then
+    echo "!! 可用空間不足 8 GB。請清出空間，或改裝到其他磁碟：  MD20_ROOT=/d/MD20 bash installer/install.sh"
+    exit 2
+  fi
   MAMBA="$ROOT/micromamba.exe"
   if [ ! -f "$MAMBA" ]; then
     echo "[1/4] 下載 micromamba (win-64) ..."
@@ -36,8 +43,12 @@ if [ "$IS_WIN" = 1 ]; then
   exit 0
 fi
 
-ROOT="${HOME}/.local/share/MD20"; mkdir -p "$ROOT"
+ROOT="${MD20_ROOT:-${HOME}/.local/share/MD20}"; mkdir -p "$ROOT"
+export MAMBA_ROOT_PREFIX="$ROOT"
 MAMBA="$ROOT/bin/micromamba"
+FREE_GB=$(df -k "$ROOT" | awk 'NR==2{printf "%d", $4/1048576}')
+echo "安裝位置：$ROOT（可用空間 ${FREE_GB} GB；環境約需 6 GB）"
+if [ "${FREE_GB:-0}" -lt 8 ]; then echo "!! 可用空間不足 8 GB；可用 MD20_ROOT=/path 指定其他磁碟。"; exit 2; fi
 if [ ! -x "$MAMBA" ]; then
   echo "[1/4] 下載 micromamba ..."
   case "$OS-$(uname -m)" in
