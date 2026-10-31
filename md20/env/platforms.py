@@ -119,6 +119,11 @@ def explain_rejection(rej: dict, hardware: dict) -> str:
             return "此電腦沒有 NVIDIA 顯示卡，CUDA 不可用是正常的。"
         if "未載入" in err:
             return "有 NVIDIA 顯示卡但 OpenMM 的 CUDA 外掛沒有載入：通常是 conda 環境裝到 CPU 版 openmm，或 CUDA 驅動版本太舊。請在環境中重新安裝 `openmm` 的 CUDA 版並更新 NVIDIA 驅動。"
+        if "INVALID_PTX" in err or "CUDA_ERROR_UNSUPPORTED_PTX_VERSION" in err or "(218)" in err or "(222)" in err:
+            return ("CUDA 驅動比 OpenMM 使用的 CUDA 工具鏈舊（PTX 版本不被驅動接受）。兩個解法擇一："
+                    "① 更新 NVIDIA 驅動到支援 CUDA 12.x 的版本（GeForce ≥ 550 系列，用 NVIDIA App 安裝）；"
+                    "② 不想動驅動時，改裝對應舊驅動的 OpenMM：`micromamba install -p <env> \"cuda-version=11.8\" openmm`。"
+                    "目前 OpenCL 仍可用，只是比 CUDA 慢 20–40%。")
         if "CUDA_ERROR" in err or "cuInit" in err or "no CUDA-capable" in err:
             return "NVIDIA 驅動存在但無法初始化 CUDA：請更新驅動（GeForce Experience／NVIDIA App），並確認筆電不是只開啟內顯。"
         return "CUDA 平台建立失敗：" + err
