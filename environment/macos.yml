@@ -1,0 +1,6 @@
+# macOS (Apple Silicon or Intel).  OpenCL platform via Apple driver; CPU fallback.
+name: md20
+channels: [conda-forge]
+dependencies:
+  - openmm>=8.1
+  - ambertools   # enables GAFF2/AM1-BCC ladder rung on macOS

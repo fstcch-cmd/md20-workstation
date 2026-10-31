@@ -1,0 +1,7 @@
+# Windows + NVIDIA.  conda-forge openmm ships CUDA builds selected by the cuda-version metapackage.
+name: md20
+channels: [conda-forge]
+dependencies:
+  - openmm>=8.1
+  - cuda-version=12.4
+  - ocl-icd-system   # not available on win; harmless if solver drops it

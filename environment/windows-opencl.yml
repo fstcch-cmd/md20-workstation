@@ -1,0 +1,5 @@
+# Windows + AMD/Intel GPU (OpenCL) or CPU only.  Driver must provide the OpenCL ICD.
+name: md20
+channels: [conda-forge]
+dependencies:
+  - openmm>=8.1

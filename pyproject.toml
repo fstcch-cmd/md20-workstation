@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "md20"
+version = "0.1.0a0"
+description = "MD20 teaching workstation: docking → MD → enhanced sampling on a single machine (Windows-first)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "HCC Lab, NKUST" }]
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+# Core physics stack.  On Windows install with micromamba (see docs/INSTALL.md);
+# pip wheels exist for openmm but the OpenFF stack is conda-forge only.
+md = [
+    "openmm>=8.1",
+    "pdbfixer>=1.9",
+    "mdtraj>=1.9.9",
+    "rdkit>=2023.9",
+    "parmed>=4.2",
+    "pymbar>=4.0",
+]
+ligand = [
+    "openff-toolkit>=0.16",
+    "openff-nagl>=0.3",
+    "openmmforcefields>=0.12",
+]
+gui = ["nicegui>=1.4", "plotly>=5.18"]
+dev = ["pytest>=7.4", "pytest-cov"]
+
+[project.scripts]
+md20 = "md20.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["md20*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

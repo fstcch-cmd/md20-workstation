@@ -1,0 +1,24 @@
+# MD20 base environment (all platforms).  Pin exact versions after first successful lock on each OS.
+name: md20
+channels: [conda-forge]
+dependencies:
+  - python=3.11
+  - numpy>=1.26
+  - pandas>=2
+  - scipy
+  - matplotlib
+  - plotly
+  - rdkit>=2024.03
+  - pdbfixer
+  - mdtraj
+  - parmed
+  - pymbar>=4
+  - openff-toolkit>=0.16
+  - openff-nagl
+  - openff-nagl-models
+  - openmmforcefields
+  - pdb2pqr
+  - propka
+  - nicegui
+  - pytest
+  - pip
