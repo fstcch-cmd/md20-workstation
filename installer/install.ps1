@@ -22,10 +22,15 @@ $Base = Join-Path $Here "..\environment\base.yml"
 $GpuYml = Join-Path $Here ("..\environment\windows-" + ($(if ($Gpu -eq "cpu") {"opencl"} else {$Gpu})) + ".yml")
 $Prefix = Join-Path $Root "envs\md20"
 if ($Gpu -ne "cuda") { $env:CONDA_OVERRIDE_CUDA = "12.4" }   # win-64 openmm builds are CUDA-linked; override the virtual package
-Write-Host "[2/4] 建立環境 ($Gpu) ..."
-& $Mamba create -y -p $Prefix -f $Base -f $GpuYml
+New-Item -ItemType Directory -Force -Path (Join-Path $Root "tmp") | Out-Null
+$env:TMP = Join-Path $Root "tmp"; $env:TEMP = $env:TMP; $env:PIP_CACHE_DIR = Join-Path $Root "pipcache"
+if (Test-Path (Join-Path $Prefix "conda-meta")) {
+  Write-Host "[2/4] 環境已存在，補齊套件 ($Gpu) ..."; & $Mamba install -y -p $Prefix -f $Base -f $GpuYml
+} else {
+  Write-Host "[2/4] 建立環境 ($Gpu) ..."; & $Mamba create -y -p $Prefix -f $Base -f $GpuYml
+}
 Write-Host "[3/4] 安裝 md20 ..."
-& $Mamba run -p $Prefix pip install -e (Join-Path $Here "..")
+& $Mamba run -p $Prefix pip install --no-cache-dir "openmmforcefields>=0.14" -e (Join-Path $Here "..")
 Write-Host "[4/4] Doctor ..."
 & $Mamba run -p $Prefix md20 doctor
 Write-Host "`n完成。之後執行：  $Mamba run -p $Prefix md20 <command>"

@@ -35,8 +35,14 @@ if [ "$IS_WIN" = 1 ]; then
   PREFIX="$ROOT/envs/md20"
   # micromamba.exe wants Windows-style paths
   W_PREFIX="$(cygpath -w "$PREFIX")"; W_BASE="$(cygpath -w "$HERE/../environment/base.yml")"; W_GPU="$(cygpath -w "$GPUYML")"; W_PKG="$(cygpath -w "$HERE/..")"
-  echo "[2/4] 建立環境 ($GPU) ..."; "$MAMBA" create -y -p "$W_PREFIX" -f "$W_BASE" -f "$W_GPU"
-  echo "[3/4] 安裝 md20 ..."; "$MAMBA" run -p "$W_PREFIX" pip install -e "$W_PKG"
+  # pip and conda use %TEMP% (usually on C:); keep all scratch under the install root
+  mkdir -p "$ROOT/tmp"; export TMP="$(cygpath -w "$ROOT/tmp")"; export TEMP="$TMP"; export TMPDIR="$TMP"; export PIP_CACHE_DIR="$(cygpath -w "$ROOT/pipcache")"
+  if [ -d "$PREFIX/conda-meta" ]; then
+    echo "[2/4] 環境已存在，補齊套件 ($GPU) ..."; "$MAMBA" install -y -p "$W_PREFIX" -f "$W_BASE" -f "$W_GPU"
+  else
+    echo "[2/4] 建立環境 ($GPU) ..."; "$MAMBA" create -y -p "$W_PREFIX" -f "$W_BASE" -f "$W_GPU"
+  fi
+  echo "[3/4] 安裝 md20 ..."; "$MAMBA" run -p "$W_PREFIX" pip install --no-cache-dir "openmmforcefields>=0.14" -e "$W_PKG"
   echo "[4/4] Doctor ..."; "$MAMBA" run -p "$W_PREFIX" md20 doctor
   echo; echo "完成。之後執行：  \"$MAMBA\" run -p \"$W_PREFIX\" md20 <command>"
   echo "提示：也可用 PowerShell 版安裝器 installer\\install.ps1。"
@@ -67,7 +73,12 @@ case "$OS" in
   *) if [ "$GPU" = cuda ]; then GPUYML="$HERE/../environment/linux-cuda.yml"; else GPUYML="$HERE/../environment/windows-opencl.yml"; fi ;;
 esac
 PREFIX="$ROOT/envs/md20"
-echo "[2/4] 建立環境 ($GPU) ..."; "$MAMBA" create -y -p "$PREFIX" -f "$HERE/../environment/base.yml" -f "$GPUYML"
-echo "[3/4] 安裝 md20 ..."; "$MAMBA" run -p "$PREFIX" pip install -e "$HERE/.."
+mkdir -p "$ROOT/tmp"; export TMPDIR="$ROOT/tmp"; export PIP_CACHE_DIR="$ROOT/pipcache"
+if [ -d "$PREFIX/conda-meta" ]; then
+  echo "[2/4] 環境已存在，補齊套件 ($GPU) ..."; "$MAMBA" install -y -p "$PREFIX" -f "$HERE/../environment/base.yml" -f "$GPUYML"
+else
+  echo "[2/4] 建立環境 ($GPU) ..."; "$MAMBA" create -y -p "$PREFIX" -f "$HERE/../environment/base.yml" -f "$GPUYML"
+fi
+echo "[3/4] 安裝 md20 ..."; "$MAMBA" run -p "$PREFIX" pip install --no-cache-dir "openmmforcefields>=0.14" -e "$HERE/.."
 echo "[4/4] Doctor ..."; "$MAMBA" run -p "$PREFIX" md20 doctor
 echo; echo "完成。之後執行：  $MAMBA run -p $PREFIX md20 <command>"

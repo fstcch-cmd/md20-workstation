@@ -21,7 +21,4 @@ dependencies:
   - nicegui
   - pytest
   - pip
-  - pip:
-      # conda-forge openmmforcefields requires ambertools (not on win-64); the pip package does not.
-      # GAFF rung then needs antechamber (Linux/macOS only); OpenFF rung works everywhere.
-      - openmmforcefields>=0.14
+# openmmforcefields is installed by the installer with pip (its conda package needs ambertools, absent on win-64).
