@@ -1,4 +1,7 @@
-# MD20 單機教學版工作站（M0 骨架）
+# MD20 單機教學版工作站（開發中）
+
+> © HCC Lab, National Kaohsiung University of Science and Technology. All rights reserved.
+> 本 repo 暫時公開僅供持續整合（CI）測試使用；未附授權，請勿重製、散布或用於其他用途。
 
 Docking → 建模 → MD → 增強取樣，在學生自己的筆電上跑（Windows 優先；NVIDIA／AMD／內顯／純 CPU），
 環境、拓撲、PDB 修復、驗收與圖表全部自動，每個自動決策都留下「為什麼」。
