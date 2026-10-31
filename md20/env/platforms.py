@@ -54,8 +54,10 @@ def _toy_system():
         system.addParticle(39.948)
         nb.addParticle(0.0, 0.34, 0.99)
     system.addForce(nb)
-    rng = np.random.default_rng(2026)
-    pos = rng.uniform(0, box, size=(n, 3))
+    # simple cubic lattice (8×8×8 = 512 ≥ n sites) so no two atoms overlap; random placement produced NaN on macOS CI
+    k = 8
+    grid = np.array([[i, j, l] for i in range(k) for j in range(k) for l in range(k)], dtype=float)[:n]
+    pos = (grid + 0.5) * (box / k)
     return system, pos * unit.nanometer
 
 
@@ -89,6 +91,7 @@ def choose_platform(order=DEFAULT_ORDER, *, precision: str = "mixed", device_ind
             t0 = time.perf_counter()
             ctx = mm.Context(system, integ, platform, props)
             ctx.setPositions(positions)
+            mm.LocalEnergyMinimizer.minimize(ctx, maxIterations=50)
             ctx.setVelocitiesToTemperature(300 * unit.kelvin, 1)
             integ.step(int(probe_steps))
             e = ctx.getState(getEnergy=True).getPotentialEnergy()._value

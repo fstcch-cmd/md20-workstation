@@ -56,6 +56,33 @@ class Backend(_Protocol):
     def close(self) -> None: ...
 
 
+def apply_hmr(system, topology, h_mass_amu: float = 3.0) -> int:
+    """Hydrogen mass repartitioning in place: H → h_mass_amu, bonded heavy atom loses the difference.
+    Water is skipped (rigid). Returns the number of hydrogens changed."""
+    from openmm import unit
+    bonds: dict[int, list[int]] = {}
+    for a, b in topology.bonds():
+        bonds.setdefault(a.index, []).append(b.index)
+        bonds.setdefault(b.index, []).append(a.index)
+    atoms = list(topology.atoms())
+    moved = 0
+    for atom in atoms:
+        if atom.element is None or atom.element.symbol != "H" or atom.residue.name in {"HOH", "WAT", "TIP3", "SOL"}:
+            continue
+        heavy = [j for j in bonds.get(atom.index, []) if atoms[j].element is not None and atoms[j].element.symbol != "H"]
+        if not heavy:
+            continue
+        cur = system.getParticleMass(atom.index).value_in_unit(unit.amu)
+        delta = h_mass_amu - cur
+        if abs(delta) < 1e-6:
+            continue
+        hm = system.getParticleMass(heavy[0]).value_in_unit(unit.amu)
+        system.setParticleMass(atom.index, h_mass_amu * unit.amu)
+        system.setParticleMass(heavy[0], (hm - delta) * unit.amu)
+        moved += 1
+    return moved
+
+
 # --------------------------------------------------------------------------- OpenMM
 class OpenMMBackend:
     """Real backend.  Construct from a serialized System XML + topology PDB.
@@ -92,30 +119,7 @@ class OpenMMBackend:
 
     # -- setup helpers
     def _apply_hmr(self, h_mass_amu: float = 3.0):
-        """Hydrogen mass repartitioning: move mass from the bonded heavy atom to H, total mass unchanged."""
-        unit, mm = self.unit, self.mm
-        bonds = {}
-        for a, b in self.topology.bonds():
-            bonds.setdefault(a.index, []).append(b.index)
-            bonds.setdefault(b.index, []).append(a.index)
-        atoms = list(self.topology.atoms())
-        moved = 0
-        for atom in atoms:
-            if atom.element is not None and atom.element.symbol == "H":
-                heavy = [j for j in bonds.get(atom.index, []) if atoms[j].element is not None and atoms[j].element.symbol != "H"]
-                if not heavy:
-                    continue
-                # skip water (rigid, constrained) – standard practice
-                if atom.residue.name in {"HOH", "WAT", "TIP3", "SOL"}:
-                    continue
-                cur = self.system.getParticleMass(atom.index).value_in_unit(unit.amu)
-                delta = h_mass_amu - cur
-                if abs(delta) < 1e-6:
-                    continue
-                hm = self.system.getParticleMass(heavy[0]).value_in_unit(unit.amu)
-                self.system.setParticleMass(atom.index, h_mass_amu * unit.amu)
-                self.system.setParticleMass(heavy[0], (hm - delta) * unit.amu)
-                moved += 1
+        moved = apply_hmr(self.system, self.topology, h_mass_amu)
         self.info.update({"hmr": True, "hmr_hydrogens_repartitioned": moved, "hmr_h_mass_amu": h_mass_amu})
 
     def _barostats(self):

@@ -66,3 +66,16 @@ def test_quality_detects_gap():
     rep, _, _ = umbrella_quality(samples)
     assert rep["graph_connected"] is False
     assert any(0.7 < c < 1.1 for c in rep["insert_centers_nm"])
+
+
+def test_cv_minimum_image_and_binding_summary():
+    from md20.sampling import com_distance, minimum_image, binding_summary
+    box = np.array([3.0, 3.0, 3.0])
+    assert np.allclose(minimum_image(np.array([2.9, 0.0, -1.6]), box), [-0.1, 0.0, 1.4])
+    xyz = np.array([[0.1, 0.0, 0.0], [2.9, 0.0, 0.0], [2.8, 0.0, 0.0]])
+    d = com_distance(xyz, np.array([0]), np.array([1, 2]), box)      # COM of g2 at 2.85 → wrapped distance 0.25
+    assert abs(d - 0.25) < 1e-9
+    g = np.linspace(0.3, 1.5, 121); pmf = 20 * (1 - np.exp(-((g - 0.4) / 0.15) ** 2)) * 0 + np.where(g < 0.6, -25 * np.exp(-((g - 0.4) / 0.1) ** 2), 0.0)
+    pmf = pmf - pmf.min()
+    bs = binding_summary(g, pmf, None, 0.3, 1.5, 300.0)
+    assert abs(bs["r_min_nm"] - 0.4) < 0.02 and 24 < bs["delta_pmf_kj_mol"] < 26 and "kcal" in bs["interpretation"]

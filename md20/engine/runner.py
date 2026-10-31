@@ -82,9 +82,13 @@ def run_protocol(run_dir: Path | str, protocol: Protocol, make_backend: Callable
                                              batch_steps=batch_steps, should_pause=should_pause)
                 df = read_state_log(res.log_path)
                 frames[spec.name] = df
-                acc = evaluate_acceptance(df, ensemble=spec.ensemble, target_temperature_k=spec.temperature_k,
-                                          length_ps=spec_run.length_ps, **{k: v for k, v in spec.accept.items()
-                                                                             if k in {"temp_tol_k", "density_cv", "last_fraction"}})
+                if spec.accept:
+                    acc = evaluate_acceptance(df, ensemble=spec.ensemble, target_temperature_k=spec.temperature_k,
+                                              length_ps=spec_run.length_ps, **{k: v for k, v in spec.accept.items()
+                                                                                 if k in {"temp_tol_k", "density_cv", "last_fraction"}})
+                else:
+                    from ..analysis.acceptance import AcceptanceResult
+                    acc = AcceptanceResult("PASS", [], "此 stage 未設定驗收門檻（accept={}）。")
                 figs = plot_stage_log(df, figures / f"{spec.name}_timeseries", title=f"{spec.name.upper()} — {res.steps:,} steps",
                                       target_temperature_k=spec.temperature_k, ensemble=spec.ensemble,
                                       accept_window_fraction=spec.accept.get("last_fraction"))

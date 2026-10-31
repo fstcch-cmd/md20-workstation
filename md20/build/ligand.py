@@ -63,6 +63,7 @@ def extract_hetatm_pose(pdb_text: str, resname: str, out_path: Path | str, *, ch
     if not lines:
         raise ValueError(f"PDB 中找不到 HETATM 殘基 {resname}")
     out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(lines) + "\nEND\n", encoding="utf-8")
     return out_path
 
