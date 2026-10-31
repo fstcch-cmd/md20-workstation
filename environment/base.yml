@@ -18,6 +18,7 @@ dependencies:
   - openff-nagl-models
   - vina>=1.2.5        # AutoDock Vina python bindings
   - meeko>=0.5         # ligand PDBQT + pose → RDKit with bond orders
+  - lxml               # needed by openmmforcefields (pip install does not pull it)
   - pdb2pqr
   - propka
   - nicegui
