@@ -26,6 +26,8 @@ class PlatformChoice:
 
 
 def available_platforms() -> list[str]:
+    from .winfix import suppress_windows_error_dialogs
+    suppress_windows_error_dialogs()
     try:
         import openmm as mm
     except ImportError:

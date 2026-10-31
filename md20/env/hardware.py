@@ -156,6 +156,8 @@ def probe_hardware(workdir: Path | str | None = None) -> dict:
     gpus = _nvidia() + _amd()
     if not gpus:
         gpus = _windows_wmi_gpus() or _mac_gpus()
+    from .winfix import nvidia_driver_files
+    nv_files = nvidia_driver_files()
     return {
         "os": {"system": platform.system(), "release": platform.release(), "version": platform.version(),
                "machine": platform.machine(), "python": platform.python_version()},
@@ -163,6 +165,7 @@ def probe_hardware(workdir: Path | str | None = None) -> dict:
         "ram_gb": round(ram / 1e9, 1) if ram else None,
         "disk": disk,
         "gpus": gpus,
+        "nvidia_driver_files": nv_files,
         "power": _power_state(),
         "env": {"CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES"),
                 "OPENMM_CUDA_COMPILER": os.environ.get("OPENMM_CUDA_COMPILER")},

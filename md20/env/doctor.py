@@ -15,6 +15,7 @@ from pathlib import Path
 from ..util import atomic_write_json, now_iso, app_data_dir, ensure_dir
 from .hardware import probe_hardware
 from .platforms import choose_platform, available_platforms, explain_rejection
+from .winfix import suppress_windows_error_dialogs, diagnose_nvidia_files
 
 CORE_PACKAGES = {
     "openmm": "MD 引擎（必要）",
@@ -148,8 +149,12 @@ def benchmark(platform_name: str, properties: dict, *, n_atoms_target: int = 240
 
 def run_doctor(*, do_benchmark: bool = True, benchmark_seconds: float = 20.0, workdir: Path | None = None,
                save: bool = True) -> DoctorReport:
+    suppress_windows_error_dialogs()
     hardware = probe_hardware(workdir)
     packages, findings = _package_report()
+    verdict = diagnose_nvidia_files(hardware.get("nvidia_driver_files", {}))
+    if verdict and "殘留" in verdict:
+        findings.append(Finding("NVIDIA 驅動檔案", "WARN", "nvopencl.dll 殘留／驅動不完整", verdict))
     platform = None
     bench = None
     # hardware findings

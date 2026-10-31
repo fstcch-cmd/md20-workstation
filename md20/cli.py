@@ -191,6 +191,8 @@ def cmd_demo(a):
 
 
 def main(argv=None) -> int:
+    from .env.winfix import suppress_windows_error_dialogs
+    suppress_windows_error_dialogs()
     ap = argparse.ArgumentParser(prog="md20", description=f"MD20 teaching workstation {__version__}")
     ap.add_argument("--dir", default=str(default_projects_dir()), help="projects root directory")
     sub = ap.add_subparsers(dest="cmd", required=True)

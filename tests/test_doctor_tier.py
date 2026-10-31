@@ -9,3 +9,11 @@ def test_recommend_tier_scales_with_system_size():
     r3 = recommend_tier(0.5)
     assert r3["recommended"] == "classroom" and not any(x["fits"] for x in r3["rows"])
     assert estimate_eta_hours(0, 1) == float("inf")
+
+
+def test_nvidia_file_diagnosis():
+    from md20.env.winfix import diagnose_nvidia_files, suppress_windows_error_dialogs
+    assert "殘留" in diagnose_nvidia_files({"nvcuda.dll": False, "nvopencl.dll": True, "nvidia-smi.exe": False})
+    assert diagnose_nvidia_files({"nvcuda.dll": True, "nvopencl.dll": True, "nvidia-smi.exe": True}) is None
+    assert diagnose_nvidia_files({}) is None
+    suppress_windows_error_dialogs()  # no-op off Windows, must not raise
