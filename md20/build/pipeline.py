@@ -14,7 +14,8 @@ from .assemble import assemble_system
 def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str | Path],
                ligand_poses: list[Path | str | None] | None = None, ph: float = 7.4, padding_nm: float = 1.0,
                ionic_strength_molar: float = 0.15, human_choices: dict | None = None, run_smoke_test: bool = True,
-               cocrystal_resnames: list[str] | None = None, keep_hetero: set[str] | None = None) -> dict:
+               cocrystal_resnames: list[str] | None = None, keep_hetero: set[str] | None = None,
+               extra_ligand_resnames: set[str] | None = None) -> dict:
     """Build a case.  `cocrystal_resnames[i]` (optional) names the HETATM residue in the receptor file whose
     coordinates are the pose for ligand i (the classic "re-simulate the crystal ligand" teaching case)."""
     decisions = case.project.decisions
@@ -22,7 +23,8 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
     rec_in = case.import_input(receptor, "receptor")
     cocrystal = list(cocrystal_resnames or [])
     rman = prepare_receptor(rec_in["path"], bdir / "receptor", ph=ph, decisions=decisions, keep_hetero=keep_hetero,
-                            human_choices=(human_choices or {}).get("receptor"), ligand_resnames=set(cocrystal))
+                            human_choices=(human_choices or {}).get("receptor"),
+                            ligand_resnames=set(cocrystal) | set(x for x in (extra_ligand_resnames or ()) if x))
     summary = {"status": "RUNNING", "receptor": rman, "ligands": [], "created_at": now_iso()}
     if rman["status"] == NEEDS_HUMAN:
         summary["status"] = NEEDS_HUMAN

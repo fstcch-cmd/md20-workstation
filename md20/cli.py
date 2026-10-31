@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .util import default_projects_dir, load_json
+from .util import default_projects_dir, load_json, safe_name
 
 
 def _p(msg: str) -> None:
@@ -65,25 +65,8 @@ def cmd_build(a):
 
 
 def _make_backend_factory(case, protocol, fake: bool):
-    if fake:
-        from .engine import FakeBackend
-        return lambda spec, dt: FakeBackend(timestep_fs=dt, temperature_k=spec.temperature_k, ensemble=spec.ensemble)
-    from .engine import OpenMMBackend
-    from .env import choose_platform
-    choice = choose_platform()
-    bm = load_json(case.build_dir / "build_manifest.json", {})
-    sys_xml, top = bm.get("system_xml"), bm.get("topology_pdb")
-    if not sys_xml or not top:
-        raise SystemExit("此 case 尚未 build 成功。")
-    case.project.decisions.record("engine.platform", "OpenMM platform", choice.name,
-                                  "依 CUDA→HIP→OpenCL→CPU 順序實測第一個能建立 Context 的平台。", rejected=choice.rejected)
-
-    def make(spec, dt):
-        return OpenMMBackend(sys_xml, top, platform_name=choice.name, platform_properties=choice.properties,
-                             timestep_fs=dt, temperature_k=spec.temperature_k, friction_per_ps=spec.friction_per_ps,
-                             ensemble=spec.ensemble, pressure_bar=spec.pressure_bar,
-                             barostat_interval_steps=spec.barostat_interval_steps, hmr=protocol.hmr, seed=spec.seed)
-    return make
+    from .engine.factory import make_backend_factory
+    return make_backend_factory(case, protocol, fake=fake)
 
 
 def cmd_run(a):
@@ -152,6 +135,44 @@ def cmd_queue(a):
             _p(f"{j['id']} → {j['status']} {j.get('reason', '')}")
             if j["status"] != "COMPLETE":
                 break
+    return 0
+
+
+def cmd_pipeline(a):
+    from .workflow import Workflow, WorkflowBlocked, example_config
+    if a.action == "example":
+        print(json.dumps(example_config(), ensure_ascii=False, indent=2))
+        return 0
+    from .project import Project
+    from .engine import PausePolicy
+    from .engine.factory import make_backend_factory
+    from .env import choose_platform
+    from .env.hardware import _power_state
+    cfg = json.loads(Path(a.config).read_text(encoding="utf-8"))
+    root = Path(a.dir) / safe_name(a.project)
+    proj = Project(root) if (root / "project.json").is_file() else Project.create(a.dir, a.project)
+    wf = Workflow(proj, cfg)
+    platform = choose_platform()
+    _p(f"平台：{platform.name}；workflow 目錄：{wf.dir}")
+    hours = tuple(int(x) for x in a.hours.split("-")) if a.hours else None
+    policy = PausePolicy(pause_file=proj.dir / "PAUSE", pause_on_battery=not a.ignore_battery, allowed_hours=hours,
+                         power_probe=_power_state)
+    last = {"t": 0.0}
+
+    def cb(ev):
+        import time
+        if time.monotonic() - last["t"] > 15:
+            last["t"] = time.monotonic()
+            _p("  " + ", ".join(f"{k}={v:.3g}" if isinstance(v, float) else f"{k}={v}" for k, v in ev.items() if k in
+                                {"stage", "chunk", "completed_local_steps", "total_steps", "temperature_k", "ligand", "window", "n", "r0", "force"}))
+    try:
+        out = wf.run(lambda case, proto: make_backend_factory(case, proto, fake=a.fake, platform=platform), platform,
+                     should_pause=policy, progress_cb=cb)
+    except WorkflowBlocked as exc:
+        _p(f"[NEEDS_HUMAN] {exc}")
+        _p(f"請在 {wf.dir / 'config.json'} 加上 pose_choices / human_choices 後重新執行同一指令。")
+        return 3
+    _p(f"workflow {out['status']}" + (f"；報告：{out.get('report')}" if out.get("report") else "（已暫停，重新執行即可續跑）"))
     return 0
 
 
@@ -224,6 +245,10 @@ def main(argv=None) -> int:
     qp.add_argument("--case"); qp.add_argument("--tier", default="teaching"); qp.add_argument("--replicas", type=int, default=1)
     qp.add_argument("--ns", type=float); qp.add_argument("--hours", help="允許時段，如 22-7"); qp.add_argument("--ignore-battery", action="store_true")
     qp.add_argument("--fake", action="store_true"); qp.set_defaults(fn=cmd_queue)
+    pl = sub.add_parser("pipeline", help="docking → MD → binding 全流程")
+    pl.add_argument("action", choices=["run", "example"]); pl.add_argument("config", nargs="?")
+    pl.add_argument("--project", default="MD20_Pipelines"); pl.add_argument("--hours"); pl.add_argument("--ignore-battery", action="store_true")
+    pl.add_argument("--fake", action="store_true"); pl.set_defaults(fn=cmd_pipeline)
     rp = sub.add_parser("report"); rp.add_argument("--project", required=True); rp.add_argument("--case", required=True)
     rp.add_argument("--run"); rp.add_argument("--bundle", action="store_true"); rp.set_defaults(fn=cmd_report)
     m = sub.add_parser("demo"); m.add_argument("--dir"); m.set_defaults(fn=cmd_demo)

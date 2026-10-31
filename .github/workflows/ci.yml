@@ -24,7 +24,7 @@ jobs:
         with: { python-version: "${{ matrix.python }}" }
       - run: pip install -e ".[dev]"
       - shell: bash
-        run: pytest -q --ignore=tests/test_openmm_integration.py --ignore=tests/test_real_case_integration.py --ignore=tests/test_docking_integration.py 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
+        run: pytest -q --ignore=tests/test_openmm_integration.py --ignore=tests/test_real_case_integration.py --ignore=tests/test_docking_integration.py --ignore=tests/test_workflow_integration.py --ignore=tests/test_binding_integration.py 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
       - run: python -m md20.cli demo --dir ${{ runner.temp }}/md20demo
       - run: python -m md20.cli doctor --no-benchmark || true   # degraded mode (no openmm): must not crash
       - name: Post failure log as commit comment
@@ -50,8 +50,9 @@ jobs:
           - os: ubuntu-latest
             gpu_yml: environment/linux-cuda.yml
             override_cuda: "12.4"
+            heavy: "1"
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - uses: mamba-org/setup-micromamba@v2
@@ -71,7 +72,8 @@ jobs:
         run: md20 doctor --seconds 5 || true
       - name: Full test suite incl. real OpenMM
         shell: bash -el {0}
-        run: pytest -v 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
+        env: { MD20_HEAVY: "${{ matrix.heavy }}" }
+        run: pytest -v --durations=15 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
       - name: Post failure log as commit comment
         if: failure()
         shell: bash
