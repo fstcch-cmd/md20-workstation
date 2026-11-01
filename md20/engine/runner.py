@@ -127,7 +127,8 @@ def run_protocol(run_dir: Path | str, protocol: Protocol, make_backend: Callable
                                      + acc.recommendation,
                                      stage=spec.name, evidence={"checks": acc.checks})
                 # extend: a *new* spec with longer length continues the same chunk sequence
-                spec_run = dataclasses.replace(spec_run, length_ps=spec_run.length_ps + acc.extend_ps)
+                spec_run = dataclasses.replace(spec_run, length_ps=spec_run.length_ps + acc.extend_ps,
+                                               schedule_length_ps=spec_run.schedule_length_ps or spec_run.length_ps)
                 (sdir / f"{spec.name}_complete.json").unlink(missing_ok=True)
                 if decisions:
                     decisions.record(f"engine.{spec.name}", "auto-extend", f"+{acc.extend_ps} ps",

@@ -106,6 +106,8 @@ def run_stage(stage_dir: Path | str, spec: StageSpec, make_backend: BackendFacto
     heartbeat_path = stage_dir / f"{name}_running.json"
     complete_path = stage_dir / f"{name}_complete.json"
     total = spec.steps()
+    # ramp / restraint-release schedule is a fraction of the original stage length, not of an auto-extended one
+    sched_total = spec.interval_steps(spec.schedule_length_ps) if spec.schedule_length_ps else total
     chunk_steps = max(1, min(total, spec.interval_steps(spec.checkpoint_interval_ps)))
     report_steps = spec.interval_steps(spec.report_interval_ps)
     dcd_steps = spec.interval_steps(spec.trajectory_interval_ps)
@@ -152,15 +154,19 @@ def run_stage(stage_dir: Path | str, spec: StageSpec, make_backend: BackendFacto
             shutil.rmtree(tmp, ignore_errors=True)
             tmp.mkdir()
             log_tmp, dcd_tmp = tmp / "chunk.log", (tmp / "chunk.dcd" if write_dcd and spec.ensemble != "MIN" else None)
+            # `completed`/`todo`/`total` count *protocol* steps (spec.timestep_fs) so the simulated time is what the
+            # protocol asked for; a halved dt means the backend takes `scale` integrator steps per protocol step.
+            scale = max(1, int(round(spec.timestep_fs / dt)))
             try:
-                backend.start_reporters(log_tmp, dcd_tmp, min(report_steps, todo), min(dcd_steps, todo), absolute_start + total)
+                backend.start_reporters(log_tmp, dcd_tmp, min(report_steps, todo) * scale, min(dcd_steps, todo) * scale,
+                                        (absolute_start + total) * scale)
                 advanced = 0
                 while advanced < todo:
                     n = min(batch, todo - advanced)
-                    frac_after = (completed + advanced + n) / total
+                    frac_after = min(1.0, (completed + advanced + n) / sched_total)
                     _apply_schedule(backend, spec, frac_after)
                     try:
-                        backend.step(n)
+                        backend.step(n * scale)
                     except Exception as exc:  # noqa: BLE001
                         if "nan" in str(exc).lower():   # OpenMM's NaN check = numerical instability, not a device fault
                             raise WatchdogError(f"OpenMM 偵測到 NaN：{str(exc)[:120]}") from exc
@@ -188,7 +194,8 @@ def run_stage(stage_dir: Path | str, spec: StageSpec, make_backend: BackendFacto
                 if dcd_tmp is not None and dcd_tmp.is_file() and dcd_tmp.stat().st_size > 0:
                     atomic_copy(dcd_tmp, cp.with_suffix(".dcd")); arts["dcd"] = _artifact(cp.with_suffix(".dcd"))
                 row = {"chunk": chunk_id, "start_local_step": completed, "end_local_step": completed + todo,
-                       "steps": todo, "absolute_step": backend.current_step(), "timestep_fs": dt,
+                       "steps": todo, "integrator_steps": todo * scale, "simulated_ps": round(todo * spec.timestep_fs / 1000.0, 4),
+                       "absolute_step": backend.current_step(), "timestep_fs": dt,
                        "artifacts": arts, "summary": backend.summary().to_dict(), "completed_at": now_iso()}
                 chunks.append(row)
                 completed += todo
@@ -227,9 +234,10 @@ def run_stage(stage_dir: Path | str, spec: StageSpec, make_backend: BackendFacto
                                      kind="auto_fixed", attempt=retries)
                 backend.close()
                 backend = make_backend(spec, dt)
+                # regenerate velocities at the ramp's *current* target, not the stage start temperature: after the heating
+                # ramp a 50 K restart would trip the watchdog again (thermostat cannot recover within one batch)
                 backend.initialize(str(last_state) if last_state else (str(initial_state) if initial_state else None),
-                                   spec.start_temperature_k if spec.start_temperature_k is not None else spec.temperature_k,
-                                   spec.seed + retries, True)
+                                   _ramp_target(spec, min(1.0, completed / sched_total)), spec.seed + retries, True)
                 absolute_start = backend.current_step() - completed
             except (Paused, NeedsHuman):
                 raise

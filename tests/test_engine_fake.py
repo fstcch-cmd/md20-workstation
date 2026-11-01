@@ -85,6 +85,63 @@ def test_watchdog_recovers_when_smaller_dt_is_stable(tmp_path: Path):
     assert whats.count("watchdog") == 1 and "timestep" in whats
     prog = load_json(tmp_path / "nvt" / "nvt_progress.json")
     assert prog["chunks"][1]["timestep_fs"] == 1.0
+    # the halved-dt chunk must still simulate its full 5 ps (twice the integrator steps), so the stage ends at 10 ps —
+    # previously the chunk was counted in steps and the stage silently finished at 7.5 ps
+    c2 = prog["chunks"][1]
+    assert c2["steps"] == 2500 and c2["integrator_steps"] == 5000 and c2["simulated_ps"] == 5.0
+    assert abs(c2["summary"]["time_ps"] - 10.0) < 1e-6
+    assert abs(prog["chunks"][0]["summary"]["time_ps"] - 5.0) < 1e-6
+
+
+def test_watchdog_retry_restarts_at_ramp_temperature(tmp_path: Path):
+    """A NaN after the heating ramp must not restart the system at the 50 K start temperature."""
+    spec = StageSpec(name="nvt", ensemble="NVT", length_ps=10.0, timestep_fs=2.0, temperature_k=300.0, start_temperature_k=50.0,
+                     ramp_fraction=0.3, report_interval_ps=0.2, checkpoint_interval_ps=5.0)
+    seen = []
+
+    class Probe(FakeBackend):
+        def initialize(self, state, temperature_k, seed, regenerate_velocities=False):
+            seen.append(float(temperature_k))
+            return super().initialize(state, temperature_k, seed, regenerate_velocities)
+
+    def make(spec_: StageSpec, dt: float):
+        return Probe(timestep_fs=dt, temperature_k=spec_.temperature_k, ensemble=spec_.ensemble,
+                     nan_at_step=3000 if dt >= 2.0 else None)
+    res = run_stage(tmp_path / "nvt", spec, make, identity={"run": "r1"}, initial_state=None, batch_steps=250)
+    assert res.status == "PASS"
+    assert seen[0] == 50.0 and seen[1] == 300.0          # first start at ramp start; the retry at chunk 2 (frac 0.5 > ramp) at 300 K
+
+
+def test_extension_keeps_schedule_of_original_length(tmp_path: Path):
+    """Auto-extend (+50 ps on a 100 ps stage) must not re-tighten restraints already released, nor move the thermostat."""
+    scales, temps = [], []
+
+    class Probe(FakeBackend):
+        def set_global_parameter(self, name, value):
+            if name == "msw_restraint_scale":
+                scales.append(float(value))
+            return super().set_global_parameter(name, value)
+
+        def set_temperature(self, t):
+            temps.append(float(t))
+            return super().set_temperature(t)
+
+    def make(spec_: StageSpec, dt: float):
+        return Probe(timestep_fs=dt, temperature_k=spec_.temperature_k, ensemble=spec_.ensemble)
+    base = StageSpec(name="nvt", ensemble="NVT", length_ps=20.0, timestep_fs=2.0, temperature_k=300.0, start_temperature_k=50.0,
+                     ramp_fraction=0.8, restraint_scale=1.0, restraint_scale_end=0.2, report_interval_ps=0.2, checkpoint_interval_ps=10.0)
+    run_stage(tmp_path / "nvt", base, make, identity={"run": "r1"}, initial_state=None, batch_steps=500)
+    assert abs(scales[-1] - 0.2) < 1e-9 and abs(temps[-1] - 300.0) < 1e-9
+    # extend the same chunk sequence the way runner does (schedule stays pinned to the original 20 ps)
+    import dataclasses
+    ext = dataclasses.replace(base, length_ps=30.0, schedule_length_ps=20.0)
+    (tmp_path / "nvt" / "nvt_complete.json").unlink()
+    n0 = len(scales)
+    res = run_stage(tmp_path / "nvt", ext, make, identity={"run": "r1"}, initial_state=None, batch_steps=500)
+    assert res.status == "PASS" and res.chunks == 3
+    assert all(abs(v - 0.2) < 1e-9 for v in scales[n0:]) and all(abs(t - 300.0) < 1e-9 for t in temps[n0:])
+    # without the pin, the old behaviour would have pulled the restraint back up to ≈0.47 at the start of the extension
+    assert all(b <= a + 1e-9 for a, b in zip(scales, scales[1:]))
 
 
 def test_full_protocol_with_plots(tmp_path: Path):

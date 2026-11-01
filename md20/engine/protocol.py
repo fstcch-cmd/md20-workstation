@@ -37,6 +37,9 @@ class StageSpec:
     # empty = the single global schedule above (pre-strategy behaviour)
     restraint_groups: dict = field(default_factory=dict)
     freeze: bool = False                        # use the build's frozen-atom set (mass 0) in this stage
+    # auto-extension keeps the ramp/restraint schedule of the *original* length: a +50 ps extension must not pull
+    # released restraints back up or the thermostat target back down (schedule fraction = time / schedule_length_ps)
+    schedule_length_ps: float | None = None
 
     def steps(self) -> int:
         return max(1, int(round(self.length_ps * 1000.0 / self.timestep_fs)))
@@ -53,6 +56,8 @@ def _stage_dict(s: StageSpec) -> dict:
         d.pop("restraint_groups", None)
     if not d.get("freeze"):
         d.pop("freeze", None)
+    if d.get("schedule_length_ps") is None:
+        d.pop("schedule_length_ps", None)
     return d
 
 
