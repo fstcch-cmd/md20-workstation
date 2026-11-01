@@ -50,3 +50,29 @@ def test_3ptb_build_and_short_md(pdb_3ptb, tmp_path):
     rep = build_run_report(run)
     html = rep.read_text(encoding="utf-8")
     assert "ff14SB" in html and "openff" in html.lower() and "co-crystal" in html
+
+
+def test_3ptb_with_peptide_on_own_chain(pdb_3ptb, tmp_path):
+    """Peptide built with ff14SB on a free chain, placed outside the protein; must not join the receptor."""
+    import numpy as np
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+    from md20.build.peptide import peptide_smiles
+    txt = Path(pdb_3ptb).read_text()
+    ca = np.array([[float(l[30:38]), float(l[38:46]), float(l[46:54])] for l in txt.splitlines() if l.startswith("ATOM") and l[12:16] == " CA "])
+    m = Chem.AddHs(Chem.MolFromSmiles(peptide_smiles("GAK"))); AllChem.EmbedMolecule(m, randomSeed=3)
+    conf = m.GetConformer()
+    shift = np.array([ca[:, 0].max() + 8.0, ca[:, 1].mean(), ca[:, 2].mean()]) - conf.GetPositions().mean(0)
+    for i in range(m.GetNumAtoms()):
+        p = conf.GetAtomPosition(i); conf.SetAtomPosition(i, (p.x + shift[0], p.y + shift[1], p.z + shift[2]))
+    sdf = tmp_path / "pep.sdf"; w = Chem.SDWriter(str(sdf)); w.write(m); w.close()
+    proj = Project.create(tmp_path, "pep")
+    case = proj.new_case("trypsin_peptide")
+    s = build_case(case, receptor=pdb_3ptb, ligand_references=[], keep_hetero=set(), padding_nm=0.8, extra_ligand_resnames={"BEN"},
+                   peptides=[{"name": "P01", "sequence": "GAK", "pose": str(sdf), "target_location": "extracellular"}])
+    assert s["status"] == "PASS", (s.get("blocking"), s.get("blocking_detail"))
+    pep = s["ligands"][0]
+    assert pep["kind"] == "peptide" and pep["cpp"]["status"] == "不適用"
+    gates = {g["name"]: g["status"] for g in s["assembly"]["gates"]["gates"]}
+    assert gates.get("peptide topology") == "PASS"
+    assert len(s["assembly"]["ligands"][0]["heavy_atom_indices"]) == Chem.MolFromSequence("GAK").GetNumHeavyAtoms()

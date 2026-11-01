@@ -209,7 +209,8 @@ def gate_inspection(insp: PDBInspection, *, keep_hetero: set[str], max_auto_gap:
 
 def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4, keep_hetero: set[str] | None = None,
                      decisions: DecisionLog | None = None, max_auto_gap: int = 6, keep_pocket_waters: bool = False,
-                     human_choices: dict | None = None, ligand_resnames: set[str] | None = None) -> dict:
+                     human_choices: dict | None = None, ligand_resnames: set[str] | None = None,
+                     exclude_chains: set[str] | None = None) -> dict:
     """Clean a receptor with PDBFixer.  Returns a manifest with the gate report.
 
     `human_choices` maps gate name → chosen option string (from the GUI) so a
@@ -220,6 +221,13 @@ def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4
     keep_hetero = set(keep_hetero or COFACTOR_KEEP_DEFAULT)
     human_choices = dict(human_choices or {})
     text = source.read_text(encoding="utf-8", errors="ignore") if source.suffix.lower() in {".pdb", ".ent"} else ""
+    exclude_chains = set(exclude_chains or ())
+    if text and exclude_chains:
+        # e.g. a co-crystal peptide: it is a ligand, never part of the receptor
+        text = "\n".join(l for l in text.splitlines() if not (l.startswith(("ATOM", "HETATM", "TER", "ANISOU")) and len(l) > 21 and l[21] in exclude_chains))
+        if decisions:
+            decisions.record("build.receptor", "excluded chains", sorted(exclude_chains),
+                             "這些 chain 是配體（例如共晶胜肽），從受體移除後由配體流程處理，避免被併入受體。")
     insp = inspect_pdb_text(text) if text else PDBInspection(format=source.suffix.lower().lstrip("."))
     report = gate_inspection(insp, keep_hetero=keep_hetero, max_auto_gap=max_auto_gap,
                              ligand_resnames=set(ligand_resnames or ())) if text else GateReport()

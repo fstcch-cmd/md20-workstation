@@ -68,6 +68,17 @@ def extract_hetatm_pose(pdb_text: str, resname: str, out_path: Path | str, *, ch
     return out_path
 
 
+def extract_chain_pose(pdb_text: str, chain: str, out_path: Path | str) -> Path:
+    """ATOM/HETATM records of one chain (e.g. a co-crystal peptide) → PDB with TER (coordinates only)."""
+    lines = [l for l in pdb_text.splitlines() if l.startswith(("ATOM", "HETATM")) and l[21] == chain and l[16] in " A"]
+    if not lines:
+        raise ValueError(f"PDB 中找不到 chain {chain}")
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(lines) + "\nTER\nEND\n", encoding="utf-8")
+    return out_path
+
+
 # --------------------------------------------------------------------------- chemistry
 def _load_reference(ref: str | Path):
     from rdkit import Chem

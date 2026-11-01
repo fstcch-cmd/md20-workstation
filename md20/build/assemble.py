@@ -59,7 +59,7 @@ def _ligand_openmm(rec: LigandRecord):
 
 
 def add_position_restraints(system, topology, positions, *, k_protein=1000.0, k_ligand=500.0,
-                            ligand_resnames: set[str] = frozenset()) -> dict:
+                            ligand_resnames: set[str] = frozenset(), ligand_atom_indices: set[int] = frozenset()) -> dict:
     """Harmonic restraints on protein backbone + ligand heavy atoms, scaled by global `msw_restraint_scale`."""
     import openmm as mm
     from openmm import unit
@@ -72,9 +72,10 @@ def add_position_restraints(system, topology, positions, *, k_protein=1000.0, k_
     backbone = {"CA", "C", "N", "O"}
     for atom in topology.atoms():
         rn = atom.residue.name
-        if rn in ligand_resnames and atom.element is not None and atom.element.symbol != "H":
+        is_lig = rn in ligand_resnames or atom.index in ligand_atom_indices
+        if is_lig and atom.element is not None and atom.element.symbol != "H":
             k = k_ligand; n_lig += 1
-        elif atom.name in backbone and rn not in {"HOH", "WAT"} and rn not in ligand_resnames and atom.element is not None and atom.element.symbol != "H":
+        elif atom.name in backbone and rn not in {"HOH", "WAT"} and not is_lig and atom.element is not None and atom.element.symbol != "H":
             k = k_protein; n_prot += 1
         else:
             continue
@@ -103,12 +104,27 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
     pdb = app.PDBFile(str(receptor_pdb))
     modeller = app.Modeller(pdb.topology, pdb.positions)
     n_protein = modeller.topology.getNumAtoms()
+    receptor_chain_ids = {c.id for c in modeller.topology.chains()}
     ff = app.ForceField(*forcefield_files)
     lig_names = set()
     generators = []
+    peptide_chains: list[str] = []
+    lig_atom_ranges: list[tuple[str, int, int]] = []
     for rec in ligands:
+        start = modeller.topology.getNumAtoms()
+        if getattr(rec, "kind", "small") == "peptide":
+            pep = app.PDBFile(rec.pdb_path)
+            pm = app.Modeller(pep.topology, pep.positions)
+            pm.addHydrogens(ff, pH=7.4)
+            for ch in pm.topology.chains():
+                ch.id = rec.chain_id
+            modeller.add(pm.topology, pm.positions)
+            peptide_chains.append(rec.chain_id)
+            lig_atom_ranges.append((rec.name, start, modeller.topology.getNumAtoms()))
+            continue
         top, pos, offmol = _ligand_openmm(rec)
         modeller.add(top, pos)
+        lig_atom_ranges.append((rec.name, start, modeller.topology.getNumAtoms()))
         lig_names.add(rec.resname)
         ladder = parameter_ladder(__import__("rdkit.Chem", fromlist=["SDMolSupplier"]).SDMolSupplier(rec.sdf_path, removeHs=False)[0],
                                   prefer=((rec.provider,) if rec.provider else ("openff-sage", "gaff2")), decisions=None)
@@ -138,7 +154,13 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
             counts[res_.name] = counts.get(res_.name, 0) + 1
     system = ff.createSystem(modeller.topology, nonbondedMethod=app.PME, nonbondedCutoff=nonbonded_cutoff_nm * unit.nanometer,
                              constraints=app.HBonds, rigidWater=True, removeCMMotion=True)
-    restr = add_position_restraints(system, modeller.topology, modeller.positions, ligand_resnames=lig_names)
+    lig_index_set = {i for _, a, b in lig_atom_ranges for i in range(a, b)}
+    restr = add_position_restraints(system, modeller.topology, modeller.positions, ligand_resnames=lig_names,
+                                    ligand_atom_indices=lig_index_set)
+    if peptide_chains:
+        from .peptide import topology_gate
+        for g in topology_gate(modeller.topology, receptor_chain_ids, peptide_chains).gates:
+            report.add(g)
     # audits
     total_q = 0.0
     for f in (system.getForce(i) for i in range(system.getNumForces())):
@@ -164,6 +186,7 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
     import math
     report.add(Gate("single-point energy", PASS if math.isfinite(e) else NEEDS_HUMAN,
                     f"初始位能 {e:,.0f} kJ/mol" if math.isfinite(e) else "初始位能 NaN：有重疊原子或壞參數。"))
+    atoms_el = [a.element.symbol if a.element is not None else "?" for a in modeller.topology.atoms()]
     top_pdb = out_dir / "topology.pdb"
     with open(top_pdb, "w", encoding="utf-8") as fh:
         app.PDBFile.writeFile(modeller.topology, modeller.positions, fh, keepIds=True)
@@ -174,7 +197,10 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
     res = BuildResult(status=report.status, system_xml=str(sys_xml), topology_pdb=str(top_pdb), n_atoms=n_atoms,
                       n_protein_atoms=n_protein, n_ligand_atoms=n_lig, n_waters=n_water, n_ions=counts, box_nm=box_nm,
                       total_charge=total_q, forcefields=list(forcefield_files) + generators,
-                      ligands=[l.to_dict() for l in ligands], restraints=restr, gates=report.to_dict(),
+                      ligands=[{**l.to_dict(), "atom_indices": list(range(a, b)),
+                                "heavy_atom_indices": [i for i in range(a, b) if atoms_el[i] != "H"]}
+                               for l, (_, a, b) in zip(ligands, lig_atom_ranges)],
+                      restraints=restr, gates=report.to_dict(),
                       hashes={"system_xml": sha256_file(sys_xml), "topology_pdb": sha256_file(top_pdb)})
     atomic_write_json({**res.to_dict(), "created_at": now_iso()}, out_dir / "build_manifest.json")
     return res
