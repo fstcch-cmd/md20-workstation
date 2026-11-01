@@ -6,12 +6,12 @@
 ## 進行中
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| 約束策略修正（會診 §1 Q1）：釋放移到 NPT、最小化配體 k ≥ 蛋白、分組約束（backbone/sidechain/ligand）、hold_backbone 的 RMSD 標註 | REVIEW_ANSWERS §1 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 21:30 | |
 | 監看 CI：3e7f941 / c016a08 的 Ubuntu 重測（鋅模型、補窗、NaCl 冪等） | — | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 | 結果記入 STATUS / DECISIONS |
 
 ## 待認領（依重要性）
 | 項目 | 來源 |
 |---|---|
-| 約束策略修正：釋放移到 NPT、最小化配體 k ≥ 蛋白、hold_backbone 的 RMSD 驗收標註 | 同上 §1 Q1 |
 | 金屬：力常數依元素×配位原子表、配位水納入鍵結、配體配位金屬的距離約束後備 | 同上 §3 |
 | umbrella：MBAR overlap matrix 門檻、OpenMM 內建 metadynamics 後備、funnel 約束（研究 tier ΔG°） | 同上 §2 |
 | 約束分組分階段／凍結／口袋截斷／資源估算（**等使用者審查規格後才實作**） | `docs/specs/restraints_freeze_truncation.md` |
