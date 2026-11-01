@@ -117,6 +117,9 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
     if res.status == NEEDS_HUMAN:
         summary["blocking"] = "assembly"
         summary["blocking_detail"] = [g for g in (res.gates or {}).get("gates", []) if g.get("status") == NEEDS_HUMAN]
+    if res.ligands:
+        # keep top-level ligand records consistent with the assembled topology (they gain atom indices)
+        summary["ligands"] = res.ligands
     summary.update({"status": "PASS" if res.status != NEEDS_HUMAN else NEEDS_HUMAN, "assembly": res.to_dict(),
                     "system_xml": res.system_xml, "topology_pdb": res.topology_pdb})
     atomic_write_json(summary, bdir / "build_manifest.json")

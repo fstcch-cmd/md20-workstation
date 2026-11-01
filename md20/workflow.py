@@ -38,6 +38,18 @@ from .util import atomic_write_json, load_json, now_iso, ensure_dir, safe_name
 SYSTEM_MODES = ("apo", "docked_single", "docked_multi")
 
 
+
+def manifest_ligands(bm: dict) -> list[dict]:
+    """Ligand records that carry topology atom indices.
+
+    build_case() rewrites build_manifest.json after assembly; the indices live in ``assembly.ligands``
+    (written by assemble_system).  Older manifests only have the pre-assembly records at top level, which
+    carry no indices — callers must then block, not guess."""
+    asm = (bm.get("assembly") or {}).get("ligands") or []
+    if any(l.get("heavy_atom_indices") for l in asm):
+        return asm
+    return bm.get("ligands") or []
+
 class WorkflowBlocked(RuntimeError):
     """A step needs a human decision; message explains which and why."""
 
@@ -423,7 +435,7 @@ class Workflow:
             man = load_json(run_dir / "analysis" / "analysis_manifest.json", {})
             if man.get("status") != "PASS":
                 bm = load_json(case.build_dir / "build_manifest.json", {})
-                groups = {l["name"]: l["heavy_atom_indices"] for l in bm.get("ligands", []) if l.get("heavy_atom_indices")}
+                groups = {l["name"]: l["heavy_atom_indices"] for l in manifest_ligands(bm) if l.get("heavy_atom_indices")}
                 man = analyse_run(run_dir, top, label=key, ligand_groups=groups or None)
             out[key] = man
             metrics[key] = load_json(man["metrics_file"], {})
@@ -468,7 +480,7 @@ class Workflow:
             run_dir = case.dir / "runs" / runs[key]["run_ids"][0]
             start = run_dir / "stages" / "production" / "production_state.xml"
             mname = (built.get(key, {}).get("ligand_map") or {}).get(name, "L01")
-            lrec = next((l for l in bm.get("ligands", []) if l.get("name") == mname), None)
+            lrec = next((l for l in manifest_ligands(bm) if l.get("name") == mname), None)
             if lrec is None or not lrec.get("heavy_atom_indices"):
                 self._block("binding", f"{name}：建模紀錄中找不到配體 {mname} 的原子索引，無法定義拉離座標。")
             res = run_binding(bm["system_xml"], bm["topology_pdb"], start, self.dir / "binding" / name,
