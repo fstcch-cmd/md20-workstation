@@ -67,21 +67,26 @@ jobs:
         shell: bash -el {0}
         env:
           CONDA_OVERRIDE_CUDA: ${{ matrix.override_cuda }}
-        run: micromamba create -y -n md20 -f environment/base.yml -f ${{ matrix.gpu_yml }} 2>&1 | tee env.log; exit ${PIPESTATUS[0]}
+        run: |
+          set -o pipefail
+          "$MAMBA_EXE" create -y -n md20 -f environment/base.yml -f ${{ matrix.gpu_yml }} 2>&1 | tee env.log
+          echo "micromamba create exit=$?" | tee -a env.log
       - name: Install md20 (+ pip-only deps)
         shell: bash -el {0}
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          micromamba run -n md20 python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" -e . 2>&1 | tee -a env.log
-          test ${PIPESTATUS[0]} -eq 0 || exit 1
-          micromamba run -n md20 md20 setup-vina 2>&1 | tee -a env.log; exit ${PIPESTATUS[0]}
+          set -o pipefail
+          "$MAMBA_EXE" run -n md20 python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" -e . 2>&1 | tee -a env.log
+          "$MAMBA_EXE" run -n md20 md20 setup-vina 2>&1 | tee -a env.log
       - name: Doctor (CPU platform)
         shell: bash -el {0}
-        run: micromamba run -n md20 md20 doctor --seconds 5 || true
+        run: '"$MAMBA_EXE" run -n md20 md20 doctor --seconds 5 || true'
       - name: Full test suite incl. real OpenMM
         shell: bash -el {0}
         env: { MD20_HEAVY: "${{ matrix.heavy }}" }
-        run: micromamba run -n md20 pytest -v --durations=15 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
+        run: |
+          set -o pipefail
+          "$MAMBA_EXE" run -n md20 pytest -v --durations=15 2>&1 | tee pytest.log
       - name: Post failure log as commit comment
         if: failure()
         shell: bash
