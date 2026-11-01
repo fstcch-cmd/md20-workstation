@@ -88,11 +88,15 @@ def _angle(a, m, b) -> float:
     return math.degrees(math.acos(max(-1.0, min(1.0, c))))
 
 
-def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None) -> dict:
-    """Decide what to do with one metal site → {status, action, bonds, angles, variants, gate, why}."""
+def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params: dict | None = None,
+              residue_atoms: dict | None = None) -> dict:
+    """Decide what to do with one metal site → {status, action, bonds, angles, variants, gate, why}.
+
+    `params` (metal_params spec for this site) replaces the crystal-geometry constants with fitted ones
+    (see metal_params.py); it is only resolved when `xyz_of` is given (final pass on the edited topology)."""
     key = site["key"]
     out = {"key": key, "metal_index": site["metal_index"], "policy": policy, "action": None, "bonds": [], "angles": [],
-           "variants": {}, "caveats": []}
+           "variants": {}, "caveats": [], "charges": {}, "source": "geometric"}
     if policy is None:
         # pocket transition metals were already stopped by the structure gate (WP6); anything reaching here
         # without a policy keeps the pre-existing behaviour, stated explicitly
@@ -145,18 +149,40 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None) -> dic
                                "theta0_deg": round(_angle(xyz_of[a["index"]], mx, xyz_of[b["index"]]), 2), "k": K_ANGLE})
     geom = {4: "四配位", 5: "五配位", 6: "六配位"}.get(len(donors), f"{len(donors)} 配位")
     caveats = ["鍵結模型為晶體幾何的諧和鍵與角（非擬合的 MCPB.py/ZAFF 參數）；電荷沿用力場，金屬–配位原子間非鍵結作用已排除。"]
+    fitted = ""
+    if params and xyz_of:
+        from .metal_params import resolve_site_params
+        fp = resolve_site_params(site, params, xyz_of, residue_atoms=residue_atoms)
+        if fp["status"] == NEEDS_HUMAN:
+            out.update(status=NEEDS_HUMAN, why=f"{key}：{fp['why']}", options=fp.get("options") or [],
+                       evidence=fp.get("evidence", {}))
+            return out
+        for b in bonds:
+            b.update(r0_nm=round(fp["bonds"][b["donor"]]["r0_nm"], 4), k=fp["bonds"][b["donor"]]["k"],
+                     k_kcal_A2=round(fp["bonds"][b["donor"]]["k_kcal_A2"], 1))
+        for a in angles:
+            rec = fp["angles"].get((a["a"], a["b"])) or fp["angles"].get((a["b"], a["a"]))
+            a.update(theta0_deg=round(rec["theta0_deg"], 2), k=rec["k"], k_kcal_rad2=round(rec["k_kcal_rad2"], 1))
+        out["charges"] = {str(i): q for i, q in fp["charges"].items()}
+        out["source"] = fp["source"]
+        out["evidence"] = fp.get("evidence", {})
+        caveats = list(fp.get("caveats", []))
+        fitted = "（擬合參數：" + fp["why"] + "）"
+    elif params and not xyz_of:
+        out["source"] = "pending"            # resolved on the final pass
     if site["waters"]:
         caveats.append(f"晶體中有 {len(site['waters'])} 個配位水；受體準備已移除水分子，該配位位置開放（可能由溶劑水或配體佔據）。")
     out.update(status=AUTO_FIXED, action="bonded", bonds=bonds, angles=angles, variants=variants, caveats=caveats,
                why=f"{key} 依使用者設定建立鍵結模型：{geom}（" + "、".join(b["label"] + f" {b['r0_nm'] * 10:.2f} Å" for b in bonds)
                    + "）" + (f"；配位殘基質子化改為 " + "、".join(f"{k}→{v}" for k, v in variants.items()) if variants else "")
-                   + "（配位的 Cys 去質子化、His 以未配位的氮帶氫）。")
+                   + "（配位的 Cys 去質子化、His 以未配位的氮帶氫）。" + fitted)
     return out
 
 
 def site_gates(plans: list[dict]) -> list[Gate]:
     return [Gate(f"metal {p['key']}", p["status"], p["why"], options=p.get("options") or [],
-                 evidence={"action": p["action"], "n_bonds": len(p["bonds"]), "variants": p["variants"]}) for p in plans]
+                 evidence={"action": p["action"], "n_bonds": len(p["bonds"]), "variants": p["variants"],
+                           "source": p.get("source", "geometric"), **(p.get("evidence") or {})}) for p in plans]
 
 
 def residue_variant(resname: str, atom_names: set[str]) -> str | None:
@@ -190,7 +216,8 @@ def _atoms_of(topology, positions_nm) -> list[dict]:
     return out
 
 
-def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float = 7.4) -> list[dict]:
+def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float = 7.4,
+                       metal_params: dict | None = None, qm_dir=None) -> list[dict]:
     """Edit the receptor Modeller in place (remove metals / reprotonate coordinating residues) and return the
     final per-site plans with indices valid for the edited topology (ligands/solvent are appended later,
     so receptor indices stay valid in the assembled system)."""
@@ -227,10 +254,29 @@ def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float =
     # 3) final plans on the edited topology (indices + angles)
     atoms, sites = snapshot()
     xyz_of = {a["index"]: a["xyz"] for a in atoms}
-    final = [plan_site(s, policy_for(s["key"], policy), xyz_of) for s in sites]
+    residue_atoms = {}
+    for r in modeller.topology.residues():
+        residue_atoms[f"{r.chain.id}:{r.id}"] = {a.name: a.index for a in r.atoms()}
+    final = [plan_site(s, policy_for(s["key"], policy), xyz_of, params=policy_for(s["key"], metal_params),
+                       residue_atoms=residue_atoms) for s in sites]
     for p in final:
         if p["action"] == "bonded":
             p["variants"] = {k: v for k, v in want.items() if k in p["variants"]} or p["variants"]
+    # geometric bonded sites: write the QM small-model input so the student can upgrade to fitted parameters
+    if qm_dir is not None:
+        from pathlib import Path as _P
+        from .metal_params import write_qm_cluster
+        for s_, p in zip(sites, final):
+            if p["action"] != "bonded" or p.get("source") != "geometric":
+                continue
+            spec = policy_for(s_["key"], metal_params) or {}
+            qm = write_qm_cluster(atoms, s_, _P(qm_dir) / s_["key"].replace(":", "_"),
+                                  charge=spec.get("qm_charge"), multiplicity=spec.get("qm_multiplicity"))
+            p["qm_input"] = qm
+            if qm["status"] == "PASS":
+                p["caveats"].append(f"可升級：QM 小模型輸入已寫到 {_P(qm_dir) / s_['key'].replace(':', '_')}（見 README.md）。")
+            else:
+                p["caveats"].append("未產生 QM 小模型輸入：" + qm["why"])
     return final
 
 
@@ -238,7 +284,7 @@ def add_metal_forces(system, plans: list[dict], positions_nm) -> dict:
     """Bonded model forces + exclusions, and always-on restraints for keep_nonbonded metals."""
     import openmm as mm
     import numpy as np  # noqa: F811
-    info = {"bonds": 0, "angles": 0, "exclusions": 0, "restrained_metals": []}
+    info = {"bonds": 0, "angles": 0, "exclusions": 0, "restrained_metals": [], "charges_set": 0, "charge_problems": []}
     bonded = [p for p in plans if p["action"] == "bonded"]
     if bonded:
         hb, ha = mm.HarmonicBondForce(), mm.HarmonicAngleForce()
@@ -246,6 +292,19 @@ def add_metal_forces(system, plans: list[dict], positions_nm) -> dict:
         nb = [f for f in system.getForces() if isinstance(f, mm.NonbondedForce)]
         cnb = [f for f in system.getForces() if isinstance(f, mm.CustomNonbondedForce)]
         for p in bonded:
+            if p.get("charges"):
+                # imported (RESP) charges: same integer total as the force field, else refuse (checked here because
+                # the System only exists now); exceptions 1-4 pairs keep their own chargeProd, as Amber does
+                idx = {int(k): float(v) for k, v in p["charges"].items()}
+                for f in nb:
+                    old = sum(f.getParticleParameters(i)[0]._value for i in idx)
+                    new = sum(idx.values())
+                    if abs(round(new) - round(old)) > 0.5 or abs(new - round(new)) > 0.02:
+                        info["charge_problems"].append((p["key"], f"{p['key']}：匯入電荷總和 {new:+.3f} 與力場 {old:+.3f} 的整數不同，未套用"))
+                        continue
+                    for i, q in idx.items():
+                        _, sig, eps = f.getParticleParameters(i)
+                        f.setParticleParameters(i, q, sig, eps); info["charges_set"] += 1
             for b in p["bonds"]:
                 hb.addBond(b["metal"], b["donor"], b["r0_nm"], b["k"]); info["bonds"] += 1
                 for f in nb:

@@ -455,6 +455,22 @@ class Workflow:
         self.dec.record("workflow.md", "docked_multi from independent", "allowed",
                         "配體分別對接，但選定 pose 彼此距離 ≥ 2.5 Å，可組成多配體系統；嚴格的共同佔位請用 simultaneous 模式。")
 
+    def _metal_params(self) -> dict | None:
+        """`metal_params` with relative file paths resolved against the workflow directory."""
+        mp = self.cfg.get("metal_params") or None
+        if not mp:
+            return None
+        out = {}
+        for key, spec in mp.items():
+            spec = dict(spec)
+            for f in ("file", "frcmod", "pdb"):
+                if spec.get(f) and not Path(spec[f]).is_absolute():
+                    spec[f] = str((self.dir / spec[f]).resolve())
+            if spec.get("mol2"):
+                spec["mol2"] = [m if Path(m).is_absolute() else str((self.dir / m).resolve()) for m in spec["mol2"]]
+            out[key] = spec
+        return out
+
     def _padding_nm(self) -> float:
         """WP3: SMD/umbrella need room to pull; raise padding when binding is enabled."""
         md = self.cfg.get("md", {})
@@ -487,7 +503,8 @@ class Workflow:
                        extra_ligand_resnames=drop, peptides=peps or None, ligand_names=small,
                        exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])),
                        metal_policy=self.cfg.get("metal_policy") or None,
-                       peptide_policy=self.cfg.get("peptide_policy") or None)
+                       peptide_policy=self.cfg.get("peptide_policy") or None,
+                       metal_params=self._metal_params())
         lmap = {n: f"L{i:02d}" for i, n in enumerate(small, 1)} | {p["name"]: p["name"] for p in peps}
         return s, lmap
 

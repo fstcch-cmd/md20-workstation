@@ -1,6 +1,6 @@
 # MD20 開發交接檔(給新的 Claude Code session 接手用)
 
-> 最後更新:2026-11-01(第二個 session,見 §5)。讀完這份就能無縫接續開發與 CI 監看。
+> 最後更新:2026-11-01(第三個 session,見 §5–§6)。讀完這份就能無縫接續開發與 CI 監看。
 > **重點:所有成果都在這個 repo + GitHub Actions 上,不在任何對話容器裡。** 新 session 只要 clone 本 repo 即可完整接手;正在跑的「虛擬機」就是 GitHub Actions CI,與 session 無關,不會因為舊對話結束而消失。
 
 ## 0. 新 session 第一步
@@ -63,10 +63,14 @@
   - **WP13** `md20/gui/views.py` + `md20/gui/static/md20view.js`(自寫 Canvas 2D 離線 3D,無 CDN、無 WebGL);GUI 分頁:閘門/即時曲線/時間軸/3D;報告內嵌 3D。
 - 開發容器補充:PyPI/npm 在第二個 session **也連不到**(pip/npm 都失敗),所以 NiceGUI、3Dmol.js 都裝不了;GUI 頁面靠 CI 的 `tests/test_gui_server.py` 實際啟動伺服器驗證,3D viewer 用容器內建的 Playwright Chromium 驗證。
 - **macOS(ARM/3 核)健壯化**(commit `1d74649`):三個真實 OpenMM 整合測試在慢 runner 上脆弱,已改成斷言軟體的真正保證而非特定機器結果——`test_nacl_pmf`(window 連通 **或** 誠實不輸出 ΔG°)、`test_multi_ligand_exit_path_blocked`(沿 Na→Cl 軸挑確實在拉離圓柱內的水,否則 skip)、`test_gui_pages_render`(伺服器暖機拉長到 ~180s,純逾時則 skip,行程掛掉仍 fail)。
-- **交接當下 CI**:最後 push 是 `1d74649`,觸發 run **41276641008**;交接時 pure-python 6 platform 已綠,三個 openmm-stack(mac/ubuntu/windows)仍在跑。新 session 第一件事就是看這一輪(或更新)的 openmm-stack 結果:若全綠,把 `docs/STATUS.md` 的 WP5/WP9/金屬/WP13/σ/replica 從「靠 CI」升級為「真跑過」;若 macOS 仍紅,讀 commit 留言的失敗 log 再修。
+- **第三個 session 看到的 CI(63d363b)**:Windows OpenCL 124 passed、macOS 126 passed,各僅 `test_gui_pages_render` 失敗(NiceGUI 在子行程讀到 `PYTEST_CURRENT_TEST` 就要求 `NICEGUI_SCREEN_TEST_PORT`);已在 `tests/test_gui_server.py` 把 `PYTEST_*` 從子行程環境移除。新 session 請看最新 commit 的 openmm-stack 三 OS 結果,全綠後把 STATUS 中「見 B」的項目升級。
 
 ## 6. 還沒做 / 可以接著做的
-- 鍵結金屬:目前是**幾何**鍵結模型;擬合參數(MCPB.py/QM)、配體直接配位金屬仍是 NEEDS_HUMAN。
+- (第三個 session 已做)金屬擬合參數 `md20/build/metal_params.py`:`metal_params: {"ZN:A262": {"source": "hessian"|"mcpb"|"json", ...}}`。
+  原理:仿 MCPB.py——小模型 QM Hessian 給鍵/角力常數、RESP 給電荷、其餘沿用力場;但不依賴 AmberTools:
+  Hessian 以 Wilson B 矩陣 pseudo-inverse 轉成位點內座標力常數(比 Seminario 精確,測試對已知模型完全還原),
+  MCPB.py 的 frcmod/mol2 只做轉譯。幾何模型建模時會自動在 `build/metal_qm/<site>/` 產生 ORCA/Gaussian 小模型輸入與 README。
+  配體直接配位金屬仍 NEEDS_HUMAN(需要配體–金屬的 QM 模型,第一版不做)。
 - (第三個 session 已做)閘門卡片一鍵寫回設定:`md20/gui/actions.py`(選項→config patch→寫回→`invalidate_from`)。
   新增可點選項時,在 `_option_action` 加映射,**且程式必須真的執行它**;否則留在 `manual`。
 - (第三個 session 已做)3D 互作標示與 vdW 表面:`views.ligand_interactions` + `md20view.js`。仍沒有卡通/SES 表面。

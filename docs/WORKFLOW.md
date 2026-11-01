@@ -39,6 +39,14 @@ md20 gui                                  # 或用圖形介面（瀏覽器 http:
 - **結合強度**：SMD 拉出配體 → 依 k、T、目標 overlap 自動規劃 window → 每個 window 可續跑 → WHAM/MBAR PMF ± bootstrap → ΔPMF（含 σ）與 ΔG° 估計（附限制說明）。
 - **多配體（WP9）**：共同口袋拉離前先檢查拉離路徑上有沒有其他配體（有就停下）；配體間比較只在同一情境內做，所有配體都有 tier 允許的 ΔG° 才給 ΔΔG°，否則給定性的 ΔΔPMF；差距 < 2σ 判為不可區分；同一配體「單獨 vs 共同口袋」的差值列為共存效應（趨勢，不是熱力學循環）。
 
+## 金屬位點（`metal_policy` 與 `metal_params`）
+
+```json
+"metal_policy": {"ZN": "bonded"},
+"metal_params": {"ZN": {"source": "hessian", "file": "qm/orca.hess"}}
+```
+`bonded` 預設用晶體幾何的諧和鍵／角（通用力常數）。建模時會在 `build/metal_qm/<site>/` 產生 QM 小模型輸入（金屬＋配位側鏈、Cα 封端；ORCA 與 Gaussian 兩種），學生用 ORCA 跑 Opt+Freq 後把 `.hess`（或 `.fchk`）指定給 `metal_params`，程式會把 Hessian 轉成金屬–配位鍵／角的力常數並檢查。其他來源：`{"source": "mcpb", "frcmod": "...", "mol2": ["ZN1.mol2", "HD1.mol2", ...], "pdb": "xxx_mcpbpy.pdb", "charges": true}`（轉譯 MCPB.py 輸出，含 RESP 電荷）、`{"source": "json", "file": "params.json"}`（`bonds` 以 `HIS94:NE2`／原子名／元素為鍵，`angles.default`，`charges`）。相對路徑以工作流程資料夾為準。開殼層金屬要加 `qm_charge`、`qm_multiplicity`。
+
 ## 需要人工決定時
 
 流程停在 `NEEDS_HUMAN`，訊息會列出閘門與選項。GUI 的「閘門」分頁對程式能執行的選項提供一鍵按鈕（需要理由的選項要先填理由），按下後設定寫回 `config.json`、決策記入日誌、從該步驟起重跑；換結構、改序列、QM 參數等選項只列為「需要在程式外處理」。CLI 則把選擇寫進設定檔後重跑同一指令（受體閘門目前只接受 `hetero groups` 的移除／保留，其他選擇會維持擋關）：

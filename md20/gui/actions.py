@@ -41,12 +41,20 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
     m = _METAL_OPT.search(option)
     if m:
         return _act(option, [{"path": ["metal_policy", m.group(1)], "value": m.group(2)}], step)
+    # imported charges refused at build time: keep the fitted bonds/angles, drop the charges for that site
+    if name.startswith("metal charges ") and gate.get("status") == "NEEDS_HUMAN":
+        key = name.split(" ", 2)[2]
+        if option.startswith("metal_params 改為不套用電荷"):
+            return _act(option, [{"path": ["metal_params", key, "charges"], "value": False}], "md_cases")
+        return None
     # metal site that cannot get a bonded model at build time: fall back on that site only
     if name.startswith("metal ") and gate.get("status") == "NEEDS_HUMAN":
         key = name.split(" ", 1)[1]
         for pol in ("keep_nonbonded", "remove"):
             if option.startswith(pol) or option.startswith("改用 " + pol):
                 return _act(option, [{"path": ["metal_policy", key], "value": pol}], "md_cases")
+        if option.startswith("改用幾何鍵結模型"):
+            return _act(option, [{"path": ["metal_params", key], "value": None}], "md_cases")
         return None
     # receptor cleanup gates: only choices prepare_receptor executes
     if step == "receptor_docking":

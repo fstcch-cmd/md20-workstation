@@ -128,7 +128,8 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                     padding_nm: float = 1.0, ionic_strength_molar: float = 0.15, box_shape: str = "cube",
                     water_model: str = "tip3p", decisions: DecisionLog | None = None,
                     nonbonded_cutoff_nm: float = 1.0, forcefield_files: tuple[str, ...] = AMBER_PROTEIN,
-                    flat_bottom: bool | None = None, metal_policy: dict | None = None, ph: float = 7.4) -> BuildResult:
+                    flat_bottom: bool | None = None, metal_policy: dict | None = None, ph: float = 7.4,
+                    metal_params: dict | None = None) -> BuildResult:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     report = GateReport()
@@ -143,7 +144,8 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
     modeller = app.Modeller(pdb.topology, pdb.positions)
     ff = app.ForceField(*forcefield_files)
     from .metal import apply_metal_policy, add_metal_forces, site_gates
-    metal_plans = apply_metal_policy(modeller, ff, metal_policy, ph=ph)
+    metal_plans = apply_metal_policy(modeller, ff, metal_policy, ph=ph, metal_params=metal_params,
+                                     qm_dir=out_dir / "metal_qm")
     for g in site_gates(metal_plans):
         report.add(g)
         if decisions and g.status != PASS:
@@ -213,6 +215,9 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
     lig_index_set = {i for _, a, b in lig_atom_ranges for i in range(a, b)}
     import numpy as _np
     metal_info = add_metal_forces(system, metal_plans, _np.asarray(modeller.positions.value_in_unit(unit.nanometer))) if metal_plans else {}
+    for key, prob in metal_info.get("charge_problems") or []:
+        report.add(Gate(f"metal charges {key}", NEEDS_HUMAN, prob,
+                        options=["metal_params 改為不套用電荷（charges: false）", "確認 MCPB 模型的質子化狀態"]))
     restr = add_position_restraints(system, modeller.topology, modeller.positions, ligand_resnames=lig_names,
                                     ligand_atom_indices=lig_index_set)
     if flat_bottom is None:

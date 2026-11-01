@@ -1,12 +1,12 @@
-# MD20 單機教學版 — 狀態報告（2026-11-01，第二個 session）
+# MD20 單機教學版 — 狀態報告（2026-11-01，第三個 session）
 
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
 CI 依據(`fstcch-cmd/md20-workstation`):
-- **L01 修正（a72ba6b）**:openmm-stack macOS 91 passed、Windows OpenCL 89 passed;Ubuntu 重測見 commit 留言（UBUNTU_A72）。
-- **第二個 session 的新功能（WP5/WP9/金屬/WP13/誤差/replica）**:最新 commit 的 CI 結果見留言（NEW_RUN）。
-- 測試函式:133 個(pure-python 部分本地全過)。
+- **63d363b（第二個 session 最終版）openmm-stack**:**Windows OpenCL 124 passed、macOS 126 passed**,各只有 1 個失敗——`test_gui_pages_render`,原因是 NiceGUI 在子行程看到 pytest 環境變數就切到它自己的測試模式(非 GUI 本身問題),本 session 已修;Ubuntu `MD20_HEAVY=1` 重測結果見該 commit 留言。
+- 第三個 session 新功能(閘門一鍵決定、3D 互作、金屬擬合參數)的 CI 結果見最新 commit 留言。
+- 測試函式:約 160 個(pure-python 部分本地全過)。
 
 ---
 
@@ -21,6 +21,7 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 | **短 MD 篩 pose(WP5)** | test_pose_screen | 候選挑選(推薦 + 每個其他 cluster)、穩定判定(後段 RMSD、接觸保留)、三態決策、暫停續跑快取、人工選擇不被覆寫 |
 | **多配體結合(WP9)** | test_multi_binding | 拉離路徑閘門、ΔΔ 比較(ΔΔG° 只在全部有 ΔG° 時;< 2σ 不可區分)、共存效應、docked_multi 每個配體各自拉離、**bootstrap σ**、**replica 彙總與 research tier 以實際完成數判定** |
 | **金屬** | test_metal | 配位位點辨識、bonded 計畫(鍵/角/CYM/HID/HIE)、擋關情境(< 3 配位、配體配位、His 雙氮)、policy 優先序、二硫鍵不被誤判為 CYM |
+| **金屬擬合參數** | test_metal_params | QM Hessian(Gaussian fchk / ORCA hess)→ 內座標轉換擬合鍵/角力常數(對已知諧和模型**完全還原**,含共用角);cluster 與蛋白位點以元素+最佳置換疊合對應;MCPB.py frcmod/mol2/pdb 轉譯(鍵角查表、RESP 電荷、原子名一致性);JSON 匯入;檢查閘門(r0 與晶體差、力常數範圍、電荷整數與力場一致);QM 小模型輸入產生(Cα 封端、電荷/多重度、開殼層擋關) |
 | **GUI 檢視(WP13)** | test_gui_views、test_gui_logic | 閘門卡片、時間軸、即時曲線、3D 場景;**離線 3D viewer 在 headless Chromium 實際繪圖且無 JS 錯誤**(含互作/表面切換);pose 表顯示短 MD 結果 |
 | **閘門一鍵決定** | test_gate_actions | 選項→設定修補(structure_override、metal_policy、human_choices、box、skip_redock、CPP、peptide_policy);需理由的選項必填;寫回 config.json、記 human 決策、自該步驟起失效重跑;**沒實作的選項不給按鈕、閘門維持擋關**(受體長 loop/未知殘基等) |
 | **3D 互作標示** | test_gui_views | 逐幀幾何互作(氫鍵候選 N/O ≤3.5 Å 未檢查角度、疏水 C–C ≤4.0 Å、配體–金屬 ≤2.8 Å)+ 殘基佔有率表;vdW 球表面近似 |
@@ -35,7 +36,8 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 | test_docking_integration | 苯甲脒 redocking RMSD<2Å;多配體 | 同上 |
 | test_binding_integration | NaCl PMF;水盒過小擋關;**拉離路徑被擋(WP9)** | 見 B |
 | test_workflow_integration | 3PTB 全流程(含 binding);**短 MD 篩 pose(WP5)** | Ubuntu 重測,見 B |
-| test_metal_integration | **CA II(3KS3)Zn–His3 鍵結模型**:建模、互變異構體、力項、最小化+MD 後鍵長維持 | Ubuntu 重測,見 B |
+| test_binding_integration / test_real_case / test_docking / test_openmm | NaCl PMF、拉離路徑閘門(WP9)、3PTB 建模與胜肽、redocking、平台/HMR/doctor | **63d363b:Windows OpenCL 與 macOS 真跑通過** |
+| test_metal_integration | **CA II(3KS3)Zn–His3 鍵結模型**:建模、互變異構體、力項、最小化+MD 後鍵長維持;**JSON 擬合參數套用與 r0 偏差擋關**;QM 小模型輸入產生 | Ubuntu 重測,見 B |
 | test_gui_server | **啟動 `md20 gui` 並請求每個頁面與 /viewer** | 有 NiceGUI 的 CI 環境 |
 
 ### A3. 使用者實機(先前回報)
@@ -59,7 +61,7 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 
 ### C2. 刻意簡化或未做
 - **短 MD 篩 pose**只排除會散開的 pose,不以短 MD 排名結合強度;非 research tier 預設關閉。
-- **金屬鍵結模型**是晶體幾何的諧和鍵/角(電荷沿用力場),**不是** MCPB.py/ZAFF 擬合參數;配體直接配位金屬、少於 3 個蛋白配位原子一律 NEEDS_HUMAN。配位水被移除(位置開放,報告標註)。
+- **金屬鍵結模型**預設是晶體幾何的諧和鍵/角(電荷沿用力場)。**擬合參數**可由三種來源匯入(`metal_params`):QM Hessian(內建轉換,電荷仍沿用力場)、MCPB.py 輸出(含 RESP 電荷;二面角與金屬 LJ 不轉譯)、JSON。QM 計算本身(ORCA/Gaussian)在程式外執行;程式負責產生小模型輸入與檢查結果。配體直接配位金屬、少於 3 個蛋白配位原子一律 NEEDS_HUMAN。配位水被移除(位置開放,報告標註)。開殼層金屬的 QM 電荷/自旋不猜,需使用者指定。
 - **多配體 PMF**:共存效應是「單獨 vs 共同口袋」的趨勢比較,不是封閉的熱力學循環;拉離路徑被另一配體擋住時不計算。
 - **誤差**:σ 為 bootstrap(每個重抽樣 PMF 重算 ΔPMF/ΔG°)與 replica 標準誤取大者;不含力場誤差。
 - **ΔG°**:一維 COM 距離 PMF + 徑向積分,未做方向/構形限制校正;classroom 不輸出;research 需 ≥3 個**實際完成**的 replica + 半段收斂。

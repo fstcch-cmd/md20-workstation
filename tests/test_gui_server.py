@@ -14,7 +14,7 @@ pytest.importorskip("nicegui")
 
 from md20.project.store import Project
 from md20.util.jsonio import atomic_write_json
-from md20.workflow import Workflow, example_config
+from md20.workflow import Workflow, WorkflowBlocked, example_config
 
 
 def _free_port():
@@ -41,13 +41,23 @@ def gui_project(tmp_path):
                       case.build_dir / "build_manifest.json")
     wf.dec.record("workflow.pose", "BEN", "rank 1", "測試決策")
     wf._mark("md_cases", cases={"docked_BEN": {"case_id": case.case_id, "mode": "docked_single", "ligands": ["BEN"]}})
+    # a blocked step with a structured gate → the page renders one-click decision buttons + a reason input
+    try:
+        wf._block("structure_gate", "結構可信度：resolution", gates=[{
+            "name": "resolution", "status": "NEEDS_HUMAN", "explanation": "解析度 3.4 Å",
+            "options": ["換一個更高解析度的結構", "仍要使用（structure_override.resolution）"]}])
+    except WorkflowBlocked:
+        pass
     return tmp_path, proj.dir.name, wf.name
 
 
 def test_gui_pages_render(gui_project):
     root, project, name = gui_project
     port = _free_port()
-    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    # NiceGUI switches to its own screen-test mode when it sees pytest's env var and then requires
+    # NICEGUI_SCREEN_TEST_PORT; the GUI under test is a normal server process, so hide pytest from it
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
+    env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen([sys.executable, "-m", "md20", "--dir", str(root), "gui", "--port", str(port), "--no-browser"],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
     base = f"http://127.0.0.1:{port}"
@@ -66,6 +76,7 @@ def test_gui_pages_render(gui_project):
         assert st == 200
         st, body = _get(f"{base}/wf/{project}/{name}")
         assert st == 200 and "閘門" in body and "3D" in body, body[-2000:]
+        assert "仍要使用" in body and "需要在程式外處理" in body, body[-2000:]     # one-click button + manual hint rendered
         st, body = _get(f"{base}/viewer?project={project}&name={name}&i=0")
         assert st == 200 and "md20Mount" in body and "https://" not in body
     finally:

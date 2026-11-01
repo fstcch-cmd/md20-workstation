@@ -60,6 +60,17 @@ def test_gate_actions_split_clickable_and_manual():
     assert [a["patch"][0]["path"] for a in acts] == [["metal_policy", "ZN:A262"]] * 2
     assert manual == ["以 MCPB.py/QM 參數化後匯入"] and all(a["from_step"] == "md_cases" for a in acts)
     assert gate_actions({**site, "status": "AUTO_FIXED"}, step="md_cases") == ([], [])
+    fit = {"name": "metal ZN:A262", "status": "NEEDS_HUMAN",
+           "options": ["修正 metal_params 設定", "改用幾何鍵結模型（移除 metal_params）", "改用 keep_nonbonded"]}
+    acts, manual = gate_actions(fit, step="md_cases")
+    assert manual == ["修正 metal_params 設定"]
+    assert acts[0]["patch"] == [{"path": ["metal_params", "ZN:A262"], "value": None}]
+    cfg = apply_patch({"metal_params": {"ZN:A262": {"source": "json", "file": "x"}}}, acts[0]["patch"])
+    assert cfg["metal_params"]["ZN:A262"] is None
+    ch = {"name": "metal charges ZN:A262", "status": "NEEDS_HUMAN",
+          "options": ["metal_params 改為不套用電荷（charges: false）", "確認 MCPB 模型的質子化狀態"]}
+    acts, manual = gate_actions(ch, step="md_cases")
+    assert len(acts) == 1 and acts[0]["patch"][0]["path"] == ["metal_params", "ZN:A262", "charges"]
 
 
 def test_cpp_actions_target_ligand_entry():
