@@ -56,14 +56,14 @@
   - **WP5** `md20/docking/pose_screen.py` + `Workflow.choose_poses(screen=...)` / `_screen_pose`:短 MD 篩 pose(結果快取在 `workflows/<name>/pose_screen.json`,暫停可續)。
   - **WP9** `md20/sampling/multi.py`:拉離路徑閘門、`compare_binding`(ΔΔ ± 2σ、共存效應);`Workflow._binding_targets` 把 docked_multi 每個配體列為 `multi:<名>`。
   - **金屬** `md20/build/metal.py`:`metal_policy` 真正套用(remove/keep_nonbonded/bonded);bonded = 晶體幾何鍵/角 + 排除 1-2 非鍵 + CYM/HID/HIE。
+  - **誤差與 replica**:`bootstrap_binding_sigma`(每個 bootstrap PMF 重算 ΔPMF/ΔG°)、`aggregate_binding_replicas`;research tier 以**實際完成**的 replica 數判定。
   - **WP13** `md20/gui/views.py` + `md20/gui/static/md20view.js`(自寫 Canvas 2D 離線 3D,無 CDN、無 WebGL);GUI 分頁:閘門/即時曲線/時間軸/3D;報告內嵌 3D。
 - 開發容器補充:PyPI/npm 在第二個 session **也連不到**(pip/npm 都失敗),所以 NiceGUI、3Dmol.js 都裝不了;GUI 頁面靠 CI 的 `tests/test_gui_server.py` 實際啟動伺服器驗證,3D viewer 用容器內建的 Playwright Chromium 驗證。
 
 ## 6. 還沒做 / 可以接著做的
 - 鍵結金屬:目前是**幾何**鍵結模型;擬合參數(MCPB.py/QM)、配體直接配位金屬仍是 NEEDS_HUMAN。
-- 結合計算的多 replica(research tier 要求 ≥3)尚未自動跑;目前只檢查並拒絕輸出 ΔG°。
-- ΔG° 的誤差(`dG_err_kj_mol`)尚未估計,所以 ΔΔG° 比較一律標「缺誤差」;ΔΔPMF 有 bootstrap σ。
-- GUI 的 pose 表尚未顯示短 MD 篩選結果欄;閘門卡片的選項目前是文字,尚未一鍵寫回設定。
+- 閘門卡片的選項目前是文字,尚未一鍵寫回設定(pose 例外)。
+- 3D viewer 沒有表面/卡通/互作標示(Canvas 2D 自寫,刻意保持離線、無依賴)。
 
 ## 7. HCC Lab 戳記(防盜用)
 - 模組:`md20/util/stamp.py`。可見文字 + 隱藏標記(PNG tEXt / SVG metadata / PDB REMARK 999 / SDF 屬性 / JSON `_md20` / 零寬 HTML / zip comment)+ RSA 加密溯源。
