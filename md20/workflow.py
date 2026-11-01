@@ -551,7 +551,7 @@ class Workflow:
                     "teaching": {"dG": True, "min_window_ps": 500.0},
                     "research": {"dG": True, "min_window_ps": 2000.0, "min_replicas": 3, "max_half_split_kj": 2.0}}
 
-    def _tier_withholds_dG(self, cfg, res) -> str | None:
+    def _tier_withholds_dG(self, cfg, res, n_done: int = 1) -> str | None:
         tier = self.cfg.get("md", {}).get("tier", "teaching")
         rule = self.TIER_BINDING.get(tier, self.TIER_BINDING["teaching"])
         if not rule["dG"]:
@@ -559,8 +559,9 @@ class Workflow:
         if cfg.window_prod_ps < rule.get("min_window_ps", 0):
             return (f"{tier} 等級要求每個 window ≥ {rule['min_window_ps']:.0f} ps，本次只有 {cfg.window_prod_ps:.0f} ps；"
                     f"ΔG° 不輸出，ΔPMF 僅供定性比較。")
-        if rule.get("min_replicas") and int((self.cfg.get("binding") or {}).get("replicas", 1)) < rule["min_replicas"]:
-            return f"research 等級要求 ≥ {rule['min_replicas']} 個獨立 replica 的結合計算；目前尚未完成，ΔG° 不輸出。"
+        if rule.get("min_replicas") and int(n_done) < rule["min_replicas"]:
+            return (f"research 等級要求 ≥ {rule['min_replicas']} 個獨立 replica 的結合計算；實際完成 {n_done} 個"
+                    f"（設定 binding.replicas），ΔG° 不輸出。")
         hs = (res.pmf.get("half_split") or {}).get("diff_kj_mol")
         if rule.get("max_half_split_kj") and (hs is None or hs > rule["max_half_split_kj"]):
             return f"前後半段 ΔPMF 差 {hs} kJ/mol > {rule['max_half_split_kj']}：未收斂，ΔG° 不輸出。"
@@ -591,7 +592,8 @@ class Workflow:
 
     def binding(self, runs: dict, built: dict, platform, *, should_pause=None, progress_cb=None) -> dict:
         from .sampling.binding import run_binding, BindingConfig
-        from .sampling.multi import compare_binding
+        from types import SimpleNamespace
+        from .sampling.multi import compare_binding, aggregate_binding_replicas
         b = self.cfg.get("binding", {})
         if not b.get("enabled"):
             return {}
@@ -605,8 +607,6 @@ class Workflow:
                 continue
             case = self.project.case(runs[key]["case_id"])
             bm = load_json(case.build_dir / "build_manifest.json", {})
-            run_dir = case.dir / "runs" / runs[key]["run_ids"][0]
-            start = run_dir / "stages" / "production" / "production_state.xml"
             lmap = built.get(key, {}).get("ligand_map") or {}
             mname = lmap.get(t["ligand"], "L01")
             recs = {l.get("name"): l for l in manifest_ligands(bm)}
@@ -619,29 +619,47 @@ class Workflow:
                 if not orec or not orec.get("heavy_atom_indices"):
                     self._block("binding", f"{name}：共同口袋中的配體 {o} 沒有原子索引，無法檢查拉離路徑。")
                 others[o] = orec["heavy_atom_indices"]
-            res = run_binding(bm["system_xml"], bm["topology_pdb"], start, self.dir / "binding" / name.replace(":", "_"),
-                              ligand_indices=lrec["heavy_atom_indices"], ligand_resname=mname, config=cfg, platform_name=platform.name,
-                              platform_properties=platform.properties, decisions=self.dec, should_pause=should_pause,
-                              progress_cb=progress_cb, other_ligand_indices=others or None)
-            if res.status == "NEEDS_HUMAN":
-                results[name] = {"status": "NEEDS_HUMAN", "ligand": t["ligand"], "caveats": res.caveats}
-                self._block("binding", f"{name} 結合自由能：{res.caveats[0] if res.caveats else ''}", results=results)
-            dG, dGk, withheld = res.dG_standard_kj_mol, res.dG_standard_kcal_mol, res.pmf.get("dG_withheld")
-            reason = self._tier_withholds_dG(cfg, res)
+            n_rep = max(1, int(b.get("replicas", 1)))
+            md_runs = runs[key]["run_ids"]
+            reps, paused = [], False
+            for i in range(n_rep):
+                # replica i starts from MD replica i (cycled) with its own seed → independent SMD/umbrella paths
+                rdir = case.dir / "runs" / md_runs[i % len(md_runs)]
+                rcfg = BindingConfig(**{**cfg.to_dict(), "seed": cfg.seed + 1000 * i})
+                odir = self.dir / "binding" / name.replace(":", "_")
+                res = run_binding(bm["system_xml"], bm["topology_pdb"], rdir / "stages" / "production" / "production_state.xml",
+                                  odir if n_rep == 1 else odir / f"rep{i + 1}",
+                                  ligand_indices=lrec["heavy_atom_indices"], ligand_resname=mname, config=rcfg, platform_name=platform.name,
+                                  platform_properties=platform.properties, decisions=self.dec, should_pause=should_pause,
+                                  progress_cb=progress_cb, other_ligand_indices=others or None)
+                if res.status == "NEEDS_HUMAN":
+                    results[name] = {"status": "NEEDS_HUMAN", "ligand": t["ligand"], "caveats": res.caveats}
+                    self._block("binding", f"{name} 結合自由能（replica {i + 1}）：{res.caveats[0] if res.caveats else ''}", results=results)
+                if res.status == "PAUSED":
+                    paused = True
+                    break
+                reps.append(res)
+            if paused:
+                results[name] = {"status": "PAUSED", "ligand": t["ligand"], "replicas_done": len(reps)}
+                st = self.state(); st["steps"]["binding"] = {"status": "PAUSED", "results": results}; atomic_write_json(st, self.state_path)
+                return results
+            agg = aggregate_binding_replicas(reps)
+            res = reps[0]
+            dG, dGk, withheld = agg["dG"], agg["dG_kcal"], agg["dG_withheld"]
+            reason = self._tier_withholds_dG(cfg, SimpleNamespace(pmf={"half_split": agg["half_split"]}), n_done=len(reps))
             if reason and dG is not None:
                 dG, dGk, withheld = None, None, reason
                 self.dec.record("binding.result", name, "ΔG° withheld", reason)
-            dG_err = getattr(res, "dG_err_kj_mol", None) if dG is not None else None
-            results[name] = {"status": res.status, "ligand": t["ligand"], "context": "single" if not t["others"] else f"multi:{key}",
-                             "co_ligands": t["others"], "delta_pmf_kj_mol": res.delta_pmf_kj_mol,
-                             "delta_pmf_err_kj_mol": getattr(res, "delta_pmf_err_kj_mol", None),
-                             "dG_standard_kj_mol": dG, "dG_err_kj_mol": dG_err, "dG_standard_kcal_mol": dGk, "dG_withheld": withheld,
-                             "half_split": res.pmf.get("half_split"),
+            if len(reps) > 1:
+                self.dec.record("binding.replicas", name, f"{len(reps)} replicas", agg["why"])
+            results[name] = {"status": "PASS", "ligand": t["ligand"], "context": "single" if not t["others"] else f"multi:{key}",
+                             "co_ligands": t["others"], "replicas": len(reps), "delta_pmf_kj_mol": agg["delta_pmf"],
+                             "delta_pmf_err_kj_mol": agg["delta_pmf_err"],
+                             "dG_standard_kj_mol": dG, "dG_err_kj_mol": agg["dG_err"] if dG is not None else None,
+                             "dG_standard_kcal_mol": dGk, "dG_withheld": withheld,
+                             "per_replica": agg["per_replica"], "half_split": agg["half_split"],
                              "r_min_nm": res.pmf.get("r_min_nm"), "figures": res.figures, "caveats": res.caveats,
                              "max_force": res.smd.get("max_force_kj_mol_nm"), "work": res.smd.get("final_work_kj_mol")}
-            if res.status == "PAUSED":
-                st = self.state(); st["steps"]["binding"] = {"status": "PAUSED", "results": results}; atomic_write_json(st, self.state_path)
-                return results
         comparison = compare_binding(results, contexts={k: v for k, v in contexts.items() if v})
         for c in comparison["contexts"].values():
             if c.get("why"):

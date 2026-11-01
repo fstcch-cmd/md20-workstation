@@ -129,3 +129,46 @@ def delta_pmf_error(grid: np.ndarray, err: np.ndarray | None, i_min: int, tail: 
     if not len(e) or not np.all(np.isfinite(e[[i_min]])) or not np.isfinite(e[-tail:]).all():
         return None
     return round(math.sqrt(float(e[i_min]) ** 2 + float(np.mean(e[-tail:])) ** 2), 3)
+
+
+def aggregate_binding_replicas(reps: list) -> dict:
+    """Combine independent binding replicas (BindingResult-like objects).
+
+    Mean over replicas; σ of the mean = max(SD/√n across replicas, √(Σσ_i²)/n from the bootstraps) — the larger
+    of the two, because replica scatter captures path/sampling variance that a single bootstrap cannot.
+    ΔG° only if every replica produced one (else withheld with the reason).  Half-split: the worst replica."""
+    n = len(reps)
+    dp = [r.delta_pmf_kj_mol for r in reps]
+    per = [{"delta_pmf_kj_mol": r.delta_pmf_kj_mol, "delta_pmf_err_kj_mol": getattr(r, "delta_pmf_err_kj_mol", None),
+            "dG_standard_kj_mol": r.dG_standard_kj_mol, "dG_err_kj_mol": getattr(r, "dG_err_kj_mol", None),
+            "half_split": (r.pmf or {}).get("half_split")} for r in reps]
+
+    def combine(vals, errs):
+        v = np.asarray(vals, dtype=float)
+        mean = float(v.mean())
+        sem = float(v.std(ddof=1) / math.sqrt(n)) if n > 1 else None
+        boot = math.sqrt(sum(e * e for e in errs)) / n if all(e is not None for e in errs) else None
+        cands = [x for x in (sem, boot) if x is not None]
+        return round(mean, 3), (round(max(cands), 3) if cands else None)
+
+    out = {"n": n, "per_replica": per}
+    if any(x is None for x in dp):
+        out.update(delta_pmf=None, delta_pmf_err=None)
+    else:
+        out["delta_pmf"], out["delta_pmf_err"] = combine(dp, [p["delta_pmf_err_kj_mol"] for p in per])
+    dgs = [r.dG_standard_kj_mol for r in reps]
+    if all(x is not None for x in dgs):
+        out["dG"], out["dG_err"] = combine(dgs, [p["dG_err_kj_mol"] for p in per])
+        out["dG_kcal"], out["dG_withheld"] = round(out["dG"] / 4.184, 3), None
+    else:
+        out.update(dG=None, dG_err=None, dG_kcal=None,
+                   dG_withheld=next(((r.pmf or {}).get("dG_withheld") for r in reps if (r.pmf or {}).get("dG_withheld")),
+                                    "至少一個 replica 未輸出 ΔG°"))
+    hs = [p["half_split"] for p in per if p["half_split"] and "diff_kj_mol" in p["half_split"]]
+    out["half_split"] = max(hs, key=lambda h: h["diff_kj_mol"]) if hs else (per[0]["half_split"] if per else None)
+    if n > 1 and out.get("delta_pmf") is not None:
+        out["why"] = (f"{n} 個獨立 replica（不同 MD 起點與亂數種子）：ΔPMF = {out['delta_pmf']} ± {out['delta_pmf_err']} kJ/mol"
+                      f"（各 replica：{', '.join(str(round(x, 1)) for x in dp)}）；σ 取 replica 標準誤與 bootstrap 合成中較大者。")
+    else:
+        out["why"] = "單一 replica；σ 只含 bootstrap 抽樣誤差。"
+    return out

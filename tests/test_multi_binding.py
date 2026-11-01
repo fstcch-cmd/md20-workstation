@@ -119,3 +119,55 @@ def test_compare_dG_uses_errors_when_present():
     res = {"A": {**_r(30.0, 1.0, dG=-25.0), "dG_err_kj_mol": 1.0}, "B": {**_r(20.0, 1.0, dG=-24.0), "dG_err_kj_mol": 1.0}}
     rows = compare_binding(res, contexts={"single": ["A", "B"]})["contexts"]["single"]["rows"]
     assert "不可區分" in rows[1]["verdict"]
+
+
+def _rep(dp, dpe, dG=None, dGe=None, hs=0.5):
+    return SimpleNamespace(delta_pmf_kj_mol=dp, delta_pmf_err_kj_mol=dpe, dG_standard_kj_mol=dG, dG_err_kj_mol=dGe,
+                           pmf={"half_split": {"diff_kj_mol": hs}})
+
+
+def test_aggregate_replicas_uses_larger_of_scatter_and_bootstrap():
+    from md20.sampling.multi import aggregate_binding_replicas
+    a = aggregate_binding_replicas([_rep(20.0, 0.5, -20.0, 0.5), _rep(26.0, 0.5, -24.0, 0.5, hs=1.5), _rep(23.0, 0.5, -22.0, 0.5)])
+    assert a["delta_pmf"] == 23.0 and a["delta_pmf_err"] == pytest.approx(3.0 / np.sqrt(3), abs=1e-3)   # scatter dominates
+    assert a["dG"] == -22.0 and a["half_split"]["diff_kj_mol"] == 1.5 and "3 個獨立 replica" in a["why"]
+    b = aggregate_binding_replicas([_rep(20.0, 2.0, None), _rep(20.1, 2.0, -20.0)])
+    assert b["dG"] is None and b["dG_withheld"] and b["delta_pmf_err"] == pytest.approx(np.hypot(2, 2) / 2, abs=1e-3)
+
+
+def test_research_tier_needs_completed_replicas(tmp_path, monkeypatch):
+    import md20.sampling.binding as B
+    from md20.project.store import Project
+    from md20.util.jsonio import atomic_write_json
+    from md20.workflow import Workflow, example_config
+    seen = []
+
+    def fake(system_xml, topology_pdb, start, out_dir, *, config, **kw):
+        seen.append((str(start), config.seed, str(out_dir)))
+        return SimpleNamespace(status="PASS", caveats=[], smd={}, figures={}, delta_pmf_kj_mol=25.0 + len(seen),
+                               delta_pmf_err_kj_mol=0.4, dG_standard_kj_mol=-20.0 - len(seen), dG_err_kj_mol=0.5,
+                               dG_standard_kcal_mol=None, pmf={"half_split": {"diff_kj_mol": 0.5}, "r_min_nm": 0.4})
+
+    monkeypatch.setattr(B, "run_binding", fake)
+    out = {}
+    for n in (1, 3):
+        cfg = copy.deepcopy(example_config())
+        cfg["md"]["tier"] = "research"
+        cfg["binding"] = {"enabled": True, "replicas": n, "config": {"window_prod_ps": 2000.0}}
+        wf = Workflow(Project.create(tmp_path / f"n{n}", "p"), cfg)
+        case = wf.project.new_case("p_docked_BEN")
+        case.build_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_json({"system_xml": "s", "topology_pdb": "t",
+                           "assembly": {"ligands": [{"name": "L01", "heavy_atom_indices": [1, 2]}]}}, case.build_dir / "build_manifest.json")
+        built = {"docked_BEN": {"case_id": case.case_id, "mode": "docked_single", "ligands": ["BEN"], "ligand_map": {"BEN": "L01"}}}
+        runs = {"docked_BEN": {"case_id": case.case_id, "run_ids": ["mdA", "mdB", "mdC"]}}
+        seen.clear()
+        out[n] = (wf.binding(runs, built, SimpleNamespace(name="CPU", properties={}))["BEN"], list(seen))
+    r1, calls1 = out[1]
+    assert len(calls1) == 1 and r1["dG_standard_kj_mol"] is None and "實際完成 1" in r1["dG_withheld"]
+    r3, calls3 = out[3]
+    assert [c[1] for c in calls3] == [2026, 3026, 4026]                      # independent seeds
+    from pathlib import Path
+    assert [Path(c[0]).parts[-4] for c in calls3] == ["mdA", "mdB", "mdC"]   # from different MD replicas
+    assert [Path(c[2]).name for c in calls3] == ["rep1", "rep2", "rep3"]
+    assert r3["replicas"] == 3 and r3["dG_standard_kj_mol"] == -22.0 and r3["dG_err_kj_mol"] is not None
