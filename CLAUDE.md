@@ -26,6 +26,12 @@ Claude-Session: <本次 session 連結>
 ## 戳記
 `md20/util/stamp.py`;公鑰 `md20/util/owner_pub.pem` 在 repo,**私鑰不在 repo 也不該進 repo**(使用者離線保管)。`system.xml` 不可加註解(OpenMM 會讀不了)。
 
+## 第四個 session 之後必知
+- 全面審查結果在 `docs/REVIEW_2026-11-01.md`(未修項目從那裡接)。HTS 篩選規格 `docs/specs/hts_screen.md`。
+- `pipeline run` 會沿用 workflow config.json 的人工決定(`workflow.DECISION_KEYS`);新增閘門決定鍵要加進去。
+- CI main 不取消進行中的 run;看 summary 留言的 **skip 數**,SKIPPED 的整合測試不算通過。
+- PDB/PDBQT 的戳記必須純 ASCII(cp950 Windows 會崩)。
+
 ## 現況與還沒做
 WP5、WP9、WP13、金屬 policy/幾何鍵結模型已實作(真實驗證狀態見 `docs/STATUS.md`)。
 GUI 閘門一鍵決定(`md20/gui/actions.py`)、3D 互作/vdW 表面、金屬擬合參數(`md20/build/metal_params.py`:QM Hessian 內建轉換/MCPB.py 轉譯/JSON,附 QM 小模型輸入產生)已實作。

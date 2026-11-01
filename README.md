@@ -36,6 +36,8 @@ md20 report --project 課堂A --case kinase_xxxxxx --bundle    # HTML 報告 + �
 md20 queue add --project 課堂A --case kinase_xxxxxx --tier teaching --replicas 3
 md20 queue run --project 課堂A --hours 22-7                   # 只在夜間跑；電池供電或建立 PAUSE 檔即暫停
 md20 demo                        # 不需 OpenMM：用合成後端跑完整流程，產生圖表、決策日誌與報告
+md20 screen template             # 高通量篩選：化合物庫 Excel 範本（name + smiles/pubchem_cid/inchikey/chembl_id/ccd/sdf）
+md20 pipeline example --screen   # 含篩選的全流程範本：100–500 個化合物自動下載 3D → 快速對接 → 看圖勾選 → 正式對接 → MD
 ```
 
 ## 架構
@@ -52,7 +54,8 @@ md20/
   analysis/   log 解析、驗收、自動圖表（PNG+SVG+plotly HTML）
   sampling/   0913 `MDH` 函式庫（WHAM/MBAR/overlap/bootstrap）＋ window 規劃
   report/     自含 HTML 報告（方法段落自動產生）＋ 可重現包 ＋ workflow 總報告
-  docking/    Vina independent／simultaneous、受體 PDBQT、Meeko 配體、pose 分析與推薦
+  docking/    Vina independent／simultaneous、受體 PDBQT、Meeko 配體、pose 分析與推薦；
+              library.py／screen.py：高通量前期篩選（化合物庫下載、批次對接、排名與圖）
   workflow.py 全流程協調（每步可續跑）
   gui/        NiceGUI 介面
   cli.py      命令列

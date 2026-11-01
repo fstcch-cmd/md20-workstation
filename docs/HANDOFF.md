@@ -66,6 +66,15 @@
 - **macOS(ARM/3 核)健壯化**(commit `1d74649`):三個真實 OpenMM 整合測試在慢 runner 上脆弱,已改成斷言軟體的真正保證而非特定機器結果——`test_nacl_pmf`(window 連通 **或** 誠實不輸出 ΔG°)、`test_multi_ligand_exit_path_blocked`(沿 Na→Cl 軸挑確實在拉離圓柱內的水,否則 skip)、`test_gui_pages_render`(伺服器暖機拉長到 ~180s,純逾時則 skip,行程掛掉仍 fail)。
 - **第三個 session 看到的 CI(63d363b)**:Windows OpenCL 124 passed、macOS 126 passed,各僅 `test_gui_pages_render` 失敗(NiceGUI 在子行程讀到 `PYTEST_CURRENT_TEST` 就要求 `NICEGUI_SCREEN_TEST_PORT`);已在 `tests/test_gui_server.py` 把 `PYTEST_*` 從子行程環境移除。新 session 請看最新 commit 的 openmm-stack 三 OS 結果,全綠後把 STATUS 中「見 B」的項目升級。
 
+## 5b. 第四個 session(2026-11-01):全面審查 + 高通量篩選
+- **先讀 `docs/REVIEW_2026-11-01.md`**:20 項發現,✅ 已修 14、❌/📝 未修 6(配體配位金屬閘門、pose 對應後備、`sampling/runner.py`、補窗門檻、供應鏈 pin、戳記簽章)。
+- **HTS 篩選**(`docs/specs/hts_screen.md`):`md20/docking/library.py`(Excel/CSV → PubChem/ChEMBL/RCSB 3D 下載、去鹽、尺寸過濾、去重)、
+  `md20/docking/screen.py`(批次縮減搜尋對接、排名、圖、ECharts)、workflow 步驟 `screen_library → screen_docking → screen_selection`
+  在 `docking_preflight` 之前;GUI「篩選」分頁勾選 → `actions.select_screen_ligands` 寫 `screen.select/next_mode`。
+  設定範本:`md20 pipeline example --screen`;庫檔範本:`md20 screen template`。
+- **CLI 重跑規則**:`pipeline run` 現在會把 workflow 自己的 config.json 裡的人工決定(`DECISION_KEYS`)併回學生的原始檔;新增決定鍵時記得加進 `workflow.DECISION_KEYS`。
+- **CI**:main 不再 cancel-in-progress(PR 才會);summary 留言印 skip 數與原因——**SKIPPED 的整合測試不算通過**。
+
 ## 6. 還沒做 / 可以接著做的
 - **規格與構想全集在 `docs/specs/`**(README 為索引,每份標明 已驗證／待 CI／設計中,並列出想請審查者回答的問題)。使用者會用更強的模型審查後回饋。
 - (第三個 session)傘狀採樣智慧補窗 `md20/sampling/adaptive.py` + 即時覆蓋圖 + 手動補採樣:已實作、純測試通過、待 CI。
