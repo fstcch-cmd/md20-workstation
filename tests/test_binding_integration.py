@@ -27,13 +27,21 @@ def _nacl(d: Path):
 
 def test_nacl_pmf(tmp_path):
     sx, tp = _nacl(tmp_path)
-    cfg = BindingConfig(pull_distance_nm=0.55, pull_velocity_nm_per_ps=0.02, k_pull=2000, k_umbrella=3000,
-                        target_overlap=0.3, window_equil_ps=2.0, window_prod_ps=20.0, sample_every_steps=20)
+    cfg = BindingConfig(pull_distance_nm=0.45, pull_velocity_nm_per_ps=0.02, k_pull=2000, k_umbrella=2500,
+                        target_overlap=0.35, window_equil_ps=2.0, window_prod_ps=25.0, sample_every_steps=20)
     res = run_binding(sx, tp, None, tmp_path / "bind", ligand_indices=[1], anchor_indices=[0], config=cfg,
                       platform_name="CPU")
     assert res.status == "PASS"
     assert len(res.windows) >= 6
-    assert 0.22 < res.pmf["r_min_nm"] < 0.38, res.pmf
+    assert res.pmf["jacobian_corrected"]
+    g, w = np.asarray(res.pmf["grid_nm"]), np.asarray(res.pmf["pmf_radial_kj_mol"])
+    cip = w[(g > 0.24) & (g < 0.32)]
+    barrier = w[(g > 0.33) & (g < 0.42)]
+    assert len(cip) and len(barrier)
+    # contact-ion-pair well separated from the solvent-separated pair by a barrier (TIP3P/JC: ~3–6 kJ/mol)
+    assert barrier.max() > cip.min() + 1.0, (cip.min(), barrier.max())
+    assert 0.22 < res.pmf["r_min_nm"] < 0.62, res.pmf["r_min_nm"]
+    assert res.pmf["quality"]["graph_connected"], "windows should be connected after automatic refinement"
     assert res.delta_pmf_kj_mol is not None and np.isfinite(res.delta_pmf_kj_mol) and res.delta_pmf_kj_mol > 0
     assert res.dG_standard_kj_mol is not None
     for k in ("pmf", "histograms", "smd"):

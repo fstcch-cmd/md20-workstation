@@ -245,23 +245,26 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         atomic_write_json(smd, smd_file)
     del ctx, integ
     # ------------------------------------------------------------------ umbrella windows
-    centers = smd["plan"]["centers_nm"]
-    samples: dict[float, np.ndarray] = {}
     eq_steps = int(cfg.window_equil_ps * 1000 / cfg.timestep_fs)
     pr_steps = int(cfg.window_prod_ps * 1000 / cfg.timestep_fs)
-    for w, c in enumerate(centers):
-        npy = wdir / f"w{w:03d}_cv.npy"
+    samples: dict[float, np.ndarray] = {}
+    finals: dict[float, str] = {}
+
+    def wfile(c: float, kind: str) -> Path:
+        return wdir / f"w_{c:.4f}_{kind}"
+
+    def run_window(c: float, start_xml: str, seed: int) -> bool:
+        npy = wfile(c, "cv.npy")
         if npy.is_file():
-            samples[float(c)] = np.load(npy)
-            continue
+            samples[c] = np.load(npy)
+            finals[c] = str(wfile(c, "final.xml"))
+            return True
         if should_pause is not None and (reason := should_pause()):
             manifest.update({"status": "PAUSED", "reason": reason, "windows_done": len(samples)})
             atomic_write_json(manifest, out / "binding_manifest.json")
-            return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[reason])
-        start = smd["window_starts"][str(w)]["path"]
-        ctx, integ = _make_context(system, pos, platform_name, platform_properties, cfg, cfg.seed + 17 * (w + 1))
-        st = XmlSerializer.deserialize(Path(start).read_text(encoding="utf-8"))
-        ctx.setState(st)
+            return False
+        ctx, integ = _make_context(system, pos, platform_name, platform_properties, cfg, seed)
+        ctx.setState(XmlSerializer.deserialize(Path(start_xml).read_text(encoding="utf-8")))
         if "msw_restraint_scale" in ctx.getParameters():
             ctx.setParameter("msw_restraint_scale", cfg.backbone_restraint_scale)
         ctx.setParameter("k_cv", cfg.k_umbrella)
@@ -274,17 +277,42 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             vals.append(cv_distance(xyz, box, anchor, ligand, masses))
         arr = np.asarray(vals)
         if not np.all(np.isfinite(arr)):
-            raise RuntimeError(f"window {w} 出現 NaN")
+            raise RuntimeError(f"window {c:.3f} nm 出現 NaN")
+        wfile(c, "final.xml").write_text(XmlSerializer.serialize(ctx.getState(getPositions=True, getVelocities=True)), encoding="utf-8")
         np.save(npy, arr)
-        samples[float(c)] = arr
+        samples[c], finals[c] = arr, str(wfile(c, "final.xml"))
         del ctx, integ
         if progress_cb:
-            progress_cb({"stage": "umbrella", "window": w + 1, "n": len(centers), "mean": float(arr.mean())})
+            progress_cb({"stage": "umbrella", "window": len(samples), "n": len(centers), "mean": float(arr.mean())})
+        return True
+
+    centers = [float(c) for c in smd["plan"]["centers_nm"]]
+    for w, c in enumerate(centers):
+        if not run_window(c, smd["window_starts"][str(w)]["path"], cfg.seed + 17 * (w + 1)):
+            return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[manifest.get("reason", "")])
+    # automatic refinement: add windows where neighbours do not overlap (max 2 rounds, ≤ 12 extra windows)
+    from .pmf import umbrella_quality
+    added = []
+    for rnd in range(2):
+        q, _, _ = umbrella_quality(samples, target_overlap=cfg.target_overlap * 0.6)
+        new = [float(round(c, 4)) for c in (q.get("insert_centers_nm") or []) if float(round(c, 4)) not in samples][:6]
+        if not new:
+            break
+        for c in new:
+            near = min(finals, key=lambda x: abs(x - c))
+            if not run_window(c, finals[near], cfg.seed + 7919 + len(samples)):
+                return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[manifest.get("reason", "")])
+            added.append(c)
+            centers.append(c)
+    if added and decisions:
+        decisions.record("binding.windows", "auto-refine", [round(c, 3) for c in added],
+                         "相鄰 window 的分佈重疊不足（PMF 會斷裂）；自動在缺口中點補 window，起始結構取最近 window 的末態。")
+    centers = sorted(samples)
     # ------------------------------------------------------------------ PMF + ΔG
     pres = pmf_from_windows(samples, force_constant_kj_mol_nm2=cfg.k_umbrella, temperature_k=cfg.temperature_k,
                             out_dir=out, n_bootstrap=100)
-    res = BindingResult(status="PASS", d_bound_nm=d0, smd=smd, windows=[{"center_nm": c, "n": int(len(samples[float(c)])),
-                        "mean_nm": float(samples[float(c)].mean()), "sd_nm": float(samples[float(c)].std())} for c in centers])
+    res = BindingResult(status="PASS", d_bound_nm=d0, smd=smd, windows=[{"center_nm": c, "n": int(len(samples[c])),
+                        "mean_nm": float(samples[c].mean()), "sd_nm": float(samples[c].std()), "added": c in added} for c in centers])
     grid, W = np.asarray(pres.grid_nm), np.asarray(pres.pmf_kj_mol)
     kT = KB_KJ_MOL_K * cfg.temperature_k
     ok = np.isfinite(W) & (grid > 0)
