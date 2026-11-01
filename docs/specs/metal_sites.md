@@ -29,6 +29,10 @@
 `orca.inp`（B3LYP-D3BJ/def2-SVP Opt+Freq，Cβ 固定）、`gaussian.gjf`、中文 README。電荷由質子化變體算出；
 **開殼層金屬（Fe/Cu/Mn/Co/Ni）不猜氧化態與自旋**，需 `qm_charge`、`qm_multiplicity`。
 
+## 4b. 配體直接配位金屬（D-17）　[已實作・待 CI]
+組裝時配體加入後重新掃描：配體 N/O/S 在金屬配位距離內 → NEEDS_HUMAN（換 pose／MCPB.py 參數化後匯入／移除金屬）。
+本版不自動處理配體–金屬鍵。
+
 ## 5. 未做
 配體直接配位金屬（需配體–金屬 QM 模型）；金屬 LJ 擬合（12-6-4）；RESP 由本程式計算。
 

@@ -29,7 +29,7 @@ class LigandRecord:
     n_atoms: int = 0
     sdf_path: str = ""              # final SDF: reference chemistry + pose coordinates + hydrogens
     pose_source: str = ""
-    mapping: str = ""               # "substructure" | "order" | "sdf-direct"
+    mapping: str = ""               # "substructure" | "connectivity" | "sdf-direct"
     provider: str = ""              # "openff-sage" | "gaff2" | ""
     charge_method: str = ""
     charge_sum: float | None = None
@@ -151,15 +151,44 @@ def map_pose_onto_reference(ref_mol, pose_mol) -> tuple[list[int] | None, str, l
             return list(match), "substructure", problems
     except Exception as exc:  # noqa: BLE001
         problems.append(f"template bond-order assignment failed: {type(exc).__name__}: {exc}")
-    # 2) element-wise order match (same atom order, e.g. Meeko preserves it)
-    same = all(a.GetAtomicNum() == b.GetAtomicNum() for a, b in zip(ref_heavy.GetAtoms(), pose_mol.GetAtoms()))
-    if same:
-        problems.append("使用原子順序對應（元素逐一相同）；請確認 pose 與參考來自同一準備流程。")
-        return list(range(ref_heavy.GetNumAtoms())), "order", problems
-    mism = [f"{i}:{a.GetSymbol()}≠{b.GetSymbol()}" for i, (a, b) in enumerate(zip(ref_heavy.GetAtoms(), pose_mol.GetAtoms()))
-            if a.GetAtomicNum() != b.GetAtomicNum()]
-    problems.append("元素序列不一致：" + ", ".join(mism[:10]))
+    # 2) connectivity-graph match: bonds perceived from the pose coordinates (bond orders ignored), matched against
+    #    the reference with generic bonds.  Works whatever the atom order; an element-order match alone is NOT
+    #    accepted (REVIEW #16: ethanol C–C–O and dimethyl ether C–O–C can share an element order).
+    match, why = _connectivity_match(ref_heavy, pose_mol)
+    if match is not None:
+        problems.append("模板指定鍵級失敗，改以連接圖對應（由 pose 座標判斷鍵、鍵級不計）：連接方式與參考分子完全一致。")
+        return match, "connectivity", problems
+    problems.append(why)
     return None, "", problems
+
+
+def _connectivity_match(ref_heavy, pose_mol) -> tuple[list[int] | None, str]:
+    """Map reference heavy atoms onto pose atoms by the bond graph alone.  Returns (match, why-not)."""
+    from rdkit import Chem
+    try:
+        from rdkit.Chem import rdDetermineBonds
+    except ImportError:
+        return None, "此 RDKit 版本沒有 rdDetermineBonds，無法以連接圖驗證；不以原子順序猜測。"
+    pose = Chem.RWMol(pose_mol)
+    for b in list(pose.GetBonds()):
+        pose.RemoveBond(b.GetBeginAtomIdx(), b.GetEndAtomIdx())
+    for a in pose.GetAtoms():
+        a.SetFormalCharge(0); a.SetNoImplicit(True); a.SetNumExplicitHs(0)
+    pose = pose.GetMol()
+    try:
+        rdDetermineBonds.DetermineConnectivity(pose, useHueckel=False)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"無法由 pose 座標判斷連接：{type(exc).__name__}: {exc}"
+    params = Chem.AdjustQueryParameters.NoAdjustments()
+    params.makeBondsGeneric = True
+    query = Chem.AdjustQueryProperties(ref_heavy, params)
+    if pose.GetNumBonds() != ref_heavy.GetNumBonds():
+        return None, (f"pose 座標判斷出 {pose.GetNumBonds()} 個鍵、參考分子有 {ref_heavy.GetNumBonds()} 個："
+                      "連接方式不同（或 pose 幾何扭曲），不猜測對應。")
+    m = pose.GetSubstructMatch(query, useChirality=False)
+    if not m or len(m) != ref_heavy.GetNumAtoms():
+        return None, "pose 的連接圖與參考分子不同（元素相同但鍵結位置不同）；不以原子順序猜測。"
+    return list(m), ""
 
 
 def apply_pose_coordinates(ref_mol, pose_mol, match: list[int]):
@@ -300,7 +329,7 @@ def prepare_ligand(reference: str | Path, pose: Path | str | None, out_dir: Path
                             options=["提供 docking 前的 SDF", "改用 pose SDF（Meeko/Vina --out sdf）"], evidence={"problems": problems}))
         else:
             rec.mapping = method
-            if method == "order":
+            if method == "connectivity":
                 report.add(Gate("pose mapping", AUTO_FIXED, problems[-1]))
             else:
                 report.add(Gate("pose mapping", PASS, f"{rec.n_heavy} 個重原子以子結構比對一一對應。"))

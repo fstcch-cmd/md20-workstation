@@ -182,6 +182,41 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
     return out
 
 
+def ligand_metal_contacts(atoms: list[dict], ligand_indices: set[int]) -> list[dict]:
+    """Ligand N/O/S within coordination distance of a metal, checked on the *assembled* topology (REVIEW #15:
+    metal sites were analysed before ligands were added, so a docked pose binding a metal was never stopped)."""
+    lig = [a for a in atoms if a["index"] in ligand_indices]
+    out = []
+    for m in atoms:
+        if m["resname"].upper() not in BONDED_METALS or m.get("is_protein") or m["index"] in ligand_indices:
+            continue
+        mx = np.asarray(m["xyz"], float)
+        for a in lig:
+            el = (a.get("element") or a["name"][:1]).upper()[:1]
+            if el not in CUTOFF_A:
+                continue
+            d = float(np.linalg.norm(np.asarray(a["xyz"], float) - mx))
+            if d <= CUTOFF_A[el]:
+                out.append({"metal": f"{m['resname'].upper()}:{m['chain']}{m['resseq']}", "ligand_resname": a["resname"],
+                            "atom": a["name"], "element": el, "distance_A": round(d, 2)})
+    return out
+
+
+def ligand_metal_gate(contacts: list[dict]) -> Gate | None:
+    if not contacts:
+        return None
+    metals = sorted({c["metal"] for c in contacts})
+    rn = metals[0].split(":")[0]
+    desc = "、".join(f"{c['ligand_resname']}:{c['atom']}–{c['metal']} {c['distance_A']:.2f} Å" for c in contacts[:6])
+    return Gate("ligand–metal coordination", NEEDS_HUMAN,
+                f"配體直接配位金屬（{desc}）。力場沒有配體–金屬鍵參數：非鍵結模型下配位會散開或塌陷，"
+                "Vina 也不計配位能；這個結合模式的 MD 與結合自由能都不可信，不自動處理。",
+                options=["換一個不直接配位金屬的 pose（pose 表點選）",
+                         "以 MCPB.py/QM 參數化配體–金屬鍵後匯入（metal_params）",
+                         "metal_policy: {" + rn + ": remove}（僅限金屬非功能必要）"],
+                evidence={"contacts": contacts, "metals": metals})
+
+
 def site_gates(plans: list[dict]) -> list[Gate]:
     return [Gate(f"metal {p['key']}", p["status"], p["why"], options=p.get("options") or [],
                  evidence={"action": p["action"], "n_bonds": len(p["bonds"]), "variants": p["variants"],

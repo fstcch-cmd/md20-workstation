@@ -184,6 +184,18 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
         else:
             ff.registerTemplateGenerator(ladder["generator"].generator)
             generators.append(ladder["provider"])
+    if lig_atom_ranges:
+        # REVIEW #15: metal sites were planned on the receptor alone; check the assembled complex for a docked
+        # ligand that coordinates a metal directly
+        from .metal import _atoms_of, ligand_metal_contacts, ligand_metal_gate
+        import numpy as _np2
+        lig_set = {i for _, a, b in lig_atom_ranges for i in range(a, b)}
+        g = ligand_metal_gate(ligand_metal_contacts(
+            _atoms_of(modeller.topology, _np2.asarray(modeller.positions.value_in_unit(unit.nanometer))), lig_set))
+        if g is not None:
+            report.add(g)
+            if decisions:
+                decisions.record("build.metal", g.name, "NEEDS_HUMAN", g.explanation, kind="human")
     if not report.ok:
         res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict())
         atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")

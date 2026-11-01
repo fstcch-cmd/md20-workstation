@@ -122,3 +122,24 @@ def test_bonded_metal_terms_bidentate_donors_keep_force_field_relation():
     t = bonded_metal_terms(bonds, [{"action": "bonded", "metal_index": 0, "bonds": [{"donor": 1}, {"donor": 2}]}], pos)
     assert (1, 2) not in t["excl13"] and (0, 3) in t["excl13"]
     assert all(p not in t["pairs14"] for p in [(1, 3), (2, 3), (1, 2)]) and (0, 4) in t["pairs14"]
+
+
+def test_ligand_coordinating_metal_is_stopped_after_assembly():
+    """REVIEW #15: a docked ligand O at 2.1 Å from Zn must stop the build (protein donors and far atoms do not)."""
+    from md20.build.metal import ligand_metal_contacts, ligand_metal_gate
+    atoms = [
+        {"index": 0, "name": "ZN", "resname": "ZN", "chain": "A", "resseq": "262", "xyz": [0, 0, 0], "element": "Zn", "is_protein": False},
+        {"index": 1, "name": "NE2", "resname": "HIS", "chain": "A", "resseq": "94", "xyz": [2.05, 0, 0], "element": "N", "is_protein": True},
+        {"index": 2, "name": "O1", "resname": "L01", "chain": "L", "resseq": "1", "xyz": [0, 2.1, 0], "element": "O", "is_protein": False},
+        {"index": 3, "name": "C1", "resname": "L01", "chain": "L", "resseq": "1", "xyz": [0, 1.9, 0.5], "element": "C", "is_protein": False},
+        {"index": 4, "name": "O2", "resname": "L01", "chain": "L", "resseq": "1", "xyz": [0, 0, 3.2], "element": "O", "is_protein": False},
+    ]
+    c = ligand_metal_contacts(atoms, {2, 3, 4})
+    assert [(x["atom"], x["metal"], x["distance_A"]) for x in c] == [("O1", "ZN:A262", 2.1)]
+    g = ligand_metal_gate(c)
+    assert g.status == "NEEDS_HUMAN" and "配體直接配位金屬" in g.explanation
+    assert any(o.startswith("metal_policy: {ZN: remove}") for o in g.options)
+    assert ligand_metal_contacts(atoms, {3, 4}) == [] and ligand_metal_gate([]) is None
+    from md20.gui.actions import gate_actions                      # the remove option is one click in the GUI
+    acts, manual = gate_actions(g.to_dict(), step="md_cases")
+    assert [a["patch"][0]["value"] for a in acts] == ["remove"] and len(manual) == 2
