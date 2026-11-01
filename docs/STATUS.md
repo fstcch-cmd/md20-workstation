@@ -11,6 +11,7 @@ CI 依據(`fstcch-cmd/md20-workstation`):
   **更正先前聲稱**:「3D viewer 在 headless Chromium 實際繪圖」在 CI 三個 OS 都是 SKIPPED(playwright 不在環境裡),降為 B 級。
   37bc6b1 那輪 Ubuntu heavy 被下一個 push 取消前已印出 `test_bonded_zinc_ca2 FAILED`,所以「1-3 排除」並沒有修好鋅配位;本 session 加了 donor–donor 排除,待這輪確認。
   全部發現與處置見 `docs/REVIEW_2026-11-01.md`。
+- **c4b5de6（run 41309973844）heavy metal 全綠**:`test_metal_integration`（含 `test_bonded_zinc_ca2`）在 Ubuntu 真跑通過——鋅鍵結模型守住配位（經金屬 1-3/1-4 修正有效）。同輪 heavy workflow／pose-screen 因 `assemble.py` 漏 `import numpy` 失敗（D-24 已修，待下一輪）。
 - 測試函式:約 220 個(pure-python 部分本地全過)。
 
 ---

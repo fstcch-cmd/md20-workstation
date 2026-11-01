@@ -7,6 +7,16 @@
 
 ## 2026-11-01（第一個 session，續）
 
+### D-24　heavy CI 紅：`np` 未匯入（fc4da13）＋純 Python 靜態未定義名稱檢查；鋅鍵結模型確認修好
+- 事實：c4b5de6（run 41309973844）heavy workflow 與 pose-screen 都死在 `build/assemble.py` 溶劑化後的 `np.linalg.det`
+  （D-22 新增的盒體積紀錄；模組沒有 `import numpy as np`）。同一輪 **heavy metal 全綠**——`test_bonded_zinc_ca2` 通過，
+  另一 session 的經金屬 D–M–D′ 1-3/1-4（9c20327）確實修好 Zn–His 配位漂移（12dcd80 時 2.03→2.56 Å）。
+- 決定：模組層補 `import numpy as np`；新增 `tests/test_static_names.py`：以標準庫 `symtable` 檢查每個函式引用的全域名稱
+  都在模組層定義或為 builtin（容器與 CI 都沒有 pyflakes，不新增依賴）。已驗證拿掉該 import 時此測試會紅。
+- 理由：這類錯誤只在 OpenMM 路徑上執行到才爆，heavy 要 10 分鐘以上才看到；靜態檢查在 6 個純 Python 平台幾秒內擋下。
+- 被否決：在 pure-python CI 安裝 pyflakes/ruff（多一個依賴與版本漂移；本檢查只需要未定義名稱這一類）。
+- 未決：屬性錯字、參數錯誤仍只能靠整合測試。
+
 ### D-23　約束策略修正：分組約束、主要釋放移到 NPT、配體 k ≥ 蛋白、受約束 RMSD 標註（會診 §1 Q1）
 - 決定：
   - `add_position_restraints` 改為**單一力、三組**：`msw_position_restraints` 每粒子參數 `k, x0, y0, z0, grp`

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
+import numpy as np
 
 MIN_PADDING_NM = 0.6      # below this the protein sees its own image inside the 1.0 nm cutoff — never allowed
 
