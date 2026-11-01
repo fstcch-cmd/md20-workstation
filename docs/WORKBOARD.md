@@ -9,6 +9,8 @@
 | 監看 CI：3e7f941 / c016a08 的 Ubuntu 重測（鋅模型、補窗、NaCl 冪等） | — | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 | 結果記入 STATUS / DECISIONS |
 | 會診 §1 Q6：`md.solvent: gbn2`（WP5 篩 pose、classroom tier；binding 擋下） | REVIEW_ANSWERS §1 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 21:05 | §0 之後 |
 
+| **PBC 歸零／錨定**：`center_trajectory()`——蛋白鏈＋bonded 金屬為錨、配體／胜肽／離子折到最近影像、蛋白質心移到盒中心、輸出 `production_centered.dcd`；分析／viewer／報告／可重現包全走它；「視覺性解離 vs 真解離」閘門 | 使用者痛點（MD 後中心跑掉、看似跑出盒子） | session_016gcJzBDnGh3heY9HLWnva3 | 2026-11-01 21:10 | 純 numpy 核心本地測；mdtraj I/O 待 CI |
+
 ## 待認領（依重要性）
 | 項目 | 來源 |
 |---|---|
