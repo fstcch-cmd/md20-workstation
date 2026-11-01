@@ -27,7 +27,7 @@ def _nacl(d: Path):
 
 def test_nacl_pmf(tmp_path):
     sx, tp = _nacl(tmp_path)
-    cfg = BindingConfig(pull_distance_nm=0.45, pull_velocity_nm_per_ps=0.02, k_pull=2000, k_umbrella=2500,
+    cfg = BindingConfig(pull_distance_nm=0.45, pull_velocity_nm_per_ps=0.02, k_pull=2000, k_umbrella=2500, box_margin_nm=0.3,
                         target_overlap=0.35, window_equil_ps=2.0, window_prod_ps=25.0, sample_every_steps=20)
     res = run_binding(sx, tp, None, tmp_path / "bind", ligand_indices=[1], anchor_indices=[0], config=cfg,
                       platform_name="CPU")
@@ -43,9 +43,19 @@ def test_nacl_pmf(tmp_path):
     # (the global minimum may be CIP, SSIP or bulk: in TIP3P/JC the NaCl wells are within sampling noise of each other)
     assert res.pmf["quality"]["graph_connected"], "windows should be connected after automatic refinement"
     assert res.delta_pmf_kj_mol is not None and np.isfinite(res.delta_pmf_kj_mol) and res.delta_pmf_kj_mol > 0
-    assert res.dG_standard_kj_mol is not None
+    assert (res.dG_standard_kj_mol is not None) or res.pmf.get("dG_withheld"), "ΔG° missing without a stated reason"
+    assert "first_half_dpmf" in res.pmf["half_split"], res.pmf["half_split"]
+    assert "骨架" in res.caveats[0]
     for k in ("pmf", "histograms", "smd"):
         assert Path(res.figures[k]["png"]).is_file()
     # resumability: second call reuses SMD and all windows (no new sampling)
     res2 = run_binding(sx, tp, None, tmp_path / "bind", ligand_indices=[1], anchor_indices=[0], config=cfg, platform_name="CPU")
     assert res2.delta_pmf_kj_mol == res.delta_pmf_kj_mol
+
+
+def test_box_too_small_blocks(tmp_path):
+    sx, tp = _nacl(tmp_path)
+    cfg = BindingConfig(pull_distance_nm=1.2, window_prod_ps=5.0)
+    res = run_binding(sx, tp, None, tmp_path / "bind_small", ligand_indices=[1], anchor_indices=[0], config=cfg,
+                      platform_name="CPU")
+    assert res.status == "NEEDS_HUMAN" and "水盒太小" in res.caveats[0]

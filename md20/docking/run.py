@@ -18,7 +18,7 @@ import numpy as np
 
 from ..util import atomic_write_json, now_iso, DecisionLog
 from .box import Box
-from .poses import analyse_poses, recommend_pose, PoseInfo
+from .poses import analyse_poses, recommend_pose, PoseInfo, pocket_volume, HEAVY_ATOM_VOLUME_A3
 from .receptor_pdbqt import receptor_to_pdbqt
 
 
@@ -229,6 +229,7 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
             infos = analyse_poses(coords, list(energies[:n]), receptor_xyz=rec_xyz, reference_xyz=ref,
                                   rmsd=_symmetric_rmsd_fn(dmol))
             pick = recommend_pose(infos)
+            recinfo = infos[0].extra.get("recommendation", {})
             sdfs = []
             for k in range(n):
                 p = out / "independent" / lig.name / f"pose_{k + 1:02d}.sdf"
@@ -236,9 +237,12 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
                 sdfs.append(str(p))
             res.entries.append({"name": lig.name, "ligands": [lig.name], "smiles": _smiles(mols[lig.name]),
                                 "poses": [x.to_dict() for x in infos], "pose_sdfs": {lig.name: sdfs},
-                                "recommended_rank": pick.rank, "reason": pick.reason})
+                                "recommended_rank": pick.rank if pick else None, "reason": recinfo.get("reason", ""),
+                                "recommendation_status": recinfo.get("status", "NEEDS_HUMAN"),
+                                "redock_rmsd": pick.rmsd_ref if pick else min((i.rmsd_ref for i in infos if i.rmsd_ref is not None), default=None)})
             if decisions:
-                decisions.record("docking.pose", lig.name, f"rank {pick.rank}", pick.reason)
+                decisions.record("docking.pose", lig.name, f"rank {pick.rank}" if pick else "none", recinfo.get("reason", ""),
+                                 kind="auto" if pick else "human")
     else:
         names = [l.name for l in ligands]
         if progress_cb:
@@ -260,7 +264,16 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
         ref = np.vstack(refs) if all(r is not None for r in refs) else None
         infos = analyse_poses(coords, list(energies[:n]), receptor_xyz=rec_xyz, reference_xyz=ref,
                               per_ligand_slices=slices)
-        pick = recommend_pose(infos)
+        from rdkit import Chem
+        charges = [int(Chem.GetFormalCharge(mols[nm])) for nm in names]
+        lig_vol = sum(sl.stop - sl.start for sl in slices) * HEAVY_ATOM_VOLUME_A3
+        try:
+            pv = pocket_volume(rec_xyz, box.center, box.size)
+        except Exception:  # noqa: BLE001
+            pv = None
+        pick = recommend_pose(infos, ligand_charges=charges, pocket_volume_A3=pv, ligand_volume_A3=lig_vol)
+        recinfo = infos[0].extra.get("recommendation", {})
+        params["pocket_volume_A3"], params["ligand_volume_A3"], params["ligand_charges"] = pv, lig_vol, charges
         sdfs = {nm: [] for nm in names}
         for k in range(n):
             for m, nm in zip(dmols, names):
@@ -269,9 +282,11 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
                 sdfs[nm].append(str(p))
         res.entries.append({"name": "joint", "ligands": names, "smiles": {nm: _smiles(mols[nm]) for nm in names},
                             "poses": [x.to_dict() for x in infos], "pose_sdfs": sdfs,
-                            "recommended_rank": pick.rank, "reason": pick.reason})
+                            "recommended_rank": pick.rank if pick else None, "reason": recinfo.get("reason", ""),
+                            "recommendation_status": recinfo.get("status", "NEEDS_HUMAN")})
         if decisions:
-            decisions.record("docking.pose", "joint " + "+".join(names), f"rank {pick.rank}", pick.reason)
+            decisions.record("docking.pose", "joint " + "+".join(names), f"rank {pick.rank}" if pick else "none",
+                             recinfo.get("reason", ""), kind="auto" if pick else "human")
     atomic_write_json(res.to_dict(), out / "docking_results.json")
     _write_csv(res, out / "docking_scores.csv")
     return res

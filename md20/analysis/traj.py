@@ -34,26 +34,30 @@ def load_production(run_dir: Path | str, topology_pdb: Path | str, *, stride: in
     return traj
 
 
-def compute_metrics(traj) -> dict:
+def compute_metrics(traj, ligand_groups: dict[str, list[int]] | None = None) -> dict:
+    """`ligand_groups` = {name: heavy-atom indices} from build_manifest (works for peptides too);
+    falls back to residue names L01, L02 … when absent."""
     import mdtraj as md
     top = traj.topology
+    if ligand_groups is None:
+        ligand_groups = {rn: top.select(f"resname {rn} and not element H").tolist() for rn in _ligand_resnames(top)}
+    lig_all = np.array(sorted({i for v in ligand_groups.values() for i in v}), dtype=int)
     t_ns = traj.time / 1000.0 if traj.time is not None and len(traj.time) else np.arange(traj.n_frames, dtype=float)
     out: dict = {"time_ns": t_ns.tolist(), "n_frames": int(traj.n_frames)}
-    bb = top.select("protein and backbone")
-    ca = top.select("protein and name CA")
+    bb = np.setdiff1d(top.select("protein and backbone"), lig_all)
+    ca = np.setdiff1d(top.select("protein and name CA"), lig_all)
     if len(bb):
         out["rmsd_backbone_A"] = (md.rmsd(traj, traj, 0, atom_indices=bb) * 10).tolist()
     if len(ca):
         rmsf = md.rmsf(traj, traj, 0, atom_indices=ca) * 10
         out["rmsf_ca_A"] = rmsf.tolist()
         out["rmsf_residues"] = [f"{top.atom(i).residue.name}{top.atom(i).residue.resSeq}" for i in ca]
-        out["rg_protein_A"] = (md.compute_rg(traj.atom_slice(top.select("protein"))) * 10).tolist()
-    ligs = _ligand_resnames(top)
+        out["rg_protein_A"] = (md.compute_rg(traj.atom_slice(np.setdiff1d(top.select("protein"), lig_all))) * 10).tolist()
     out["ligands"] = {}
-    prot_heavy = top.select("protein and not element H")
-    prot_polar = top.select("protein and (element N or element O)")
-    for rn in ligs:
-        lh = top.select(f"resname {rn} and not element H")
+    prot_heavy = np.setdiff1d(top.select("protein and not element H"), lig_all)
+    prot_polar = np.setdiff1d(top.select("protein and (element N or element O)"), lig_all)
+    for rn, idx in ligand_groups.items():
+        lh = np.array(idx, dtype=int)
         if not len(lh):
             continue
         # ligand RMSD in the protein frame (no ligand re-fit): measures movement inside the pocket
@@ -74,7 +78,7 @@ def compute_metrics(traj) -> dict:
             for r in rs:
                 key = f"{top.residue(r).name}{top.residue(r).resSeq}"
                 res_freq[key] = res_freq.get(key, 0) + 1
-        lpolar = top.select(f"resname {rn} and (element N or element O)")
+        lpolar = np.array([i for i in lh if top.atom(int(i)).element.symbol in ("N", "O")], dtype=int)
         hb = []
         if len(lpolar) and len(prot_polar):
             hp = np.array([[i, j] for i in lpolar for j in prot_polar])
@@ -91,6 +95,12 @@ def compute_metrics(traj) -> dict:
             "contact_frequency": {k: v / traj.n_frames for k, v in sorted(res_freq.items(), key=lambda kv: -kv[1])},
             "stays_bound": bool(np.mean(lrmsd[-max(1, len(lrmsd) // 5):]) < 3.0),
         }
+    # WP4: ligand–ligand centroid distances (multi-ligand systems)
+    names = [n for n in ligand_groups if len(ligand_groups[n])]
+    if len(names) > 1:
+        coms = {n: traj.xyz[:, np.array(ligand_groups[n], dtype=int), :].mean(1) for n in names}
+        out["ligand_ligand_distance_A"] = {f"{a}-{b}": (np.linalg.norm(coms[a] - coms[b], axis=1) * 10).tolist()
+                                           for i, a in enumerate(names) for b in names[i + 1:]}
     return out
 
 
@@ -132,13 +142,22 @@ def plot_metrics(m: dict, out_dir: Path | str, *, label: str = "") -> dict:
         for y, v in enumerate(vals):
             ax.text(v + 0.01, y, f"{v:.0%}", va="center", fontsize=7)
         figs[f"contacts_{rn}"] = _save(fig, out_dir / f"analysis_contacts_{rn}")
+    if m.get("ligand_ligand_distance_A"):
+        fig, ax = plt.subplots(figsize=(7.2, 2.6))
+        for (pair, y), c in zip(m["ligand_ligand_distance_A"].items(), PALETTE * 3):
+            ax.plot(t[:len(y)], y, color=c, lw=2, label=pair)
+        ax.set_xlabel("Time (ns)"); ax.set_ylabel("Centroid distance (Å)")
+        ax.set_title("Ligand–ligand distance (co-occupancy stability)", loc="left", fontsize=10)
+        ax.legend(fontsize=7, frameon=False)
+        figs["ligand_ligand"] = _save(fig, out_dir / "analysis_ligand_ligand")
     return figs
 
 
-def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 1, label: str = "") -> dict:
+def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 1, label: str = "",
+                ligand_groups: dict[str, list[int]] | None = None) -> dict:
     run_dir = Path(run_dir)
     traj = load_production(run_dir, topology_pdb, stride=stride)
-    m = compute_metrics(traj)
+    m = compute_metrics(traj, ligand_groups)
     adir = run_dir / "analysis"
     adir.mkdir(parents=True, exist_ok=True)
     figs = plot_metrics(m, run_dir / "figures", label=label)

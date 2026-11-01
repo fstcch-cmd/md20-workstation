@@ -134,11 +134,65 @@ class Workflow:
             return Box(tuple(b["center"]), tuple(b.get("size", (22, 22, 22))), "manual", "使用者指定 box。")
         return box_whole_receptor(clean)
 
+    @staticmethod
+    def cocrystal_ligands(raw: Path) -> set[str]:
+        """Hetero residues in the raw PDB that look like real ligands (not water/ions/buffers)."""
+        from .build.receptor import JUNK_HETERO
+        names = set()
+        for line in raw.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.startswith("HETATM"):
+                rn = line[17:20].strip()
+                if rn not in JUNK_HETERO and rn not in {"HOH", "WAT", "DOD"}:
+                    names.add(rn)
+        return names
+
+    def docking_preflight(self, raw: Path) -> None:
+        """S9: redocking self-check is mandatory for co-crystal boxes; blind boxes need explicit consent."""
+        b, dcfg = self.cfg.get("box") or {}, self.cfg.get("docking", {})
+        refs = {l.get("reference_resname") for l in self.cfg["ligands"] if l.get("reference_resname")}
+        if b.get("from_residue"):
+            res = str(b["from_residue"]).split(":")[0].split()[0]
+            if res not in refs:
+                if dcfg.get("skip_redock"):
+                    self.dec.record("docking.redock", res, "skipped", "使用者明確設定 docking.skip_redock；本次對接沒有共晶自檢，"
+                                    "pose 可信度未經驗證，報告將標註。", kind="human")
+                else:
+                    self._block("docking_preflight",
+                                f"box 取自共晶配體 {res}，但沒有任何配體以它作為 reference_resname 進行 redocking 自檢。"
+                                f"請加入一個 {{name: {res}, smiles: <共晶配體 SMILES>, reference_resname: {res}}}，"
+                                f"或設定 docking.skip_redock: true（會記錄在報告）。")
+            else:
+                self.dec.record("docking.redock", res, "required",
+                                "共晶 box：對接共晶配體並與晶體姿勢比較，RMSD > 2 Å 時不推薦任何 pose。")
+        elif not b.get("center"):
+            co = self.cocrystal_ligands(raw)
+            if co and not b.get("allow_blind"):
+                self._block("docking_preflight",
+                            f"結構中有共晶配體（{', '.join(sorted(co))}），卻使用全蛋白盲對接。"
+                            f"建議 box.from_residue: {sorted(co)[0]}；若確定要盲對接，請設定 box.allow_blind: true。")
+            if co or b.get("allow_blind"):
+                self.dec.record("docking.box", "blind", "allowed", "使用者明確允許盲對接；盲對接分數與口袋排名可信度較低。",
+                                kind="human" if b.get("allow_blind") else "auto")
+
+    def _peptide_preflight(self, l: dict) -> str:
+        """Peptide ligand: CPP gate before docking, docking SMILES from the sequence."""
+        from .build.peptide import clean_sequence, peptide_smiles, cpp_gate
+        from .build.gates import NEEDS_HUMAN
+        seq = clean_sequence(l["sequence"])
+        gate, rec = cpp_gate(seq, target_location=l.get("target_location"), experimental_evidence=l.get("cpp_evidence"))
+        if gate.status == NEEDS_HUMAN and not l.get("cpp_override"):
+            self._block("docking_preflight", f"胜肽 {l['name']}：{gate.explanation}（或設定 cpp_override 並說明理由）")
+        self.dec.record("peptide.cpp", l["name"], rec.get("status"), gate.explanation,
+                        kind="human" if l.get("cpp_override") else "auto")
+        self._cpp = getattr(self, "_cpp", {}); self._cpp[l["name"]] = rec
+        return peptide_smiles(seq, l.get("termini", "charged"))
+
     def run_docking(self, clean: Path, raw: Path, progress_cb=None):
         from .docking import dock, LigandInput, DockingResult
         out = self.dir / "docking"
         if (d := self._done("docking")):
             return DockingResult.load(d["result"])
+        self.docking_preflight(raw)
         dcfg = self.cfg.get("docking", {})
         ligs = []
         for l in self.cfg["ligands"]:
@@ -150,9 +204,16 @@ class Workflow:
                                                   out / f"ref_{l['name']}.pdb"))
                 except ValueError:
                     ref = ""
-            ligs.append(LigandInput(name=l["name"], smiles=l.get("smiles", ""), sdf=l.get("sdf", ""), reference_pose=ref))
+            smi = l.get("smiles", "")
+            if l.get("sequence"):
+                smi = self._peptide_preflight(l)
+            ligs.append(LigandInput(name=l["name"], smiles=smi, sdf=l.get("sdf", ""), reference_pose=ref))
+        exh = dcfg.get("exhaustiveness", 16)
+        if any(l.get("sequence") for l in self.cfg["ligands"]) and exh < 32:
+            self.dec.record("docking.setup", "exhaustiveness", 32, f"胜肽配體自由度高，exhaustiveness 由 {exh} 自動提高到 32。")
+            exh = 32
         res = dock(clean, ligs, self.make_box(raw, clean), out, mode=dcfg.get("mode", "independent"),
-                   scoring=dcfg.get("scoring", "vina"), exhaustiveness=dcfg.get("exhaustiveness", 16),
+                   scoring=dcfg.get("scoring", "vina"), exhaustiveness=exh,
                    n_poses=dcfg.get("n_poses", 9), seed=dcfg.get("seed", 2026), decisions=self.dec, progress_cb=progress_cb)
         self._mark("docking", result=str(out / "docking_results.json"), mode=res.mode)
         return res
@@ -165,6 +226,10 @@ class Workflow:
         sel = {"mode": res.mode, "ligands": {}}
         for e in res.entries:
             n = len(e["poses"])
+            if e.get("recommended_rank") is None and e["name"] not in user:
+                self._block("pose_selection",
+                            f"{e['name']}：系統沒有推薦任何 pose（{e.get('reason') or '無合格候選'}）。"
+                            f"請在 pose_choices 指定名次，或檢查盒子/口袋設定後重跑對接。")
             rank = int(user.get(e["name"], e["recommended_rank"]))
             if not 1 <= rank <= n:
                 self._block("pose_selection", f"{e['name']} 只有 {n} 個 pose，無法選第 {rank} 名。")
@@ -217,6 +282,22 @@ class Workflow:
         self.dec.record("workflow.md", "docked_multi from independent", "allowed",
                         "配體分別對接，但選定 pose 彼此距離 ≥ 2.5 Å，可組成多配體系統；嚴格的共同佔位請用 simultaneous 模式。")
 
+    def _padding_nm(self) -> float:
+        """WP3: SMD/umbrella need room to pull; raise padding when binding is enabled."""
+        md = self.cfg.get("md", {})
+        pad = float(md.get("padding_nm", 1.0))
+        if (self.cfg.get("binding") or {}).get("enabled"):
+            need = float((self.cfg["binding"].get("config") or {}).get("pull_distance", 1.5)) + 0.5
+            need = max(1.5, min(need, 2.5))
+            if pad < need:
+                if not getattr(self, "_pad_logged", False):
+                    self.dec.record("build.box", "padding_nm", need,
+                                    f"啟用結合自由能計算：拉離距離需要空間，padding 由 {pad} 自動提高到 {need} nm，"
+                                    f"避免配體被拉到週期影像附近。")
+                    self._pad_logged = True
+                pad = need
+        return pad
+
     def build_cases(self, raw: Path, sel: dict) -> dict:
         from .build.pipeline import build_case
         built = dict((self._done("md_cases") or {}).get("cases", {}))
@@ -226,12 +307,19 @@ class Workflow:
             if spec["key"] in built and built[spec["key"]].get("status") == "PASS":
                 continue
             case = self.project.new_case(f"{self.name}_{spec['key']}")
-            refs = [sel["ligands"][n]["smiles"] for n in spec["ligands"]]
-            poses = [sel["ligands"][n]["sdf"] for n in spec["ligands"]]
+            lspec = {l["name"]: l for l in self.cfg["ligands"]}
+            small = [n for n in spec["ligands"] if not lspec.get(n, {}).get("sequence")]
+            peps = [{"name": n, "sequence": lspec[n]["sequence"], "pose": sel["ligands"][n]["sdf"],
+                     "termini": lspec[n].get("termini", "charged"), "target_location": lspec[n].get("target_location"),
+                     "cpp_evidence": lspec[n].get("cpp_evidence"), "cpp_override": lspec[n].get("cpp_override")}
+                    for n in spec["ligands"] if lspec.get(n, {}).get("sequence")]
+            refs = [sel["ligands"][n]["smiles"] for n in small]
+            poses = [sel["ligands"][n]["sdf"] for n in small]
             s = build_case(case, receptor=raw, ligand_references=refs, ligand_poses=poses, ph=self.cfg.get("ph", 7.4),
-                           padding_nm=md.get("padding_nm", 1.0), keep_hetero=set(self.cfg.get("keep_hetero", [])),
-                           extra_ligand_resnames=drop)
-            built[spec["key"]] = {"case_id": case.case_id, "mode": spec["mode"], "ligands": spec["ligands"],
+                           padding_nm=self._padding_nm(), keep_hetero=set(self.cfg.get("keep_hetero", [])),
+                           extra_ligand_resnames=drop, peptides=peps or None, ligand_names=small)
+            lmap = {n: f"L{i:02d}" for i, n in enumerate(small, 1)} | {p["name"]: p["name"] for p in peps}
+            built[spec["key"]] = {"case_id": case.case_id, "mode": spec["mode"], "ligands": spec["ligands"], "ligand_map": lmap,
                                   "status": s["status"], "blocking": s.get("blocking"), "blocking_detail": s.get("blocking_detail")}
             self._mark("md_cases", cases=built)
             if s["status"] != "PASS":
@@ -278,12 +366,34 @@ class Workflow:
             run_dir = case.dir / "runs" / rid
             man = load_json(run_dir / "analysis" / "analysis_manifest.json", {})
             if man.get("status") != "PASS":
-                man = analyse_run(run_dir, top, label=key)
+                bm = load_json(case.build_dir / "build_manifest.json", {})
+                groups = {l["name"]: l["heavy_atom_indices"] for l in bm.get("ligands", []) if l.get("heavy_atom_indices")}
+                man = analyse_run(run_dir, top, label=key, ligand_groups=groups or None)
             out[key] = man
             metrics[key] = load_json(man["metrics_file"], {})
         comp = compare_runs(metrics, self.dir / "figures") if len(metrics) > 1 else {}
         self._mark("analysis", summaries=out, comparison=comp)
         return {"summaries": out, "comparison": comp}
+
+    # WP3: what a tier is allowed to claim.  Sampling below the tier minimum still runs, but ΔG° is not reported.
+    TIER_BINDING = {"classroom": {"dG": False},
+                    "teaching": {"dG": True, "min_window_ps": 500.0},
+                    "research": {"dG": True, "min_window_ps": 2000.0, "min_replicas": 3, "max_half_split_kj": 2.0}}
+
+    def _tier_withholds_dG(self, cfg, res) -> str | None:
+        tier = self.cfg.get("md", {}).get("tier", "teaching")
+        rule = self.TIER_BINDING.get(tier, self.TIER_BINDING["teaching"])
+        if not rule["dG"]:
+            return "classroom 等級只展示 ΔPMF 趨勢，不輸出 ΔG° 絕對值（取樣不足以支持定量結論）。"
+        if cfg.window_prod_ps < rule.get("min_window_ps", 0):
+            return (f"{tier} 等級要求每個 window ≥ {rule['min_window_ps']:.0f} ps，本次只有 {cfg.window_prod_ps:.0f} ps；"
+                    f"ΔG° 不輸出，ΔPMF 僅供定性比較。")
+        if rule.get("min_replicas") and int((self.cfg.get("binding") or {}).get("replicas", 1)) < rule["min_replicas"]:
+            return f"research 等級要求 ≥ {rule['min_replicas']} 個獨立 replica 的結合計算；目前尚未完成，ΔG° 不輸出。"
+        hs = (res.pmf.get("half_split") or {}).get("diff_kj_mol")
+        if rule.get("max_half_split_kj") and (hs is None or hs > rule["max_half_split_kj"]):
+            return f"前後半段 ΔPMF 差 {hs} kJ/mol > {rule['max_half_split_kj']}：未收斂，ΔG° 不輸出。"
+        return None
 
     def binding(self, runs: dict, built: dict, platform, *, should_pause=None, progress_cb=None) -> dict:
         from .sampling.binding import run_binding, BindingConfig
@@ -301,12 +411,25 @@ class Workflow:
             bm = load_json(case.build_dir / "build_manifest.json", {})
             run_dir = case.dir / "runs" / runs[key]["run_ids"][0]
             start = run_dir / "stages" / "production" / "production_state.xml"
+            mname = (built.get(key, {}).get("ligand_map") or {}).get(name, "L01")
+            lrec = next((l for l in bm.get("ligands", []) if l.get("name") == mname), None)
+            if lrec is None or not lrec.get("heavy_atom_indices"):
+                self._block("binding", f"{name}：建模紀錄中找不到配體 {mname} 的原子索引，無法定義拉離座標。")
             res = run_binding(bm["system_xml"], bm["topology_pdb"], start, self.dir / "binding" / name,
-                              ligand_resname="L01", config=cfg, platform_name=platform.name,
+                              ligand_indices=lrec["heavy_atom_indices"], ligand_resname=mname, config=cfg, platform_name=platform.name,
                               platform_properties=platform.properties, decisions=self.dec, should_pause=should_pause,
                               progress_cb=progress_cb)
+            if res.status == "NEEDS_HUMAN":
+                results[name] = {"status": "NEEDS_HUMAN", "caveats": res.caveats}
+                self._block("binding", f"{name} 結合自由能：{res.caveats[0] if res.caveats else ''}", results=results)
+            dG, dGk, withheld = res.dG_standard_kj_mol, res.dG_standard_kcal_mol, res.pmf.get("dG_withheld")
+            reason = self._tier_withholds_dG(cfg, res)
+            if reason and dG is not None:
+                dG, dGk, withheld = None, None, reason
+                self.dec.record("binding.result", name, "ΔG° withheld", reason)
             results[name] = {"status": res.status, "delta_pmf_kj_mol": res.delta_pmf_kj_mol,
-                             "dG_standard_kj_mol": res.dG_standard_kj_mol, "dG_standard_kcal_mol": res.dG_standard_kcal_mol,
+                             "dG_standard_kj_mol": dG, "dG_standard_kcal_mol": dGk, "dG_withheld": withheld,
+                             "half_split": res.pmf.get("half_split"),
                              "r_min_nm": res.pmf.get("r_min_nm"), "figures": res.figures, "caveats": res.caveats,
                              "max_force": res.smd.get("max_force_kj_mol_nm"), "work": res.smd.get("final_work_kj_mol")}
             if res.status == "PAUSED":

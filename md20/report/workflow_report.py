@@ -77,13 +77,22 @@ def _binding_section(wf) -> str:
     parts = ["<table><tr><th>配體</th><th>ΔPMF 井深 (kJ/mol)</th><th>ΔG° 估計 (kJ/mol)</th><th>ΔG° (kcal/mol)</th><th>結合距離 (nm)</th>"
              "<th>SMD 最大拉力 (kJ/mol/nm)</th><th>SMD 功 (kJ/mol)</th></tr>"]
     for name, r in b.items():
-        parts.append(f"<tr><td>{_esc(name)}</td><td>{r.get('delta_pmf_kj_mol')}</td><td>{r.get('dG_standard_kj_mol')}</td>"
-                     f"<td>{r.get('dG_standard_kcal_mol')}</td><td>{r.get('r_min_nm') and round(r['r_min_nm'], 3)}</td>"
+        dg = r.get('dG_standard_kj_mol') if r.get('dG_standard_kj_mol') is not None else "不輸出"
+        dgk = r.get('dG_standard_kcal_mol') if r.get('dG_standard_kcal_mol') is not None else "—"
+        parts.append(f"<tr><td>{_esc(name)}</td><td>{r.get('delta_pmf_kj_mol')}</td><td>{dg}</td>"
+                     f"<td>{dgk}</td><td>{r.get('r_min_nm') and round(r['r_min_nm'], 3)}</td>"
                      f"<td>{r.get('max_force') and round(r['max_force'])}</td><td>{r.get('work') and round(r['work'], 1)}</td></tr>")
     parts.append("</table>")
     for name, r in b.items():
         figs = r.get("figures") or {}
         parts.append(f"<h3>{_esc(name)}</h3>")
+        if r.get("caveats"):
+            parts.append(f"<p class=warn><b>{_esc(r['caveats'][0])}</b></p>")
+        if r.get("dG_withheld"):
+            parts.append(f"<p class=warn>ΔG° 不輸出：{_esc(str(r['dG_withheld']))}</p>")
+        hs = r.get("half_split") or {}
+        if "diff_kj_mol" in hs:
+            parts.append(f"<p class=muted>前半／後半段 ΔPMF：{hs['first_half_dpmf']} / {hs['second_half_dpmf']} kJ/mol（差 {hs['diff_kj_mol']}）</p>")
         for k, cap in (("smd", "SMD 拉力與功（不可逆、與速度有關）"), ("histograms", "Window 直方圖（相鄰須重疊）"), ("pmf", "PMF ± bootstrap 誤差")):
             if figs.get(k):
                 parts.append(f"<figure>{_img(figs[k]['png'])}<figcaption>{cap}</figcaption></figure>")

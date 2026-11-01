@@ -52,19 +52,76 @@ def test_recommend_prefers_consensus_within_window():
     rec = np.vstack([_pose((0, 0, 3), n=60, seed=5), _pose((10, 0, 3), n=60, seed=6)])
     infos = analyse_poses(coords, scores, receptor_xyz=rec)
     assert cluster_poses(coords, scores)[1:4] == [1, 1, 1]
-    pick = recommend_pose(infos, min_contacts=1)
+    for i in infos:
+        i.contacts = max(i.contacts, 12)
+    pick = recommend_pose(infos)
     assert pick.rank == 2 and pick.cluster_size == 3
     assert "Vina 分數誤差" in pick.reason and "3 個 pose" in pick.reason
 
 
-def test_recommend_rejects_clashing_joint_pose():
-    a1, b1 = _pose((0, 0, 0), n=5), _pose((0.2, 0, 0), n=5)          # overlapping ligands → clash
-    a2, b2 = _pose((0, 0, 0), n=5), _pose((8, 0, 0), n=5)
-    coords = [np.vstack([a1, b1]), np.vstack([a2, b2])]
-    infos = analyse_poses(coords, [-12.0, -11.5], per_ligand_slices=[slice(0, 5), slice(5, 10)])
-    assert infos[0].clash and not infos[1].clash
-    pick = recommend_pose(infos, min_contacts=0)
-    assert pick.rank == 2 and "無碰撞" in pick.reason
+def _line_lig(x0, n=5):
+    return np.array([[x0 + 1.5 * k, 0.0, 0.0] for k in range(n)])
+
+
+def test_joint_pose_rules_each_one():
+    from md20.docking.poses import recommend_pose
+    a = _line_lig(0)                                   # atoms at x = 0 … 6
+    clash, good, far = _line_lig(6.5), _line_lig(9.8), _line_lig(16.0)   # min distances 0.5, 3.8, 10.0 Å
+    sl = [slice(0, 5), slice(5, 10)]
+    infos = analyse_poses([np.vstack([a, clash]), np.vstack([a, good]), np.vstack([a, far])], [-12.0, -11.6, -11.5],
+                          per_ligand_slices=sl)
+    for i in infos:
+        i.contacts_per_ligand = [20, 20]
+    pick = recommend_pose(infos)
+    assert pick.rank == 2 and "共同佔據且無碰撞" in pick.reason
+    assert any("碰撞" in r for r in infos[0].rejected) and any("未共同佔據" in r for r in infos[2].rejected)
+    # one ligand shallow → rejected even with perfect distance
+    infos[1].contacts_per_ligand = [25, 3]
+    infos2 = analyse_poses([np.vstack([a, good])], [-11.6], per_ligand_slices=sl)
+    infos2[0].contacts_per_ligand = [25, 3]
+    assert recommend_pose(infos2) is None and "一深一淺" in infos2[0].extra["recommendation"]["reason"]
+
+
+def test_no_candidate_means_no_recommendation():
+    from md20.docking.poses import recommend_pose
+    infos = analyse_poses([_pose((0, 0, 0)), _pose((5, 0, 0))], [-7.0, -6.8])
+    for i in infos:
+        i.contacts = 2                                  # all on the surface
+    assert recommend_pose(infos) is None
+    assert infos[0].extra["recommendation"]["status"] == "NEEDS_HUMAN"
+
+
+def test_pocket_too_small_and_same_sign_charges():
+    from md20.docking.poses import recommend_pose
+    sl = [slice(0, 5), slice(5, 10)]
+    infos = analyse_poses([np.vstack([_line_lig(0), _line_lig(9.8)])], [-10.0], per_ligand_slices=sl)
+    infos[0].contacts_per_ligand = [20, 20]
+    assert recommend_pose(infos, pocket_volume_A3=150, ligand_volume_A3=180) is None
+    assert "只容得下一個" in infos[0].extra["recommendation"]["reason"]
+    pick = recommend_pose(infos, ligand_charges=[1, 1], pocket_volume_A3=900, ligand_volume_A3=180)
+    assert pick is not None and "同號淨電荷" in pick.reason and infos[0].extra["recommendation"]["status"] == "AUTO_FIXED"
+
+
+def test_redocking_self_check_blocks():
+    from md20.docking.poses import recommend_pose
+    ref = _pose((0, 0, 0))
+    infos = analyse_poses([ref + 3.0, ref + 3.1], [-7.0, -6.9], reference_xyz=ref)
+    for i in infos:
+        i.contacts = 30
+    assert recommend_pose(infos) is None and "Redocking 自檢未通過" in infos[0].extra["recommendation"]["reason"]
+
+
+def test_pocket_volume_cavity_vs_open():
+    from md20.docking.poses import pocket_volume
+    # hollow sphere of receptor atoms (radius 9 Å) → buried cavity inside; empty space → 0
+    pts = []
+    for th in np.linspace(0, np.pi, 18):
+        for ph in np.linspace(0, 2 * np.pi, 36, endpoint=False):
+            pts.append([9 * np.sin(th) * np.cos(ph), 9 * np.sin(th) * np.sin(ph), 9 * np.cos(th)])
+    shell = np.array(pts)
+    v = pocket_volume(shell, (0, 0, 0), (14, 14, 14))
+    assert 300 < v < 3000
+    assert pocket_volume(np.array([[50.0, 50.0, 50.0]]), (0, 0, 0), (10, 10, 10)) == 0.0
 
 
 def test_reference_rmsd_reported():

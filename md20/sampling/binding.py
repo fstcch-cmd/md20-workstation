@@ -43,6 +43,7 @@ class BindingConfig:
     backbone_restraint_scale: float = 0.1  # × 1000 kJ/mol/nm² from the build restraints
     pocket_cutoff_nm: float = 0.8
     max_windows: int = 40
+    box_margin_nm: float = 1.0             # d_max + ligand radius + margin must fit in half the box
     seed: int = 2026
 
     def to_dict(self) -> dict:
@@ -80,7 +81,9 @@ def select_groups(topology, positions_nm: np.ndarray, *, ligand_resname: str | N
         raise ValueError(f"找不到配體 {ligand_resname}")
     note = ""
     if anchor_indices is None:
+        lig_res = {atoms[i].residue.index for i in lig}   # peptide ligands have their own CA atoms
         ca = np.array([a.index for a in atoms if a.name == "CA" and a.residue.name not in {ligand_resname, "CA"}
+                       and a.residue.index not in lig_res
                        and a.element is not None and a.element.symbol == "C"], dtype=int)
         cutoff = pocket_cutoff_nm
         sel = np.array([], dtype=int)
@@ -149,6 +152,31 @@ def _make_context(system, positions, platform_name, properties, cfg: BindingConf
     return ctx, integ
 
 
+def radial_pmf(pres, temperature_k: float) -> dict:
+    """Jacobian-corrected radial PMF, well depth and radial-integration ΔG° (1 M)."""
+    grid, W = np.asarray(pres.grid_nm), np.asarray(pres.pmf_kj_mol)
+    kT = KB_KJ_MOL_K * temperature_k
+    ok = np.isfinite(W) & (grid > 0)
+    g, W_raw = grid[ok], W[ok]
+    # Jacobian (volume-element) correction for a 3-D distance CV: the raw PMF contains −2kT·ln r,
+    # which makes large separations look favourable.  w(r) = W(r) + 2kT·ln r is the radial PMF.
+    Wv = W_raw + 2.0 * kT * np.log(g)
+    Wv = Wv - np.min(Wv)
+    err = np.asarray(pres.err_kj_mol)[ok] if pres.err_kj_mol is not None else None
+    tail = max(3, len(Wv) // 10)
+    w_bulk = float(np.mean(Wv[-tail:]))
+    i_min = int(np.argmin(Wv))
+    dpmf = round(w_bulk - float(Wv[i_min]), 3)
+    beyond = np.where(Wv[i_min:] >= w_bulk - 0.5 * kT)[0]
+    r_cut = float(g[i_min + beyond[0]] if len(beyond) else g[-1])
+    bound = g <= r_cut
+    integrand = 4 * np.pi * g[bound] ** 2 * np.exp(-(Wv[bound] - w_bulk) / kT)
+    k_eq = float(np.trapezoid(integrand, g[bound])) if hasattr(np, "trapezoid") else float(np.trapz(integrand, g[bound]))
+    dG = round(-kT * math.log(k_eq / V0_NM3), 3) if k_eq > 0 else None
+    return {"grid": g, "W": Wv, "W_raw": W_raw - np.min(W_raw), "err": err, "w_bulk": w_bulk, "r_min": float(g[i_min]),
+            "r_cut": r_cut, "delta_pmf": dpmf, "dG": dG}
+
+
 def _state_xyz_box(ctx):
     st = ctx.getState(getPositions=True)
     xyz = st.getPositions(asNumpy=True)._value
@@ -196,6 +224,21 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         ctx.setParameter("msw_restraint_scale", cfg.backbone_restraint_scale)
     xyz, box = _state_xyz_box(ctx)
     d0 = cv_distance(xyz, box, anchor, ligand, masses)
+    lig_xyz = xyz[ligand]
+    lig_radius = float(np.max(np.linalg.norm(lig_xyz - lig_xyz.mean(0), axis=1))) if len(ligand) > 1 else 0.0
+    half_box = 0.5 * float(min(np.linalg.norm(box, axis=1)))
+    need = d0 + cfg.pull_distance_nm + lig_radius + cfg.box_margin_nm
+    manifest["box_check"] = {"d0_nm": d0, "pull_nm": cfg.pull_distance_nm, "ligand_radius_nm": lig_radius,
+                             "margin_nm": cfg.box_margin_nm, "need_half_box_nm": need, "half_box_nm": half_box}
+    if need > half_box:
+        msg = (f"水盒太小：拉離終點 {d0 + cfg.pull_distance_nm:.2f} nm + 配體半徑 {lig_radius:.2f} + 安全距離 "
+               f"{cfg.box_margin_nm:.1f} = {need:.2f} nm，超過盒子半長 {half_box:.2f} nm；配體會接近週期影像，PMF 不可信。"
+               f"請以較大 padding 重建（啟用結合計算時工作流程會自動提高），或縮短 pull_distance。")
+        manifest.update({"status": "NEEDS_HUMAN", "reason": msg})
+        atomic_write_json(json.loads(json.dumps(manifest, default=_np_default)), out / "binding_manifest.json")
+        if decisions:
+            decisions.record("binding.box", "box size", "NEEDS_HUMAN", msg, kind="human")
+        return BindingResult(status="NEEDS_HUMAN", d_bound_nm=d0, caveats=[msg])
     plan = plan_windows(d0, d0 + cfg.pull_distance_nm, force_constant_kj_mol_nm2=cfg.k_umbrella,
                         temperature_k=cfg.temperature_k, target_overlap=cfg.target_overlap, max_windows=cfg.max_windows)
     if smd.get("status") != "PASS":
@@ -313,44 +356,44 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                             out_dir=out, n_bootstrap=100)
     res = BindingResult(status="PASS", d_bound_nm=d0, smd=smd, windows=[{"center_nm": c, "n": int(len(samples[c])),
                         "mean_nm": float(samples[c].mean()), "sd_nm": float(samples[c].std()), "added": c in added} for c in centers])
-    grid, W = np.asarray(pres.grid_nm), np.asarray(pres.pmf_kj_mol)
-    kT = KB_KJ_MOL_K * cfg.temperature_k
-    ok = np.isfinite(W) & (grid > 0)
-    g, W_raw = grid[ok], W[ok]
-    # Jacobian (volume-element) correction for a 3-D distance CV: the raw PMF contains −2kT·ln r,
-    # which makes large separations look favourable.  w(r) = W(r) + 2kT·ln r is the radial PMF.
-    Wv = W_raw + 2.0 * kT * np.log(g)
-    Wv = Wv - np.min(Wv)
-    err = None
-    if pres.err_kj_mol is not None:
-        err = np.asarray(pres.err_kj_mol)[ok]
-    tail = max(3, len(Wv) // 10)
-    w_bulk = float(np.mean(Wv[-tail:]))
-    i_min = int(np.argmin(Wv))
-    res.delta_pmf_kj_mol = round(w_bulk - float(Wv[i_min]), 3)
-    beyond = np.where(Wv[i_min:] >= w_bulk - 0.5 * kT)[0]
-    r_cut = g[i_min + beyond[0]] if len(beyond) else g[-1]
-    bound = g <= r_cut
-    integrand = 4 * np.pi * g[bound] ** 2 * np.exp(-(Wv[bound] - w_bulk) / kT)
-    k_eq = float(np.trapezoid(integrand, g[bound])) if hasattr(np, "trapezoid") else float(np.trapz(integrand, g[bound]))
-    if k_eq > 0:
-        res.dG_standard_kj_mol = round(-kT * math.log(k_eq / V0_NM3), 3)
+    rp = radial_pmf(pres, cfg.temperature_k)
+    g, Wv, err = rp["grid"], rp["W"], rp["err"]
+    res.delta_pmf_kj_mol, res.dG_standard_kj_mol = rp["delta_pmf"], rp["dG"]
+    if res.dG_standard_kj_mol is not None:
         res.dG_standard_kcal_mol = round(res.dG_standard_kj_mol / 4.184, 3)
-    res.pmf = {"method": pres.method, "converged": pres.converged, "quality": pres.quality, "bound_cutoff_nm": float(r_cut),
-               "w_bulk_kj_mol": w_bulk, "r_min_nm": float(g[i_min]), "jacobian_corrected": True,
-               "grid_nm": g.tolist(), "pmf_radial_kj_mol": Wv.tolist(), "pmf_raw_kj_mol": (W_raw - np.min(W_raw)).tolist()}
+    # half-split convergence: first vs second half of every window
+    half = {}
+    try:
+        h1 = {c: v[: len(v) // 2] for c, v in samples.items()}
+        h2 = {c: v[len(v) // 2:] for c, v in samples.items()}
+        a = radial_pmf(pmf_from_windows(h1, force_constant_kj_mol_nm2=cfg.k_umbrella, temperature_k=cfg.temperature_k,
+                                        n_bootstrap=0), cfg.temperature_k)
+        b = radial_pmf(pmf_from_windows(h2, force_constant_kj_mol_nm2=cfg.k_umbrella, temperature_k=cfg.temperature_k,
+                                        n_bootstrap=0), cfg.temperature_k)
+        half = {"first_half_dpmf": a["delta_pmf"], "second_half_dpmf": b["delta_pmf"],
+                "diff_kj_mol": round(abs(a["delta_pmf"] - b["delta_pmf"]), 3)}
+    except Exception as exc:  # noqa: BLE001
+        half = {"error": str(exc)}
+    res.pmf = {"method": pres.method, "converged": pres.converged, "quality": pres.quality,
+               "bound_cutoff_nm": rp["r_cut"], "w_bulk_kj_mol": rp["w_bulk"], "r_min_nm": rp["r_min"],
+               "jacobian_corrected": True, "half_split": half,
+               "grid_nm": g.tolist(), "pmf_radial_kj_mol": Wv.tolist(), "pmf_raw_kj_mol": rp["W_raw"].tolist()}
     res.figures = dict(pres.figures)
     from ..analysis.plots import plot_pmf
     res.figures["pmf"] = plot_pmf(g, Wv, err, out / "pmf")
     res.figures["smd"] = _plot_smd(out / "smd.tsv", out / "smd_force_work")
     res.caveats = [
+        f"拉離與每個 window 期間，蛋白骨架施加 {cfg.backbone_restraint_scale * 1000:.0f} kJ/mol/nm² 位置限制"
+        f"（避免整顆蛋白被拖走）；PMF 不包含蛋白構形重排的自由能。",
         "ΔPMF 是一維 COM 距離 PMF 的井深，不等於實驗結合自由能。",
         "PMF 已做 Jacobian 校正（+2kT·ln r）；未校正的一維距離 PMF 會因 r² 體積項而在遠距離偏低。",
         "ΔG° 以徑向積分與 1 M 標準態估算，未包含方向／構形約束校正；適合比較配體間趨勢。",
         "SMD 的功與拉伸速度有關（不可逆），只有 PMF 是自由能剖面。",
     ]
-    if not res.pmf["quality"].get("graph_connected", True):
-        res.caveats.insert(0, "Window 之間 overlap 不足（見直方圖）；PMF 有斷裂風險，請依 insert_centers 補 window。")
+    if not res.pmf["quality"].get("graph_connected", True) or not pres.converged:
+        res.caveats.insert(1, "PMF 未收斂或 window overlap 不足（見直方圖）；不輸出 ΔG°，只保留 ΔPMF 作定性參考。")
+        res.dG_standard_kj_mol = res.dG_standard_kcal_mol = None
+        res.pmf["dG_withheld"] = "not converged"
     manifest.update({"status": "PASS", "result": res.to_dict()})
     atomic_write_json(json.loads(json.dumps(manifest, default=_np_default)), out / "binding_manifest.json")
     if decisions:
