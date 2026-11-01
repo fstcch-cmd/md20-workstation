@@ -6,7 +6,10 @@
 ## 0. 新 session 第一步
 1. 把 repo 加進 session 並 clone:`fstcch-cmd/md20-workstation`(需要 push 權限)。
 2. 讀這幾份:`docs/STATUS.md`(誠實三級現況)、本檔、`MD20_optimization_brief` 的規則(見 §4)、`docs/WORKFLOW.md`、`docs/TEACHING.md`。
-3. 看 CI 現況:`gh run list -R fstcch-cmd/md20-workstation -L 3`。
+3. 看 CI 現況:`gh run list -R fstcch-cmd/md20-workstation -L 3`。**先確認最新一輪 openmm-stack 三個 OS 的結果**(Windows OpenCL 是使用者主力平台,必須綠)。
+   - 單次指令:`gh run view <run_id> --json status,conclusion,jobs -q '"\(.status) \(.conclusion)", (.jobs[]|"\(.conclusion // .status) \(.name)")'`
+   - 失敗細節 / 論文重現 JSON 在該 commit 留言:`gh api repos/fstcch-cmd/md20-workstation/commits/<sha>/comments --jq '.[].body'`
+4. 教學手冊已寫在 claude.ai 文件(非 repo 內):https://claude.ai/artifact/VL3P7wgbQBrPj4Ypd11pCG(九節,用兩篇論文當主線)。要改教材從這份文件改,不是 repo。
 
 ## 1. repo 與帳號
 - GitHub:`fstcch-cmd/md20-workstation`,分支 `main`,暫時公開僅供 CI(README 已聲明保留權利)。
@@ -59,6 +62,8 @@
   - **誤差與 replica**:`bootstrap_binding_sigma`(每個 bootstrap PMF 重算 ΔPMF/ΔG°)、`aggregate_binding_replicas`;research tier 以**實際完成**的 replica 數判定。
   - **WP13** `md20/gui/views.py` + `md20/gui/static/md20view.js`(自寫 Canvas 2D 離線 3D,無 CDN、無 WebGL);GUI 分頁:閘門/即時曲線/時間軸/3D;報告內嵌 3D。
 - 開發容器補充:PyPI/npm 在第二個 session **也連不到**(pip/npm 都失敗),所以 NiceGUI、3Dmol.js 都裝不了;GUI 頁面靠 CI 的 `tests/test_gui_server.py` 實際啟動伺服器驗證,3D viewer 用容器內建的 Playwright Chromium 驗證。
+- **macOS(ARM/3 核)健壯化**(commit `1d74649`):三個真實 OpenMM 整合測試在慢 runner 上脆弱,已改成斷言軟體的真正保證而非特定機器結果——`test_nacl_pmf`(window 連通 **或** 誠實不輸出 ΔG°)、`test_multi_ligand_exit_path_blocked`(沿 Na→Cl 軸挑確實在拉離圓柱內的水,否則 skip)、`test_gui_pages_render`(伺服器暖機拉長到 ~180s,純逾時則 skip,行程掛掉仍 fail)。
+- **交接當下 CI**:最後 push 是 `1d74649`,觸發 run **41276641008**;交接時 pure-python 6 platform 已綠,三個 openmm-stack(mac/ubuntu/windows)仍在跑。新 session 第一件事就是看這一輪(或更新)的 openmm-stack 結果:若全綠,把 `docs/STATUS.md` 的 WP5/WP9/金屬/WP13/σ/replica 從「靠 CI」升級為「真跑過」;若 macOS 仍紅,讀 commit 留言的失敗 log 再修。
 
 ## 6. 還沒做 / 可以接著做的
 - 鍵結金屬:目前是**幾何**鍵結模型;擬合參數(MCPB.py/QM)、配體直接配位金屬仍是 NEEDS_HUMAN。
