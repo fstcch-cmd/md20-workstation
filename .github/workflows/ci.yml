@@ -113,3 +113,14 @@ jobs:
             ~/Library/Application Support/MD20/doctor/*
             ~/.local/share/MD20/doctor/*
           if-no-files-found: ignore
+      - name: Export explicit lock file (exact package URLs of the environment that passed)
+        if: always()
+        shell: bash
+        run: '"$MAMBA_EXE" env export -n md20 --explicit > md20-lock-${{ runner.os }}.txt 2>/dev/null || true; "$MAMBA_EXE" run -n md20 pip freeze > md20-pip-${{ runner.os }}.txt 2>/dev/null || true'
+      - name: Upload lock files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lock-${{ runner.os }}
+          path: md20-*-${{ runner.os }}.txt
+          if-no-files-found: ignore
