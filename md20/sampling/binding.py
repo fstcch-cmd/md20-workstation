@@ -286,14 +286,20 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     res = BindingResult(status="PASS", d_bound_nm=d0, smd=smd, windows=[{"center_nm": c, "n": int(len(samples[float(c)])),
                         "mean_nm": float(samples[float(c)].mean()), "sd_nm": float(samples[float(c)].std())} for c in centers])
     grid, W = np.asarray(pres.grid_nm), np.asarray(pres.pmf_kj_mol)
-    ok = np.isfinite(W)
-    g, Wv = grid[ok], W[ok]
+    kT = KB_KJ_MOL_K * cfg.temperature_k
+    ok = np.isfinite(W) & (grid > 0)
+    g, W_raw = grid[ok], W[ok]
+    # Jacobian (volume-element) correction for a 3-D distance CV: the raw PMF contains −2kT·ln r,
+    # which makes large separations look favourable.  w(r) = W(r) + 2kT·ln r is the radial PMF.
+    Wv = W_raw + 2.0 * kT * np.log(g)
+    Wv = Wv - np.min(Wv)
+    err = None
+    if pres.err_kj_mol is not None:
+        err = np.asarray(pres.err_kj_mol)[ok]
     tail = max(3, len(Wv) // 10)
     w_bulk = float(np.mean(Wv[-tail:]))
     i_min = int(np.argmin(Wv))
     res.delta_pmf_kj_mol = round(w_bulk - float(Wv[i_min]), 3)
-    # radial standard-state estimate: bound region = from grid start to the barrier/plateau after the minimum
-    kT = KB_KJ_MOL_K * cfg.temperature_k
     beyond = np.where(Wv[i_min:] >= w_bulk - 0.5 * kT)[0]
     r_cut = g[i_min + beyond[0]] if len(beyond) else g[-1]
     bound = g <= r_cut
@@ -303,11 +309,15 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         res.dG_standard_kj_mol = round(-kT * math.log(k_eq / V0_NM3), 3)
         res.dG_standard_kcal_mol = round(res.dG_standard_kj_mol / 4.184, 3)
     res.pmf = {"method": pres.method, "converged": pres.converged, "quality": pres.quality, "bound_cutoff_nm": float(r_cut),
-               "w_bulk_kj_mol": w_bulk, "r_min_nm": float(g[i_min])}
+               "w_bulk_kj_mol": w_bulk, "r_min_nm": float(g[i_min]), "jacobian_corrected": True,
+               "grid_nm": g.tolist(), "pmf_radial_kj_mol": Wv.tolist(), "pmf_raw_kj_mol": (W_raw - np.min(W_raw)).tolist()}
     res.figures = dict(pres.figures)
+    from ..analysis.plots import plot_pmf
+    res.figures["pmf"] = plot_pmf(g, Wv, err, out / "pmf")
     res.figures["smd"] = _plot_smd(out / "smd.tsv", out / "smd_force_work")
     res.caveats = [
         "ΔPMF 是一維 COM 距離 PMF 的井深，不等於實驗結合自由能。",
+        "PMF 已做 Jacobian 校正（+2kT·ln r）；未校正的一維距離 PMF 會因 r² 體積項而在遠距離偏低。",
         "ΔG° 以徑向積分與 1 M 標準態估算，未包含方向／構形約束校正；適合比較配體間趨勢。",
         "SMD 的功與拉伸速度有關（不可逆），只有 PMF 是自由能剖面。",
     ]
