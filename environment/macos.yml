@@ -4,3 +4,4 @@ channels: [conda-forge]
 dependencies:
   - openmm>=8.1
   - ambertools   # enables GAFF2/AM1-BCC ladder rung on macOS
+  - vina>=1.2.5

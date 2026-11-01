@@ -16,12 +16,11 @@ dependencies:
   - openff-toolkit>=0.16
   - openff-nagl
   - openff-nagl-models
-  - vina>=1.2.5        # AutoDock Vina python bindings
-  - meeko>=0.5         # ligand PDBQT + pose → RDKit with bond orders
   - lxml               # needed by openmmforcefields (pip install does not pull it)
   - pdb2pqr
   - propka
   - nicegui
   - pytest
   - pip
+# vina: conda on Linux/macOS (see <os>.yml), pip wheel on Windows; meeko (pure Python) via pip everywhere.
 # openmmforcefields is installed by the installer with pip (its conda package needs ambertools, absent on win-64).

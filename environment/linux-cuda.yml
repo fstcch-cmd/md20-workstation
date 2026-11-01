@@ -4,3 +4,4 @@ dependencies:
   - openmm>=8.1
   - cuda-version=12.4
   - ambertools
+  - vina>=1.2.5

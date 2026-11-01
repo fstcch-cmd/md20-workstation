@@ -42,7 +42,7 @@ if [ "$IS_WIN" = 1 ]; then
   else
     echo "[2/4] 建立環境 ($GPU) ..."; "$MAMBA" create -y -p "$W_PREFIX" -f "$W_BASE" -f "$W_GPU"
   fi
-  echo "[3/4] 安裝 md20 ..."; "$MAMBA" run -p "$W_PREFIX" pip install --no-cache-dir "openmmforcefields>=0.14" -e "$W_PKG"
+  echo "[3/4] 安裝 md20 ..."; "$MAMBA" run -p "$W_PREFIX" pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" "vina>=1.2.5" -e "$W_PKG"
   echo "[4/4] Doctor ..."; "$MAMBA" run -p "$W_PREFIX" md20 doctor
   echo; echo "完成。之後執行：  \"$MAMBA\" run -p \"$W_PREFIX\" md20 <command>"
   echo "提示：也可用 PowerShell 版安裝器 installer\\install.ps1。"
@@ -79,6 +79,6 @@ if [ -d "$PREFIX/conda-meta" ]; then
 else
   echo "[2/4] 建立環境 ($GPU) ..."; "$MAMBA" create -y -p "$PREFIX" -f "$HERE/../environment/base.yml" -f "$GPUYML"
 fi
-echo "[3/4] 安裝 md20 ..."; "$MAMBA" run -p "$PREFIX" pip install --no-cache-dir "openmmforcefields>=0.14" -e "$HERE/.."
+echo "[3/4] 安裝 md20 ..."; "$MAMBA" run -p "$PREFIX" pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" -e "$HERE/.."
 echo "[4/4] Doctor ..."; "$MAMBA" run -p "$PREFIX" md20 doctor
 echo; echo "完成。之後執行：  $MAMBA run -p $PREFIX md20 <command>"
