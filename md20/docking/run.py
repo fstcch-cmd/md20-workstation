@@ -52,7 +52,9 @@ class DockingResult:
     @classmethod
     def load(cls, path: Path | str) -> "DockingResult":
         d = json.loads(Path(path).read_text(encoding="utf-8"))
-        return cls(**d)
+        from dataclasses import fields as _fields
+        known = {f.name for f in _fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in known})      # drops the HCC Lab stamp key `_md20`
 
 
 # --------------------------------------------------------------------------- ligand prep

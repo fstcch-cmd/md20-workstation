@@ -151,3 +151,36 @@ def test_persistent_device_error_needs_human(tmp_path: Path):
     with pytest.raises(NeedsHuman, match="運算裝置"):
         run_stage(tmp_path / "npt", spec, lambda s, dt: Broken(timestep_fs=dt, ensemble="NPT"), identity={"run": "r1"},
                   initial_state=None, batch_steps=250)
+
+
+def test_short_stage_gets_dense_log_and_passes(tmp_path: Path):
+    """WP5 regression: a 2 ps screen stage with the tier's 0.5 ps report interval left 4 log rows → 'log almost empty'
+    → two useless +0 ps extensions → NEEDS_HUMAN.  Now the interval is densified (and logged) up front."""
+    proto = make_protocol("classroom")
+    for s in proto.stages:
+        if s.ensemble != "MIN":
+            s.length_ps = 2.0; s.checkpoint_interval_ps = 2.0; s.report_interval_ps = 0.5
+    dec = DecisionLog(tmp_path / "decisions.jsonl")
+    status = run_protocol(tmp_path / "run1", proto, _factory(), identity={"case": "c1"}, decisions=dec, batch_steps=50)
+    assert status["status"] == "COMPLETE", status
+    assert len(read_state_log(tmp_path / "run1" / "stages" / "nvt" / "nvt.log")) >= 20
+    assert any(d.get("what") == "report_interval_ps" for d in dec.read())
+
+
+def test_unextendable_acceptance_fails_fast(tmp_path: Path, monkeypatch):
+    """Acceptance that extension cannot fix (extend_ps 0) → NEEDS_HUMAN after one attempt, no wasted re-runs."""
+    from md20.analysis.acceptance import AcceptanceResult
+    import md20.engine.runner as runner
+    calls = {"n": 0}
+
+    def fake_eval(*a, **k):
+        calls["n"] += 1
+        return AcceptanceResult("NEEDS_HUMAN", [], "StateData log 幾乎是空的", extend_ps=0.0)
+    monkeypatch.setattr(runner, "evaluate_acceptance", fake_eval)
+    proto = make_protocol("classroom")
+    for s in proto.stages:
+        if s.ensemble != "MIN":
+            s.length_ps = 4.0; s.checkpoint_interval_ps = 4.0; s.report_interval_ps = 0.2
+    with pytest.raises(NeedsHuman, match="nvt 未通過驗收"):
+        run_protocol(tmp_path / "run1", proto, _factory(), identity={"case": "c1"}, batch_steps=50)
+    assert calls["n"] == 1

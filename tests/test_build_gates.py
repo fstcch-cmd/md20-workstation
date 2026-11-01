@@ -126,3 +126,16 @@ def test_pocket_protonation_review(tmp_path):
              {"residue": "LYS", "resid": 30, "chain": "A", "pka": 10.4, "model_pka": 10.5}]
     out = pocket_protonation_review(table, pdb, (0, 0, 0), ph=7.4)
     assert [f["residue"] for f in out] == ["ASP10A"] and len(out[0]["flags"]) == 2
+
+
+def test_altloc_pairs_are_not_duplicate_atom_names():
+    """3KS3 regression: altloc A/B copies of the same atom must not trip the duplicate-name gate."""
+    lines, serial = _protein(3)
+    lines.append(_atom(serial, "OG", "SER", "A", 4, x=12.0, altloc="A")); serial += 1
+    lines.append(_atom(serial, "OG", "SER", "A", 4, x=12.5, altloc="B")); serial += 1
+    insp = inspect_pdb_text("\n".join(lines))
+    assert insp.altlocs == 1 and insp.duplicate_atom_names == []
+    lines.append(_atom(serial, "CB", "SER", "A", 4, x=13.0)); serial += 1
+    lines.append(_atom(serial, "CB", "SER", "A", 4, x=13.5)); serial += 1       # a real duplicate (no altloc)
+    insp = inspect_pdb_text("\n".join(lines))
+    assert [d["atoms"] for d in insp.duplicate_atom_names] == [["CB"]]

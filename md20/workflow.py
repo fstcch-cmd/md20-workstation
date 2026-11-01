@@ -384,7 +384,7 @@ class Workflow:
                     raise RuntimeError(f"建模未通過：{bs.get('blocking')}")
             else:
                 case = self.project.new_case(f"{self.name}_screen_{safe_name(entry['name'])}_r{rank}")
-                bs, lmap = self._build_one(case, raw, names, picks)
+                bs, lmap = self._build_one(case, raw, names, picks, screen=True)
                 reg[rkey] = {"case_id": case.case_id, "ligand_map": lmap}
                 atomic_write_json(reg, reg_path)
                 if bs.get("status") != "PASS":
@@ -471,12 +471,14 @@ class Workflow:
             out[key] = spec
         return out
 
-    def _padding_nm(self) -> float:
-        """WP3: SMD/umbrella need room to pull; raise padding when binding is enabled."""
+    def _padding_nm(self, ligands: list[str] | None = None, *, screen: bool = False) -> float:
+        """WP3: SMD/umbrella need room to pull; raise padding for the systems that will be pulled from
+        (cases with ligands when binding is enabled) — not for apo, not for the short-MD pose screen."""
         md = self.cfg.get("md", {})
         pad = float(md.get("padding_nm", 1.0))
-        if (self.cfg.get("binding") or {}).get("enabled"):
-            need = float((self.cfg["binding"].get("config") or {}).get("pull_distance", 1.5)) + 0.5
+        if (self.cfg.get("binding") or {}).get("enabled") and ligands and not screen:
+            bc = self.cfg["binding"].get("config") or {}
+            need = float(bc.get("pull_distance_nm", bc.get("pull_distance", 1.5))) + 0.5
             need = max(1.5, min(need, 2.5))
             if pad < need:
                 if not getattr(self, "_pad_logged", False):
@@ -487,7 +489,7 @@ class Workflow:
                 pad = need
         return pad
 
-    def _build_one(self, case, raw: Path, names: list[str], picks: dict) -> tuple[dict, dict]:
+    def _build_one(self, case, raw: Path, names: list[str], picks: dict, *, screen: bool = False) -> tuple[dict, dict]:
         """Build one case from chosen poses (`picks[name]` has sdf/smiles); returns (build summary, name → topology name)."""
         from .build.pipeline import build_case
         drop = {l.get("reference_resname") for l in self.cfg["ligands"] if l.get("reference_resname")}
@@ -499,7 +501,7 @@ class Workflow:
                 for n in names if lspec.get(n, {}).get("sequence")]
         s = build_case(case, receptor=raw, ligand_references=[picks[n]["smiles"] for n in small],
                        ligand_poses=[picks[n]["sdf"] for n in small], ph=self.cfg.get("ph", 7.4),
-                       padding_nm=self._padding_nm(), keep_hetero=set(self.cfg.get("keep_hetero", [])),
+                       padding_nm=self._padding_nm(names, screen=screen), keep_hetero=set(self.cfg.get("keep_hetero", [])),
                        extra_ligand_resnames=drop, peptides=peps or None, ligand_names=small,
                        exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])),
                        metal_policy=self.cfg.get("metal_policy") or None,

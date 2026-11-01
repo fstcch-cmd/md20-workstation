@@ -53,6 +53,25 @@ def _minimize(stage_dir: Path, spec: StageSpec, make_backend, *, identity: dict,
         backend.close()
 
 
+MIN_LOG_ROWS = 20
+
+
+def _ensure_log_rows(spec, decisions=None):
+    """A stage must leave enough StateData rows to be judged (acceptance needs ≥ 5 in total and a 30 % tail).
+    Short stages (pose screen, classroom tweaks) get a denser report interval instead of an unjudgeable log."""
+    if spec.ensemble == "MIN" or spec.length_ps <= 0:
+        return spec
+    rows = spec.length_ps / max(spec.report_interval_ps, 1e-9)
+    if rows >= MIN_LOG_ROWS:
+        return spec
+    new = max(spec.length_ps / MIN_LOG_ROWS, spec.timestep_fs / 1000.0)
+    if decisions:
+        decisions.record(f"engine.{spec.name}", "report_interval_ps", round(new, 4),
+                         f"{spec.name} 長 {spec.length_ps:g} ps、每 {spec.report_interval_ps:g} ps 記錄一次只有 {rows:.0f} 筆，"
+                         f"不足以驗收溫度／密度；自動改為每 {new:.3g} ps 記錄（至少 {MIN_LOG_ROWS} 筆）。", kind="auto_fixed")
+    return dataclasses.replace(spec, report_interval_ps=new)
+
+
 def run_protocol(run_dir: Path | str, protocol: Protocol, make_backend: Callable, *, identity: dict,
                  decisions: DecisionLog | None = None, progress_cb=None, max_extensions: int = 2,
                  write_dcd: bool = True, batch_steps: int | None = None, should_pause=None) -> dict:
@@ -75,7 +94,7 @@ def run_protocol(run_dir: Path | str, protocol: Protocol, make_backend: Callable
                 prev_state = Path(data["state"])
                 results[spec.name] = {"status": "PASS", "energies": data["energies_kj_mol"]}
                 continue
-            spec_run = spec
+            spec_run = _ensure_log_rows(spec, decisions)
             for attempt in range(max_extensions + 1):
                 res: StageResult = run_stage(sdir, spec_run, make_backend, identity=ident, initial_state=prev_state,
                                              decisions=decisions, write_dcd=write_dcd, progress_cb=progress_cb,
@@ -100,10 +119,12 @@ def run_protocol(run_dir: Path | str, protocol: Protocol, make_backend: Callable
                         decisions.record(f"engine.{spec.name}", "acceptance", acc.status,
                                          "Production 不自動延長；末段統計未達標會在報告中標示，由使用者判斷。", kind="auto")
                     break
-                if attempt == max_extensions:
+                if attempt == max_extensions or acc.extend_ps <= 0:
+                    # extend_ps 0 = the problem is not "too short" (e.g. no usable log): extending cannot fix it
                     comp["status"] = "NEEDS_HUMAN"
                     atomic_write_json(comp, sdir / f"{spec.name}_complete.json")
-                    raise NeedsHuman(f"{spec.name} 延長 {max_extensions} 次後仍未通過驗收：{acc.recommendation}",
+                    raise NeedsHuman((f"{spec.name} 延長 {attempt} 次後仍未通過驗收：" if attempt else f"{spec.name} 未通過驗收：")
+                                     + acc.recommendation,
                                      stage=spec.name, evidence={"checks": acc.checks})
                 # extend: a *new* spec with longer length continues the same chunk sequence
                 spec_run = dataclasses.replace(spec_run, length_ps=spec_run.length_ps + acc.extend_ps)

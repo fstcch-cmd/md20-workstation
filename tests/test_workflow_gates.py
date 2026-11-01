@@ -58,9 +58,15 @@ def test_no_recommendation_blocks_pose_selection(tmp_path):
 
 def test_binding_raises_padding(tmp_path):
     wf = _wf(tmp_path)
-    assert wf._padding_nm() >= 1.5
+    assert wf._padding_nm(["BEN"]) >= 1.5
+    assert wf._padding_nm([]) == 1.0                       # apo is never pulled from
+    assert wf._padding_nm(["BEN"], screen=True) == 1.0     # nor is the short-MD pose screen
+    wf.cfg["binding"]["config"] = {"pull_distance_nm": 1.8}   # the key binding actually uses
+    assert wf._padding_nm(["BEN"]) == 2.3
+    wf.cfg["binding"]["config"] = {"pull_distance_nm": 0.6}
+    assert wf._padding_nm(["BEN"]) == 1.5                  # floor
     wf.cfg["binding"]["enabled"] = False
-    assert wf._padding_nm() == 1.0
+    assert wf._padding_nm(["BEN"]) == 1.0
 
 
 # --- regression: binding/analysis must read ligand atom indices from the post-assembly records -----------------

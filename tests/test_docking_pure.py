@@ -136,3 +136,14 @@ def test_box_from_coords_bounds():
     b = box_from_coords(np.array([[0, 0, 0], [4, 2, 1]]), padding=6, min_size=18, max_size=32)
     assert b.center == (2.0, 1.0, 0.5) and b.size == (18.0, 18.0, 18.0)
     assert b.contains(np.array([2, 1, 0.5]))
+
+
+def test_docking_result_load_ignores_stamp(tmp_path):
+    """Workflow resume reads docking_results.json written by atomic_write_json, which adds the `_md20` stamp."""
+    from md20.docking.run import DockingResult
+    from md20.util import atomic_write_json
+    r = DockingResult(mode="independent", receptor_pdbqt="r.pdbqt", box={"center": [0, 0, 0]}, params={}, entries=[{"name": "BEN"}])
+    atomic_write_json(r.to_dict(), tmp_path / "docking_results.json")
+    assert "_md20" in (tmp_path / "docking_results.json").read_text(encoding="utf-8")
+    back = DockingResult.load(tmp_path / "docking_results.json")
+    assert back.entry("BEN") == {"name": "BEN"} and back.mode == "independent"

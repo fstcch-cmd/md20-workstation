@@ -93,7 +93,7 @@ def inspect_pdb_text(text: str) -> PDBInspection:
         if element.upper() == "H":
             insp.hydrogens += 1
         key = (chain, resid, icode, resname)
-        seen_names[key][name] += 1
+        seen_names[key][(name, altloc)] += 1        # altloc A and B of the same atom are not duplicates
         if rec == "HETATM":
             insp.n_hetatm += 1
             if resname in WATER:
@@ -128,7 +128,7 @@ def inspect_pdb_text(text: str) -> PDBInspection:
     insp.chains = {c: len(v) for c, v in chain_res.items()}
     insp.hetero_residues = {k: len(v) for k, v in insp.hetero_residues.items()}
     for key, counter in seen_names.items():
-        dups = [n for n, c in counter.items() if c > 1]
+        dups = sorted({n for (n, _alt), c in counter.items() if c > 1})
         if dups:
             insp.duplicate_atom_names.append({"residue": key, "atoms": dups})
     return insp

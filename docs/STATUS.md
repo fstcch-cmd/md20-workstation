@@ -5,7 +5,7 @@
 
 CI 依據(`fstcch-cmd/md20-workstation`):
 - **63d363b（第二個 session 最終版）openmm-stack**:**Windows OpenCL 124 passed、macOS 126 passed**,各只有 1 個失敗——`test_gui_pages_render`,原因是 NiceGUI 在子行程看到 pytest 環境變數就切到它自己的測試模式(非 GUI 本身問題),本 session 已修;Ubuntu `MD20_HEAVY=1` 重測結果見該 commit 留言。
-- **f879764(第三個 session:閘門一鍵決定、3D 互作、金屬擬合參數、GUI server 測試修正)openmm-stack**:**Windows OpenCL 與 macOS 全綠**(含 `test_gui_pages_render`);Ubuntu `MD20_HEAVY=1` 重測**卡在論文對接重現超過 60 分鐘**(見下),已取消;同一輪中 `test_metal_integration` 兩項失敗,traceback 待下一輪。
+- **f879764(第三個 session:閘門一鍵決定、3D 互作、金屬擬合參數、GUI server 測試修正)openmm-stack**:**Windows OpenCL 與 macOS 全綠**(含 `test_gui_pages_render`);Ubuntu `MD20_HEAVY=1` 重測卡在論文對接重現(已移出)。**ef32b48 的 Ubuntu 重測跑完:151 passed、4 failed,全是從未在 Ubuntu 跑完過的重測抓到的真 bug**,已修:(1)重複原子名閘門把 altloc A/B 同名原子算成重複(3KS3 被擋,兩個金屬整合測試因此失敗);(2)`DockingResult.load` 讀到戳記 `_md20` 欄位就當掉(全流程續跑時);(3)短 MD 篩 pose 的 2 ps stage 只記 4 筆 log → 無法驗收,且引擎用 +0 ps「延長」兩次白跑——現在短 stage 自動加密記錄、無法靠延長解決的直接 NEEDS_HUMAN;(4)workflow 讀 `pull_distance`(實際鍵名 `pull_distance_nm`),padding 一律被拉到 2.0 nm,且套到 apo 與篩選系統——全流程測試因此跑了 51 分鐘。
 - 測試函式:約 160 個(pure-python 部分本地全過)。
 
 ---
@@ -58,6 +58,10 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 - **hsieh2024**(NF-κB RELA,六配體同時對接):論文標 PDB 1VKF,但 1VKF 是 *Thermotoga* 蛋白;系統判定正解為 **1VKX**。
 - **hsieh2025**(Keap1-BTB 4CXT,胜肽 GGGGGKP):胞內標靶但淨電荷 +1,**CPP 閘門擋下並給替代設計**;「covalent bonding」實為凡得瓦接觸;盒子比整個 domain 還大(等同盲對接)。
 目的是示範把關流程,不是逐位重現論文數字。
+
+**論文對接重現(CI `paper-docking`,ef32b48,exhaustiveness 8 縮減搜尋)——第一次跑完**:
+- **hsieh2025**(4CXT,GGGGGKP,91 s):第 1 名 −5.91 kcal/mol(論文 −5.22);第 1 名 pose 與論文報告的接觸殘基 recall **100%**,第 2–5 名 0–100%。
+- **hsieh2024**(1VKX,六配體同時對接,38 分):聯合分數 −11.7(論文 −13.86),但六個配體與論文殘基的 recall **全為 0**——落點在論文口袋之外;系統**拒絕推薦任何 pose**:口袋可用體積約 107 Å³、六配體總體積約 1386 Å³,建議改 independent 對接。這正是要教的:分數接近不代表結合模式對,而同時塞六個配體進一個口袋在幾何上就不成立。
 
 ### C2. 刻意簡化或未做
 - **短 MD 篩 pose**只排除會散開的 pose,不以短 MD 排名結合強度;非 research tier 預設關閉。
