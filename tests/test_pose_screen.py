@@ -117,6 +117,30 @@ def test_pause_then_resume_uses_cache(tmp_path):
     assert sel["ligands"]["BEN"]["rank"] == 1
 
 
+def test_redock_invalidates_screen_cache(tmp_path):
+    """After docking_results.json changes, rank 1 is a different pose: cached verdicts must not be reused."""
+    from md20.util import atomic_write_json
+    wf = _wf(tmp_path)
+    res = SimpleNamespace(mode="independent", entries=[_entry()])
+    dock_json = wf.dir / "docking" / "docking_results.json"
+    atomic_write_json({"v": 1}, dock_json)
+    wf._mark("docking", result=str(dock_json), mode="independent")
+    calls = []
+    wf.choose_poses(res, screen=_fake_screen({1: STABLE, 3: STABLE, 5: STABLE}, calls))
+    assert calls
+    wf.state()["steps"].pop("pose_selection")
+    wf.cfg["pose_choices"] = {"X": 1}                            # changes the selection key so choose_poses runs again
+    calls2 = []
+    wf.choose_poses(res, screen=_fake_screen({1: STABLE, 3: STABLE, 5: STABLE}, calls2))
+    assert calls2 == []                                          # same docking → cache used
+    atomic_write_json({"v": 2}, dock_json)                       # re-dock
+    wf.cfg["pose_choices"] = {"X": 2}
+    calls3 = []
+    wf.choose_poses(res, screen=_fake_screen({1: STABLE, 3: STABLE, 5: STABLE}, calls3))
+    assert calls3 == calls                                       # everything re-simulated
+    assert any(r["what"] == "cache" for r in wf.dec.read())
+
+
 def test_user_choice_and_disabled_screen_skip_simulation(tmp_path):
     calls = []
     sel = _wf(tmp_path / "a", choices={"BEN": 5}).choose_poses(

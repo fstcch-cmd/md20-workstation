@@ -159,6 +159,15 @@ def cmd_pipeline(a):
     cfg = json.loads(Path(a.config).read_text(encoding="utf-8"))
     root = Path(a.dir) / safe_name(a.project)
     proj = Project(root) if (root / "project.json").is_file() else Project.create(a.dir, a.project)
+    wf_cfg_path = root / "workflows" / safe_name(cfg.get("name", "workflow")) / "config.json"
+    existing = load_json(wf_cfg_path, {}) if wf_cfg_path.is_file() else {}
+    if existing and existing != cfg:
+        # the workflow's own config.json carries decisions made at gates (GUI buttons / hand edits); the student's
+        # original file does not — keep those instead of silently re-blocking at the same gate
+        from .workflow import merge_human_decisions
+        cfg, carried = merge_human_decisions(cfg, existing)
+        if carried:
+            _p("沿用先前在 workflow config.json 裡的人工決定：" + ", ".join(carried))
     wf = Workflow(proj, cfg)
     platform = choose_platform()
     _p(f"平台：{platform.name}；workflow 目錄：{wf.dir}")

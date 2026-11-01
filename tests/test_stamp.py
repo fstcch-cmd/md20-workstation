@@ -55,3 +55,11 @@ def test_encrypted_provenance_only_owner_can_read(tmp_path: Path, monkeypatch):
     with pytest.raises(Exception):
         st.decrypt_blob(blob, other)
     st.provenance_blob.cache_clear()
+
+
+def test_pdb_remarks_are_pure_ascii():
+    """cp950 Windows regression: OpenMM opens PDB files with the locale encoding; a non-ASCII REMARK crashed assembly."""
+    from md20.util.stamp import pdb_remarks
+    for line in pdb_remarks():
+        line.encode("ascii")
+        assert len(line) <= 80

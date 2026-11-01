@@ -28,6 +28,7 @@ Config (JSON):
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from dataclasses import fields
 from pathlib import Path
@@ -52,6 +53,27 @@ def manifest_ligands(bm: dict) -> list[dict]:
     if any(l.get("heavy_atom_indices") or l.get("atom_indices") for l in asm):
         return asm
     return bm.get("ligands") or []
+
+def fetch_pdb(pid: str, path: Path, *, timeout: float = 60.0) -> Path:
+    """Download an RCSB entry to a temporary file, check it is really a PDB, then move it into place: a broken
+    connection or an HTML error page must never be left behind as `<ID>.pdb` and reused on the next run."""
+    tmp = path.with_suffix(".pdb.part")
+    req = urllib.request.Request(f"https://files.rcsb.org/download/{pid}.pdb", headers={"User-Agent": "MD20-workstation"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r, open(tmp, "wb") as fh:
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                fh.write(chunk)
+        text = tmp.read_text(encoding="utf-8", errors="ignore")
+        if not any(l.startswith(("ATOM  ", "HETATM")) for l in text.splitlines()) or not text.rstrip().endswith("END"):
+            raise RuntimeError(f"RCSB 回傳的 {pid}.pdb 不完整或不是 PDB（{len(text)} 字元）")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return path
+
 
 class WorkflowBlocked(RuntimeError):
     """A step needs a human decision; message explains which and why."""
@@ -87,15 +109,76 @@ def example_config(screen: bool = False) -> dict:
     }
 
 
+# keys that hold *human decisions* written back by gates/GUI (never re-derivable); re-running `pipeline run` from
+# the student's original file must not silently discard them
+DECISION_KEYS: tuple[tuple[str, ...], ...] = (
+    ("pose_choices",), ("human_choices",), ("structure_override",), ("metal_policy",), ("metal_params",), ("peptide_policy",),
+    ("docking", "skip_redock"), ("box", "allow_blind"), ("binding", "manual_windows"),
+    ("screen", "select"), ("screen", "next_mode"), ("screen", "allow_partial"),
+)
+LIGAND_DECISION_KEYS = ("cpp_override", "cpp_evidence", "target_location")
+
+
+def _get_path(d: dict, path: tuple) -> tuple[bool, object]:
+    node = d
+    for k in path:
+        if not isinstance(node, dict) or k not in node:
+            return False, None
+        node = node[k]
+    return True, node
+
+
+def merge_human_decisions(new: dict, existing: dict) -> tuple[dict, list[str]]:
+    """Carry decision keys from the workflow's own config.json into a freshly loaded config when the new one does
+    not set them.  Returns (merged, carried-key names)."""
+    import copy as _copy
+    out = _copy.deepcopy(new)
+    carried = []
+    for path in DECISION_KEYS:
+        has_old, old = _get_path(existing, path)
+        has_new, cur = _get_path(out, path)
+        if not has_old or old in (None, {}, [], False):
+            continue
+        if has_new and cur not in (None, {}, [], False):
+            continue
+        node = out
+        for k in path[:-1]:
+            node = node.setdefault(k, {})
+        node[path[-1]] = _copy.deepcopy(old)
+        carried.append(".".join(path))
+    old_ligs = {l.get("name"): l for l in existing.get("ligands") or [] if isinstance(l, dict)}
+    for l in out.get("ligands") or []:
+        o = old_ligs.get(l.get("name"))
+        if not o:
+            continue
+        for k in LIGAND_DECISION_KEYS:
+            if o.get(k) and not l.get(k):
+                l[k] = o[k]
+                carried.append(f"ligands[{l.get('name')}].{k}")
+    return out, carried
+
+
 class Workflow:
-    def __init__(self, project: Project, config: dict):
+    def __init__(self, project: Project, config: dict, *, create: bool = True):
         self.project = project
         self.cfg = config
         self.name = safe_name(config.get("name", "workflow"))
-        self.dir = ensure_dir(project.dir / "workflows" / self.name)
+        self.dir = project.dir / "workflows" / self.name
+        if create:
+            ensure_dir(self.dir)
         self.state_path = self.dir / "state.json"
         self.dec = project.decisions
-        atomic_write_json(config, self.dir / "config.json")
+        cfg_path = self.dir / "config.json"
+        if create and (not cfg_path.is_file() or load_json(cfg_path, {}) != config):   # only touch the file when the content changes
+            atomic_write_json(config, cfg_path)
+
+    @classmethod
+    def open(cls, project: Project, name: str) -> "Workflow":
+        """An existing workflow by name, from its own config.json (the file that carries human decisions)."""
+        p = project.dir / "workflows" / safe_name(name) / "config.json"
+        if not p.is_file():
+            raise FileNotFoundError(f"找不到 workflow {name}（{p}）")
+        return cls(project, load_json(p, {}))
 
     # ------------------------------------------------------------------ state helpers
     def state(self) -> dict:
@@ -126,10 +209,12 @@ class Workflow:
         dst = self.dir / "inputs"
         dst.mkdir(exist_ok=True)
         if r.get("pdb_id"):
-            pid = r["pdb_id"].upper()
+            pid = str(r["pdb_id"]).strip().upper()
+            if not re.fullmatch(r"[0-9][A-Z0-9]{3}", pid):
+                self._block("receptor_input", f"PDB ID「{r['pdb_id']}」格式不對（4 個英數字，例如 3PTB）。")
             path = dst / f"{pid}.pdb"
             if not path.is_file():
-                urllib.request.urlretrieve(f"https://files.rcsb.org/download/{pid}.pdb", path)
+                fetch_pdb(pid, path)
             src = f"RCSB {pid}"
         else:
             src_path = Path(r["file"])
@@ -475,7 +560,7 @@ class Workflow:
         user = self.cfg.get("pose_choices", {}) or {}
         sel = {"mode": res.mode, "ligands": {}}
         cache_path = self.dir / "pose_screen.json"
-        cache = load_json(cache_path, {})
+        cache = self._pose_screen_cache(cache_path)
         for e in res.entries:
             n = len(e["poses"])
             if e.get("recommended_rank") is None and e["name"] not in user:
@@ -528,6 +613,29 @@ class Workflow:
             self.dec.record("workflow.pose", e["name"], f"rank {rank}", why, kind="human" if e["name"] in user else "auto")
         self._mark("pose_selection", selection=sel, choices_cfg=key)
         return sel
+
+    def _docking_signature(self) -> str | None:
+        from .util import sha256_file
+        d = self._done("docking")
+        p = Path(d["result"]) if d and d.get("result") else None
+        return sha256_file(p) if p and p.is_file() else None
+
+    def _pose_screen_cache(self, cache_path: Path) -> dict:
+        """Short-MD verdicts are keyed by entry+rank; after a re-dock rank 1 is a different pose, so the whole cache
+        (and the registry of cases built from the old poses) is dropped when docking_results.json changed."""
+        cache = load_json(cache_path, {})
+        sig = self._docking_signature()
+        if cache and cache.get("_docking") != sig:
+            n = sum(1 for k in cache if not k.startswith("_"))
+            cache = {}
+            reg_path = self.dir / "pose_screen_cases.json"
+            if reg_path.is_file():
+                reg_path.unlink()
+            if n:
+                self.dec.record("workflow.pose_screen", "cache", "discarded",
+                                f"對接結果已改變（重新對接），{n} 個舊 pose 的短 MD 判定與其建模 case 不再沿用，重新篩選。")
+        cache["_docking"] = sig
+        return cache
 
     def _screen_pose(self, raw: Path, make_factory: Callable, entry: dict, rank: int, *,
                      should_pause=None, progress_cb=None) -> dict | None:
@@ -627,6 +735,8 @@ class Workflow:
             return None
         out = {}
         for key, spec in mp.items():
+            if not spec:                                  # None/{}: GUI chose the geometric bonded model for this site
+                continue
             spec = dict(spec)
             for f in ("file", "frcmod", "pdb"):
                 if spec.get(f) and not Path(spec[f]).is_absolute():
@@ -694,8 +804,13 @@ class Workflow:
         md = self.cfg.get("md", {})
         runs = dict((self._done("md_runs") or {}).get("runs", {}))
         for key, c in built.items():
-            if runs.get(key, {}).get("status") == "COMPLETE":
+            prev = runs.get(key, {})
+            if prev.get("status") == "COMPLETE" and prev.get("case_id") == c["case_id"]:
                 continue
+            if prev and prev.get("case_id") != c["case_id"]:
+                self.dec.record("workflow.md", key, "rebuilt case", f"{key} 的 MD 紀錄屬於舊 case {prev.get('case_id')}（pose 或設定改變後重新建模為 "
+                                f"{c['case_id']}）；舊結果不沿用，重新執行 MD。")
+                runs.pop(key, None)
             case = self.project.case(c["case_id"])
             proto = make_protocol(md.get("tier", "teaching"), production_ns=md.get("production_ns"), replicas=md.get("replicas", 1))
             if md.get("stage_overrides"):

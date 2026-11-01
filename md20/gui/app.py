@@ -151,9 +151,14 @@ def _gate_buttons(wf: Workflow, card: dict):
 @ui.page("/wf/{project}/{name}")
 def workflow_page(project: str, name: str):
     _header()
+    if safe_name(project) != project or safe_name(name) != name or not (Path(STATE["projects_dir"]) / project / "project.json").is_file():
+        ui.label("找不到這個專案／流程。").classes("text-negative"); return
     proj = Project(Path(STATE["projects_dir"]) / project)
-    cfg = load_json(proj.dir / "workflows" / name / "config.json", {})
-    wf = Workflow(proj, cfg)
+    try:
+        wf = Workflow.open(proj, name)          # never creates an empty workflow for a mistyped URL
+    except FileNotFoundError:
+        ui.label(f"找不到流程 {name}。").classes("text-negative"); return
+    cfg = wf.cfg
     with ui.column().classes("w-full max-w-6xl mx-auto gap-3"):
         ui.label(f"{project} / {name}").classes("text-xl font-semibold")
         status = ui.label("").classes("text-lg")
@@ -172,6 +177,9 @@ def workflow_page(project: str, name: str):
 
         def pick(e):
             row = e.args[1]
+            job = RUNNER.get(wf)
+            if job and job.thread and job.thread.is_alive():
+                ui.notify("流程執行中；請先暫停再改選 pose（執行中改選會和背景執行緒互相覆寫狀態）", type="warning"); return
             set_pose_choice(wf, row["entry"], row["rank"])
             ui.notify(f"{row['entry']} 改用第 {row['rank']} 名 pose；按「開始／繼續」重新執行後續步驟")
         poses.on("rowClick", pick)
@@ -346,7 +354,10 @@ def serve_viewer(project: str, name: str, i: int = 0):
     if safe_name(project) != project or safe_name(name) != name:
         return HTMLResponse("not allowed", status_code=403)
     proj = Project(Path(STATE["projects_dir"]) / project)
-    wf = Workflow(proj, load_json(proj.dir / "workflows" / name / "config.json", {}))
+    try:
+        wf = Workflow.open(proj, name)
+    except FileNotFoundError:
+        return HTMLResponse("not found", status_code=404)
     targets = viewer_targets(wf)
     if not 0 <= i < len(targets):
         return HTMLResponse("沒有可檢視的結構", status_code=404)

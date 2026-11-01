@@ -6,3 +6,11 @@ __pycache__/
 /dist/
 *private*.pem
 owner_keys/
+validation_results/
+pytest.log
+env.log
+md20-lock-*.txt
+md20-pip-*.txt
+.venv/
+.DS_Store
+*.pdb.part

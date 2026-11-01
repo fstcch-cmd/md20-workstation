@@ -59,8 +59,12 @@ def test_docking_damaged_pdb_is_flagged():
 
 
 def test_long_gap_needs_human_short_gap_auto():
-    lines, _ = _protein(6, gap_after=2, gap_len=3)     # 3 missing residues → auto
+    lines, _ = _protein(6, gap_after=2, gap_len=3)     # 3 missing residues → auto, but only when SEQRES says what is missing
     rep = gate_inspection(inspect_pdb_text("\n".join(lines)), keep_hetero=set())
+    g = {g.name: g for g in rep.gates}["missing loops (short)"]
+    assert g.status == NEEDS_HUMAN and "SEQRES" in g.explanation and "ACE/NME" in " ".join(g.options)
+    seqres = "SEQRES   1 A    6  ALA ALA ALA ALA ALA ALA"
+    rep = gate_inspection(inspect_pdb_text("\n".join([seqres] + lines)), keep_hetero=set())
     assert {g.name: g.status for g in rep.gates}["missing loops (short)"] == AUTO_FIXED
     lines, _ = _protein(6, gap_after=2, gap_len=12)    # 12 missing → human
     rep = gate_inspection(inspect_pdb_text("\n".join(lines)), keep_hetero=set())

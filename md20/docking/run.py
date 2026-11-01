@@ -186,7 +186,7 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
         rec_pdbqt = out / "receptor.pdbqt"
         types = receptor_to_pdbqt(receptor_pdb, rec_pdbqt)
     rec_xyz = np.array([[float(l[30:38]), float(l[38:46]), float(l[46:54])]
-                        for l in rec_pdbqt.read_text().splitlines() if l.startswith(("ATOM", "HETATM")) and not l.rstrip().endswith("HD")])
+                        for l in rec_pdbqt.read_text(encoding="utf-8").splitlines() if l.startswith(("ATOM", "HETATM")) and not l.rstrip().endswith("HD")])
     params = {"scoring": scoring, "exhaustiveness": exhaustiveness, "n_poses": n_poses, "energy_range": energy_range,
               "seed": seed, "cpu": cpu, "receptor_types": types}
     if decisions:

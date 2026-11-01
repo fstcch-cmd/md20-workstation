@@ -168,8 +168,18 @@ def gate_inspection(insp: PDBInspection, *, keep_hetero: set[str], max_auto_gap:
                      diff=[f"chain {c}: {a}→{b}" for c, a, b in insp.numbering_jumps[:12]]))
     long_gaps = [g for g in insp.gaps if g[2] - g[1] - 1 > max_auto_gap]
     short_gaps = [g for g in insp.gaps if g[2] - g[1] - 1 <= max_auto_gap]
-    if short_gaps:
-        rep.add(Gate("missing loops (short)", AUTO_FIXED, f"{len(short_gaps)} 段 ≤{max_auto_gap} 殘基的缺口由 PDBFixer 依 SEQRES 補建。",
+    if short_gaps and not insp.seqres_present:
+        # PDBFixer only knows *which* residues are missing from SEQRES; without it nothing is rebuilt and OpenMM's
+        # createStandardBonds() would join the two ends of the gap with a 10–20 Å "bond" (no distance check)
+        rep.add(Gate("missing loops (short)", NEEDS_HUMAN,
+                     f"{len(short_gaps)} 段 ≤{max_auto_gap} 殘基的主鏈缺口，但檔案沒有 SEQRES，PDBFixer 無法得知缺的是哪些殘基，"
+                     "不會補建；若直接建模，缺口兩端會被當成一條鍵連起來。",
+                     diff=[f"chain {c}: {a}…{b} ({b - a - 1} res)" for c, a, b in short_gaps],
+                     options=["截斷（加 ACE/NME 端帽）", "提供含 SEQRES 的原始 PDB（RCSB 下載版）", "改用 AlphaFold 模型"],
+                     evidence={"gaps": [list(g) for g in short_gaps], "seqres": False}))
+    elif short_gaps:
+        rep.add(Gate("missing loops (short)", AUTO_FIXED, f"{len(short_gaps)} 段 ≤{max_auto_gap} 殘基的缺口由 PDBFixer 依 SEQRES 補建"
+                     "（補建後會再檢查主鏈是否連續）。",
                      diff=[f"chain {c}: {a}…{b} ({b - a - 1} res)" for c, a, b in short_gaps]))
     if long_gaps:
         rep.add(Gate("missing loops (long)", NEEDS_HUMAN,
@@ -230,7 +240,7 @@ def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4
     """
     source, out_dir = Path(source), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    keep_hetero = set(keep_hetero or COFACTOR_KEEP_DEFAULT)
+    keep_hetero = set(COFACTOR_KEEP_DEFAULT if keep_hetero is None else keep_hetero)   # an explicit [] means "keep none"
     human_choices = dict(human_choices or {})
     text = source.read_text(encoding="utf-8", errors="ignore") if source.suffix.lower() in {".pdb", ".ent"} else ""
     exclude_chains = set(exclude_chains or ())
@@ -328,6 +338,22 @@ def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4
     with open(out_cif, "w", encoding="utf-8") as fh:
         PDBxFile.writeFile(fixer.topology, fixer.positions, fh, keepIds=True)
     n_atoms = fixer.topology.getNumAtoms()
+    # verify, never assume: every internal gap must be gone from the cleaned receptor (a leftover break becomes a
+    # bogus C–N bond in OpenMM, which the force-field template matching does not catch)
+    left = inspect_pdb_text(out_pdb.read_text(encoding="utf-8", errors="ignore")).gaps
+    if left:
+        g = Gate("unfilled chain breaks", NEEDS_HUMAN,
+                 f"PDBFixer 補建後仍有 {len(left)} 處主鏈斷裂（CA–CA > 4.2 Å）；SEQRES 未涵蓋這些缺口或補建失敗。"
+                 "不能直接建模：OpenMM 會把斷裂兩端連成一條假鍵。",
+                 diff=[f"chain {c}: {a}…{b} ({b - a - 1} res)" for c, a, b in left],
+                 options=["截斷（加 ACE/NME 端帽）", "提供含完整 SEQRES 的原始 PDB", "改用 AlphaFold 模型"],
+                 evidence={"gaps": [list(x) for x in left]})
+        report.add(g)
+        manifest.update({"gates": report.to_dict(), "status": NEEDS_HUMAN, "receptor_pdb_unverified": str(out_pdb)})
+        if decisions:
+            decisions.record("build.receptor", "chain breaks", [list(x) for x in left], g.explanation, kind="human")
+        atomic_write_json(manifest, out_dir / "receptor_manifest.json")
+        return manifest
     manifest.update({"receptor_pdb": str(out_pdb), "receptor_cif": str(out_cif), "n_atoms_clean": n_atoms,
                      "missing_residues_added": {str(k): v for k, v in kept_missing.items()},
                      "missing_atoms_added": {str(r): [a.name for a in atoms] for r, atoms in fixer.missingAtoms.items()}})
