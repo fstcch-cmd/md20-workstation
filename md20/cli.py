@@ -146,8 +146,11 @@ def cmd_queue(a):
 def cmd_pipeline(a):
     from .workflow import Workflow, WorkflowBlocked, example_config
     if a.action == "example":
-        print(json.dumps(example_config(), ensure_ascii=False, indent=2))
+        print(json.dumps(example_config(screen=getattr(a, "screen", False)), ensure_ascii=False, indent=2))
         return 0
+    if not a.config:
+        _p("pipeline run 需要設定檔：md20 pipeline example > my.json；md20 pipeline run my.json")
+        return 2
     from .project import Project
     from .engine import PausePolicy
     from .engine.factory import make_backend_factory
@@ -230,6 +233,16 @@ def cmd_validate(a):
     out = Path(a.out or f"{cfg['name']}.json")
     out.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     _p(f"已寫入 {out}\n{(mod.__doc__ or '').strip()}\n下一步：md20 pipeline run {out}")
+    return 0
+
+
+def cmd_screen(a):
+    """Write an example compound sheet (every accepted column) for `screen.library`."""
+    from .docking.library import write_template
+    p = write_template(a.out)
+    _p(f"已寫入 {p}。填入化合物後在 pipeline 設定加上：\n"
+       '  "screen": {"library": "' + str(p) + '", "exhaustiveness": 8, "n_poses": 3, "top_n": 20}\n'
+       "欄位：name（必填）＋ smiles / pubchem_cid / inchikey / chembl_id / ccd / sdf 任一（優先序同此順序）。")
     return 0
 
 
@@ -344,6 +357,7 @@ def main(argv=None) -> int:
     qp.add_argument("--fake", action="store_true"); qp.set_defaults(fn=cmd_queue)
     pl = sub.add_parser("pipeline", help="docking → MD → binding 全流程")
     pl.add_argument("action", choices=["run", "example"]); pl.add_argument("config", nargs="?")
+    pl.add_argument("--screen", action="store_true", help="example：含高通量篩選（screen.library）的範本")
     pl.add_argument("--project", default="MD20_Pipelines"); pl.add_argument("--hours"); pl.add_argument("--ignore-battery", action="store_true")
     pl.add_argument("--fake", action="store_true"); pl.set_defaults(fn=cmd_pipeline)
     rs = sub.add_parser("resume", help="續跑所有未完成的工作流程（重開機／當機後）")
@@ -354,6 +368,8 @@ def main(argv=None) -> int:
     va = sub.add_parser("validate", help="以 HCC Lab 論文建立驗證／教學案例")
     va.add_argument("case", nargs="?", default="list"); va.add_argument("--out"); va.add_argument("--tier", default="classroom")
     va.add_argument("--cpp-override", help="胜肽 CPP 未通過仍要繼續的理由（會寫入報告）"); va.set_defaults(fn=cmd_validate)
+    sc = sub.add_parser("screen", help="高通量篩選：化合物庫範本")
+    sc.add_argument("action", choices=["template"]); sc.add_argument("--out", default="compound_library.xlsx"); sc.set_defaults(fn=cmd_screen)
     g = sub.add_parser("gui", help="圖形介面（瀏覽器）"); g.add_argument("--port", type=int, default=8020)
     g.add_argument("--no-browser", action="store_true"); g.set_defaults(fn=cmd_gui)
     stp = sub.add_parser("stamp", help="檢查／解開 HCC Lab 戳記"); stp.add_argument("action", choices=["verify", "decrypt", "keygen"])

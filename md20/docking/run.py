@@ -163,7 +163,8 @@ def _symmetric_rmsd_fn(mol):
 def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir: Path | str, *,
          mode: str = "independent", scoring: str = "vina", exhaustiveness: int = 16, n_poses: int = 9,
          energy_range: float = 3.0, seed: int = 2026, cpu: int = 0, decisions: DecisionLog | None = None,
-         progress_cb=None) -> DockingResult:
+         progress_cb=None, receptor_pdbqt: Path | str | None = None) -> DockingResult:
+    """`receptor_pdbqt`: reuse an already converted receptor (HTS screen converts it once for hundreds of ligands)."""
     try:
         from vina import Vina
         vina_exe = None
@@ -176,8 +177,14 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
         raise ValueError("simultaneous 模式至少需要 2 個配體")
     receptor_pdb, out = Path(receptor_pdb), Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    rec_pdbqt = out / "receptor.pdbqt"
-    types = receptor_to_pdbqt(receptor_pdb, rec_pdbqt)
+    if receptor_pdbqt and Path(receptor_pdbqt).is_file():
+        rec_pdbqt = Path(receptor_pdbqt)
+        from collections import Counter
+        types = dict(Counter(l[77:79].strip() for l in rec_pdbqt.read_text(encoding="utf-8").splitlines()
+                             if l.startswith(("ATOM", "HETATM"))))
+    else:
+        rec_pdbqt = out / "receptor.pdbqt"
+        types = receptor_to_pdbqt(receptor_pdb, rec_pdbqt)
     rec_xyz = np.array([[float(l[30:38]), float(l[38:46]), float(l[46:54])]
                         for l in rec_pdbqt.read_text().splitlines() if l.startswith(("ATOM", "HETATM")) and not l.rstrip().endswith("HD")])
     params = {"scoring": scoring, "exhaustiveness": exhaustiveness, "n_poses": n_poses, "energy_range": energy_range,

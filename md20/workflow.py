@@ -19,7 +19,10 @@ Config (JSON):
   "pose_choices": {"BEN": 2},               # optional overrides (rank); simultaneous: {"joint": 3}
   "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 1, "production_ns": null,
          "padding_nm": 1.0},
-  "binding": {"enabled": true, "ligands": ["BEN"], "config": {"pull_velocity_nm_per_ps": 0.01}}
+  "binding": {"enabled": true, "ligands": ["BEN"], "config": {"pull_velocity_nm_per_ps": 0.01}},
+  "screen": {"library": "compounds.xlsx", "exhaustiveness": 8, "n_poses": 3, "top_n": 20, "select": [], "next_mode": "independent"}
+                                            # optional HTS pre-screen (docs/specs/hts_screen.md): selected compounds are
+                                            # appended to `ligands` and docked for real with `docking` settings
 }
 """
 from __future__ import annotations
@@ -54,7 +57,23 @@ class WorkflowBlocked(RuntimeError):
     """A step needs a human decision; message explains which and why."""
 
 
-def example_config() -> dict:
+def example_config(screen: bool = False) -> dict:
+    if screen:
+        return {
+            "name": "trypsin_screen",
+            "receptor": {"pdb_id": "3PTB"},
+            "ph": 7.4, "keep_hetero": ["CA"],
+            "box": {"from_residue": "BEN"},
+            "ligands": [{"name": "BEN", "smiles": "NC(=[NH2+])c1ccccc1", "reference_resname": "BEN"}],   # co-crystal self-check
+            "screen": {"library": "compound_library.xlsx", "exhaustiveness": 8, "n_poses": 3, "top_n": 20,
+                       "allow_partial": False, "allow_name_lookup": False,
+                       "filters": {"min_heavy_atoms": 5, "max_heavy_atoms": 80, "min_mw": 100, "max_mw": 900},
+                       "select": [], "next_mode": "independent"},
+            "docking": {"mode": "independent", "scoring": "vina", "exhaustiveness": 16, "n_poses": 9},
+            "pose_choices": {},
+            "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 1, "production_ns": None, "padding_nm": 1.0},
+            "binding": {"enabled": False, "ligands": [], "config": {}},
+        }
     return {
         "name": "trypsin_benzamidine",
         "receptor": {"pdb_id": "3PTB"},
@@ -155,7 +174,7 @@ class Workflow:
         if (d := self._done("receptor_docking")):
             return Path(d["path"])
         from .build.receptor import prepare_receptor
-        lig_res = {l.get("reference_resname") for l in self.cfg["ligands"] if l.get("reference_resname")}
+        lig_res = {l.get("reference_resname") for l in self.cfg.get("ligands") or [] if l.get("reference_resname")}
         box_res = (self.cfg.get("box") or {}).get("from_residue")
         if box_res:
             lig_res.add(box_res)
@@ -213,7 +232,7 @@ class Workflow:
     def docking_preflight(self, raw: Path) -> None:
         """S9: redocking self-check is mandatory for co-crystal boxes; blind boxes need explicit consent."""
         b, dcfg = self.cfg.get("box") or {}, self.cfg.get("docking", {})
-        refs = {l.get("reference_resname") for l in self.cfg["ligands"] if l.get("reference_resname")}
+        refs = {l.get("reference_resname") for l in self.cfg.get("ligands") or [] if l.get("reference_resname")}
         if b.get("from_residue"):
             res = str(b["from_residue"]).split(":")[0].split()[0]
             if res not in refs:
@@ -260,6 +279,152 @@ class Workflow:
             self._block("docking_preflight", f"胜肽 {l['name']}：{gate.explanation}（確認要繼續請在該配體設定 cpp_override 並說明理由）",
                         gates=[gate.to_dict()], ligand=l["name"])
         return peptide_smiles(seq, l.get("termini", "charged"))
+
+    # ------------------------------------------------------------------ HTS pre-screen (docs/specs/hts_screen.md)
+    def _screen_config(self):
+        from .docking.screen import ScreenConfig
+        return ScreenConfig.from_cfg(self.cfg.get("screen"))
+
+    def _library_path(self) -> Path:
+        lib = (self.cfg.get("screen") or {}).get("library") or ""
+        if not lib:
+            self._block("screen_library", "screen.library 未設定：請指定化合物庫（.xlsx/.csv），或移除 screen 區塊。")
+        p = Path(lib)
+        if not p.is_absolute():
+            p = (self.dir / p) if (self.dir / p).is_file() else p
+        if not p.is_file():
+            self._block("screen_library", f"找不到化合物庫檔案：{lib}")
+        return p
+
+    def run_screen_library(self, progress_cb=None) -> dict:
+        """Read the sheet and fetch one 3D SDF per compound (cached); keyed on the sheet's fingerprint."""
+        from .util.hashing import cheap_fingerprint, verify_cheap_fingerprint
+        from .docking.library import read_library, resolve_library, LibraryFilters, problem_entries
+        lib = self._library_path()
+        key = {"library": str(lib), "fingerprint": {k: v for k, v in cheap_fingerprint(lib).items() if k != "mtime_ns"},
+               "filters": (self.cfg.get("screen") or {}).get("filters") or {},
+               "allow_name_lookup": bool((self.cfg.get("screen") or {}).get("allow_name_lookup"))}
+        if (d := self._done("screen_library")) and d.get("key") == key and verify_cheap_fingerprint(lib, d["key"]["fingerprint"] | {"bytes": key["fingerprint"]["bytes"]}):
+            return load_json(d["manifest"], {"entries": {}})
+        scfg = self._screen_config()
+        entries, problems = read_library(lib, sheet=scfg.sheet)
+        if problems:
+            self._block("screen_library", "化合物庫有問題，請修正後重跑：\n" + "\n".join(f"• {p}" for p in problems[:40])
+                        + (f"\n…另有 {len(problems) - 40} 項" if len(problems) > 40 else ""),
+                        gates=[{"name": "library", "status": "NEEDS_HUMAN", "explanation": "\n".join(problems[:40]),
+                                "options": ["修正化合物庫檔案後重新執行"]}])
+        self.dec.record("screen.library", "input", {"file": str(lib), "rows": len(entries)},
+                        f"化合物庫 {lib.name}：{len(entries)} 筆；來源優先序 sdf > smiles > pubchem_cid > inchikey > chembl_id > ccd。"
+                        + ("名稱查詢已啟用（可能對應錯分子，每筆記錄）。" if scfg.allow_name_lookup else "名稱查詢關閉（寧可擋也不要猜）。"))
+        out = self.dir / "screen" / "library"
+        man = resolve_library(entries, out, filters=LibraryFilters.from_cfg(key["filters"]), allow_name_lookup=scfg.allow_name_lookup,
+                              decisions=self.dec, progress_cb=progress_cb, workers=scfg.workers)
+        bad = problem_entries(man)
+        if bad and not scfg.allow_partial:
+            lines = [f"• {b['name']}（第 {b.get('row', '?')} 列）：{b['status']} — {b.get('error', '')}" for b in bad[:40]]
+            msg = (f"化合物庫 {man['summary']['total']} 筆中有 {len(bad)} 筆無法使用（{man['summary']['FAILED']} 失敗、"
+                   f"{man['summary']['SKIPPED']} 略過）。請修正庫檔重跑，或設定 screen.allow_partial: true 略過它們（報告會列出）。\n" + "\n".join(lines))
+            self._block("screen_library", msg, manifest=str(out / "library_manifest.json"),
+                        gates=[{"name": "library partial", "status": "NEEDS_HUMAN", "explanation": msg,
+                                "evidence": {"failed": [b["name"] for b in bad]},
+                                "options": ["修正化合物庫檔案後重新執行", "screen.allow_partial: true（略過失敗的化合物，報告標註）"]}])
+        if bad:
+            self.dec.record("screen.library", "partial", [b["name"] for b in bad],
+                            f"使用者設定 screen.allow_partial：{len(bad)} 個化合物未納入篩選（{', '.join(b['name'] for b in bad[:10])}"
+                            + ("…" if len(bad) > 10 else "") + "）。", kind="human")
+        self._mark("screen_library", manifest=str(out / "library_manifest.json"), key=key, summary=man["summary"])
+        return man
+
+    def run_screen_docking(self, clean: Path, raw: Path, manifest: dict, progress_cb=None, should_stop=None) -> dict | None:
+        """Reduced-search independent docking of every usable compound; None when paused."""
+        from .docking.library import usable_entries
+        from .docking.screen import screen_dock, rank_screen, write_ranking_csv, screen_plots, failed_rows
+        scfg = self._screen_config()
+        box = self.make_box(raw, clean)
+        key = {"library": (self._done("screen_library") or {}).get("key"), "box": box.to_dict(), "params": scfg.params()}
+        if (d := self._done("screen_docking")) and d.get("key") == key:
+            return load_json(d["results"], {"entries": {}})
+        self.docking_preflight(raw)
+        out = self.dir / "screen"
+        ents = usable_entries(manifest)
+        if not ents:
+            self._block("screen_docking", "化合物庫沒有任何可用的化合物。")
+        res = screen_dock(clean, ents, box, out, scfg, decisions=self.dec, progress_cb=progress_cb, should_stop=should_stop)
+        if res.get("paused"):
+            return None
+        rows = rank_screen(res, top_n=scfg.top_n)
+        write_ranking_csv(rows, out / "screen_ranking.csv")
+        try:
+            plots = screen_plots(rows, out / "plots", top_n=scfg.top_n)
+        except Exception as exc:  # noqa: BLE001  — a plotting failure must not hide the numbers
+            plots = {"error": f"{type(exc).__name__}: {exc}"}
+            self.dec.record("screen.docking", "plots", "failed", f"篩選圖產生失敗（{str(exc)[:200]}）；排名表仍可用。")
+        bad = failed_rows(res, manifest)
+        dock_failed = [b for b in bad if b["stage"] == "docking"]
+        if dock_failed and not scfg.allow_partial:
+            msg = (f"{len(dock_failed)} 個化合物對接失敗（其餘 {len(rows)} 個已完成）。請檢查後重跑，或設定 screen.allow_partial: true。\n"
+                   + "\n".join(f"• {b['name']}：{b['error']}" for b in dock_failed[:40]))
+            self._block("screen_docking", msg, results=str(out / "screen_results.json"),
+                        gates=[{"name": "screen partial", "status": "NEEDS_HUMAN", "explanation": msg,
+                                "evidence": {"failed": [b["name"] for b in dock_failed]},
+                                "options": ["檢查失敗原因後重新執行", "screen.allow_partial: true（略過失敗的化合物，報告標註）"]}])
+        n_close = sum(1 for r in rows if r.get("indistinguishable_from_top"))
+        self.dec.record("screen.docking", "ranking", {"n": len(rows), "best": rows[0]["name"] if rows else None,
+                                                      "within_1kcal_of_best": n_close},
+                        f"篩選完成：{len(rows)} 個化合物有分數；第 1 名 {rows[0]['name'] if rows else '—'}"
+                        f"（{rows[0]['score'] if rows else '—'} kcal/mol），其中 {n_close} 個與第 1 名差距 < 1 kcal/mol，"
+                        "在 Vina 誤差內、名次沒有統計意義。篩選只用來剔除，正式對接與 MD 才做完整搜尋。")
+        self._mark("screen_docking", results=str(out / "screen_results.json"), ranking=str(out / "screen_ranking.csv"),
+                   plots=plots, key=key, n_scored=len(rows), failed=[b["name"] for b in bad])
+        return res
+
+    def screen_selection(self, manifest: dict, results: dict) -> list[dict]:
+        """Gate: the student picks which screened compounds go on (screen.select); returns the merged ligand list."""
+        from .docking.screen import rank_screen
+        scfg = self._screen_config()
+        sel = list((self.cfg.get("screen") or {}).get("select") or [])
+        mode = (self.cfg.get("screen") or {}).get("next_mode") or "independent"
+        rows = rank_screen(results, top_n=scfg.top_n)
+        by_name = {r["name"]: r for r in rows}
+        if not sel:
+            top = [r["name"] for r in rows[:scfg.top_n]]
+            msg = (f"篩選完成（{len(rows)} 個化合物有分數）。請在 GUI「篩選」分頁勾選要進入下一步的化合物，或在 config 設定 "
+                   f"screen.select: [名稱…] 與 screen.next_mode: independent|simultaneous。前 {len(top)} 名：{', '.join(top)}")
+            self._block("screen_selection", msg, gates=[{"name": "screen selection", "status": "NEEDS_HUMAN", "explanation": msg,
+                                                        "evidence": {"top": top}, "options": ["在「篩選」分頁勾選化合物"]}])
+        missing = [n for n in sel if n not in by_name]
+        if missing:
+            self._block("screen_selection", f"screen.select 裡的 {', '.join(missing)} 沒有篩選分數（不在庫中、失敗或被略過）。")
+        if mode not in ("independent", "simultaneous"):
+            self._block("screen_selection", f"screen.next_mode 必須是 independent 或 simultaneous（現在是 {mode}）。")
+        if mode == "simultaneous" and len(sel) < 2:
+            self._block("screen_selection", "多配體同時對接至少要選 2 個化合物。")
+        explicit = list(self.cfg.get("ligands") or [])
+        names = {l["name"] for l in explicit}
+        # the library SDF (input conformer) goes on, not the screen pose: the final docking re-searches with full exhaustiveness
+        merged = explicit + [{"name": n, "sdf": (manifest["entries"].get(n) or {}).get("path", ""), "smiles": by_name[n]["smiles"],
+                              "from_screen": True, "screen_rank": by_name[n]["rank"], "screen_score": by_name[n]["score"]}
+                             for n in sel if n not in names]
+        self.dec.record("screen.selection", "selected", sel,
+                        f"使用者從篩選結果選出 {len(sel)} 個化合物（{', '.join(sel)}）進入正式對接，模式 {mode}；"
+                        f"與使用者明列的 {len(explicit)} 個配體合併，正式對接用完整 exhaustiveness 重新搜尋。", kind="human")
+        self._mark("screen_selection", selected=sel, next_mode=mode, ligands=merged)
+        return merged
+
+    def apply_screen(self, clean: Path, raw: Path, progress_cb=None, should_stop=None) -> bool:
+        """Run the whole pre-screen when `screen` is configured; mutates cfg.ligands/docking.mode for this run.
+        Returns False when paused."""
+        if not self.cfg.get("screen"):
+            return True
+        self.cfg.setdefault("ligands", [])
+        man = self.run_screen_library(progress_cb=progress_cb)
+        res = self.run_screen_docking(clean, raw, man, progress_cb=progress_cb, should_stop=should_stop)
+        if res is None:
+            return False
+        merged = self.screen_selection(man, res)
+        self.cfg["ligands"] = merged
+        self.cfg.setdefault("docking", {})["mode"] = (self.cfg.get("screen") or {}).get("next_mode") or "independent"
+        return True
 
     def run_docking(self, clean: Path, raw: Path, progress_cb=None):
         from .docking import dock, LigandInput, DockingResult
@@ -734,6 +899,9 @@ class Workflow:
         clean = self.prepare_docking_receptor(raw)
         sel = None
         systems = self.cfg.get("md", {}).get("systems", ["apo", "docked_single"])
+        if not self.apply_screen(clean, raw, progress_cb=progress_cb,
+                                 should_stop=(lambda: bool(should_pause())) if callable(should_pause) else None):
+            return {"status": "PAUSED", "state": self.state()}
         if self.cfg.get("ligands") and (any(s != "apo" for s in systems) or self.cfg.get("docking", {}).get("always")):
             res = self.run_docking(clean, raw, progress_cb=progress_cb)
             sel = self.choose_poses(res, screen=lambda e, r: self._screen_pose(raw, make_factory, e, r,

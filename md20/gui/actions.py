@@ -18,8 +18,8 @@ from ..build.receptor import receptor_choice_action
 from ..util import atomic_write_json, load_json
 
 # workflow step keys in execution order; a decision at step X invalidates X and everything after it
-STEP_ORDER = ["structure_gate", "receptor_docking", "docking_preflight", "docking", "pose_selection", "md_cases",
-              "md_runs", "analysis", "binding", "report"]
+STEP_ORDER = ["structure_gate", "receptor_docking", "screen_library", "screen_docking", "screen_selection", "docking_preflight",
+              "docking", "pose_selection", "md_cases", "md_runs", "analysis", "binding", "report"]
 STRUCTURE_OVERRIDE = {"resolution": "resolution", "R-free": "r_free", "ligand occupancy": "ligand_occupancy",
                       "pocket occupancy": "pocket"}
 _METAL_OPT = re.compile(r"metal_policy:\s*\{\s*([A-Za-z0-9:]+)\s*:\s*(bonded|keep_nonbonded|remove)\s*\}")
@@ -69,6 +69,10 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
         if option.startswith("box.allow_blind"):
             return _act(option, [{"path": ["box", "allow_blind"], "value": True}], step)
         return None
+    # HTS screen: partial library / partial docking may be accepted explicitly (listed in the report)
+    if name in ("library partial", "screen partial") and option.startswith("screen.allow_partial"):
+        return _act(option, [{"path": ["screen", "allow_partial"], "value": True}],
+                    "screen_library" if name == "library partial" else "screen_docking")
     if name == "redocking" and option.startswith("docking.skip_redock"):
         return _act(option, [{"path": ["docking", "skip_redock"], "value": True}], step)
     # peptide CPP gate (per ligand)
@@ -219,3 +223,27 @@ def resample_range(wf, target: str, lo_nm: float, hi_nm: float, *, k: float | No
                   + f" 新增 {len(new)} 個 window；其餘結合目標不重算。", kind="human",
                   windows=new, replicas=len(dirs))
     return {"windows": new, "k": plan["k"], "spacing_nm": plan["spacing_nm"], "breaks_in_range": plan["breaks_in_range"]}
+
+
+# ------------------------------------------------------------------------------- HTS screen: compound selection
+def select_screen_ligands(wf, names: list[str], mode: str = "independent", note: str = "") -> dict:
+    """The student ticks compounds in the 篩選 tab: write screen.select / screen.next_mode, invalidate from the
+    final docking onward (the screen itself is kept)."""
+    names = [str(n) for n in names if str(n).strip()]
+    if not names:
+        raise ValueError("請至少勾選一個化合物")
+    if mode not in ("independent", "simultaneous"):
+        raise ValueError("模式必須是 independent 或 simultaneous")
+    if mode == "simultaneous" and len(names) < 2:
+        raise ValueError("多配體同時對接至少要選 2 個化合物")
+    cfg = load_json(wf.dir / "config.json", wf.cfg)
+    sc = cfg.setdefault("screen", {})
+    sc["select"], sc["next_mode"] = names, mode
+    atomic_write_json(cfg, wf.dir / "config.json")
+    wf.cfg = cfg
+    dropped = invalidate_from(wf, "screen_selection")
+    wf.dec.record("gui.screen", "select", names,
+                  f"使用者在「篩選」分頁勾選 {len(names)} 個化合物進入{'多配體同時對接' if mode == 'simultaneous' else '各自對接與 MD'}"
+                  + (f"；備註：{note}" if note else "") + f"。自 screen_selection 起重新執行（{', '.join(dropped) or '無已完成步驟'}）。",
+                  kind="human", mode=mode)
+    return {"selected": names, "mode": mode, "invalidated": dropped}

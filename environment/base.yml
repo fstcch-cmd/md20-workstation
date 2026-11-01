@@ -5,6 +5,7 @@ dependencies:
   - python=3.11
   - numpy>=1.26
   - pandas>=2
+  - openpyxl          # Excel compound libraries (HTS screen)
   - scipy
   - cryptography
   - psutil

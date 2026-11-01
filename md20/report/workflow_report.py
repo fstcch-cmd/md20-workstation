@@ -12,6 +12,44 @@ def _fmt(x, nd: int = 2) -> str:
     return "" if x is None else f"{float(x):.{nd}f}"
 
 
+def _screen_section(wf) -> str:
+    st = wf.state()["steps"]
+    d = st.get("screen_docking") or {}
+    if not (wf.cfg.get("screen") or d):
+        return ""
+    from ..docking.screen import rank_screen, failed_rows
+    res = load_json(d.get("results", ""), {}) if d.get("results") else {}
+    man = load_json((st.get("screen_library") or {}).get("manifest", ""), {}) if st.get("screen_library") else {}
+    rows = rank_screen(res, top_n=int((wf.cfg.get("screen") or {}).get("top_n", 20))) if res else []
+    sel = set((wf.cfg.get("screen") or {}).get("select") or [])
+    parts = ["<h3>高通量前期篩選</h3>",
+             "<p class=muted>縮減搜尋（exhaustiveness {} 、{} 個 pose）的 Vina 分數；只用來剔除化合物，不是結合自由能。"
+             "與第 1 名差距 &lt; 1 kcal/mol 的化合物在 Vina 誤差內，名次沒有統計意義。</p>".format(
+                 (res.get("params") or {}).get("exhaustiveness", "—"), (res.get("params") or {}).get("n_poses", "—"))]
+    if not rows:
+        parts.append("<p class=muted>（篩選尚未完成）</p>")
+        return "".join(parts)
+    for k in ("histogram", "scatter", "top"):
+        pth = ((d.get("plots") or {}).get(k) or {}).get("png")
+        if pth:
+            parts.append(f"<figure style='display:inline-block;max-width:48%'>{_img(pth)}</figure>")
+    parts.append("<table><tr><th>名次</th><th>化合物</th><th>score</th><th>Δ最佳</th><th>重原子</th><th>LE</th><th>cluster</th><th>接觸</th><th>推薦</th><th></th></tr>")
+    for r in rows[:50]:
+        parts.append(f"<tr><td>{r['rank']}</td><td>{_esc(r['name'])}</td><td>{r['score']:.2f}</td><td>{r['delta_to_best']:+.2f}</td>"
+                     f"<td>{_fmt(r['heavy_atoms'], 0)}</td><td>{_fmt(r['ligand_efficiency'], 3)}</td><td>{r['cluster_size']}</td><td>{r['contacts']}</td>"
+                     f"<td>{_esc(r['recommendation_status'])}</td><td>{'✔ 選入' if r['name'] in sel else ''}{' ≈' if r.get('indistinguishable_from_top') else ''}</td></tr>")
+    parts.append("</table>")
+    if len(rows) > 50:
+        parts.append(f"<p class=muted>只列前 50 名；完整排名在 screen_ranking.csv（共 {len(rows)} 個）。</p>")
+    bad = failed_rows(res, man)
+    if bad:
+        parts.append(f"<p><b>未納入篩選的化合物（{len(bad)}）：</b></p><ul>" +
+                     "".join(f"<li>{_esc(b['name'])}（{_esc(b['stage'])} {_esc(b['status'])}）：{_esc(b.get('error', ''))}</li>" for b in bad[:100]) + "</ul>")
+    if sel:
+        parts.append(f"<p><b>使用者選入正式對接：</b>{_esc(', '.join(sorted(sel)))}（模式 {_esc((wf.cfg.get('screen') or {}).get('next_mode', 'independent'))}）</p>")
+    return "".join(parts)
+
+
 def _docking_section(wf) -> str:
     d = (wf.state()["steps"].get("docking") or {})
     if not d:
@@ -205,12 +243,12 @@ def _viewer_section(wf) -> str:
 def build_workflow_report(wf, out_path: Path | None = None) -> Path:
     out_path = Path(out_path) if out_path else wf.dir / "workflow_report.html"
     cfg = wf.cfg
-    rows = [r for r in wf.project.decisions.read() if str(r.get("stage", "")).startswith(("workflow", "docking", "binding", "build", "engine"))]
+    rows = [r for r in wf.project.decisions.read() if str(r.get("stage", "")).startswith(("workflow", "docking", "binding", "build", "engine", "screen", "gui"))]
     html = [f"<!doctype html><html lang=zh-Hant><head><meta charset=utf-8><title>MD20 Workflow — {_esc(wf.name)}</title><style>{_CSS}</style></head><body>",
             f"<h1>MD20 Workflow 報告：{_esc(wf.name)}</h1>",
             f"<p class=muted>專案 {_esc(wf.project.name)} · 產生於 {now_iso()}</p>",
             "<h2>1. 設定</h2>", f"<details><summary>config.json</summary><pre>{_esc(json.dumps(cfg, ensure_ascii=False, indent=1))}</pre></details>",
-            "<h2>2. 分子對接與 pose 選擇</h2>", _structure_section(wf), _docking_section(wf), _cpp_section(wf),
+            "<h2>2. 分子對接與 pose 選擇</h2>", _structure_section(wf), _screen_section(wf), _docking_section(wf), _cpp_section(wf),
             "<h2>3. 分子動力學（apo vs 對接結合態）</h2>", _md_section(wf),
             "<h2>4. 結合強度（SMD + 傘狀採樣）</h2>", _binding_section(wf),
             _viewer_section(wf),

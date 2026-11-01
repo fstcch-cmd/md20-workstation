@@ -11,8 +11,9 @@ from ..engine.factory import make_backend_factory
 from ..project import Project
 from ..util import default_projects_dir, load_json, safe_name
 from ..workflow import Workflow
-from .logic import Runner, config_from_form, list_workflows, pose_table, set_pose_choice
-from .actions import apply_gate_action, resample_range
+from .logic import Runner, config_from_form, list_workflows, pose_table, set_pose_choice, screen_table
+from .actions import apply_gate_action, resample_range, select_screen_ligands
+from ..docking.screen import echart_screen
 from .views import (gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html,
                     coverage_targets, coverage_chart, coverage_summary)
 
@@ -176,11 +177,36 @@ def workflow_page(project: str, name: str):
         poses.on("rowClick", pick)
         # ---- WP13: gate cards / live curves / timeline / offline 3D -------------------------------------
         with ui.tabs().classes("w-full") as tabs:
-            t_gate, t_live, t_umb, t_time, t_3d = (ui.tab("閘門"), ui.tab("即時曲線"), ui.tab("傘狀採樣覆蓋"),
-                                                   ui.tab("時間軸"), ui.tab("3D 檢視"))
+            t_gate, t_screen, t_live, t_umb, t_time, t_3d = (ui.tab("閘門"), ui.tab("篩選"), ui.tab("即時曲線"), ui.tab("傘狀採樣覆蓋"),
+                                                             ui.tab("時間軸"), ui.tab("3D 檢視"))
         with ui.tab_panels(tabs, value=t_gate).classes("w-full"):
             with ui.tab_panel(t_gate):
                 cards_box = ui.column().classes("w-full gap-2")
+            with ui.tab_panel(t_screen):
+                ui.label("高通量篩選（縮減搜尋的 Vina 分數，只用來剔除）。勾選要進入下一步的化合物：「各自對接＋MD」或「多配體同時對接」。"
+                         "≈ 表示與第 1 名差距 < 1 kcal/mol，在 Vina 誤差內、名次沒有統計意義。").classes("text-sm")
+                scr_info = ui.label("").classes("text-sm")
+                ch_scr = ui.echart(echart_screen([])).classes("w-full h-80")
+                scr_tbl = ui.table(columns=[{"name": k, "label": l, "field": k, "sortable": True} for k, l in
+                                            (("rank", "名次"), ("name", "化合物"), ("score", "score"), ("delta_to_best", "Δ最佳"),
+                                             ("heavy_atoms", "重原子"), ("ligand_efficiency", "LE"), ("cluster_size", "cluster"),
+                                             ("contacts", "接觸"), ("recommendation_status", "推薦"), ("tag", ""))],
+                                   rows=[], row_key="key", selection="multiple", pagination=25).classes("w-full")
+                with ui.row().classes("items-end gap-2"):
+                    scr_note = ui.input("備註（為什麼選這些）").classes("w-72")
+
+                    def do_select(mode: str):
+                        job = RUNNER.get(wf)
+                        if job and job.thread and job.thread.is_alive():
+                            ui.notify("流程執行中；請先暫停再選擇", type="warning"); return
+                        names = [r["name"] for r in scr_tbl.selected]
+                        try:
+                            out = select_screen_ligands(wf, names, mode, note=scr_note.value or "")
+                        except ValueError as exc:
+                            ui.notify(str(exc), type="negative"); return
+                        ui.notify(f"已選 {len(out['selected'])} 個化合物（{mode}）；按「開始／繼續」進入正式對接與 MD", type="positive")
+                    ui.button("各自對接 → MD", on_click=lambda: do_select("independent")).props("color=primary")
+                    ui.button("多配體同時對接 → MD", on_click=lambda: do_select("simultaneous")).props("outline")
             with ui.tab_panel(t_live):
                 prog = ui.label("").classes("text-sm")
                 bar = ui.linear_progress(value=0, show_value=False).classes("w-full")
@@ -233,6 +259,7 @@ def workflow_page(project: str, name: str):
                     pick3d.on_value_change(lambda _: show3d())
                     show3d()
         cards_sig = {"v": None}
+        scr_sig = {"v": None}
         cov_sig = {"v": None}
         time_sig = {"v": None}
 
@@ -267,6 +294,14 @@ def workflow_page(project: str, name: str):
                     cov_sig["v"] = cov.get("updated_at")
                     ch_cov.options.clear(); ch_cov.options.update(coverage_chart(cov)); ch_cov.update()
                     cov_info.set_text(coverage_summary(cov))
+            srows = screen_table(wf)
+            if len(srows) != scr_sig["v"]:
+                scr_sig["v"] = len(srows)
+                scr_tbl.rows = srows
+                ch_scr.options.clear(); ch_scr.options.update(echart_screen(srows)); ch_scr.update()
+                sd = wf.state()["steps"].get("screen_docking") or {}
+                scr_info.set_text(f"{len(srows)} 個化合物有分數；{len(sd.get('failed') or [])} 個失敗／略過（見閘門與報告）。" if srows else
+                                  "尚無篩選結果（config 的 screen.library 指定化合物庫後執行）。")
             cards = gate_cards(wf)
             if cards != cards_sig["v"]:
                 cards_sig["v"] = cards
