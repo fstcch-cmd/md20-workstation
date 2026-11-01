@@ -30,6 +30,12 @@ def test_3ptb_build_and_short_md(pdb_3ptb, tmp_path):
     assert lig["smoke_test"]["ok"], lig["smoke_test"]
     asm = s["assembly"]
     assert abs(asm["total_charge"]) < 0.05 and asm["n_ligand_atoms"] == 18 and asm["n_waters"] > 1000
+    # compact box: rhombic dodecahedron (off-diagonal box vectors) — trypsin + 0.8 nm padding must stay well under
+    # the ~12k waters a 1.0 nm cube needs; the saving is where the laptop's compute goes
+    import numpy as np
+    box = np.array(asm["box_nm"])
+    assert box.shape == (3, 3) and np.abs(box - np.diag(np.diag(box))).sum() > 0.1, box
+    assert asm["n_waters"] < 9000, asm["n_waters"]
     # short MD on the best platform available (CPU in CI)
     choice = choose_platform(probe_steps=20)
     proto = make_protocol("classroom")

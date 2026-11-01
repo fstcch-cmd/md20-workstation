@@ -7,6 +7,14 @@
 
 ## 2026-11-01（第三個 session）
 
+### D-22　水盒不過大：菱形十二面體 + tier padding + 下限閘門（使用者原則）
+- 決定：預設 `box_shape=dodecahedron`（立方的 71%）；`padding_nm` 未指定時 classroom／teaching 0.8、research 1.0；< 0.6 nm NEEDS_HUMAN；
+  篩 pose 短 MD 用 min(pad, 0.8)；`md.ionic_strength_molar` 可設 0（只中和）。水比例閘門改為說明而非警告。
+- 理由：算力在水（80–90% 原子），立方盒以最長軸定三邊對細長蛋白浪費最大；鹽 < 1% 原子，不是成本（誠實告知）。
+- 被否決：長方盒貼合蛋白（蛋白旋轉後短邊碰影像）；padding 0（蛋白與影像直接接觸）。
+- 證據：`test_binding_raises_padding`；CI `test_3ptb_build_and_short_md` 斷言非對角盒向量且水 < 9000。規格 `docs/specs/solvent_box.md`。
+- 未決：0.8 nm 對 teaching 是否太緊；十二面體在 VMD 的顯示。
+
 ### D-21　週期邊界歸零：分析層錨定＋歸零 DCD，不在模擬中加力（使用者痛點）
 - 決定：`analysis/pbc.py`＋`traj.center_trajectory`：錨＝蛋白鏈＋bonded 金屬（manifest），其他分子以質心最小影像折回，錨質心置盒中心；
   `analyse_run` 一律輸出 `production_centered.dcd`／`production_aligned.dcd`，可重現包含歸零版；viewer 走同一條。

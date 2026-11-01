@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
+MIN_PADDING_NM = 0.6      # below this the protein sees its own image inside the 1.0 nm cutoff — never allowed
+
 from ..util import now_iso, DecisionLog, atomic_write_json, sha256_file
 from .gates import Gate, GateReport, PASS, AUTO_FIXED, NEEDS_HUMAN
 from .ligand import LigandRecord, parameter_ladder
@@ -162,7 +164,7 @@ def add_flat_bottom_restraints(system, topology, positions, lig_atom_ranges, *, 
 
 
 def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_dir: Path | str, *,
-                    padding_nm: float = 1.0, ionic_strength_molar: float = 0.15, box_shape: str = "cube",
+                    padding_nm: float = 1.0, ionic_strength_molar: float = 0.15, box_shape: str = "dodecahedron",
                     water_model: str = "tip3p", decisions: DecisionLog | None = None,
                     nonbonded_cutoff_nm: float = 1.0, forcefield_files: tuple[str, ...] = AMBER_PROTEIN,
                     flat_bottom: bool | None = None, metal_policy: dict | None = None, ph: float = 7.4,
@@ -255,13 +257,32 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                              "隱式溶劑：不加水與離子、無週期盒、無 PME，原子數少 80–90%，筆電上快很多。適合短 MD 篩 pose 與教學 MD；"
                              "不適合金屬位點、水橋接的結合、SMD/傘狀採樣（溶劑化能障會失真）。")
     else:
-        # solvate
+        # solvate — the box is where the compute goes (80–90 % of the atoms are water), so: smallest shape that keeps
+        # the protein ≥ 2×padding from its own image in every orientation (rhombic dodecahedron: 71 % of the cube's
+        # volume for the same image distance), and padding no larger than the solvation shell needs.
+        if padding_nm < MIN_PADDING_NM:
+            report.add(Gate("padding", NEEDS_HUMAN,
+                            f"padding {padding_nm} nm 小於 {MIN_PADDING_NM} nm：蛋白會與自己的週期影像在截斷半徑（1.0 nm）內互相作用，"
+                            "溶劑化殼層也不完整；省下的算力會換來錯的結果。",
+                            options=[f"md.padding_nm ≥ {MIN_PADDING_NM}（教學 0.8、研究 1.0）", "md.solvent: gbn2（真的要省算力時用隱式溶劑）"]))
+            res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict(), solvent=solvent)
+            atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")
+            return res
         shape = {"cube": "cube", "dodecahedron": "dodecahedron", "octahedron": "octahedron"}[box_shape]
         modeller.addSolvent(ff, model=water_model, padding=padding_nm * unit.nanometer, boxShape=shape,
                             ionicStrength=ionic_strength_molar * unit.molar, neutralize=True)
         if decisions:
-            decisions.record("build.solvate", "box", f"{shape}, padding {padding_nm} nm, {ionic_strength_molar} M, neutralized",
-                             "padding 1.0 nm 在教學 tier 是精度與速度的折衷；研究 tier 建議 1.2 nm。中和 + 生理離子強度。")
+            vecs = modeller.topology.getPeriodicBoxVectors()
+            vol = abs(float(np.linalg.det(np.array([[v.x, v.y, v.z] for v in vecs])))) if vecs else 0.0
+            n_w = sum(1 for r in modeller.topology.residues() if r.name in {"HOH", "WAT"})
+            cube_equiv = {"dodecahedron": 1.0 / 0.7071, "octahedron": 1.0 / 0.7698, "cube": 1.0}[shape]
+            decisions.record("build.solvate", "box",
+                             {"shape": shape, "padding_nm": padding_nm, "ionic_strength_M": ionic_strength_molar, "volume_nm3": round(vol, 1),
+                              "n_water": n_w},
+                             f"{shape}、padding {padding_nm} nm、{n_w} 個水、體積 {vol:.0f} nm³"
+                             + (f"（同樣影像距離的立方盒要多 {100 * (cube_equiv - 1):.0f}% 水）" if shape != "cube" else "")
+                             + f"；離子強度 {ionic_strength_molar} M 並中和（鹽只佔原子數 < 1%，算力在水）。"
+                             "padding 是蛋白到盒邊的最小距離：0.8 nm 已含完整溶劑化殼層，再小會碰到自己的週期影像。")
     counts = {}
     n_water = 0
     for res_ in modeller.topology.residues():
@@ -326,8 +347,8 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
         report.add(Gate("total charge", PASS, f"系統總電荷 {total_q:.3f} e（已中和）。"))
     n_atoms = system.getNumParticles()
     water_frac = 3 * n_water / n_atoms if n_atoms else 0
-    if not implicit and water_frac < 0.5:
-        report.add(Gate("water fraction", AUTO_FIXED, f"水佔 {100 * water_frac:.0f}%，系統偏小或 padding 不足；可接受但請確認 box 大於蛋白最長軸 + 2×padding。"))
+    if not implicit and water_frac < 0.4:
+        report.add(Gate("water fraction", PASS, f"水佔 {100 * water_frac:.0f}%（小 padding 的緊湊盒子；蛋白到影像的距離仍 ≥ 2×padding）。"))
     box = modeller.topology.getPeriodicBoxVectors()
     box_nm = [[v.x, v.y, v.z] for v in box] if box else []
     # single-point energy must be finite

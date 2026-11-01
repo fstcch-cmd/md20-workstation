@@ -353,7 +353,7 @@ def main(argv=None) -> int:
     b = sub.add_parser("build"); b.add_argument("--project", required=True); b.add_argument("--case", required=True)
     b.add_argument("--receptor", required=True); b.add_argument("--ligand", action="append", required=True)
     b.add_argument("--pose", action="append"); b.add_argument("--ph", type=float, default=7.4)
-    b.add_argument("--padding", type=float, default=1.0); b.add_argument("--no-smoke", action="store_true")
+    b.add_argument("--padding", type=float, default=0.8); b.add_argument("--no-smoke", action="store_true")
     b.set_defaults(fn=cmd_build)
     r = sub.add_parser("run"); r.add_argument("--project", required=True); r.add_argument("--case", required=True)
     r.add_argument("--tier", default="teaching"); r.add_argument("--ns", type=float); r.add_argument("--resume", action="store_true")

@@ -59,14 +59,19 @@ def test_no_recommendation_blocks_pose_selection(tmp_path):
 def test_binding_raises_padding(tmp_path):
     wf = _wf(tmp_path)
     assert wf._padding_nm(["BEN"]) >= 1.5
-    assert wf._padding_nm([]) == 1.0                       # apo is never pulled from
-    assert wf._padding_nm(["BEN"], screen=True) == 1.0     # nor is the short-MD pose screen
+    assert wf._padding_nm([]) == 0.8                       # apo is never pulled from; teaching tier default 0.8 nm
+    assert wf._padding_nm(["BEN"], screen=True) == 0.8     # nor is the short-MD pose screen
     wf.cfg["binding"]["config"] = {"pull_distance_nm": 1.8}   # the key binding actually uses
     assert wf._padding_nm(["BEN"]) == 2.3
     wf.cfg["binding"]["config"] = {"pull_distance_nm": 0.6}
     assert wf._padding_nm(["BEN"]) == 1.5                  # floor
     wf.cfg["binding"]["enabled"] = False
-    assert wf._padding_nm(["BEN"]) == 1.0
+    assert wf._padding_nm(["BEN"]) == 0.8
+    wf.cfg["md"]["tier"] = "research"
+    assert wf._padding_nm([]) == 1.0
+    wf.cfg["md"]["padding_nm"] = 1.2                       # explicit value always wins
+    assert wf._padding_nm([]) == 1.2 and wf._padding_nm(["BEN"], screen=True) == 0.8
+    assert any(r["what"] == "padding_nm" and "預設" in r["why"] for r in wf.dec.read())
 
 
 # --- regression: binding/analysis must read ligand atom indices from the post-assembly records -----------------

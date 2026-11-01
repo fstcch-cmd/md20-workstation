@@ -24,6 +24,9 @@ md20 gui                                  # 或用圖形介面（瀏覽器 http:
 | `md.systems` | `apo`（原始蛋白）、`docked_single`（每個配體一個系統）、`docked_multi`（多配體同一系統） |
 | `md.tier` | `classroom`（2 ns）、`teaching`（10 ns）、`research`（100 ns）；`production_ns` 可直接指定 |
 | `md.replicas` | 獨立 seed 的重複數（研究建議 ≥ 3） |
+| `md.padding_nm` | 蛋白到盒邊最小距離；不填 = tier 預設（classroom／teaching 0.8、research 1.0）；< 0.6 擋關 |
+| `md.box_shape` | `dodecahedron`（預設，水最少）／`octahedron`／`cube` |
+| `md.ionic_strength_molar` | 0.15（預設，生理）；0 = 只加中和離子（鹽本來就 < 1% 原子，省不了算力） |
 | `binding` | `{"enabled": true, "ligands": ["BEN"], "multi": true, "config": {...}}`；`docked_multi` 系統中每個配體會各自從共同口袋拉離（`multi:<配體>`）；config 見下 |
 
 `binding.config`（`BindingConfig`）：`pull_distance_nm`（1.5）、`pull_velocity_nm_per_ps`（0.01）、`k_pull`、`k_umbrella`（1000）、`target_overlap`（0.2）、`window_equil_ps`（10）、`window_prod_ps`（50）、`max_windows`（40）。

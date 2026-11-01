@@ -23,6 +23,7 @@
 ## 完成
 | 項目 | session | commit |
 |---|---|---|
+| 水盒不過大：十二面體、tier padding、下限閘門、離子強度可調（D-22、specs/solvent_box.md） | session_016gcJzBDnGh3heY9HLWnva3 | 本 commit（CI 待驗） |
 | PBC 歸零／錨定（`analysis/pbc.py`、`center_trajectory`、歸零 DCD、視覺性解離閘門；D-21、specs/pbc_centering.md；GBn2 無盒情況已處理） | session_016gcJzBDnGh3heY9HLWnva3 | 本 commit（CI 待驗） |
 | 會診 §1 Q6 隱式溶劑 GBn2（D-20，待 CI） | session_016gcJz8q2F6515MWPncJEZu | 見 git log |
 | CI 重測拆成平行 heavy job（會診 §5 Q2，D-19） | session_016gcJz8q2F6515MWPncJEZu | 見 git log |

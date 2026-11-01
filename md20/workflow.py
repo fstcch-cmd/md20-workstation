@@ -18,7 +18,9 @@ Config (JSON):
   "docking": {"mode": "independent", "scoring": "vina", "exhaustiveness": 16, "n_poses": 9},
   "pose_choices": {"BEN": 2},               # optional overrides (rank); simultaneous: {"joint": 3}
   "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 1, "production_ns": null,
-         "padding_nm": 1.0},
+         "padding_nm": null,                  # null = tier default (0.8 nm teaching/classroom, 1.0 research)
+         "box_shape": "dodecahedron",         # 71 % of a cube's water for the same image distance
+         "ionic_strength_molar": 0.15},       # 0 = neutralising counter-ions only
   "binding": {"enabled": true, "ligands": ["BEN"], "config": {"pull_velocity_nm_per_ps": 0.01}},
   "screen": {"library": "compounds.xlsx", "exhaustiveness": 8, "n_poses": 3, "top_n": 20, "select": [], "next_mode": "independent"}
                                             # optional HTS pre-screen (docs/specs/hts_screen.md): selected compounds are
@@ -40,6 +42,8 @@ from .project import Project
 from .util import atomic_write_json, load_json, now_iso, ensure_dir, safe_name
 
 SYSTEM_MODES = ("apo", "docked_single", "docked_multi")
+# minimum protein–box-edge distance when md.padding_nm is not given (rhombic dodecahedron box)
+TIER_PADDING_NM = {"classroom": 0.8, "teaching": 0.8, "research": 1.0}
 
 
 
@@ -99,7 +103,7 @@ def example_config(screen: bool = False) -> dict:
                        "select": [], "next_mode": "independent"},
             "docking": {"mode": "independent", "scoring": "vina", "exhaustiveness": 16, "n_poses": 9},
             "pose_choices": {},
-            "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 1, "production_ns": None, "padding_nm": 1.0},
+            "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 1, "production_ns": None, "padding_nm": None, "box_shape": "dodecahedron", "ionic_strength_molar": 0.15},
             "binding": {"enabled": False, "ligands": [], "config": {}},
         }
     return {
@@ -110,7 +114,7 @@ def example_config(screen: bool = False) -> dict:
         "ligands": [{"name": "BEN", "smiles": "NC(=[NH2+])c1ccccc1", "reference_resname": "BEN"}],
         "docking": {"mode": "independent", "scoring": "vina", "exhaustiveness": 16, "n_poses": 9},
         "pose_choices": {},
-        "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 1, "production_ns": None, "padding_nm": 1.0},
+        "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 1, "production_ns": None, "padding_nm": None, "box_shape": "dodecahedron", "ionic_strength_molar": 0.15},
         "binding": {"enabled": True, "ligands": ["BEN"], "config": {}},
     }
 
@@ -772,7 +776,18 @@ class Workflow:
         """WP3: SMD/umbrella need room to pull; raise padding for the systems that will be pulled from
         (cases with ligands when binding is enabled) — not for apo, not for the short-MD pose screen."""
         md = self.cfg.get("md", {})
-        pad = float(md.get("padding_nm", 1.0))
+        tier = md.get("tier", "teaching")
+        if md.get("padding_nm") is None:
+            pad = TIER_PADDING_NM.get(tier, 0.8)
+            if not getattr(self, "_pad_default_logged", False):
+                self.dec.record("build.box", "padding_nm", pad,
+                                f"未指定 padding：{tier} tier 預設 {pad} nm（蛋白到盒邊的最小距離；菱形十二面體盒）。"
+                                "水佔原子數 80–90%，盒子只需容納蛋白加一層完整溶劑化殼層。")
+                self._pad_default_logged = True
+        else:
+            pad = float(md["padding_nm"])
+        if screen:
+            return min(pad, 0.8)          # the short pose screen only asks whether the pose falls apart
         if (self.cfg.get("binding") or {}).get("enabled") and ligands and not screen:
             bc = self.cfg["binding"].get("config") or {}
             need = float(bc.get("pull_distance_nm", bc.get("pull_distance", 1.5))) + 0.5
@@ -803,7 +818,9 @@ class Workflow:
                        exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])),
                        metal_policy=self.cfg.get("metal_policy") or None,
                        peptide_policy=self.cfg.get("peptide_policy") or None,
-                       metal_params=self._metal_params(), solvent=self._solvent(screen))
+                       metal_params=self._metal_params(), solvent=self._solvent(screen),
+                       box_shape=self.cfg.get("md", {}).get("box_shape", "dodecahedron"),
+                       ionic_strength_molar=float(self.cfg.get("md", {}).get("ionic_strength_molar", 0.15)))
         lmap = {n: f"L{i:02d}" for i, n in enumerate(small, 1)} | {p["name"]: p["name"] for p in peps}
         return s, lmap
 
