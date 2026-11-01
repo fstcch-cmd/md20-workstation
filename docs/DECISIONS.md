@@ -7,7 +7,7 @@
 
 ## 2026-11-01（第一個 session，續）
 
-### D-30　Windows 的 meeko 其實沒裝好（缺 gemmi）→ 對接／HTS 整合測試在 Windows 一直是 SKIPPED，綠是假的
+### D-31　Windows 的 meeko 其實沒裝好（缺 gemmi）→ 對接／HTS 整合測試在 Windows 一直是 SKIPPED，綠是假的
 - 現象：99c8b64 Windows openmm-stack「351 passed, 7 skipped」綠，但 skip 原因是 `could not import 'meeko': No module named 'gemmi'`——
   `test_docking_integration`、`test_screen_integration` 整檔跳過。明早筆電用同一條安裝路徑，對接第一個配體就會 ImportError。
 - 決定：`gemmi` 加進 `environment/base.yml` 與三處 pip 安裝行；openmm-stack job 設 `MD20_STACK=1`，`tests/test_stack_present.py` 在該旗標下
@@ -15,6 +15,7 @@
 - 理由：`importorskip` 讓「環境壞了」看起來像「這台機器不需要」；在宣稱有全套的 job 裡，skip 必須是失敗。
 - 證據：CI 這輪（Windows openmm-stack 的 skip 數應降到 ≤ 5，且 docking／screen 整合測試出現在 PASSED 裡）。
 - 未決：macOS／Ubuntu 是否也靠別的套件間接帶入 gemmi（現在明寫後無差）。
+- 編號註記（session_016gcJz8q2F6515MWPncJEZu）：原標為 D-30，與 99c8b64 的「Windows 時間預算」D-30 撞號，改為 D-31；內容未動。
 
 ### D-30　Windows 時間預算：GBn2 3PTB 測試只驗管線（f140a49 Windows 84／90 分鐘）
 - 事實：f140a49 Windows OpenCL 338 passed／1 failed（同 D-28 的連接圖，已修），但總時長 **84 分鐘（上限 90）**：
