@@ -290,7 +290,11 @@ def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], position
     (1-3) have no nonbonded interaction, M–Y with Y two bonds from D (1-4) is scaled, and the M–D–X angles keep
     the donor group pointing at the metal.  Without 1-3 exclusion the +2 metal sits ~3 Å from the donor's
     neighbours (e.g. His CE1/CD2 and their hydrogens) and is pushed off its site (CI: Zn–NE2 2.03 → 2.56 Å).
-    Returns {"excl13": [(m, x)], "pairs14": [(m, y)], "angles": [(m, d, x, θ0 rad)]} with no duplicates."""
+    The same bookkeeping runs *through* the metal, as tleap/MCPB.py do once M–D bonds exist: two donors of the
+    same metal are a 1-3 pair (D–M–D′, excluded) and a donor with the neighbour of another donor is 1-4
+    (D–M–D′–X′, scaled).  Without that, the three His NE2 (≈ −0.5 e each, 3.3 Å apart) repel at full strength
+    while the D–M–D′ angle term tries to hold them — the Zn–N bonds stretch.
+    Returns {"excl13": [(a, b)], "pairs14": [(a, b)], "angles": [(m, d, x, θ0 rad)]} with no duplicates."""
     import numpy as np  # noqa: F811
     nbr: dict[int, set[int]] = {}
     for a, b in bonds:
@@ -303,6 +307,16 @@ def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], position
         m = p["metal_index"]
         donors = {b["donor"] for b in p["bonds"]}
         excl12 |= {(m, d) for d in donors}
+        dl = sorted(donors)
+        for i, d in enumerate(dl):                       # through-metal pairs: D–M–D′ (1-3) and D–M–D′–X′ (1-4)
+            for d2 in dl[i + 1:]:
+                excl13.add((d, d2))
+            for d2 in dl:
+                if d2 == d:
+                    continue
+                for x2 in nbr.get(d2, ()):
+                    if x2 != m and x2 not in donors and x2 != d and x2 not in nbr.get(d, ()):
+                        pairs14.add((min(d, x2), max(d, x2)))
         for d in donors:
             for x in nbr.get(d, ()):
                 if x == m or x in donors:
@@ -314,9 +328,14 @@ def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], position
                 for y in nbr.get(x, ()):
                     if y not in (d, m) and y not in donors:
                         pairs14.add((m, y))
-    excl13 -= excl12
-    pairs14 -= excl12 | excl13
-    return {"excl13": sorted(excl13), "pairs14": sorted(pairs14), "angles": angles}
+    # pairs that are already 1-2/1-3 inside the protein topology (e.g. bidentate carboxylate O–O) stay as the
+    # force field has them; never *add* a scaled 1-4 where a closer relation exists
+    bonded12 = {(min(a, b), max(a, b)) for a, b in bonds}
+    bonded13 = {(min(a, c), max(a, c)) for b_, ns in nbr.items() for a in ns for c in ns if a < c}
+    norm = lambda pairs: {(min(a, b), max(a, b)) for a, b in pairs}  # noqa: E731
+    excl12n, excl13n = norm(excl12), norm(excl13) - norm(excl12) - bonded12 - bonded13
+    pairs14n = norm(pairs14) - excl12n - excl13n - bonded12 - bonded13
+    return {"excl13": sorted(excl13n), "pairs14": sorted(pairs14n), "angles": angles}
 
 
 def add_metal_forces(system, plans: list[dict], positions_nm, topology=None) -> dict:

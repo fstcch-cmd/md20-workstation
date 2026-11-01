@@ -102,10 +102,23 @@ def test_bonded_metal_terms_exclude_13_scale_14_and_add_mdx_angles():
     plans = [{"action": "bonded", "metal_index": 0, "bonds": [{"donor": 1}, {"donor": 8}]},
              {"action": "keep_nonbonded", "metal_index": 0, "bonds": []}]
     t = bonded_metal_terms(bonds, plans, pos)
-    assert t["excl13"] == [(0, 2), (0, 3), (0, 9)]
-    assert t["pairs14"] == [(0, 4), (0, 5), (0, 6), (0, 7), (0, 10)]
+    # metal-centred 1-3/1-4 plus the through-metal pairs: NE2–SG is 1-3 (D–M–D′); NE2–CB and SG–CE1/CD2 are 1-4
+    assert t["excl13"] == [(0, 2), (0, 3), (0, 9), (1, 8)]
+    assert t["pairs14"] == [(0, 4), (0, 5), (0, 6), (0, 7), (0, 10), (1, 9), (2, 8), (3, 8)]
     ang = {(d, x): th for _m, d, x, th in t["angles"]}
     assert set(ang) == {(1, 2), (1, 3), (8, 9)}
     u, v = pos[0] - pos[1], pos[2] - pos[1]
     assert math.isclose(ang[(1, 2)], math.acos(np.dot(u, v) / np.linalg.norm(u) / np.linalg.norm(v)))
     assert bonded_metal_terms(bonds, plans[1:], pos) == {"excl13": [], "pairs14": [], "angles": []}
+
+
+def test_bonded_metal_terms_bidentate_donors_keep_force_field_relation():
+    """Asp OD1/OD2 both bound to the metal: they are already 1-3 through CG, so no new exception is invented for them."""
+    import numpy as np
+    from md20.build.metal import bonded_metal_terms
+    # M(0); OD1(1)–CG(3)–OD2(2); CG–CB(4)
+    bonds = [(1, 3), (2, 3), (3, 4)]
+    pos = np.array([[0, 0, 0], [0.2, 0.1, 0], [0.2, -0.1, 0], [0.32, 0, 0], [0.45, 0, 0]], float)
+    t = bonded_metal_terms(bonds, [{"action": "bonded", "metal_index": 0, "bonds": [{"donor": 1}, {"donor": 2}]}], pos)
+    assert (1, 2) not in t["excl13"] and (0, 3) in t["excl13"]
+    assert all(p not in t["pairs14"] for p in [(1, 3), (2, 3), (1, 2)]) and (0, 4) in t["pairs14"]
