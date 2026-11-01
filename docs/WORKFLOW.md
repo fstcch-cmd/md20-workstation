@@ -24,7 +24,7 @@ md20 gui                                  # 或用圖形介面（瀏覽器 http:
 | `md.replicas` | 獨立 seed 的重複數（研究建議 ≥ 3） |
 | `binding` | `{"enabled": true, "ligands": ["BEN"], "multi": true, "config": {...}}`；`docked_multi` 系統中每個配體會各自從共同口袋拉離（`multi:<配體>`）；config 見下 |
 
-`binding.config`（`BindingConfig`）：`pull_distance_nm`（1.5）、`pull_velocity_nm_per_ps`（0.01）、`k_pull`、`k_umbrella`（1000）、`target_overlap`（0.25）、`window_equil_ps`（10）、`window_prod_ps`（50）、`max_windows`（40）。
+`binding.config`（`BindingConfig`）：`pull_distance_nm`（1.5）、`pull_velocity_nm_per_ps`（0.01）、`k_pull`、`k_umbrella`（1000）、`target_overlap`（0.2）、`window_equil_ps`（10）、`window_prod_ps`（50）、`max_windows`（40）。
 
 ## 智慧化處理（每一項都寫進決策日誌）
 

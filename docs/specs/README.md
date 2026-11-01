@@ -18,7 +18,8 @@
 | [hts_screen.md](hts_screen.md) | 高通量前期篩選：Excel/CSV 化合物庫 → 自動下載 3D → 批次快速對接 → 排名圖 → 勾選進入正式對接/MD | 已實作・待 CI |
 | [ci_validation.md](ci_validation.md) | CI 架構、重測、論文對接重現、hsieh2024 不可重現分析、這幾輪抓到的 bug | 進行中 |
 | [REVIEW_QUESTIONS.md](REVIEW_QUESTIONS.md) | 彙整：最希望審查者挑戰的設計決定 | — |
-| docking.md、gui.md | 早期規格（第一個 session） | 參考 |
+| [REVIEW_ANSWERS_2026-11-01.md](REVIEW_ANSWERS_2026-11-01.md) | **會診結果**：每個審查問題的回答、各規格沒寫到的科學缺口、下一個 session 的優先順序 | 待採納 |
+| docking.md、gui.md | **已被取代**的第一個 session 規格（模組名與頁面結構都和現況不符）；現況見 ../WORKFLOW.md、hts_screen.md、gate_actions.md | 歷史 |
 
 ## 全專案共通原則（MD20_optimization_brief）
 1. **不新增 phase/step**，只強化既有邏輯。

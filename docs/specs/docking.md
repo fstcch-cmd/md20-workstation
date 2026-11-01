@@ -1,3 +1,5 @@
+> **已被取代（2026-11-01）**：這是第一個 session 的規格，模組與頁面結構與現在的程式不符；請以 `../WORKFLOW.md`、`hts_screen.md`、`gate_actions.md` 與原始碼為準。
+
 # Spec: `md20.docking` (port of MD20 v6.1 Project 1, Phases 2–10)
 
 Goal: AutoDock Vina docking inside the md20 package, feeding `md20.build` directly, with the two
