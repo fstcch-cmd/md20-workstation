@@ -37,6 +37,12 @@ def test_full_workflow_3ptb(pdb_3ptb, tmp_path):
     assert st["pose_selection"]["selection"]["ligands"]["BEN"]["rank"] >= 1
     assert set(st["md_runs"]["runs"]) == {"apo", "docked_BEN"}
     assert st["analysis"]["comparison"]["figures"]["compare"]
+    # PBC re-centering: every analysed run ships a centred DCD and the apparent-vs-true dissociation check
+    for key, summ in st["analysis"]["summaries"].items():
+        cen = summ.get("centered") or {}
+        assert cen.get("centered_dcd") and Path(cen["centered_dcd"]).is_file() and cen["n_frames"] > 0, (key, cen)
+        if key != "apo":
+            assert "BEN" in summ.get("pbc_checks", {}) and summ["pbc_checks"]["BEN"]["true_nm"] < 1.0, summ.get("pbc_checks")
     b = out["binding"]["BEN"]
     assert b["status"] == "PASS" and b["delta_pmf_kj_mol"] is not None
     html = Path(out["report"]).read_text(encoding="utf-8")

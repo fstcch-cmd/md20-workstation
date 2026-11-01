@@ -7,6 +7,16 @@
 
 ## 2026-11-01（第三個 session）
 
+### D-21　週期邊界歸零：分析層錨定＋歸零 DCD，不在模擬中加力（使用者痛點）
+- 決定：`analysis/pbc.py`＋`traj.center_trajectory`：錨＝蛋白鏈＋bonded 金屬（manifest），其他分子以質心最小影像折回，錨質心置盒中心；
+  `analyse_run` 一律輸出 `production_centered.dcd`／`production_aligned.dcd`，可重現包含歸零版；viewer 走同一條。
+  `apparent_vs_true_distance` 在原始與歸零後差 > 0.5 nm 時記 AUTO_FIXED「視覺性假象」。
+- 理由：蛋白擴散是物理，`CMMotionRemover` 只除整體質心；症狀來自 per-molecule 折回與 mdtraj 自猜錨（多鏈／胜肽／金屬是獨立分子）。
+- 被否決：模擬中加「歸零」約束（改物理）；把 `enforcePeriodicBox=False` 寫 DCD（原子座標無界、檔案與工具相容性差，且仍需 image）。
+- 證據：`tests/test_pbc_centering.py`（6）；CI `test_full_workflow_3ptb` 斷言歸零檔與 `true_nm`。規格 `docs/specs/pbc_centering.md`。
+- 未決：多配體互相錨定；三斜盒只靠 mdtraj。
+- 另一個 session 留言（GBn2 無週期盒）：已處理——`center_trajectory` 無盒時只置中（質心到原點）、不折影像。
+
 ### D-20　隱式溶劑 GBn2（會診 §1 Q6）
 - 決定：`md.solvent: explicit|gbn2`、`docking.pose_md_screen.solvent`；細節見 `docs/specs/implicit_solvent.md`。
   GB 力用 OpenMM 內建 `GBSAGBn2Force`（依元素／鍵結指派 mbondi3），因為 `implicit/gbn2.xml` 對 OpenFF/GAFF 配體沒有參數。

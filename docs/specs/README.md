@@ -16,6 +16,7 @@
 | [metal_sites.md](metal_sites.md) | 金屬 policy、幾何鍵結模型（含金屬中心與經金屬的 1-3/1-4 修正）、擬合參數（QM Hessian／MCPB.py／JSON）、QM 小模型輸入 | 部分已驗證・鋅配位仍待 CI（37bc6b1 那輪仍紅） |
 | [gate_actions.md](gate_actions.md) | 三態閘門、GUI 一鍵決定、選項→設定修補、失效重跑 | 已驗證（GUI 伺服器測試）|
 | [viewer_interactions.md](viewer_interactions.md) | 離線 3D viewer、幾何互作標示、vdW 表面 | 已實作・純 Python 驗證（Chromium 繪圖測試在 CI 恆跳過，未驗證） |
+| [pbc_centering.md](pbc_centering.md) | 週期邊界歸零：蛋白鏈＋bonded 金屬為錨、配體／胜肽折回、歸零 DCD 輸出、視覺性解離閘門 | 已實作・待 CI |
 | [hts_screen.md](hts_screen.md) | 高通量前期篩選：Excel/CSV 化合物庫 → 自動下載 3D → 批次快速對接 → 排名圖 → 勾選進入正式對接/MD | 已實作・待 CI |
 | [ci_validation.md](ci_validation.md) | CI 架構、重測、論文對接重現、hsieh2024 不可重現分析、這幾輪抓到的 bug | 進行中 |
 | [REVIEW_QUESTIONS.md](REVIEW_QUESTIONS.md) | 彙整：最希望審查者挑戰的設計決定 | — |

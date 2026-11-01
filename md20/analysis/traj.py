@@ -20,19 +20,92 @@ def _ligand_resnames(top) -> list[str]:
     return sorted({r.name for r in top.residues if len(r.name) == 3 and r.name.startswith(LIG_PREFIX) and r.name[1:].isdigit()})
 
 
-def load_production(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 1):
+def anchor_atoms(top, metal_indices: list[int] | None = None) -> set[int]:
+    """Protein chains (+ metals bonded to them) are the anchor; never let mdtraj guess by molecule size —
+    with a peptide ligand or a second chain the guess puts them on the wrong side of the box."""
+    idx = set(int(i) for i in top.select("protein"))
+    idx |= set(int(i) for i in (metal_indices or []))
+    return idx
+
+
+def center_trajectory(traj, *, metal_indices: list[int] | None = None, superpose: bool = True, inplace: bool = True):
+    """Image every molecule to the side of the protein, put the protein centroid at the box centre, optionally
+    superpose on Cα (docs/specs/pbc_centering.md).  Returns the (possibly new) trajectory plus the molecule sets."""
+    import mdtraj as md  # noqa: F401
+    t = traj if inplace else traj[:]
+    top = t.topology
+    anchors = anchor_atoms(top, metal_indices)
+    mols = top.find_molecules()
+    anchor_mols = [m for m in mols if any(a.index in anchors for a in m)]
+    other_mols = [m for m in mols if not any(a.index in anchors for a in m)]
+    if anchor_mols and t.unitcell_vectors is not None:      # implicit solvent (GBn2) trajectories have no box: nothing to image
+        t.image_molecules(inplace=True, anchor_molecules=anchor_mols, other_molecules=other_mols)
+        a_idx = np.array(sorted(i for m in anchor_mols for i in (a.index for a in m)), dtype=int)
+        box = t.unitcell_lengths if t.unitcell_lengths is not None else None
+        for f in range(t.n_frames):
+            centroid = t.xyz[f, a_idx].mean(0)
+            target = (box[f] / 2.0) if box is not None else np.zeros(3)   # no box (GBn2): protein centroid at the origin
+            t.xyz[f] += target - centroid
+    ca = top.select("protein and name CA")
+    if superpose and len(ca):
+        t.superpose(t, 0, atom_indices=ca)
+    return t
+
+
+def load_production(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 1, metal_indices: list[int] | None = None,
+                    superpose: bool = True):
+    """Production DCDs → one trajectory, re-centred (anchored on the protein) and Cα-superposed."""
     import mdtraj as md
     comp = load_json(Path(run_dir) / "stages" / "production" / "production_complete.json", {})
     dcds = (comp.get("result") or {}).get("dcd_paths") or []
     if not dcds:
         raise FileNotFoundError("production 沒有 DCD；請確認 stage 已完成且 write_dcd=True")
     traj = md.load(dcds, top=str(topology_pdb), stride=stride)
-    if traj.unitcell_vectors is not None:            # implicit solvent (GBn2) trajectories have no box
-        traj.image_molecules(inplace=True)
-    ca = traj.topology.select("protein and name CA")
+    return center_trajectory(traj, metal_indices=metal_indices, superpose=superpose)
+
+
+def export_centered(run_dir: Path | str, topology_pdb: Path | str, *, metal_indices: list[int] | None = None,
+                    ligand_groups: dict[str, list[int]] | None = None, stride: int = 1) -> dict:
+    """Write production_centered.dcd (+ .pdb) for students/VMD and the apparent-vs-true dissociation check.
+    Two files: *_centered* (imaged + protein centroid at the box centre, no rotation) and *_aligned* (also
+    Cα-superposed; the box appears to rotate, RMSD-ready)."""
+    import mdtraj as md
+    from .pbc import apparent_vs_true_distance
+    run_dir = Path(run_dir)
+    comp = load_json(run_dir / "stages" / "production" / "production_complete.json", {})
+    dcds = (comp.get("result") or {}).get("dcd_paths") or []
+    if not dcds:
+        raise FileNotFoundError("production 沒有 DCD")
+    raw = md.load(dcds, top=str(topology_pdb), stride=stride)
+    raw_xyz_last = raw.xyz[-1].copy()
+    cen = center_trajectory(raw, metal_indices=metal_indices, superpose=False, inplace=True)
+    adir = run_dir / "analysis"; adir.mkdir(parents=True, exist_ok=True)
+    cen.save_dcd(str(adir / "production_centered.dcd"))
+    cen[0].save_pdb(str(adir / "production_centered.pdb"))
+    checks = {}
+    top = cen.topology
+    if ligand_groups is None:
+        ligand_groups = {rn: top.select(f"resname {rn} and not element H").tolist() for rn in _ligand_resnames(top)}
+    prot_heavy = top.select("protein and not element H")
+    for name, idx in ligand_groups.items():
+        li = np.array(idx, dtype=int)
+        if not len(li) or not len(prot_heavy):
+            continue
+        d0 = np.linalg.norm(cen.xyz[0, prot_heavy][:, None, :] - cen.xyz[0, li][None, :, :], axis=-1).min(1)
+        pocket = prot_heavy[d0 < 0.8]
+        if not len(pocket):
+            pocket = prot_heavy
+        checks[name] = apparent_vs_true_distance(raw_xyz_last, cen.xyz[-1], li, np.asarray(pocket, dtype=int))
+    aligned = cen[:]
+    ca = top.select("protein and name CA")
     if len(ca):
-        traj.superpose(traj, 0, atom_indices=ca)
-    return traj
+        aligned.superpose(aligned, 0, atom_indices=ca)
+        aligned.save_dcd(str(adir / "production_aligned.dcd"))
+    out = {"centered_dcd": str(adir / "production_centered.dcd"), "centered_pdb": str(adir / "production_centered.pdb"),
+           "aligned_dcd": str(adir / "production_aligned.dcd") if len(ca) else None, "n_frames": int(cen.n_frames),
+           "pbc_checks": checks}
+    atomic_write_json(out, adir / "centered_manifest.json", backup=False)
+    return out
 
 
 def compute_metrics(traj, ligand_groups: dict[str, list[int]] | None = None) -> dict:
@@ -155,15 +228,28 @@ def plot_metrics(m: dict, out_dir: Path | str, *, label: str = "") -> dict:
 
 
 def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 1, label: str = "",
-                ligand_groups: dict[str, list[int]] | None = None) -> dict:
+                ligand_groups: dict[str, list[int]] | None = None, metal_indices: list[int] | None = None,
+                decisions=None) -> dict:
     run_dir = Path(run_dir)
-    traj = load_production(run_dir, topology_pdb, stride=stride)
+    traj = load_production(run_dir, topology_pdb, stride=stride, metal_indices=metal_indices)
     m = compute_metrics(traj, ligand_groups)
     adir = run_dir / "analysis"
     adir.mkdir(parents=True, exist_ok=True)
+    try:
+        cen = export_centered(run_dir, topology_pdb, metal_indices=metal_indices, ligand_groups=ligand_groups, stride=stride)
+    except Exception as exc:  # noqa: BLE001 — the centred export is a convenience; metrics above are already imaged
+        cen = {"error": f"{type(exc).__name__}: {exc}"}
+    m["pbc"] = cen
+    for name, chk in (cen.get("pbc_checks") or {}).items():
+        if chk.get("pbc_artifact") and decisions is not None:
+            decisions.record("analysis.pbc", name, "visual wrap artefact corrected",
+                             f"原始 DCD 的最後一幀中 {name} 與口袋質心距離 {chk['apparent_nm'] * 10:.1f} Å（看起來已解離），"
+                             f"歸零／錨定後為 {chk['true_nm'] * 10:.1f} Å：這是週期邊界的視覺假象，不是解離；分析與報告都用歸零後的座標。",
+                             kind="auto_fixed")
     figs = plot_metrics(m, run_dir / "figures", label=label)
     summary = {"status": "PASS", "metrics_file": str(adir / "metrics.json"), "figures": figs, "created_at": now_iso(),
-               "n_frames": m["n_frames"],
+               "n_frames": m["n_frames"], "centered": {k: v for k, v in cen.items() if k != "pbc_checks"},
+               "pbc_checks": cen.get("pbc_checks", {}),
                "rmsd_backbone_mean_A": float(np.mean(m["rmsd_backbone_A"])) if "rmsd_backbone_A" in m else None,
                "ligands": {rn: {"stays_bound": d["stays_bound"], "rmsd_last20_A": float(np.mean(d["rmsd_in_pocket_A"][-max(1, len(d["rmsd_in_pocket_A"]) // 5):])),
                                 "top_contacts": list(d["contact_frequency"].items())[:5]} for rn, d in m["ligands"].items()}}

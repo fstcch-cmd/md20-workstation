@@ -192,6 +192,8 @@ def reproducibility_bundle(run: Run, out_zip: Path | str | None = None) -> Path:
         if d.is_dir():
             files += [p for p in d.iterdir() if p.suffix in {".json", ".log", ".xml", ".pdb"} and not p.name.startswith("chunk_")]
     files += list(run.figures_dir.glob("*"))
+    # re-centred trajectory (imaged, protein at the box centre) so students never open the raw wrapped DCD in VMD
+    files += [p for p in (run.dir / "analysis").glob("production_centered.*")] + [p for p in (run.dir / "analysis").glob("centered_manifest.json")]
     if (run.dir / "report.html").is_file():
         files.append(run.dir / "report.html")
     manifest = {"created_at": now_iso(), "md20_version": __version__, "files": []}

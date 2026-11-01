@@ -297,7 +297,9 @@ def scene_from_run(run_dir: Path | str, topology_pdb: Path | str, *, ligand_indi
                    max_frames: int = 60) -> dict:
     """Production trajectory → scene with up to `max_frames` frames (needs mdtraj; imaged + Cα-superposed)."""
     from ..analysis.traj import load_production
-    traj = load_production(run_dir, topology_pdb)
+    from ..workflow import metal_indices_from_manifest
+    bm = load_json(Path(topology_pdb).parent / "build_manifest.json", {})
+    traj = load_production(run_dir, topology_pdb, metal_indices=metal_indices_from_manifest(bm))
     stride = max(1, traj.n_frames // max_frames)
     traj = traj[::stride]
     atoms, _ = parse_pdb_atoms(Path(topology_pdb).read_text(encoding="utf-8", errors="ignore"))

@@ -75,6 +75,12 @@ def fetch_pdb(pid: str, path: Path, *, timeout: float = 60.0) -> Path:
     return path
 
 
+def metal_indices_from_manifest(bm: dict) -> list[int]:
+    """Metals the bonded model tied to the protein: they belong to the protein anchor when re-centering."""
+    plans = ((bm.get("restraints") or {}).get("metals") or {}).get("plans") or []
+    return [int(p["metal_index"]) for p in plans if p.get("action") == "bonded" and p.get("metal_index") is not None]
+
+
 class WorkflowBlocked(RuntimeError):
     """A step needs a human decision; message explains which and why."""
 
@@ -865,7 +871,8 @@ class Workflow:
             if man.get("status") != "PASS":
                 bm = load_json(case.build_dir / "build_manifest.json", {})
                 groups = {l["name"]: l["heavy_atom_indices"] for l in manifest_ligands(bm) if l.get("heavy_atom_indices")}
-                man = analyse_run(run_dir, top, label=key, ligand_groups=groups or None)
+                man = analyse_run(run_dir, top, label=key, ligand_groups=groups or None, metal_indices=metal_indices_from_manifest(bm),
+                                  decisions=self.dec)
             out[key] = man
             metrics[key] = load_json(man["metrics_file"], {})
         comp = compare_runs(metrics, self.dir / "figures") if len(metrics) > 1 else {}
