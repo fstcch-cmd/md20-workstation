@@ -7,12 +7,12 @@
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
 | 監看 CI：3e7f941 / c016a08 的 Ubuntu 重測（鋅模型、補窗、NaCl 冪等） | — | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 | 結果記入 STATUS / DECISIONS |
+| 會診 §0：配體質子化（規則式離子化，對接／HTS／MD 共用同一結果）、GUI 預設 127.0.0.1、舊規格標示取代 | REVIEW_ANSWERS §0 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 21:05 | |
+| 會診 §1 Q6：`md.solvent: gbn2`（WP5 篩 pose、classroom tier；binding 擋下） | REVIEW_ANSWERS §1 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 21:05 | §0 之後 |
 
 ## 待認領（依重要性）
 | 項目 | 來源 |
 |---|---|
-| **會診結論的第 0 節三件事**：配體質子化（dimorphite-dl 規則式離子化，HTS 與對接共用）、GUI 預設綁 127.0.0.1、舊規格已標示取代 | `docs/specs/REVIEW_ANSWERS_2026-11-01.md` §0 |
-| `md.solvent: gbn2`（隱式溶劑）給 WP5 篩 pose 與 classroom tier；binding 時擋下 | 同上 §1 Q6 |
 | 約束策略修正：釋放移到 NPT、最小化配體 k ≥ 蛋白、hold_backbone 的 RMSD 驗收標註 | 同上 §1 Q1 |
 | 金屬：力常數依元素×配位原子表、配位水納入鍵結、配體配位金屬的距離約束後備 | 同上 §3 |
 | umbrella：MBAR overlap matrix 門檻、OpenMM 內建 metadynamics 後備、funnel 約束（研究 tier ΔG°） | 同上 §2 |
