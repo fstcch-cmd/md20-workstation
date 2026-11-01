@@ -66,6 +66,64 @@ def test_which_pdb_matches_hsieh2024(rcsb):
     assert res["1VKX"]["recall"] > res["1VKF"]["recall"] and res["1VKX"]["recall"] >= 0.5, res
 
 
+def _atoms(pdb_text: str):
+    import numpy as np
+    out = []
+    for l in pdb_text.splitlines():
+        if l.startswith("ATOM") and len(l) >= 54:
+            try:
+                out.append((l[21], f"{l[17:20].strip()}{int(l[22:26])}", np.array([float(l[30:38]), float(l[38:46]), float(l[46:54])])))
+            except ValueError:
+                continue
+    return out
+
+
+def test_hsieh2024_box_hypotheses(rcsb):
+    """Why does the hsieh2024 docking land elsewhere?  Pure geometry, no docking: where does the published box sit
+    in each candidate structure, under three readings of its size —
+      published  28.5×34.5×26.25 Å  (= 76×92×70 AD4 grid points × 0.375 Å; what MD20 docks with)
+      points_as_A 76×92×70 Å        (ADT grid-point counts typed into Vina's size field, which is in Å)
+      A_as_points 10.7×12.9×9.8 Å   (the Å values read as points and multiplied by 0.375 again)
+    and how far the box centre is from the reported residues.  The centre is in Å in both programs, so a
+    spacing mix-up changes the box *size*, never where it is."""
+    import numpy as np
+    P = hsieh2024.PAPER
+    ref = set(P["hbond_residues"])
+    c = np.asarray(P["box_center"], float)
+    sizes = {"published": P["box_size"], "points_as_A": tuple(round(v / 0.375) for v in P["box_size"]),
+             "A_as_points": tuple(round(v * 0.375, 2) for v in P["box_size"])}
+    out = {}
+    for pid in ("1VKX", "1VKF"):
+        txt = rcsb(pid).read_text(errors="ignore")
+        atoms = _atoms(txt)
+        xyz = np.array([a[2] for a in atoms])
+        d = np.linalg.norm(xyz - c, axis=1)
+        near = []
+        for i in np.argsort(d):
+            r = f"{atoms[i][0]}:{atoms[i][1]}"
+            if r not in near:
+                near.append(r)
+            if len(near) == 8:
+                break
+        rec = {"center_to_nearest_atom_A": round(float(d.min()), 2), "residues_nearest_center": near,
+               "protein_extent_A": [round(float(v), 1) for v in xyz.max(0) - xyz.min(0)],
+               "protein_centroid": [round(float(v), 2) for v in xyz.mean(0)]}
+        refpts = np.array([a[2] for a in atoms if a[1] in ref])
+        if len(refpts):
+            cen = refpts.mean(0)
+            rec["reported_residues_centroid"] = [round(float(v), 2) for v in cen]
+            rec["center_to_reported_centroid_A"] = round(float(np.linalg.norm(cen - c)), 2)
+            rec["reported_chains"] = sorted({a[0] for a in atoms if a[1] in ref})
+        for k, sz in sizes.items():
+            inside = residues_in_box(txt, c, sz)
+            rec[k] = {"size_A": sz, "n_residues_in_box": len(inside),
+                      "reported_in_box": sorted(ref & inside), "recall": round(len(ref & inside) / len(ref), 3)}
+        out[pid] = rec
+    _save("hsieh2024_box_hypotheses", out)
+    print(json.dumps(out, ensure_ascii=False, indent=1))
+    assert out["1VKX"]["published"]["n_residues_in_box"] >= 0      # a measurement, recorded for the teaching case
+
+
 def test_hsieh2025_reported_residues_are_in_keap1(rcsb):
     """The reported Keap1-BTB contacts must exist in 4CXT (coordinate-independent); also record how many fall
     inside the published 36×51×45 Å box — that box is larger than the domain, i.e. effectively blind docking."""
