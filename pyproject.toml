@@ -47,3 +47,5 @@ md20 = ["util/*.pem", "gui/static/*.js"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# a test running > 15 min dumps every thread's stack to stderr (CI log) — tells where a hang is
+faulthandler_timeout = 900

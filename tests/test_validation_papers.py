@@ -117,7 +117,15 @@ def _pose_residues(sdf: str, rec_txt: str) -> set[str]:
     return residues_near(rec_txt, xyz, 4.0)
 
 
-@pytest.mark.skipif(not os.environ.get("MD20_HEAVY"), reason="set MD20_HEAVY=1 (CI ubuntu)")
+# The two paper reproductions are hours of Vina on a 4-core runner (six ligands at once in a 28×34×26 Å box;
+# a 7-mer peptide in a 36×51×45 Å box).  They run in their own non-blocking CI job (MD20_PAPERS=1) with a
+# reduced search (exhaustiveness 8), and the result JSON says so — a check of the workflow, not of the
+# papers' exact search settings.
+PAPER_EXHAUSTIVENESS = 8
+PAPERS = pytest.mark.skipif(not os.environ.get("MD20_PAPERS"), reason="set MD20_PAPERS=1 (CI paper-docking job)")
+
+
+@PAPERS
 def test_reproduce_hsieh2024_simultaneous_docking(rcsb, tmp_path):
     _need_docking()
     from md20.build.receptor import prepare_receptor
@@ -128,7 +136,7 @@ def test_reproduce_hsieh2024_simultaneous_docking(rcsb, tmp_path):
     rec = Path(man["receptor_pdb"])
     box = Box(tuple(P["box_center"]), tuple(P["box_size"]), "paper", "Hsieh 2024 §2.13")
     ligs = [LigandInput(l["name"], smiles=l["smiles"]) for l in hsieh2024.LIGANDS]
-    res = dock(rec, ligs, box, tmp_path / "dock", mode="simultaneous", exhaustiveness=16, n_poses=9)
+    res = dock(rec, ligs, box, tmp_path / "dock", mode="simultaneous", exhaustiveness=PAPER_EXHAUSTIVENESS, n_poses=9)
     e = res.entry("joint")
     rank = e["recommended_rank"] or 1
     rtxt = rec.read_text()
@@ -139,7 +147,8 @@ def test_reproduce_hsieh2024_simultaneous_docking(rcsb, tmp_path):
         allres |= r
         per[l["name"]] = {"label": l["label"], "contacts": sorted(r),
                           **hsieh2024.residue_overlap(r, l["paper_residues"])}
-    out = {"paper_affinity": P["collective_affinity_kcal_mol"], "md20_joint_score": e["poses"][rank - 1]["score"],
+    out = {"search": f"reduced: exhaustiveness {PAPER_EXHAUSTIVENESS} (CI time budget), not the paper's setting",
+           "paper_affinity": P["collective_affinity_kcal_mol"], "md20_joint_score": e["poses"][rank - 1]["score"],
            "md20_best_score": e["poses"][0]["score"], "recommended_rank": e["recommended_rank"],
            "recommendation": e["reason"], "pocket": hsieh2024.residue_overlap(allres), "per_ligand": per}
     _save("hsieh2024_docking", out)
@@ -147,7 +156,7 @@ def test_reproduce_hsieh2024_simultaneous_docking(rcsb, tmp_path):
     assert e["poses"][0]["score"] < 0
 
 
-@pytest.mark.skipif(not os.environ.get("MD20_HEAVY"), reason="set MD20_HEAVY=1 (CI ubuntu)")
+@PAPERS
 def test_reproduce_hsieh2025_peptide_docking(rcsb, tmp_path):
     _need_docking()
     from md20.build.receptor import prepare_receptor
@@ -159,7 +168,7 @@ def test_reproduce_hsieh2025_peptide_docking(rcsb, tmp_path):
     rec = Path(man["receptor_pdb"])
     box = Box(tuple(P["box_center"]), tuple(P["box_size"]), "paper", "Hsieh 2025 §2.13")
     res = dock(rec, [LigandInput("GRP", smiles=peptide_smiles(P["sequence"]))], box, tmp_path / "dock",
-               exhaustiveness=32, n_poses=9)
+               exhaustiveness=PAPER_EXHAUSTIVENESS, n_poses=9)
     e = res.entry("GRP")
     rtxt = rec.read_text()
     poses = []
@@ -168,7 +177,8 @@ def test_reproduce_hsieh2025_peptide_docking(rcsb, tmp_path):
         ov = hsieh2025.PAPER["hbond_residues"] + hsieh2025.PAPER["contact_residues"]
         poses.append({"rank": p["rank"], "score": p["score"], "cluster": p.get("cluster_size"),
                       "recall_vs_paper": round(len(set(ov) & r) / len(ov), 3), "contacts": sorted(r)})
-    out = {"paper_affinity": P["affinity_kcal_mol"], "recommended_rank": e["recommended_rank"],
+    out = {"search": f"reduced: exhaustiveness {PAPER_EXHAUSTIVENESS} (CI time budget), not the paper's setting",
+           "paper_affinity": P["affinity_kcal_mol"], "recommended_rank": e["recommended_rank"],
            "recommendation": e["reason"], "poses": poses}
     _save("hsieh2025_docking", out)
     print(json.dumps(out, ensure_ascii=False, indent=1))

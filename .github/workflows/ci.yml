@@ -32,7 +32,7 @@ jobs:
       - run: python -m md20.cli demo --dir ${{ runner.temp }}/md20demo
       - run: python -m md20.cli doctor --no-benchmark || true   # degraded mode (no openmm): must not crash
       - name: Post failure log as commit comment
-        if: failure()
+        if: failure() || cancelled()
         shell: bash
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
@@ -83,12 +83,15 @@ jobs:
         run: '"$MAMBA_EXE" run -n md20 md20 doctor --seconds 5 || true'
       - name: Full test suite incl. real OpenMM
         shell: bash -el {0}
+        # normal: mac ~16 min, windows ~23, ubuntu heavy ~30; a step timeout (unlike the job timeout) still lets
+        # the failure-log step post pytest.log, whose -v lines show the test that never finished
+        timeout-minutes: 75
         env: { MD20_HEAVY: "${{ matrix.heavy }}" }
         run: |
           set -o pipefail
-          "$MAMBA_EXE" run -n md20 pytest -v --durations=15 2>&1 | tee pytest.log
+          "$MAMBA_EXE" run -n md20 pytest -vv --durations=15 2>&1 | tee pytest.log
       - name: Post failure log as commit comment
-        if: failure()
+        if: failure() || cancelled()
         shell: bash
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
@@ -133,3 +136,40 @@ jobs:
           name: lock-${{ runner.os }}
           path: md20-*-${{ runner.os }}.txt
           if-no-files-found: ignore
+
+  paper-docking:
+    # Hsieh 2024/2025 docking reproductions: hours of Vina on 4 cores, so they live here — non-blocking, never
+    # holding the openmm-stack gate.  Results are posted as a commit comment like the other validation JSON.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 200
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          init-shell: bash
+          cache-downloads: true
+      - name: Create environment
+        shell: bash -el {0}
+        env: { CONDA_OVERRIDE_CUDA: "12.4" }
+        run: '"$MAMBA_EXE" create -y -n md20 -f environment/base.yml -f environment/linux-cuda.yml'
+      - name: Install md20
+        shell: bash -el {0}
+        run: |
+          "$MAMBA_EXE" run -n md20 python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" -e .
+          "$MAMBA_EXE" run -n md20 md20 setup-vina
+      - name: Paper docking reproductions
+        shell: bash -el {0}
+        timeout-minutes: 180
+        env: { MD20_PAPERS: "1" }
+        run: |
+          set -o pipefail
+          "$MAMBA_EXE" run -n md20 pytest -vv -s --durations=5 tests/test_validation_papers.py -k reproduce 2>&1 | tee pytest.log
+      - name: Post results (always)
+        if: always()
+        shell: bash
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          body="### Paper docking (ubuntu, exhaustiveness 8) — ${{ job.status }}"$'\n```\n'"$(grep -E 'PASSED|FAILED|SKIPPED|ERROR|passed|failed|slowest|^[0-9.]+s call' pytest.log 2>/dev/null | tail -c 6000)"$'\n```\n'
+          for f in validation_results/*_docking.json; do [ -f "$f" ] && body+=$'\n<details><summary>'"$(basename $f)"$'</summary>\n\n```json\n'"$(head -c 12000 $f)"$'\n```\n</details>'; done
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$body" >/dev/null || true

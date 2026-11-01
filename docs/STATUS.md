@@ -5,7 +5,7 @@
 
 CI 依據(`fstcch-cmd/md20-workstation`):
 - **63d363b（第二個 session 最終版）openmm-stack**:**Windows OpenCL 124 passed、macOS 126 passed**,各只有 1 個失敗——`test_gui_pages_render`,原因是 NiceGUI 在子行程看到 pytest 環境變數就切到它自己的測試模式(非 GUI 本身問題),本 session 已修;Ubuntu `MD20_HEAVY=1` 重測結果見該 commit 留言。
-- **f879764(第三個 session:閘門一鍵決定、3D 互作、金屬擬合參數、GUI server 測試修正)openmm-stack**:**Windows OpenCL 與 macOS 全綠**(含 `test_gui_pages_render`);Ubuntu `MD20_HEAVY=1` 重測(金屬/pose 篩選/論文重現)見該 commit 留言。
+- **f879764(第三個 session:閘門一鍵決定、3D 互作、金屬擬合參數、GUI server 測試修正)openmm-stack**:**Windows OpenCL 與 macOS 全綠**(含 `test_gui_pages_render`);Ubuntu `MD20_HEAVY=1` 重測**卡在論文對接重現超過 60 分鐘**(見下),已取消;同一輪中 `test_metal_integration` 兩項失敗,traceback 待下一輪。
 - 測試函式:約 160 個(pure-python 部分本地全過)。
 
 ---
@@ -48,7 +48,7 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 
 ## B. 寫好、靠 CI 驗證(開發容器裝不了 OpenMM/NiceGUI,也連不到 PyPI/npm/RCSB)
 - 第二個 session 加入的真實路徑測試(上表粗體)以最新 commit 的 CI 留言為準;若某項紅,留言含失敗 log,會在下一個 commit 修正並更新本檔。
-- Ubuntu `MD20_HEAVY=1` 另跑兩篇論文的真實對接重現,結果以 JSON 貼到 commit 留言。
+- **兩篇論文的對接重現從未在 CI 跑完過**(更正先前說法):六配體同時對接(28×34×26 Å 盒)與 7 胜肽對接(36×51×45 Å 盒、exhaustiveness 32)在 4 核 runner 上要數小時,之前每輪都被取消或在更早處失敗。已移到獨立、不阻擋的 CI 工作 `paper-docking`(exhaustiveness 8,JSON 標明為縮減搜尋)。PDB 判定(1VKF→1VKX)、殘基存在性、結構閘門這幾項**輕量**驗證則每輪都有跑、有 JSON。
 
 ---
 
