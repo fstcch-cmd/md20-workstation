@@ -116,10 +116,12 @@ def test_3ptb_gbn2_implicit_solvent_short_md(pdb_3ptb, tmp_path):
         if st.ensemble != "MIN":
             # GBn2 (CustomGBForce, NoCutoff) is O(N²) and slow on CPU runners: 4 ps stages + 500 iterations took 65 min
             # on Ubuntu CPU (c4b5de6, D-25).  This test checks the plumbing, not the physics: keep it to a few hundred steps.
-            st.length_ps = 0.4; st.checkpoint_interval_ps = 0.2; st.report_interval_ps = 0.02; st.trajectory_interval_ps = 0.1
+            # Even 0.4 ps stages + 100 iterations still took 20–33 min (f140a49; ~1.5 s per force evaluation on CPU
+            # runners, D-29): 20 steps per stage and 50 iterations keep the plumbing check under a few minutes.
+            st.length_ps = 0.08; st.checkpoint_interval_ps = 0.04; st.report_interval_ps = 0.004; st.trajectory_interval_ps = 0.02
             st.accept = {}
         else:
-            st.max_iterations = 100
+            st.max_iterations = 50
     def make(spec, dt):
         return OpenMMBackend(s["system_xml"], s["topology_pdb"], platform_name=choice.name, platform_properties=choice.properties,
                              timestep_fs=dt, temperature_k=spec.temperature_k, ensemble=spec.ensemble,
