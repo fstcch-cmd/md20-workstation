@@ -49,8 +49,13 @@ def test_simultaneous_two_ligands(trypsin, tmp_path):
                mode="simultaneous", exhaustiveness=8, n_poses=5)
     e = res.entry("joint")
     assert e["ligands"] == ["BEN", "PHL"] and len(e["pose_sdfs"]["BEN"]) == len(e["pose_sdfs"]["PHL"])
-    pick = next(p for p in e["poses"] if p["recommended"])
-    assert not pick["clash"] and pick["min_ll_distance"] is not None
+    assert all(p["min_ll_distance"] is not None for p in e["poses"])
+    picks = [p for p in e["poses"] if p["recommended"]]
+    if picks:   # a joint pose that passes every conservative rule
+        assert e["recommended_rank"] == picks[0]["rank"] and not picks[0]["clash"]
+    else:       # brief S2: no qualifying candidate → no recommendation, but always a stated reason
+        assert e["recommended_rank"] is None and e["recommendation_status"] == "NEEDS_HUMAN" and e["reason"], e
+    print("joint recommendation:", e["recommended_rank"], e["reason"])
 
 
 def _ref(pdb_3ptb, tmp_path):
