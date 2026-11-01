@@ -21,6 +21,17 @@
 - 證據：CI `installer-windows`（待這輪）。文件：`docs/WINDOWS_QUICKSTART.md`（安裝→doctor→demo→GUI→真實案例→回報清單）。
 - 未決：CUDA 路徑只能在真機驗證（runner 無 GPU）。
 
+### D-28　f140a49：Ubuntu／macOS openmm-stack 各剩 1 紅（配體連接圖對應）、heavy workflow 1 紅（測試鍵名）
+- 事實（run 41320101307）：Ubuntu 342 passed／1 failed（49 分鐘）、macOS 同（68 分鐘）——D-25 的修正生效：質子化教科書案例、HTS 測試、
+  縮短後的 GBn2 3PTB、`test_restraint_groups_openmm`（分組約束實算）全過；heavy pose-screen、metal、paper-docking 綠。
+  1. `test_shuffled_pose_without_bond_orders_maps_by_graph`：**D-18 我寫的** `_connectivity_match` 用 `AdjustQueryProperties(makeBondsGeneric)` 當查詢，
+     但查詢原子仍比對芳香旗標與非零形式電荷；只有座標的 pose 沒有芳香性也沒有電荷 → 苯甲脒的苯環與 NH2+ 對不上。
+  2. heavy `test_full_workflow_3ptb`：PBC 檢查以組裝後的配體殘基名（L01）為鍵，測試寫成 BEN（另一 session 的 D-21 測試）。
+     實際值顯示功能正確：原始 DCD 看起來 6.95 nm（已解離），歸零後 0.205 nm，並記 AUTO_FIXED。
+- 決定：(1) 兩邊都轉成「只剩元素的圖」再比對（`_bare_graph`：電荷 0、非芳香、所有鍵 SINGLE、無立體），仍要求鍵數相同＋完整匹配，
+  乙醇／二甲醚的反例照樣被擋；(2) 測試改為檢查每個配體的 `true_nm < 1.0`，不綁輸入名稱。
+- 證據：待下一輪 CI（容器沒有 RDKit）。
+
 ### D-25　c4b5de6 openmm-stack 三 OS 紅：質子化 SMARTS 寫錯、HTS 純路徑測試遇到 RDKit、GBn2 在 CPU 極慢
 - 事實（run 41309973844；Ubuntu 16 failed／239 passed，87 分鐘；Windows／macOS 撞 90 分鐘上限）：
   1. **我寫的** `ionize` 脂肪胺規則 `[NX3;…;!$(N-[!CX4])]`：SMARTS 隱式 AND 比 `!` 緊，`[!CX4]` 是「非脂肪碳 **且** 4 連接」，

@@ -42,7 +42,9 @@ def test_full_workflow_3ptb(pdb_3ptb, tmp_path):
         cen = summ.get("centered") or {}
         assert cen.get("centered_dcd") and Path(cen["centered_dcd"]).is_file() and cen["n_frames"] > 0, (key, cen)
         if key != "apo":
-            assert "BEN" in summ.get("pbc_checks", {}) and summ["pbc_checks"]["BEN"]["true_nm"] < 1.0, summ.get("pbc_checks")
+            # keyed by the assembled ligand residue name (L01…), not the input name (BEN) — CI f140a49, D-28
+            checks = summ.get("pbc_checks") or {}
+            assert checks and all(c["true_nm"] < 1.0 for c in checks.values()), checks
     b = out["binding"]["BEN"]
     assert b["status"] == "PASS" and b["delta_pmf_kj_mol"] is not None
     html = Path(out["report"]).read_text(encoding="utf-8")

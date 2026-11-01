@@ -179,9 +179,11 @@ def _connectivity_match(ref_heavy, pose_mol) -> tuple[list[int] | None, str]:
         rdDetermineBonds.DetermineConnectivity(pose, useHueckel=False)
     except Exception as exc:  # noqa: BLE001
         return None, f"無法由 pose 座標判斷連接：{type(exc).__name__}: {exc}"
-    params = Chem.AdjustQueryParameters.NoAdjustments()
-    params.makeBondsGeneric = True
-    query = Chem.AdjustQueryProperties(ref_heavy, params)
+    # bare graph of the reference: element only.  A query built with AdjustQueryProperties still compares the
+    # aromatic flag and a non-zero formal charge, which a coordinate-only pose never has (CI f140a49: benzamidine's
+    # aromatic ring and NH2+ failed to match, D-28) — so strip both and make every bond SINGLE on each side.
+    query = _bare_graph(ref_heavy)
+    pose = _bare_graph(pose)
     if pose.GetNumBonds() != ref_heavy.GetNumBonds():
         return None, (f"pose 座標判斷出 {pose.GetNumBonds()} 個鍵、參考分子有 {ref_heavy.GetNumBonds()} 個："
                       "連接方式不同（或 pose 幾何扭曲），不猜測對應。")
@@ -189,6 +191,21 @@ def _connectivity_match(ref_heavy, pose_mol) -> tuple[list[int] | None, str]:
     if not m or len(m) != ref_heavy.GetNumAtoms():
         return None, "pose 的連接圖與參考分子不同（元素相同但鍵結位置不同）；不以原子順序猜測。"
     return list(m), ""
+
+
+def _bare_graph(mol):
+    """Copy with every atom neutral/non-aromatic and every bond SINGLE/non-aromatic (unsanitized): element graph only."""
+    from rdkit import Chem
+    rw = Chem.RWMol(mol)
+    for a in rw.GetAtoms():
+        a.SetFormalCharge(0); a.SetIsAromatic(False); a.SetNoImplicit(True); a.SetNumExplicitHs(0)
+        a.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
+    for b in rw.GetBonds():
+        b.SetBondType(Chem.BondType.SINGLE); b.SetIsAromatic(False); b.SetStereo(Chem.BondStereo.STEREONONE)
+    out = rw.GetMol()
+    out.UpdatePropertyCache(strict=False)
+    Chem.FastFindRings(out)
+    return out
 
 
 def apply_pose_coordinates(ref_mol, pose_mol, match: list[int]):
