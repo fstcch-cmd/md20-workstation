@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, field, asdict
+from dataclasses import fields, dataclass, field, asdict
 from pathlib import Path
 from typing import Callable
 
@@ -36,6 +36,7 @@ class BindingConfig:
     target_overlap: float = 0.2            # neighbouring windows (and the adaptive refinement's stop criterion)
     k_umbrella_max: float = 5000.0         # stiffest spring refinement may use on steep stretches
     max_refine_rounds: int = 6
+    max_extensions_per_window: int = 2   # a window with few effective samples is extended at most this often
     max_new_per_round: int = 12
     extra_windows: list = field(default_factory=list)   # manual "resample a–b": [{"center", "k"}] from plan_range
     window_equil_ps: float = 10.0
@@ -222,6 +223,19 @@ def _state_xyz_box(ctx):
     return xyz, box
 
 
+def finished_result(out_dir: Path | str, cfg: "BindingConfig") -> "BindingResult | None":
+    """Finished is finished: a second call with the same config returns the stored result instead of re-planning
+    the refinement on the (now larger) sample set — that re-ran extend_window and shifted ΔPMF (CI Windows:
+    3.518 → 3.396 kJ/mol on the resume call).  A changed config (e.g. manual extra_windows from the coverage
+    chart) reopens the sampling."""
+    manifest = load_json(Path(out_dir) / "binding_manifest.json", {})
+    prev = manifest.get("result") or {}
+    if manifest.get("status") == "PASS" and prev.get("status") == "PASS" and manifest.get("config") == cfg.to_dict():
+        known = {f.name for f in fields(BindingResult)}
+        return BindingResult(**{k: v for k, v in prev.items() if k in known})
+    return None
+
+
 def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xml: Path | str | None, out_dir: Path | str, *,
                 ligand_resname: str | None = None, ligand_indices: list[int] | None = None,
                 anchor_indices: list[int] | None = None, config: BindingConfig | None = None,
@@ -229,10 +243,13 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                 decisions: DecisionLog | None = None, should_pause: Callable[[], str | None] | None = None,
                 progress_cb: Callable[[dict], None] | None = None, positions_override=None,
                 other_ligand_indices: dict[str, list[int]] | None = None) -> BindingResult:
-    import openmm as mm
-    from openmm import app, unit, XmlSerializer
     cfg = config or BindingConfig()
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
+    done = finished_result(out, cfg)
+    if done is not None:
+        return done
+    import openmm as mm
+    from openmm import app, unit, XmlSerializer
     wdir = out / "windows"; wdir.mkdir(exist_ok=True)
     system = XmlSerializer.deserialize(Path(system_xml).read_text(encoding="utf-8"))
     pdb = app.PDBFile(str(topology_pdb))
@@ -462,11 +479,14 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     # adaptive refinement: large holes first, then the residual small ones; extend instead of duplicating
     added: list[float] = []
     final_plan = None
+    ext_count: dict[float, int] = {c: sum(1 for r in range(1, cfg.max_refine_rounds + 1) if wfile(c, f"ext{r}.done").is_file())
+                                   for c in samples}
     for rnd in range(cfg.max_refine_rounds):
         rp = plan_refinement(samples, ks, temperature_k=cfg.temperature_k, target_overlap=cfg.target_overlap,
                              k_max=cfg.k_umbrella_max, max_new_per_round=cfg.max_new_per_round,
                              max_total_windows=cfg.max_windows, cv_range=(d0, d0 + cfg.pull_distance_nm),
-                             min_effective_samples=min(100.0, 0.25 * pr_steps / cfg.sample_every_steps))
+                             min_effective_samples=min(100.0, 0.25 * pr_steps / cfg.sample_every_steps),
+                             extensions_done=ext_count, max_extensions=cfg.max_extensions_per_window)
         final_plan = rp
         entry = {"round": rnd + 1, "insert": rp.insert, "extend": [e["center"] for e in rp.extend],
                  "holes": rp.holes, "unsamplable": rp.unsamplable, "notes": rp.notes, "continuous": rp.continuous}
@@ -480,6 +500,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         for e in rp.extend:
             if not extend_window(float(e["center"]), rnd + 1):
                 return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[manifest.get("reason", "")])
+            ext_count[float(e["center"])] = ext_count.get(float(e["center"]), 0) + 1
         for j, ins in enumerate(rp.insert):
             c = float(ins["center"])
             if not run_window(c, start_for(c), cfg.seed + 7919 * (rnd + 1) + j, float(ins["k"])):

@@ -112,18 +112,31 @@ def _stats(samples: dict[float, np.ndarray], ks: dict[float, float], discard_fra
 def plan_refinement(samples: dict[float, np.ndarray], ks: dict[float, float] | float, *, temperature_k: float = 300.0,
                     target_overlap: float = 0.2, min_effective_samples: float = 100.0, k_max: float = 5000.0,
                     max_new_per_round: int = 12, max_total_windows: int = 60, discard_fraction: float = 0.1,
-                    cv_range: tuple[float, float] | None = None) -> RefinePlan:
-    """One refinement round.  `samples`: {centre: CV samples (nm)}; `ks`: {centre: k} or one k (kJ/mol/nm²)."""
+                    cv_range: tuple[float, float] | None = None, extensions_done: dict[float, int] | None = None,
+                    max_extensions: int = 2) -> RefinePlan:
+    """One refinement round.  `samples`: {centre: CV samples (nm)}; `ks`: {centre: k} or one k (kJ/mol/nm²).
+    `extensions_done`: {centre: times already extended}; after `max_extensions` a window with few effective samples
+    is reported in `notes` (a wider error bar) instead of being extended for ever — otherwise correlated CVs kept
+    every window in `extend` for all rounds and the refinement never reached `done` (cost ×6 for nothing)."""
     if not isinstance(ks, dict):
         ks = {c: float(ks) for c in samples}
     kT = KB_KJ_MOL_K * temperature_k
     plan = RefinePlan()
     st = _stats(samples, ks, discard_fraction)
     by_c = {w.center: w for w in st}
-    # --- windows that need more samples (extend, never duplicate)
+    ext_done = extensions_done or {}
+    # --- windows that need more samples (extend, never duplicate; bounded)
+    short = []
     for w in st:
         if w.n_eff < min_effective_samples:
-            plan.extend.append({"center": w.center, "why": f"有效樣本 {w.n_eff:.0f} < {min_effective_samples:.0f}（相關時間長）；延長此 window，不另加 window。"})
+            if ext_done.get(w.center, 0) < max_extensions:
+                plan.extend.append({"center": w.center, "why": f"有效樣本 {w.n_eff:.0f} < {min_effective_samples:.0f}（相關時間長）；"
+                                                               f"延長此 window（第 {ext_done.get(w.center, 0) + 1}/{max_extensions} 次），不另加 window。"})
+            else:
+                short.append(f"{w.center:.3f} nm（n_eff {w.n_eff:.0f}）")
+    if short:
+        plan.notes.append(f"{len(short)} 個 window 延長 {max_extensions} 次後有效樣本仍 < {min_effective_samples:.0f}：{', '.join(short[:6])}"
+                          + ("…" if len(short) > 6 else "") + "；不再延長，誤差由 bootstrap 反映。")
     # --- neighbours in μ order
     proposals: list[dict] = []
     for a, b in zip(st[:-1], st[1:]):
@@ -202,11 +215,22 @@ def plan_refinement(samples: dict[float, np.ndarray], ks: dict[float, float] | f
     room = max(0, max_total_windows - len(samples))
     take = min(max_new_per_round, room)
     existing = np.array(sorted(samples))
+    taken: list[float] = []
     for p in proposals:
         if len(plan.insert) >= take:
             break
-        if existing.size and np.min(np.abs(existing - p["center"])) < 1e-3:
-            p["center"] = round(p["center"] + 2e-3, 4)          # never reuse an existing centre key
+        # never reuse an existing centre key (a reused key would silently "add" a window that already exists and
+        # sample nothing); step away from every existing/taken centre, give up on this proposal after 1 σ-ish
+        c, moved = float(p["center"]), 0
+        while (existing.size and np.min(np.abs(existing - c)) < 1e-3) or any(abs(t - c) < 1e-3 for t in taken):
+            c, moved = round(c + 2e-3, 4), moved + 1
+            if moved > 10:
+                break
+        if moved > 10:
+            plan.notes.append(f"{p['center']:.3f} nm 附近已有 window，提案被跳過（該處樣本仍不足時請提高 k 或手動補採樣）。")
+            continue
+        p["center"] = c
+        taken.append(c)
         plan.insert.append({k: v for k, v in p.items() if k != "gap"})
     if len(proposals) > len(plan.insert):
         plan.budget_exhausted = True

@@ -62,3 +62,20 @@ def test_resample_requires_existing_windows(tmp_path):
     wf = Workflow(Project.create(tmp_path, "p"), copy.deepcopy(example_config()))
     with pytest.raises(ValueError):
         resample_range(wf, "BEN", 0.5, 0.7)
+
+
+def test_finished_binding_is_returned_without_resampling(tmp_path):
+    """Resume with the same config → stored result (same ΔPMF); a manual resample (extra_windows) reopens it."""
+    from md20.sampling.binding import run_binding, finished_result, BindingConfig
+    from md20.util import atomic_write_json
+    cfg = BindingConfig(pull_distance_nm=0.45, k_umbrella=2500)
+    res = {"status": "PASS", "d_bound_nm": 0.28, "delta_pmf_kj_mol": 3.518, "dG_standard_kj_mol": 0.294, "pmf": {"grid_nm": [0.3]},
+           "windows": [], "smd": {}, "caveats": ["x"]}
+    atomic_write_json({"status": "PASS", "config": cfg.to_dict(), "result": res}, tmp_path / "binding_manifest.json")
+    got = run_binding("no.xml", "no.pdb", None, tmp_path, config=cfg)        # no OpenMM needed on this path
+    assert got.status == "PASS" and got.delta_pmf_kj_mol == 3.518 and got.dG_standard_kj_mol == 0.294
+    import dataclasses
+    cfg2 = dataclasses.replace(cfg, extra_windows=[{"center": 0.5, "k": 2500}])
+    assert finished_result(tmp_path, cfg2) is None
+    atomic_write_json({"status": "PAUSED", "config": cfg.to_dict(), "result": {"status": "PAUSED"}}, tmp_path / "binding_manifest.json")
+    assert finished_result(tmp_path, cfg) is None

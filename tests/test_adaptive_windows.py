@@ -129,6 +129,34 @@ def test_budget_and_extend_and_ends():
     assert not plan.done
 
 
+def test_extension_is_bounded_and_then_reported():
+    """Correlated CVs never reach n_eff ≥ 100 in a short window: after max_extensions the plan stops asking for more
+    (previously every window was extended in every round and `done` was unreachable)."""
+    k0 = 1000.0
+    centres = np.linspace(0.45, 0.85, 5)
+    samples = {float(c): sample(c, k0, n=60, seed=i) for i, c in enumerate(centres)}
+    done = {float(c): 2 for c in centres}
+    plan = plan_refinement(samples, k0, temperature_k=T, target_overlap=0.2, min_effective_samples=100,
+                           cv_range=(0.4, 0.9), extensions_done=done, max_extensions=2)
+    assert plan.extend == [] and any("不再延長" in n for n in plan.notes)
+    half = {float(c): (1 if i % 2 else 2) for i, c in enumerate(centres)}
+    plan2 = plan_refinement(samples, k0, temperature_k=T, target_overlap=0.2, min_effective_samples=100,
+                            cv_range=(0.4, 0.9), extensions_done=half, max_extensions=2)
+    assert {e["center"] for e in plan2.extend} == {float(c) for i, c in enumerate(centres) if i % 2}
+
+
+def test_proposed_centre_never_collides_with_existing_keys():
+    """An endpoint proposal that lands on an existing centre must move to a free key, not 'add' the same window."""
+    from md20.sampling.adaptive import plan_refinement as pr
+    k0 = 1000.0
+    base = {0.45: sample(0.45, k0, n=400, seed=1), 0.452: sample(0.452, k0, n=400, seed=2), 0.454: sample(0.454, k0, n=400, seed=3),
+            0.9: sample(0.9, k0, n=400, seed=4)}
+    plan = pr(base, k0, temperature_k=T, target_overlap=0.2, min_effective_samples=1, cv_range=(0.45, 0.95))
+    assert plan.insert
+    assert all(min(abs(c - i["center"]) for c in base) >= 1e-3 for i in plan.insert)
+    assert len({i["center"] for i in plan.insert}) == len(plan.insert)
+
+
 def test_redundant_window_is_flagged():
     k0 = 1000.0
     samples = {1.2: sample(1.2, k0, seed=1), 1.2005: sample(1.2005, k0, seed=2), 1.3: sample(1.3, k0, seed=3)}
