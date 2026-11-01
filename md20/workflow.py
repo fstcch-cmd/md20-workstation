@@ -216,7 +216,9 @@ class Workflow:
             self._block("docking_preflight", f"胜肽 {l['name']}：{gate.explanation}（或設定 cpp_override 並說明理由）")
         self.dec.record("peptide.cpp", l["name"], rec.get("status"), gate.explanation,
                         kind="human" if l.get("cpp_override") else "auto")
-        self._cpp = getattr(self, "_cpp", {}); self._cpp[l["name"]] = rec
+        st = self.state(); st.setdefault("cpp", {})[l["name"]] = {**rec, "gate": gate.status, "explanation": gate.explanation,
+                                                                  "override": bool(l.get("cpp_override"))}
+        atomic_write_json(st, self.state_path)
         return peptide_smiles(seq, l.get("termini", "charged"))
 
     def run_docking(self, clean: Path, raw: Path, progress_cb=None):

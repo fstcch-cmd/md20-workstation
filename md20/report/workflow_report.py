@@ -70,6 +70,31 @@ def _md_section(wf) -> str:
     return "".join(parts)
 
 
+def _structure_section(wf) -> str:
+    from ..util import load_json
+    g = load_json(wf.dir / "structure_gates.json", {})
+    if not g:
+        return ""
+    icon = {"PASS": "✅", "AUTO_FIXED": "🛠", "NEEDS_HUMAN": "⛔"}
+    return ("<h3>結構可信度</h3><ul>" + "".join(f"<li>{icon.get(x['status'], '')} <b>{_esc(x['name'])}</b>：{_esc(x['explanation'])}</li>"
+                                          for x in g.get("gates", [])) + "</ul>")
+
+
+def _cpp_section(wf) -> str:
+    cpp = wf.state().get("cpp") or {}
+    if not cpp:
+        return ""
+    rows = ["<h3>胜肽穿膜性（CPP）</h3><table><tr><th>胜肽</th><th>狀態</th><th>預測</th><th>說明</th></tr>"]
+    for name, r in cpp.items():
+        st = r.get("status", "")
+        if r.get("override"):
+            st += "（使用者覆寫）"
+        rows.append(f"<tr><td>{_esc(name)}</td><td>{_esc(st)}</td><td>{_esc(r.get('prediction', '—'))}</td>"
+                    f"<td>{_esc(r.get('explanation', ''))}</td></tr>")
+    rows.append("</table><p class=muted>「計算預測」僅依序列特徵，不能取代穿膜實驗；胞內標靶的結論需實驗確認。</p>")
+    return "".join(rows)
+
+
 def _binding_section(wf) -> str:
     b = (wf.state()["steps"].get("binding") or {}).get("results", {})
     if not b:
@@ -108,7 +133,7 @@ def build_workflow_report(wf, out_path: Path | None = None) -> Path:
             f"<h1>MD20 Workflow 報告：{_esc(wf.name)}</h1>",
             f"<p class=muted>專案 {_esc(wf.project.name)} · 產生於 {now_iso()}</p>",
             "<h2>1. 設定</h2>", f"<details><summary>config.json</summary><pre>{_esc(json.dumps(cfg, ensure_ascii=False, indent=1))}</pre></details>",
-            "<h2>2. 分子對接與 pose 選擇</h2>", _docking_section(wf),
+            "<h2>2. 分子對接與 pose 選擇</h2>", _structure_section(wf), _docking_section(wf), _cpp_section(wf),
             "<h2>3. 分子動力學（apo vs 對接結合態）</h2>", _md_section(wf),
             "<h2>4. 結合強度（SMD + 傘狀採樣）</h2>", _binding_section(wf),
             "<h2>5. 決策日誌</h2>", _decisions_table(rows), __import__("md20.util.stamp", fromlist=["html_footer"]).html_footer(), "</body></html>"]
