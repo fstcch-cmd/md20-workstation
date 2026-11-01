@@ -1,6 +1,7 @@
 ﻿# MD20 Windows installer (PowerShell).  Downloads micromamba, creates the md20 env, installs the package.
 # Usage:  powershell -ExecutionPolicy Bypass -File installer\install.ps1 [-Gpu cuda|opencl|cpu]
-param([ValidateSet("auto","cuda","opencl","cpu")] [string]$Gpu = "auto", [string]$Root = "")
+param([ValidateSet("auto","cuda","opencl","cpu")] [string]$Gpu = "auto", [string]$Root = "",
+      [ValidateSet("","11.8","12.0","12.4")] [string]$Cuda = "")   # -Cuda 11.8: keep an old driver, install the matching OpenMM build
 $ErrorActionPreference = "Stop"
 if (-not $Root) { $Root = if ($env:MD20_ROOT) { $env:MD20_ROOT } else { Join-Path $env:LOCALAPPDATA "MD20" } }
 $env:MAMBA_ROOT_PREFIX = $Root
@@ -30,7 +31,7 @@ if ($Gpu -eq "cuda") {
     $drv = [double]$m.Groups[1].Value
     if ($drv -lt 11.8) { Write-Host "!! 驅動只支援 CUDA $drv（< 11.8）：改用 OpenCL。更新 NVIDIA 驅動後可重跑本安裝器改用 CUDA。"; $Gpu = "opencl"; $env:CONDA_OVERRIDE_CUDA = "12.4"; $GpuYml = Join-Path $Here "..\environment\windows-opencl.yml" }
     else {
-      $cv = if ($drv -lt 12.0) { "11.8" } elseif ($drv -ge 12.4) { "12.4" } else { $m.Groups[1].Value }
+      $cv = if ($Cuda) { $Cuda } elseif ($drv -lt 12.0) { "11.8" } elseif ($drv -ge 12.4) { "12.4" } else { $m.Groups[1].Value }
       $tmpYml = Join-Path $Root "windows-cuda-$cv.yml"
       (Get-Content $GpuYml) -replace "cuda-version=[0-9.]+", "cuda-version=$cv" | Set-Content -Encoding UTF8 $tmpYml
       $GpuYml = $tmpYml

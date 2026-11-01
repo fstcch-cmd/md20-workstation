@@ -245,6 +245,48 @@ def cmd_validate(a):
     return 0
 
 
+def cmd_drivers(a):
+    """Detect GPUs → decide → one-click download of the official driver (never executed by us)."""
+    from .env.hardware import probe_hardware
+    from .env.drivers import plan_drivers, resolve_nvidia_download, download_driver, installer_hint
+    hw = probe_hardware()
+    plans = plan_drivers(hw, resolve=resolve_nvidia_download)
+    for i, p in enumerate(plans, 1):
+        _p(f"[{i}] {p.vendor} {p.gpu}  驅動 {p.driver or '未知'}  狀態 {p.status}  → 現在會用 {p.platform_now}")
+        _p("    " + p.why)
+        for st in p.steps:
+            _p("    " + st)
+        if p.download_url:
+            _p(f"    官方下載：{p.download_url}" + (f"（{p.package_version}）" if p.package_version else ""))
+        elif p.download_page:
+            _p(f"    官方頁面：{p.download_page}")
+        _p(f"    安裝器：{installer_hint(p)}")
+    if a.action == "plan":
+        return 0
+    targets = [p for p in plans if p.download_url or p.download_page]
+    if not targets:
+        _p("沒有可下載的驅動（沒有偵測到 GPU，或驅動已是最新）。")
+        return 0
+    p = targets[0]
+    import webbrowser
+    if a.action == "open" or not p.download_url:
+        _p(f"開啟官方頁面：{p.download_page or p.download_url}")
+        webbrowser.open(p.download_page or p.download_url)
+        return 0
+    last = {"pct": -1}
+
+    def cb(ev):
+        if ev["pct"] is not None and ev["pct"] != last["pct"] and ev["pct"] % 5 == 0:
+            last["pct"] = ev["pct"]; _p(f"  下載 {ev['pct']}%")
+    dest = download_driver(p.download_url, a.out, progress_cb=cb)
+    _p(f"已下載到 {dest}\n請雙擊安裝（需要管理員權限，安裝後重開機），然後重跑安裝器：{installer_hint(p).replace(' -Cuda ' + str(p.env_cuda_version), '')}")
+    try:
+        webbrowser.open(str(dest.parent))
+    except Exception:  # noqa: BLE001
+        pass
+    return 0
+
+
 def cmd_screen(a):
     """Write an example compound sheet (every accepted column) for `screen.library`."""
     from .docking.library import write_template
@@ -377,6 +419,9 @@ def main(argv=None) -> int:
     va = sub.add_parser("validate", help="以 HCC Lab 論文建立驗證／教學案例")
     va.add_argument("case", nargs="?", default="list"); va.add_argument("--out"); va.add_argument("--tier", default="classroom")
     va.add_argument("--cpp-override", help="胜肽 CPP 未通過仍要繼續的理由（會寫入報告）"); va.set_defaults(fn=cmd_validate)
+    dr = sub.add_parser("drivers", help="顯示卡驅動：偵測 → 判定 → 一鍵下載官方驅動（不自動安裝）")
+    dr.add_argument("action", choices=["plan", "download", "open"], nargs="?", default="plan")
+    dr.add_argument("--out", help="下載目錄（預設 ~/Downloads）"); dr.set_defaults(fn=cmd_drivers)
     sc = sub.add_parser("screen", help="高通量篩選：化合物庫範本")
     sc.add_argument("action", choices=["template"]); sc.add_argument("--out", default="compound_library.xlsx"); sc.set_defaults(fn=cmd_screen)
     g = sub.add_parser("gui", help="圖形介面（瀏覽器）"); g.add_argument("--port", type=int, default=8020)

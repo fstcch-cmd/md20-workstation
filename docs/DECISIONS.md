@@ -7,6 +7,13 @@
 
 ## 2026-11-01（第一個 session，續）
 
+### D-27　驅動問題徹底解決：偵測→判定→一鍵下載官方驅動；不自動安裝（使用者要求）
+- 決定：`md20/env/drivers.py`：驅動→CUDA 對照表判定 OK/UPDATE/FALLBACK/NONE，NVIDIA 用 nvidia.com 下載頁背後的查詢服務對型號取最新 WHQL 載點，
+  只從官方 https 網域下載到 ~/Downloads、不執行；查不到就官方頁面不猜。`md20 drivers`、Doctor finding、GUI 卡片、安裝器 `-Cuda`。
+- 被否決：靜默執行驅動安裝器（需管理員與重開機，不該由程式代做）；從非官方鏡像下載；對不到型號時用「最接近」的猜。
+- 證據：`tests/test_drivers.py`（11，含查詢服務 fixture）；真機驗證待明早筆電。規格 `docs/specs/drivers.md`。
+- 未決：查詢服務非正式 API，變動時退化為官方頁面。
+
 ### D-26　Windows 安裝器必須在 Windows PowerShell 5.1 下可跑，且由 CI 真的執行
 - 決定：`install.ps1` 移除 PS7 專用的 `?.`／`??`（內建 `powershell.exe` 是 5.1，第一行就語法錯誤）；加 UTF-8 BOM（5.1 讀無 BOM 的 UTF-8 會把中文當 ANSI）；
   設 `PYTHONUTF8=1`；產生 `md20.cmd` 與桌面 `MD20-GUI.cmd` 啟動器。新增 CI job `installer-windows`：用 `shell: powershell`（5.1）跑安裝器，再用 `md20.cmd` 跑 doctor／demo／範本。

@@ -135,13 +135,26 @@ def benchmark(platform_name: str, properties: dict, *, n_atoms_target: int = 240
 
 
 def run_doctor(*, do_benchmark: bool = True, benchmark_seconds: float = 20.0, workdir: Path | None = None,
-               save: bool = True) -> DoctorReport:
+               save: bool = True, lookup_drivers: bool = True) -> DoctorReport:
     suppress_windows_error_dialogs()
     hardware = probe_hardware(workdir)
     packages, findings = _package_report()
     verdict = diagnose_nvidia_files(hardware.get("nvidia_driver_files", {}))
     if verdict and "殘留" in verdict:
         findings.append(Finding("NVIDIA 驅動檔案", "WARN", "nvopencl.dll 殘留／驅動不完整", verdict))
+    # driver plan: not only "too old" but the official download and the keep-my-driver alternative
+    from .drivers import plan_drivers, resolve_nvidia_download, installer_hint
+    drivers = plan_drivers(hardware, resolve=resolve_nvidia_download if lookup_drivers else None)
+    for dp in drivers:
+        sev = {"OK": "OK", "UPDATE": "WARN", "FALLBACK": "OK", "NONE": "WARN", "UNKNOWN": "WARN"}[dp.status]
+        fix = dp.why + ("\n" + "\n".join(dp.steps) if dp.steps else "")
+        if dp.download_url:
+            fix += f"\n一鍵下載：md20 drivers download（{dp.package_version or ''}）"
+        elif dp.download_page:
+            fix += f"\n官方頁面：{dp.download_page}"
+        fix += f"\n安裝器指令：{installer_hint(dp)}"
+        findings.append(Finding(f"驅動 {dp.vendor} {dp.gpu}", sev, f"{dp.driver or '未知版本'} → {dp.platform_now}", fix))
+    hardware["driver_plans"] = [dp.to_dict() for dp in drivers]
     platform = None
     bench = None
     # hardware findings

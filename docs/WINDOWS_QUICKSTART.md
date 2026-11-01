@@ -23,6 +23,13 @@ powershell -ExecutionPolicy Bypass -File installer\install.ps1          # 自動
 - `CUDA_ERROR_INVALID_PTX` → 驅動比 OpenMM 的 CUDA 舊；更新驅動或 `-Gpu opencl`。
 - 403 下載 Vina → 之後重跑 `md20.cmd setup-vina`（GitHub API 限流）。
 
+## 1b. 驅動（安裝器跑完若 doctor 說驅動太舊）
+```cmd
+%LOCALAPPDATA%\MD20\md20.cmd drivers plan       # 偵測這張卡、判定支援的 CUDA、兩條路
+%LOCALAPPDATA%\MD20\md20.cmd drivers download   # 一鍵下載官方最新驅動到「下載」並開啟資料夾 → 雙擊安裝 → 重開機 → 重跑安裝器
+```
+不想動驅動：`powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Cuda 11.8`（安裝對應舊驅動的 OpenMM）。GUI 的 Doctor 頁有同樣的按鈕。
+
 ## 2. 確認 GPU 真的在算（2 分鐘）
 ```cmd
 %LOCALAPPDATA%\MD20\md20.cmd doctor

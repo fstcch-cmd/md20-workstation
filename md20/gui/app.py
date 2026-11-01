@@ -53,9 +53,45 @@ def dashboard():
             if rep.platform:
                 STATE["platform"] = None
             box.set_content(rep.to_markdown())
+            render_drivers(rep)
         with ui.row():
             ui.button("快速診斷", on_click=lambda: do_doctor(False))
             ui.button("診斷＋效能測試", on_click=lambda: do_doctor(True)).props("outline")
+        drv_box = ui.column().classes("w-full gap-2")
+
+        def render_drivers(rep):
+            drv_box.clear()
+            plans = (rep.hardware or {}).get("driver_plans") or []
+            from ..env.drivers import installer_hint, DriverPlan
+            with drv_box:
+                for d in plans:
+                    dp = DriverPlan(**{k: v for k, v in d.items() if k in DriverPlan.__dataclass_fields__})
+                    color = {"OK": "positive", "UPDATE": "warning", "FALLBACK": "grey", "NONE": "warning", "UNKNOWN": "grey"}[dp.status]
+                    with ui.card().classes("w-full"):
+                        with ui.row().classes("items-center gap-2"):
+                            ui.badge(dp.status, color=color)
+                            ui.label(f"{dp.vendor} {dp.gpu} · 驅動 {dp.driver or '未知'} · 現在會用 {dp.platform_now}").classes("font-semibold")
+                        ui.label(dp.why).classes("text-sm whitespace-pre-wrap")
+                        for st in dp.steps:
+                            ui.label(st).classes("text-sm text-primary")
+                        ui.label(f"安裝器指令：{installer_hint(dp)}").classes("text-xs font-mono")
+                        with ui.row().classes("gap-2"):
+                            if dp.download_url:
+                                prog = ui.label("").classes("text-sm")
+
+                                async def do_download(url=dp.download_url, prog=prog):
+                                    from nicegui import run as nrun
+                                    from ..env.drivers import download_driver
+                                    prog.set_text("下載中…")
+                                    try:
+                                        dest = await nrun.io_bound(download_driver, url)
+                                    except Exception as exc:  # noqa: BLE001
+                                        prog.set_text(f"下載失敗：{exc}"); return
+                                    prog.set_text(f"已下載：{dest}。請雙擊安裝（管理員權限、重開機），再重跑安裝器。")
+                                ui.button(f"一鍵下載官方驅動{'（' + dp.package_version + '）' if dp.package_version else ''}",
+                                          on_click=do_download).props("color=primary")
+                            if dp.download_page:
+                                ui.button("開啟官方下載頁", on_click=lambda u=dp.download_page: ui.navigate.to(u, new_tab=True)).props("outline")
         ui.separator()
         ui.label("流程").classes("text-xl font-semibold")
         rows = list_workflows(STATE["projects_dir"])
