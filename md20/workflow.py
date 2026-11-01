@@ -155,7 +155,26 @@ class Workflow:
             blocking = [g for g in man["gates"]["gates"] if g["status"] == "NEEDS_HUMAN"]
             self._block("receptor_docking", "受體需要人工決定：" + "；".join(f"{g['name']}：{g['explanation']}（選項：{' / '.join(g['options'])}）" for g in blocking),
                         gates=blocking)
-        return Path(self._mark("receptor_docking", path=man["receptor_pdb"])["path"])
+        prot = self.protonation_review(raw, Path(man["receptor_pdb"]))
+        return Path(self._mark("receptor_docking", path=man["receptor_pdb"], protonation=prot)["path"])
+
+    def protonation_review(self, raw: Path, clean: Path) -> dict:
+        """WP8 review mode: PROPKA on the cleaned receptor; flag pocket residues (never blocks, never edits)."""
+        from .build.protonation import propka_available, run_pdb2pqr, pocket_protonation_review
+        ph = self.cfg.get("ph", 7.4)
+        if not propka_available():
+            return {"method": "pdbfixer", "note": "pdb2pqr/propka 未安裝；只用 PDBFixer 固定規則。"}
+        try:
+            box = self.make_box(raw, clean)
+            res = run_pdb2pqr(clean, self.dir / "protonation", ph=ph)
+            flags = pocket_protonation_review(res["pka_table"], clean, box.center, ph=ph)
+        except Exception as exc:  # noqa: BLE001
+            self.dec.record("build.protonation", "PROPKA", "failed", f"PROPKA 執行失敗（{str(exc)[:200]}）；改用 PDBFixer 固定規則。")
+            return {"method": "pdbfixer", "note": f"PROPKA 失敗：{str(exc)[:200]}"}
+        for f in flags:
+            self.dec.record("build.protonation", f["residue"], f"pKa {f['pka']:.1f}", "；".join(f["flags"]) +
+                            "。建模仍用固定規則；若此殘基參與結合，請考慮指定其質子化狀態後重建。")
+        return {"method": "propka-review", "ph": ph, "pocket_flags": flags}
 
     def make_box(self, raw: Path, clean: Path):
         from .docking import Box, box_from_pdb_residue, box_whole_receptor

@@ -76,7 +76,15 @@ def _structure_section(wf) -> str:
     if not g:
         return ""
     icon = {"PASS": "✅", "AUTO_FIXED": "🛠", "NEEDS_HUMAN": "⛔"}
-    return ("<h3>結構可信度</h3><ul>" + "".join(f"<li>{icon.get(x['status'], '')} <b>{_esc(x['name'])}</b>：{_esc(x['explanation'])}</li>"
+    prot = (wf.state()["steps"].get("receptor_docking") or {}).get("protonation") or {}
+    ptxt = ""
+    if prot.get("pocket_flags"):
+        ptxt = ("<h3>口袋質子化（PROPKA 審查，未自動更改）</h3><ul>" +
+                "".join(f"<li><b>{_esc(f['residue'])}</b> pKa {f['pka']:.1f}：{_esc('；'.join(f['flags']))}</li>"
+                        for f in prot["pocket_flags"]) + "</ul>")
+    elif prot.get("note"):
+        ptxt = f"<p class=muted>質子化：{_esc(prot['note'])}</p>"
+    return ptxt + ("<h3>結構可信度</h3><ul>" + "".join(f"<li>{icon.get(x['status'], '')} <b>{_esc(x['name'])}</b>：{_esc(x['explanation'])}</li>"
                                           for x in g.get("gates", [])) + "</ul>")
 
 

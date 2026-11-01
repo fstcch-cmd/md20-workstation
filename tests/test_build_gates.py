@@ -113,3 +113,16 @@ def test_numbering_jump_is_not_a_gap():
     rep = gate_inspection(insp, keep_hetero=set())
     names = {g.name: g.status for g in rep.gates}
     assert names["numbering jumps"] == PASS and "missing loops (long)" not in names and rep.ok
+
+
+def test_pocket_protonation_review(tmp_path):
+    from md20.build.protonation import pocket_protonation_review
+    pdb = tmp_path / "r.pdb"
+    pdb.write_text("ATOM      1  CA  ASP A  10       1.000   0.000   0.000  1.00 10.00           C\n"
+                   "ATOM      2  CA  HIS A  20      30.000   0.000   0.000  1.00 10.00           C\n"
+                   "ATOM      3  CA  LYS A  30       2.000   0.000   0.000  1.00 10.00           C\nEND\n")
+    table = [{"residue": "ASP", "resid": 10, "chain": "A", "pka": 7.9, "model_pka": 3.8},
+             {"residue": "HIS", "resid": 20, "chain": "A", "pka": 8.0, "model_pka": 6.5},   # far from pocket
+             {"residue": "LYS", "resid": 30, "chain": "A", "pka": 10.4, "model_pka": 10.5}]
+    out = pocket_protonation_review(table, pdb, (0, 0, 0), ph=7.4)
+    assert [f["residue"] for f in out] == ["ASP10A"] and len(out[0]["flags"]) == 2

@@ -98,3 +98,44 @@ def decide_protonation(receptor_pdb: Path | str, out_dir: Path | str, *, ph: flo
                                  + ("His 狀態依 pKa 與 pH 比較決定。" if row["residue"] == "HIS" else "位移超過 1.5 單位，值得在報告中說明。"))
     res["method"] = "propka"
     return res
+
+
+def pocket_protonation_review(pka_table: list[dict], receptor_pdb: Path | str, center, *, ph: float = 7.4,
+                              radius_A: float = 8.0) -> list[dict]:
+    """WP8 (review mode): titratable pocket residues whose PROPKA pKa is within 1 unit of the pH, or whose predicted
+    state differs from the fixed-rule default (Asp/Glu neutral, His doubly protonated, Lys neutral).
+
+    These are *flagged*, not changed: the build still uses PDBFixer rules at the given pH, and the report lists
+    the residues so the student can decide whether to rebuild with a different state."""
+    import numpy as np
+    c = np.asarray(center, float)
+    near: set[tuple[str, int]] = set()
+    for l in Path(receptor_pdb).read_text(encoding="utf-8", errors="ignore").splitlines():
+        if l.startswith("ATOM"):
+            try:
+                xyz = np.array([float(l[30:38]), float(l[38:46]), float(l[46:54])])
+                rid = int(l[22:26])
+            except ValueError:
+                continue
+            if np.linalg.norm(xyz - c) <= radius_A:
+                near.add(((l[21].strip() or "_"), rid))
+    out = []
+    for r in pka_table:
+        if (r["chain"].strip() or "_", r["resid"]) not in near:
+            continue
+        pka, res = r["pka"], r["residue"]
+        flags = []
+        if abs(pka - ph) < 1.0:
+            flags.append(f"pKa {pka:.1f} 與 pH {ph} 相差 < 1：兩種質子化狀態都有可觀比例")
+        if res in ("ASP", "GLU") and pka > ph:
+            flags.append(f"預測為中性（{'ASH' if res == 'ASP' else 'GLH'}），固定規則會給帶負電")
+        elif res == "HIS" and pka > ph:
+            flags.append("預測為雙質子化 HIP（+1）")
+        elif res == "LYS" and pka < ph:
+            flags.append("預測為中性 LYN")
+        elif res == "CYS" and pka < ph:
+            flags.append("預測為去質子化（−1）")
+        if flags:
+            out.append({"residue": f"{res}{r['resid']}{r['chain']}", "pka": pka, "model_pka": r["model_pka"],
+                        "flags": flags})
+    return out
