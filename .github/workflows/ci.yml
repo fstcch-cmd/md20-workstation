@@ -3,6 +3,8 @@ name: MD20 CI (Windows / macOS / Linux, CPU)
 on:
   push:
     branches: [main]
+    # documentation-only pushes (decision log, specs) must not start — or cancel — the long real-engine runs
+    paths-ignore: ["docs/**", "**/*.md"]
   pull_request:
   workflow_dispatch:
 
