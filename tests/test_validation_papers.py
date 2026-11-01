@@ -18,6 +18,8 @@ import pytest
 from md20.validation import hsieh2024, hsieh2025, residues_in_box, residues_near, protein_residues
 
 OUT = Path(os.environ.get("MD20_VALIDATION_OUT", "validation_results"))
+# word-boundary match: "ANTITERMINATOR-RELATED" must not count as RELA
+NFKB_RE = __import__("re").compile(r"NF-?\s?KAPPA\s?-?B|NF-?KB|\bKAPPA\s?B\b|\bP65\b|\bRELA\b")
 
 
 def _fetch(pdb_id: str, d: Path) -> Path:
@@ -53,7 +55,7 @@ def test_which_pdb_matches_hsieh2024(rcsb):
         present = protein_residues(txt)
         title = next((l[10:].strip() for l in txt.splitlines() if l.startswith("TITLE")), "")
         hit = sorted(ref & present)
-        res[pid] = {"title": title, "is_nf_kb": "NF" in title.upper() or "KAPPA" in title.upper() or "RELA" in title.upper(),
+        res[pid] = {"title": title, "is_nf_kb": bool(NFKB_RE.search(title.upper())),
                     "reported_residues_present": hit, "recall": round(len(hit) / len(ref), 3)}
     _save("hsieh2024_pdb_identity", res)
     print(json.dumps(res, ensure_ascii=False, indent=1))
