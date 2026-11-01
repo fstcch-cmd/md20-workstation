@@ -41,17 +41,28 @@ def test_bonded_zinc_ca2(pdb_ca2, tmp_path):
         hname = "HE2" if donor.name == "NE2" else "HD1"
         assert hname not in {a.name for a in donor.residue.atoms()}, (donor.residue, donor.name)
     # geometry survives minimisation + 2 ps MD (nonbonded Zn without the model typically drifts or collapses)
+    # A single frame after 2 ps from crystal coordinates is a noisy measurement (unequilibrated solvent, random
+    # velocities): the same code passed and failed on CI.  Judge the model the way it is meant: seeded, the *mean*
+    # bond length over the second half of a short run within 0.3 Å of r0, and no frame beyond 0.8 Å (a real escape).
     integ = mm.LangevinMiddleIntegrator(300 * unit.kelvin, 1 / unit.picosecond, 0.002 * unit.picoseconds)
+    integ.setRandomNumberSeed(2026)
     ctx = mm.Context(system, integ, mm.Platform.getPlatformByName("CPU"))
     ctx.setPositions(pdb.positions)
     if "msw_restraint_scale" in ctx.getParameters():
         ctx.setParameter("msw_restraint_scale", 0.0)
     mm.LocalEnergyMinimizer.minimize(ctx, maxIterations=500)
-    integ.step(1000)
-    xyz = ctx.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+    ctx.setVelocitiesToTemperature(300 * unit.kelvin, 2026)
+    integ.step(1000)                                    # 2 ps transient, discarded
+    traces = {b["label"]: [] for b in p["bonds"]}
+    for _ in range(20):                                 # 2 ps sampled every 0.1 ps
+        integ.step(50)
+        xyz = ctx.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+        for b in p["bonds"]:
+            traces[b["label"]].append(float(np.linalg.norm(xyz[b["metal"]] - xyz[b["donor"]])))
     for b in p["bonds"]:
-        d = np.linalg.norm(xyz[b["metal"]] - xyz[b["donor"]])
-        assert abs(d - b["r0_nm"]) < 0.03, (b["label"], d, b["r0_nm"])
+        tr = np.array(traces[b["label"]])
+        assert abs(tr.mean() - b["r0_nm"]) < 0.03, (b["label"], tr.mean(), tr.std(), b["r0_nm"])
+        assert tr.max() - b["r0_nm"] < 0.08, (b["label"], tr.max(), b["r0_nm"])
 
 
 def test_fitted_zinc_params_json_ca2(pdb_ca2, tmp_path):
