@@ -71,8 +71,9 @@ def cv_distance(xyz: np.ndarray, box: np.ndarray, anchor: np.ndarray, ligand: np
 # --------------------------------------------------------------------------- system setup
 def select_groups(topology, positions_nm: np.ndarray, *, ligand_resname: str | None = None,
                   ligand_indices: list[int] | None = None, anchor_indices: list[int] | None = None,
-                  pocket_cutoff_nm: float = 0.8) -> tuple[np.ndarray, np.ndarray, dict]:
+                  pocket_cutoff_nm: float = 0.8, exclude_indices=None) -> tuple[np.ndarray, np.ndarray, dict]:
     atoms = list(topology.atoms())
+    excl_res = {atoms[i].residue.index for i in (exclude_indices or [])}   # other ligands (e.g. peptides) never anchor
     if ligand_indices is None:
         ligand_indices = [a.index for a in atoms if a.residue.name == ligand_resname and a.element is not None
                           and a.element.symbol != "H"]
@@ -83,7 +84,7 @@ def select_groups(topology, positions_nm: np.ndarray, *, ligand_resname: str | N
     if anchor_indices is None:
         lig_res = {atoms[i].residue.index for i in lig}   # peptide ligands have their own CA atoms
         ca = np.array([a.index for a in atoms if a.name == "CA" and a.residue.name not in {ligand_resname, "CA"}
-                       and a.residue.index not in lig_res
+                       and a.residue.index not in lig_res and a.residue.index not in excl_res
                        and a.element is not None and a.element.symbol == "C"], dtype=int)
         cutoff = pocket_cutoff_nm
         sel = np.array([], dtype=int)
@@ -133,6 +134,7 @@ class BindingResult:
     windows: list = field(default_factory=list)
     pmf: dict = field(default_factory=dict)
     delta_pmf_kj_mol: float | None = None
+    delta_pmf_err_kj_mol: float | None = None
     dG_standard_kj_mol: float | None = None
     dG_standard_kcal_mol: float | None = None
     figures: dict = field(default_factory=dict)
@@ -173,8 +175,14 @@ def radial_pmf(pres, temperature_k: float) -> dict:
     integrand = 4 * np.pi * g[bound] ** 2 * np.exp(-(Wv[bound] - w_bulk) / kT)
     k_eq = float(np.trapezoid(integrand, g[bound])) if hasattr(np, "trapezoid") else float(np.trapz(integrand, g[bound]))
     dG = round(-kT * math.log(k_eq / V0_NM3), 3) if k_eq > 0 else None
+    from .multi import delta_pmf_error
     return {"grid": g, "W": Wv, "W_raw": W_raw - np.min(W_raw), "err": err, "w_bulk": w_bulk, "r_min": float(g[i_min]),
-            "r_cut": r_cut, "delta_pmf": dpmf, "dG": dG}
+            "r_cut": r_cut, "delta_pmf": dpmf, "delta_pmf_err": delta_pmf_error(g, err, i_min, tail), "dG": dG}
+
+
+def _unwrap_near(xyz: np.ndarray, ref: np.ndarray, box: np.ndarray) -> np.ndarray:
+    """Images of `xyz` closest to `ref` (orthorhombic/triclinic via min_image on each atom)."""
+    return np.asarray(ref) + np.array([min_image(np.asarray(x) - ref, box) for x in xyz])
 
 
 def _state_xyz_box(ctx):
@@ -189,7 +197,8 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                 anchor_indices: list[int] | None = None, config: BindingConfig | None = None,
                 platform_name: str = "CPU", platform_properties: dict | None = None,
                 decisions: DecisionLog | None = None, should_pause: Callable[[], str | None] | None = None,
-                progress_cb: Callable[[dict], None] | None = None, positions_override=None) -> BindingResult:
+                progress_cb: Callable[[dict], None] | None = None, positions_override=None,
+                other_ligand_indices: dict[str, list[int]] | None = None) -> BindingResult:
     import openmm as mm
     from openmm import app, unit, XmlSerializer
     cfg = config or BindingConfig()
@@ -207,7 +216,8 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         box_vecs = top.getPeriodicBoxVectors() or system.getDefaultPeriodicBoxVectors()
     masses = np.array([system.getParticleMass(i).value_in_unit(unit.dalton) for i in range(system.getNumParticles())])
     anchor, ligand, gi = select_groups(top, pos, ligand_resname=ligand_resname, ligand_indices=ligand_indices,
-                                       anchor_indices=anchor_indices, pocket_cutoff_nm=cfg.pocket_cutoff_nm)
+                                       anchor_indices=anchor_indices, pocket_cutoff_nm=cfg.pocket_cutoff_nm,
+                                       exclude_indices=[i for v in (other_ligand_indices or {}).values() for i in v])
     system = build_pulling_system(system, pos, anchor, ligand)
     manifest = load_json(out / "binding_manifest.json", {})
     manifest.update({"config": cfg.to_dict(), "groups": gi, "platform": platform_name, "updated_at": now_iso()})
@@ -241,6 +251,26 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         if decisions:
             decisions.record("binding.box", "box size", "NEEDS_HUMAN", msg, kind="human")
         return BindingResult(status="NEEDS_HUMAN", d_bound_nm=d0, caveats=[msg])
+    if other_ligand_indices:
+        # WP9: in a shared pocket, the exit path of the pulled ligand must be free of the other ligands
+        from .multi import pull_path_blockers
+        others = {k: _unwrap_near(xyz[np.array(v, dtype=int)], lig_xyz.mean(0), box) for k, v in other_ligand_indices.items() if v}
+        acom = (masses[anchor, None] * xyz[anchor]).sum(0) / masses[anchor].sum()
+        acom = _unwrap_near(acom[None], lig_xyz.mean(0), box)[0]
+        blk = pull_path_blockers(acom, lig_xyz, others, pull_distance_nm=cfg.pull_distance_nm)
+        manifest["path_check"] = {"blockers": blk, "others": sorted(others)}
+        if blk:
+            msg = ("拉離路徑被其他配體擋住：" + "；".join(f"{b['ligand']} 有 {b.get('n_atoms_in_path', '?')} 個重原子在拉離圓柱內"
+                                                      f"（沿路徑 {b.get('nearest_along_path_nm', '?')} nm）" for b in blk)
+                   + "。穿過另一個配體拉離得到的是推開它的功，不是本配體的結合自由能。")
+            manifest.update({"status": "NEEDS_HUMAN", "reason": msg})
+            atomic_write_json(json.loads(json.dumps(manifest, default=_np_default)), out / "binding_manifest.json")
+            if decisions:
+                decisions.record("binding.path", "multi-ligand exit path", "NEEDS_HUMAN", msg, kind="human")
+            return BindingResult(status="NEEDS_HUMAN", d_bound_nm=d0, caveats=[msg + "選項：先拉外側配體／只算單獨結合（docked_single）／指定 anchor_indices 改變方向"])
+        if decisions:
+            decisions.record("binding.path", "multi-ligand exit path", "clear",
+                             f"其他配體（{', '.join(sorted(others))}）不在拉離圓柱內；拉離期間它們不加限制（可自由移動），結果含其重排。")
     plan = plan_windows(d0, d0 + cfg.pull_distance_nm, force_constant_kj_mol_nm2=cfg.k_umbrella,
                         temperature_k=cfg.temperature_k, target_overlap=cfg.target_overlap, max_windows=cfg.max_windows)
     if smd.get("status") != "PASS":
@@ -363,6 +393,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     rp = radial_pmf(pres, cfg.temperature_k)
     g, Wv, err = rp["grid"], rp["W"], rp["err"]
     res.delta_pmf_kj_mol, res.dG_standard_kj_mol = rp["delta_pmf"], rp["dG"]
+    res.delta_pmf_err_kj_mol = rp["delta_pmf_err"]
     if res.dG_standard_kj_mol is not None:
         res.dG_standard_kcal_mol = round(res.dG_standard_kj_mol / 4.184, 3)
     # half-split convergence: first vs second half of every window

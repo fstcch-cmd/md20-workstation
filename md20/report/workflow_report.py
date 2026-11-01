@@ -131,6 +131,7 @@ def _binding_section(wf) -> str:
                      f"<td>{dgk}</td><td>{r.get('r_min_nm') and round(r['r_min_nm'], 3)}</td>"
                      f"<td>{r.get('max_force') and round(r['max_force'])}</td><td>{r.get('work') and round(r['work'], 1)}</td></tr>")
     parts.append("</table>")
+    parts.append(_comparison_html((wf.state()["steps"].get("binding") or {}).get("comparison") or {}))
     for name, r in b.items():
         figs = r.get("figures") or {}
         parts.append(f"<h3>{_esc(name)}</h3>")
@@ -147,6 +148,29 @@ def _binding_section(wf) -> str:
         parts.append("<ul>" + "".join(f"<li>{_esc(c)}</li>" for c in r.get("caveats", [])) + "</ul>")
     return "".join(parts)
 
+
+
+def _comparison_html(comp: dict) -> str:
+    """WP9: ΔΔ ranking per context and co-occupancy shifts."""
+    if not comp or not (comp.get("contexts") or comp.get("co_occupancy")):
+        return ""
+    parts = ["<h3>配體間比較（ΔΔ）</h3>"]
+    for ctx, c in comp.get("contexts", {}).items():
+        label = "各配體單獨結合" if ctx == "single" else f"共同口袋（{_esc(ctx.split(':', 1)[1])}）"
+        if c.get("status") != "PASS":
+            parts.append(f"<p class=muted>{label}：{_esc(c.get('why', ''))}</p>")
+            continue
+        parts.append(f"<p><b>{label}</b> — {_esc(c['why'])}</p><table><tr><th>配體</th><th>{_esc(c['quantity'])} ({_esc(c['unit'])})</th>"
+                     "<th>σ</th><th>判定</th></tr>")
+        for r in c["rows"]:
+            parts.append(f"<tr><td>{_esc(r['key'])}</td><td>{r['delta']:+.2f}</td><td>{'—' if r['sigma'] is None else r['sigma']}</td>"
+                         f"<td>{_esc(r['verdict'])}</td></tr>")
+        parts.append("</table>")
+    if comp.get("co_occupancy"):
+        parts.append("<p><b>共存效應</b>（共同口袋 − 單獨結合）</p><ul>"
+                     + "".join(f"<li>{_esc(c['why'])}</li>" for c in comp["co_occupancy"]) + "</ul>")
+    parts.append("<ul class=muted>" + "".join(f"<li>{_esc(n)}</li>" for n in comp.get("notes", [])) + "</ul>")
+    return "".join(parts)
 
 def build_workflow_report(wf, out_path: Path | None = None) -> Path:
     out_path = Path(out_path) if out_path else wf.dir / "workflow_report.html"

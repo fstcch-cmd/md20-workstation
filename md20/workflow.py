@@ -285,12 +285,25 @@ class Workflow:
         self._mark("docking", result=str(out / "docking_results.json"), mode=res.mode)
         return res
 
-    def choose_poses(self, res) -> dict:
-        """Recommended pose per entry unless the user overrides; validates joint consistency."""
-        if (d := self._done("pose_selection")) and d.get("choices_cfg") == self.cfg.get("pose_choices", {}):
+    def _screen_cfg(self):
+        from .docking.pose_screen import PoseScreenConfig
+        return PoseScreenConfig.from_cfg(self.cfg.get("docking", {}).get("pose_md_screen"),
+                                         tier=self.cfg.get("md", {}).get("tier", "teaching"))
+
+    def choose_poses(self, res, screen: Callable | None = None) -> dict | None:
+        """Recommended pose per entry unless the user overrides; validates joint consistency.
+
+        WP5: with `docking.pose_md_screen.enabled`, candidate poses are screened by short MD before the pose is
+        fixed (`screen(entry, rank) → assessment`, None = paused).  Returns None when the screen paused."""
+        from .docking.pose_screen import screen_candidates, decide
+        scfg = self._screen_cfg()
+        key = {"choices": self.cfg.get("pose_choices", {}), "screen": scfg.to_dict()}
+        if (d := self._done("pose_selection")) and d.get("choices_cfg") == key:
             return d["selection"]
         user = self.cfg.get("pose_choices", {}) or {}
         sel = {"mode": res.mode, "ligands": {}}
+        cache_path = self.dir / "pose_screen.json"
+        cache = load_json(cache_path, {})
         for e in res.entries:
             n = len(e["poses"])
             if e.get("recommended_rank") is None and e["name"] not in user:
@@ -300,17 +313,103 @@ class Workflow:
             rank = int(user.get(e["name"], e["recommended_rank"]))
             if not 1 <= rank <= n:
                 self._block("pose_selection", f"{e['name']} 只有 {n} 個 pose，無法選第 {rank} 名。")
+            why = e["reason"] if rank == e["recommended_rank"] else f"使用者改選第 {rank} 名（系統推薦第 {e['recommended_rank']} 名：{e['reason']}）"
+            screen_info = None
+            if e["name"] in user:
+                pass                                   # explicit human choice is never overridden by the screen
+            elif not scfg.enabled:
+                self.dec.record("workflow.pose_screen", e["name"], "skipped",
+                                "短 MD 篩 pose 未啟用（docking.pose_md_screen.enabled=false；非 research tier 預設關閉以節省時間）；"
+                                "pose 只依對接保守條件選擇，報告會標註。")
+            elif screen is None:
+                self._block("pose_selection", f"{e['name']}：已啟用短 MD 篩 pose，但此執行方式沒有提供模擬器；請用 pipeline run 執行。")
+            else:
+                ec = cache.setdefault(e["name"], {})
+                screened = {}
+                for r in screen_candidates(e, scfg.top_n):
+                    if str(r) in ec and ec[str(r)].get("verdict"):
+                        screened[r] = ec[str(r)]
+                        continue
+                    a = screen(e, r)
+                    if a is None:
+                        atomic_write_json(cache, cache_path)
+                        return None
+                    ec[str(r)] = screened[r] = a
+                    atomic_write_json(cache, cache_path)
+                dec = decide(e, screened, scfg)
+                screen_info = {k: dec[k] for k in ("status", "rank", "summary")}
+                if dec["status"] == "NEEDS_HUMAN":
+                    self._block("pose_selection", dec["why"] + "（選項：" + " / ".join(dec["options"]) + "）",
+                                screen={e["name"]: dec})
+                self.dec.record("workflow.pose_screen", e["name"], f"rank {dec['rank']}", dec["why"])
+                if dec["rank"] != rank:
+                    why = dec["why"]
+                rank = dec["rank"]
             p = e["poses"][rank - 1]
             if p.get("clash"):
                 self._block("pose_selection", f"{e['name']} 第 {rank} 名 joint pose 配體互相碰撞（最短 {p['min_ll_distance']} Å），請改選。")
-            why = e["reason"] if rank == e["recommended_rank"] else f"使用者改選第 {rank} 名（系統推薦第 {e['recommended_rank']} 名：{e['reason']}）"
             for lig in e["ligands"]:
                 sel["ligands"][lig] = {"rank": rank, "sdf": e["pose_sdfs"][lig][rank - 1], "score": p["score"],
                                        "rmsd_ref": p.get("rmsd_ref"), "entry": e["name"],
-                                       "smiles": e["smiles"][lig] if isinstance(e["smiles"], dict) else e["smiles"]}
+                                       "smiles": e["smiles"][lig] if isinstance(e["smiles"], dict) else e["smiles"],
+                                       "md_screen": screen_info}
             self.dec.record("workflow.pose", e["name"], f"rank {rank}", why, kind="human" if e["name"] in user else "auto")
-        self._mark("pose_selection", selection=sel, choices_cfg=user)
+        self._mark("pose_selection", selection=sel, choices_cfg=key)
         return sel
+
+    def _screen_pose(self, raw: Path, make_factory: Callable, entry: dict, rank: int, *,
+                     should_pause=None, progress_cb=None) -> dict | None:
+        """Build the pose at `rank`, run a short MD, return assess_pose(...) (None if paused)."""
+        from .docking.pose_screen import assess_pose
+        from .engine import make_protocol, run_replicas
+        scfg = self._screen_cfg()
+        names = list(entry["ligands"])
+        picks = {n: {"sdf": entry["pose_sdfs"][n][rank - 1],
+                     "smiles": entry["smiles"][n] if isinstance(entry["smiles"], dict) else entry["smiles"]} for n in names}
+        reg_path = self.dir / "pose_screen_cases.json"
+        reg = load_json(reg_path, {})
+        rkey = f"{entry['name']}#{rank}"
+        try:
+            if rkey in reg:
+                case = self.project.case(reg[rkey]["case_id"])
+                bs, lmap = load_json(case.build_dir / "build_manifest.json", {}), reg[rkey]["ligand_map"]
+                if bs.get("status") != "PASS":
+                    raise RuntimeError(f"建模未通過：{bs.get('blocking')}")
+            else:
+                case = self.project.new_case(f"{self.name}_screen_{safe_name(entry['name'])}_r{rank}")
+                bs, lmap = self._build_one(case, raw, names, picks)
+                reg[rkey] = {"case_id": case.case_id, "ligand_map": lmap}
+                atomic_write_json(reg, reg_path)
+                if bs.get("status") != "PASS":
+                    raise RuntimeError(f"建模未通過：{bs.get('blocking')}：{bs.get('blocking_detail')}")
+            md = self.cfg.get("md", {})
+            proto = make_protocol(md.get("tier", "teaching"), production_ns=scfg.production_ps / 1000.0, replicas=1,
+                                  seed=int(self.cfg.get("docking", {}).get("seed", 2026)))
+            for st in proto.stages:
+                if st.name in ("nvt", "npt"):
+                    st.length_ps = getattr(scfg, f"{st.name}_ps")
+                if st.ensemble != "MIN":
+                    st.trajectory_interval_ps = scfg.frame_interval_ps
+                    st.checkpoint_interval_ps = min(st.checkpoint_interval_ps, st.length_ps)
+            summ = run_replicas(case, proto, make_factory(case, proto), n=1, should_pause=should_pause,
+                                progress_cb=progress_cb, group_id=f"screen_{rank}")
+            r0 = summ["runs"][0]
+            if r0["status"] == "PAUSED":
+                return None
+            if r0["status"] != "COMPLETE":
+                raise RuntimeError(r0.get("reason") or r0["status"])
+            from .analysis.traj import load_production, compute_metrics
+            bm = load_json(case.build_dir / "build_manifest.json", {})
+            recs = {l.get("name"): l for l in manifest_ligands(bm)}
+            groups = {n: (recs.get(lmap.get(n)) or {}).get("heavy_atom_indices") or [] for n in names}
+            if not all(groups.values()):
+                raise RuntimeError("建模紀錄缺少配體原子索引")
+            traj = load_production(case.dir / "runs" / r0["run_id"], bm["topology_pdb"])
+            a = assess_pose(compute_metrics(traj, groups), names, scfg)
+        except Exception as exc:              # a failed screen is a recorded FAILED verdict, never a silent pass
+            a = assess_pose(None, names, scfg, error=f"{type(exc).__name__}: {exc}")
+        a["case_id"] = (reg.get(rkey) or {}).get("case_id")
+        return a
 
     def _cases_to_build(self, sel: dict) -> list[dict]:
         systems = self.cfg.get("md", {}).get("systems", ["apo", "docked_single"])
@@ -365,28 +464,31 @@ class Workflow:
                 pad = need
         return pad
 
-    def build_cases(self, raw: Path, sel: dict) -> dict:
+    def _build_one(self, case, raw: Path, names: list[str], picks: dict) -> tuple[dict, dict]:
+        """Build one case from chosen poses (`picks[name]` has sdf/smiles); returns (build summary, name → topology name)."""
         from .build.pipeline import build_case
-        built = dict((self._done("md_cases") or {}).get("cases", {}))
-        md = self.cfg.get("md", {})
         drop = {l.get("reference_resname") for l in self.cfg["ligands"] if l.get("reference_resname")}
+        lspec = {l["name"]: l for l in self.cfg["ligands"]}
+        small = [n for n in names if not lspec.get(n, {}).get("sequence")]
+        peps = [{"name": n, "sequence": lspec[n]["sequence"], "pose": picks[n]["sdf"],
+                 "termini": lspec[n].get("termini", "charged"), "target_location": lspec[n].get("target_location"),
+                 "cpp_evidence": lspec[n].get("cpp_evidence"), "cpp_override": lspec[n].get("cpp_override")}
+                for n in names if lspec.get(n, {}).get("sequence")]
+        s = build_case(case, receptor=raw, ligand_references=[picks[n]["smiles"] for n in small],
+                       ligand_poses=[picks[n]["sdf"] for n in small], ph=self.cfg.get("ph", 7.4),
+                       padding_nm=self._padding_nm(), keep_hetero=set(self.cfg.get("keep_hetero", [])),
+                       extra_ligand_resnames=drop, peptides=peps or None, ligand_names=small,
+                       exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])))
+        lmap = {n: f"L{i:02d}" for i, n in enumerate(small, 1)} | {p["name"]: p["name"] for p in peps}
+        return s, lmap
+
+    def build_cases(self, raw: Path, sel: dict) -> dict:
+        built = dict((self._done("md_cases") or {}).get("cases", {}))
         for spec in self._cases_to_build(sel):
             if spec["key"] in built and built[spec["key"]].get("status") == "PASS":
                 continue
             case = self.project.new_case(f"{self.name}_{spec['key']}")
-            lspec = {l["name"]: l for l in self.cfg["ligands"]}
-            small = [n for n in spec["ligands"] if not lspec.get(n, {}).get("sequence")]
-            peps = [{"name": n, "sequence": lspec[n]["sequence"], "pose": sel["ligands"][n]["sdf"],
-                     "termini": lspec[n].get("termini", "charged"), "target_location": lspec[n].get("target_location"),
-                     "cpp_evidence": lspec[n].get("cpp_evidence"), "cpp_override": lspec[n].get("cpp_override")}
-                    for n in spec["ligands"] if lspec.get(n, {}).get("sequence")]
-            refs = [sel["ligands"][n]["smiles"] for n in small]
-            poses = [sel["ligands"][n]["sdf"] for n in small]
-            s = build_case(case, receptor=raw, ligand_references=refs, ligand_poses=poses, ph=self.cfg.get("ph", 7.4),
-                           padding_nm=self._padding_nm(), keep_hetero=set(self.cfg.get("keep_hetero", [])),
-                           extra_ligand_resnames=drop, peptides=peps or None, ligand_names=small,
-                           exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])))
-            lmap = {n: f"L{i:02d}" for i, n in enumerate(small, 1)} | {p["name"]: p["name"] for p in peps}
+            s, lmap = self._build_one(case, raw, spec["ligands"], sel["ligands"])
             built[spec["key"]] = {"case_id": case.case_id, "mode": spec["mode"], "ligands": spec["ligands"], "ligand_map": lmap,
                                   "status": s["status"], "blocking": s.get("blocking"), "blocking_detail": s.get("blocking_detail")}
             self._mark("md_cases", cases=built)
@@ -463,39 +565,74 @@ class Workflow:
             return f"前後半段 ΔPMF 差 {hs} kJ/mol > {rule['max_half_split_kj']}：未收斂，ΔG° 不輸出。"
         return None
 
+    def _binding_targets(self, runs: dict, built: dict) -> tuple[list[dict], dict[str, list[str]]]:
+        """(targets, contexts).  Single-ligand cases → key = ligand name (backward compatible);
+        WP9: every ligand of a docked_multi case is pulled from the shared complex → key = "multi:<ligand>"."""
+        b = self.cfg.get("binding", {})
+        wanted = b.get("ligands") or None
+        targets, ctx = [], {"single": []}
+        for key, c in built.items():
+            if key not in runs:
+                continue
+            if c["mode"] == "docked_single":
+                for n in c["ligands"]:
+                    if wanted is None or n in wanted:
+                        targets.append({"key": n, "ligand": n, "run_key": key, "others": []})
+                        ctx["single"].append(n)
+            elif c["mode"] == "docked_multi" and b.get("multi", True):
+                names = [n for n in c["ligands"] if wanted is None or n in wanted]
+                ctx[f"multi:{key}"] = []
+                for n in names:
+                    targets.append({"key": f"multi:{n}", "ligand": n, "run_key": key,
+                                    "others": [m for m in c["ligands"] if m != n]})
+                    ctx[f"multi:{key}"].append(f"multi:{n}")
+        return targets, ctx
+
     def binding(self, runs: dict, built: dict, platform, *, should_pause=None, progress_cb=None) -> dict:
         from .sampling.binding import run_binding, BindingConfig
+        from .sampling.multi import compare_binding
         b = self.cfg.get("binding", {})
         if not b.get("enabled"):
             return {}
         results = dict((self._done("binding") or {}).get("results", {}))
         valid = {f.name for f in fields(BindingConfig)}
         cfg = BindingConfig(**{k: v for k, v in (b.get("config") or {}).items() if k in valid})
-        for name in b.get("ligands") or [n for c in built.values() if c["mode"] == "docked_single" for n in c["ligands"]]:
-            key = f"docked_{name}"
-            if key not in runs or results.get(name, {}).get("status") == "PASS":
+        targets, contexts = self._binding_targets(runs, built)
+        for t in targets:
+            name, key = t["key"], t["run_key"]
+            if results.get(name, {}).get("status") == "PASS":
                 continue
             case = self.project.case(runs[key]["case_id"])
             bm = load_json(case.build_dir / "build_manifest.json", {})
             run_dir = case.dir / "runs" / runs[key]["run_ids"][0]
             start = run_dir / "stages" / "production" / "production_state.xml"
-            mname = (built.get(key, {}).get("ligand_map") or {}).get(name, "L01")
-            lrec = next((l for l in manifest_ligands(bm) if l.get("name") == mname), None)
+            lmap = built.get(key, {}).get("ligand_map") or {}
+            mname = lmap.get(t["ligand"], "L01")
+            recs = {l.get("name"): l for l in manifest_ligands(bm)}
+            lrec = recs.get(mname)
             if lrec is None or not lrec.get("heavy_atom_indices"):
                 self._block("binding", f"{name}：建模紀錄中找不到配體 {mname} 的原子索引，無法定義拉離座標。")
-            res = run_binding(bm["system_xml"], bm["topology_pdb"], start, self.dir / "binding" / name,
+            others = {}
+            for o in t["others"]:
+                orec = recs.get(lmap.get(o, ""))
+                if not orec or not orec.get("heavy_atom_indices"):
+                    self._block("binding", f"{name}：共同口袋中的配體 {o} 沒有原子索引，無法檢查拉離路徑。")
+                others[o] = orec["heavy_atom_indices"]
+            res = run_binding(bm["system_xml"], bm["topology_pdb"], start, self.dir / "binding" / name.replace(":", "_"),
                               ligand_indices=lrec["heavy_atom_indices"], ligand_resname=mname, config=cfg, platform_name=platform.name,
                               platform_properties=platform.properties, decisions=self.dec, should_pause=should_pause,
-                              progress_cb=progress_cb)
+                              progress_cb=progress_cb, other_ligand_indices=others or None)
             if res.status == "NEEDS_HUMAN":
-                results[name] = {"status": "NEEDS_HUMAN", "caveats": res.caveats}
+                results[name] = {"status": "NEEDS_HUMAN", "ligand": t["ligand"], "caveats": res.caveats}
                 self._block("binding", f"{name} 結合自由能：{res.caveats[0] if res.caveats else ''}", results=results)
             dG, dGk, withheld = res.dG_standard_kj_mol, res.dG_standard_kcal_mol, res.pmf.get("dG_withheld")
             reason = self._tier_withholds_dG(cfg, res)
             if reason and dG is not None:
                 dG, dGk, withheld = None, None, reason
                 self.dec.record("binding.result", name, "ΔG° withheld", reason)
-            results[name] = {"status": res.status, "delta_pmf_kj_mol": res.delta_pmf_kj_mol,
+            results[name] = {"status": res.status, "ligand": t["ligand"], "context": "single" if not t["others"] else f"multi:{key}",
+                             "co_ligands": t["others"], "delta_pmf_kj_mol": res.delta_pmf_kj_mol,
+                             "delta_pmf_err_kj_mol": getattr(res, "delta_pmf_err_kj_mol", None),
                              "dG_standard_kj_mol": dG, "dG_standard_kcal_mol": dGk, "dG_withheld": withheld,
                              "half_split": res.pmf.get("half_split"),
                              "r_min_nm": res.pmf.get("r_min_nm"), "figures": res.figures, "caveats": res.caveats,
@@ -503,7 +640,13 @@ class Workflow:
             if res.status == "PAUSED":
                 st = self.state(); st["steps"]["binding"] = {"status": "PAUSED", "results": results}; atomic_write_json(st, self.state_path)
                 return results
-        self._mark("binding", results=results)
+        comparison = compare_binding(results, contexts={k: v for k, v in contexts.items() if v})
+        for c in comparison["contexts"].values():
+            if c.get("why"):
+                self.dec.record("binding.compare", "ΔΔ", c.get("reference"), c["why"])
+        for c in comparison["co_occupancy"]:
+            self.dec.record("binding.compare", f"co-occupancy {c['ligand']}", c["shift_kj_mol"], c["why"])
+        self._mark("binding", results=results, comparison=comparison)
         return results
 
     # ------------------------------------------------------------------ driver
@@ -542,7 +685,10 @@ class Workflow:
         systems = self.cfg.get("md", {}).get("systems", ["apo", "docked_single"])
         if self.cfg.get("ligands") and (any(s != "apo" for s in systems) or self.cfg.get("docking", {}).get("always")):
             res = self.run_docking(clean, raw, progress_cb=progress_cb)
-            sel = self.choose_poses(res)
+            sel = self.choose_poses(res, screen=lambda e, r: self._screen_pose(raw, make_factory, e, r,
+                                                                              should_pause=should_pause, progress_cb=progress_cb))
+            if sel is None:
+                return {"status": "PAUSED", "state": self.state()}
         built = self.build_cases(raw, sel or {"mode": "none", "ligands": {}})
         runs = self.run_md(built, make_factory, should_pause=should_pause, progress_cb=progress_cb)
         if any(r["status"] == "PAUSED" for r in runs.values()):

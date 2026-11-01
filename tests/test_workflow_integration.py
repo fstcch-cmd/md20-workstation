@@ -44,3 +44,37 @@ def test_full_workflow_3ptb(pdb_3ptb, tmp_path):
     # idempotent re-run: everything is skipped
     out2 = wf.run(lambda case, proto: make_backend_factory(case, proto, platform=platform), platform)
     assert out2["status"] == "COMPLETE"
+
+
+def test_pose_md_screen_3ptb(pdb_3ptb, tmp_path):
+    """WP5 on the real stack: docking → short-MD screen of candidate poses → docked MD → analysis with ligand groups."""
+    import json
+    from md20.workflow import WorkflowBlocked
+    cfg = example_config()
+    cfg["name"] = "screen"
+    cfg["receptor"] = {"file": str(pdb_3ptb)}
+    cfg["docking"].update({"exhaustiveness": 4, "n_poses": 5,
+                           "pose_md_screen": {"enabled": True, "top_n": 2, "nvt_ps": 2.0, "npt_ps": 2.0,
+                                              "production_ps": 10.0, "frame_interval_ps": 0.5}})
+    short = {"length_ps": 4.0, "checkpoint_interval_ps": 2.0, "report_interval_ps": 0.2, "trajectory_interval_ps": 0.5, "accept": {}}
+    cfg["md"] = {"systems": ["docked_single"], "tier": "classroom", "production_ns": 0.006, "padding_nm": 0.8, "replicas": 1,
+                 "stage_overrides": {"minimize": {"max_iterations": 300}, "nvt": short, "npt": short,
+                                     "production": {**short, "length_ps": 6.0, "checkpoint_interval_ps": 3.0}}}
+    cfg["binding"] = {"enabled": False}
+    wf = Workflow(Project.create(tmp_path, "wf"), cfg)
+    platform = choose_platform(probe_steps=20)
+    try:
+        out = wf.run(lambda case, proto: make_backend_factory(case, proto, platform=platform), platform)
+    except WorkflowBlocked as exc:          # all poses genuinely unstable is a legitimate gate outcome, not a crash
+        assert "都不穩定" in str(exc), str(exc)
+        out = None
+    cache = json.loads((wf.dir / "pose_screen.json").read_text(encoding="utf-8"))["BEN"]
+    assert cache, "screen produced no verdicts"
+    assert all(v["verdict"] in ("STABLE", "UNSTABLE") for v in cache.values()), cache   # FAILED = machinery broken
+    if out is not None:
+        assert out["status"] == "COMPLETE"
+        sel = wf.state()["steps"]["pose_selection"]["selection"]["ligands"]["BEN"]
+        assert sel["md_screen"]["status"] in ("PASS", "AUTO_FIXED")
+        summ = wf.state()["steps"]["analysis"]["summaries"]["docked_BEN"]
+        metrics = json.loads(Path(summ["metrics_file"]).read_text(encoding="utf-8"))
+        assert "L01" in metrics["ligands"]          # manifest atom indices reached the analysis (regression a72ba6b)
