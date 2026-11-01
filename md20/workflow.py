@@ -108,6 +108,37 @@ class Workflow:
         self.dec.record("workflow.receptor", "source", src, "原始結構永久保存在 workflow/inputs；之後所有建模都從原檔重做，不回收 docking 處理過的 PDB。")
         return Path(self._mark("receptor_input", path=str(path), source=src)["path"])
 
+    OVERRIDE_KEYS = {"resolution": "resolution", "R-free": "r_free", "ligand occupancy": "ligand_occupancy",
+                     "pocket occupancy": "pocket"}
+
+    def structure_gate(self, raw: Path, box_res: str | None) -> dict:
+        """WP6: structure confidence + metals in the pocket, before anything is docked."""
+        from .build.structure_gate import structure_confidence
+        b = self.cfg.get("box") or {}
+        center = b.get("center")
+        res = str(box_res).split(":")[0].split()[0] if box_res else None
+        mp = self.cfg.get("metal_policy") or {}
+        rep = structure_confidence(raw.read_text(encoding="utf-8", errors="ignore"), pocket_center=center,
+                                   ligand_resname=res, metal_policy=mp)
+        over = self.cfg.get("structure_override") or {}
+        blocking = []
+        for g in rep.gates:
+            if g.status != "NEEDS_HUMAN":
+                continue
+            key = self.OVERRIDE_KEYS.get(g.name)
+            if key and over.get(key):
+                self.dec.record("structure.gate", g.name, "override", f"{g.explanation}（使用者選擇仍要使用：{over[key]}）", kind="human")
+                continue
+            blocking.append(g)
+        for rn, pol in mp.items():
+            if str(pol).startswith("keep"):
+                kh = set(self.cfg.get("keep_hetero", [])); kh.add(rn.split(":")[0]); self.cfg["keep_hetero"] = sorted(kh)
+        atomic_write_json(rep.to_dict(), self.dir / "structure_gates.json")
+        if blocking:
+            self._block("structure_gate", "結構可信度：" + "；".join(f"{g.name}：{g.explanation}（選項：{' / '.join(g.options)}）"
+                                                                  for g in blocking), gates=[g.to_dict() for g in blocking])
+        return rep.to_dict()
+
     def prepare_docking_receptor(self, raw: Path) -> Path:
         if (d := self._done("receptor_docking")):
             return Path(d["path"])
@@ -116,6 +147,7 @@ class Workflow:
         box_res = (self.cfg.get("box") or {}).get("from_residue")
         if box_res:
             lig_res.add(box_res)
+        self.structure_gate(raw, box_res)
         man = prepare_receptor(raw, self.dir / "docking_receptor", ph=self.cfg.get("ph", 7.4), decisions=self.dec,
                                keep_hetero=set(self.cfg.get("keep_hetero", [])), ligand_resnames=lig_res,
                                human_choices=self.cfg.get("human_choices", {}).get("receptor"))
