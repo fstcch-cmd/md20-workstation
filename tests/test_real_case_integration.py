@@ -30,12 +30,18 @@ def test_3ptb_build_and_short_md(pdb_3ptb, tmp_path):
     assert lig["smoke_test"]["ok"], lig["smoke_test"]
     asm = s["assembly"]
     assert abs(asm["total_charge"]) < 0.05 and asm["n_ligand_atoms"] == 18 and asm["n_waters"] > 1000
-    # compact box: rhombic dodecahedron (off-diagonal box vectors) — trypsin + 0.8 nm padding must stay well under
-    # the ~12k waters a 1.0 nm cube needs; the saving is where the laptop's compute goes
+    # general invariant, not a number for this protein: the box is a rhombic dodecahedron (off-diagonal vectors) whose
+    # volume is below the cube that gives the same protein–image distance (dodecahedron/cube = 0.707)
     import numpy as np
     box = np.array(asm["box_nm"])
     assert box.shape == (3, 3) and np.abs(box - np.diag(np.diag(box))).sum() > 0.1, box
-    assert asm["n_waters"] < 9000, asm["n_waters"]
+    vol = abs(np.linalg.det(box))
+    import mdtraj as md
+    prot = md.load(s["assembly"]["topology_pdb"]) if "topology_pdb" in s["assembly"] else md.load(s["topology_pdb"])
+    heavy = prot.topology.select("protein and not element H")
+    extent = float(np.ptp(prot.xyz[0, heavy], axis=0).max())
+    cube_vol = (extent + 2 * 0.8) ** 3
+    assert vol < 0.8 * cube_vol, (vol, cube_vol)
     # short MD on the best platform available (CPU in CI)
     choice = choose_platform(probe_steps=20)
     proto = make_protocol("classroom")
