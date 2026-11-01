@@ -71,3 +71,30 @@ def test_prepare_peptide_maps_pose_and_assigns_chain(tmp_path):
     w = Chem.SDWriter(str(bad)); w.write(m2); w.close()
     rec2 = prepare_peptide("GAK", bad, tmp_path, name="P02", chain_id="Q")
     assert rec2.status == NEEDS_HUMAN
+
+
+def test_cpp_gate_suggests_redesign_for_non_penetrating():
+    """A G-rich, low-charge peptide fails the gate AND must come back with concrete fixes + external predictors."""
+    from md20.build.peptide import cpp_gate, cpp_redesign_suggestions, CPP_PREDICTORS
+    g, rec = cpp_gate("GGGGGKP", target_location="胞內")
+    assert g.status == "NEEDS_HUMAN" and rec["prediction"] == "不太可能穿膜"
+    sug = rec["redesign_suggestions"]
+    # the user's own ideas (shorter charged core) and cationic enrichment and a CPP conjugate
+    assert sug["submotifs"] and sug["cationic"] and sug["conjugates"]
+    flat = {c["sequence"] for b in sug.values() for c in b}
+    assert "KP" in flat and any(s.startswith("GK") or s == "GKP" for s in flat)
+    # enrichment reaches net charge >= +3; conjugates score higher than the original (score 1)
+    assert all(c["net_charge"] >= 3 for c in sug["cationic"])
+    assert max(c["score"] for c in sug["conjugates"]) >= 6
+    # external predictor (BIOPEP-UWM named by the user) surfaced in the gate
+    assert any(name == "BIOPEP-UWM" for name, _u, _d in CPP_PREDICTORS)
+    assert "BIOPEP-UWM" in g.explanation and "biopep" in g.explanation.lower()
+    assert len(cpp_redesign_suggestions("GGGGGKP")["conjugates"]) >= 2
+
+
+def test_cpp_suggestions_empty_when_already_penetrating():
+    """A strong CPP (R8) passes, so no redesign is attached."""
+    from md20.build.peptide import cpp_gate
+    g, rec = cpp_gate("RRRRRRRR", target_location="胞內")
+    assert g.status in ("PASS", "AUTO_FIXED")
+    assert "redesign_suggestions" not in rec

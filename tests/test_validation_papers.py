@@ -1,0 +1,160 @@
+"""Validation against HCC Lab publications (teaching background cases).
+
+1. Hsieh 2024 J. Ethnopharmacol. — six metabolites, simultaneous docking on NF-κB RELA.
+2. Hsieh 2025 LWT — glycine-rich peptide GGGGGKP on Keap1-BTB (4CXT).
+
+Pure part (network only): is the published PDB/box consistent with the published residues?
+Heavy part (vina + meeko + pdbfixer): reproduce the docking and record score + residue recall in
+validation_results/*.json (posted by CI).  Assertions are deliberately about *consistency*, not about
+matching the paper's numbers, which depend on unpublished settings (exhaustiveness, protonation, seeds).
+"""
+import json
+import os
+import urllib.request
+from pathlib import Path
+
+import pytest
+
+from md20.validation import hsieh2024, hsieh2025, residues_in_box, residues_near
+
+OUT = Path(os.environ.get("MD20_VALIDATION_OUT", "validation_results"))
+
+
+def _fetch(pdb_id: str, d: Path) -> Path:
+    p = d / f"{pdb_id}.pdb"
+    if not p.is_file():
+        try:
+            urllib.request.urlretrieve(f"https://files.rcsb.org/download/{pdb_id}.pdb", p)
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"RCSB unreachable: {exc}")
+    return p
+
+
+@pytest.fixture(scope="module")
+def rcsb(tmp_path_factory):
+    d = tmp_path_factory.mktemp("rcsb_val")
+    return lambda pid: _fetch(pid, d)
+
+
+def _save(name: str, data: dict) -> None:
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / f"{name}.json").write_text(json.dumps(data, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+
+
+def test_which_pdb_matches_hsieh2024(rcsb):
+    """The paper prints 1VKF; decide from coordinates whether 1VKF or 1VKX carries the reported pocket."""
+    P = hsieh2024.PAPER
+    res = {}
+    for pid in ("1VKF", "1VKX"):
+        txt = rcsb(pid).read_text(errors="ignore")
+        found = residues_in_box(txt, P["box_center"], P["box_size"])
+        title = next((l[10:].strip() for l in txt.splitlines() if l.startswith("TITLE")), "")
+        res[pid] = {"title": title, "n_residues_in_box": len(found), **hsieh2024.residue_overlap(found)}
+    _save("hsieh2024_pdb_identity", res)
+    print(json.dumps(res, ensure_ascii=False, indent=1))
+    assert res["1VKX"]["recall"] > res["1VKF"]["recall"], res
+    assert res["1VKX"]["recall"] >= 0.7, res
+
+
+def test_hsieh2025_box_contains_reported_residues(rcsb):
+    P = hsieh2025.PAPER
+    txt = rcsb("4CXT").read_text(errors="ignore")
+    found = residues_in_box(txt, P["box_center"], P["box_size"])
+    ref = P["hbond_residues"] + P["contact_residues"]
+    hit = sorted(set(ref) & found)
+    _save("hsieh2025_box", {"reported": ref, "in_box": hit, "recall": len(hit) / len(ref), "n_in_box": len(found)})
+    assert len(hit) / len(ref) >= 0.8, (hit, ref)
+
+
+def test_cpp_gate_flags_grp():
+    from md20.build.peptide import cpp_gate
+    g, rec = cpp_gate(hsieh2025.PAPER["sequence"], target_location="胞內")
+    assert g.status == "NEEDS_HUMAN" and rec["prediction"] == "不太可能穿膜"
+
+
+def test_structure_gates_on_paper_structures(rcsb):
+    from md20.build.structure_gate import structure_confidence
+    out = {}
+    for pid, center in (("1VKX", hsieh2024.PAPER["box_center"]), ("4CXT", hsieh2025.PAPER["box_center"])):
+        rep = structure_confidence(rcsb(pid).read_text(errors="ignore"), pocket_center=center)
+        out[pid] = rep.to_dict()
+    _save("paper_structure_gates", out)
+    # 1VKX is 2.9 Å: a resolution warning is expected, not a block
+    assert any(g["name"] == "resolution" and g["status"] == "AUTO_FIXED" for g in out["1VKX"]["gates"]), out["1VKX"]
+
+
+# ------------------------------------------------------------------ heavy: reproduce the docking
+def _need_docking():
+    pytest.importorskip("meeko")
+    pytest.importorskip("pdbfixer")
+    try:
+        import vina  # noqa: F401
+    except ImportError:
+        from md20.docking.vina_cli import find_vina_exe
+        if not find_vina_exe():
+            pytest.skip("no vina")
+
+
+def _pose_residues(sdf: str, rec_txt: str) -> set[str]:
+    from rdkit import Chem
+    m = Chem.MolFromMolFile(sdf, removeHs=False, sanitize=False)
+    xyz = m.GetConformer().GetPositions()
+    return residues_near(rec_txt, xyz, 4.0)
+
+
+@pytest.mark.skipif(not os.environ.get("MD20_HEAVY"), reason="set MD20_HEAVY=1 (CI ubuntu)")
+def test_reproduce_hsieh2024_simultaneous_docking(rcsb, tmp_path):
+    _need_docking()
+    from md20.build.receptor import prepare_receptor
+    from md20.docking import dock, LigandInput, Box
+    P = hsieh2024.PAPER
+    man = prepare_receptor(rcsb("1VKX"), tmp_path / "rec", keep_hetero=set(), exclude_chains={"C", "D"})
+    assert man["status"] != "NEEDS_HUMAN", man["gates"]
+    rec = Path(man["receptor_pdb"])
+    box = Box(tuple(P["box_center"]), tuple(P["box_size"]), "paper", "Hsieh 2024 §2.13")
+    ligs = [LigandInput(l["name"], smiles=l["smiles"]) for l in hsieh2024.LIGANDS]
+    res = dock(rec, ligs, box, tmp_path / "dock", mode="simultaneous", exhaustiveness=16, n_poses=9)
+    e = res.entry("joint")
+    rank = e["recommended_rank"] or 1
+    rtxt = rec.read_text()
+    per = {}
+    allres = set()
+    for l in hsieh2024.LIGANDS:
+        r = _pose_residues(e["pose_sdfs"][l["name"]][rank - 1], rtxt)
+        allres |= r
+        per[l["name"]] = {"label": l["label"], "contacts": sorted(r),
+                          **hsieh2024.residue_overlap(r, l["paper_residues"])}
+    out = {"paper_affinity": P["collective_affinity_kcal_mol"], "md20_joint_score": e["poses"][rank - 1]["score"],
+           "md20_best_score": e["poses"][0]["score"], "recommended_rank": e["recommended_rank"],
+           "recommendation": e["reason"], "pocket": hsieh2024.residue_overlap(allres), "per_ligand": per}
+    _save("hsieh2024_docking", out)
+    print(json.dumps(out, ensure_ascii=False, indent=1))
+    assert e["poses"][0]["score"] < 0
+
+
+@pytest.mark.skipif(not os.environ.get("MD20_HEAVY"), reason="set MD20_HEAVY=1 (CI ubuntu)")
+def test_reproduce_hsieh2025_peptide_docking(rcsb, tmp_path):
+    _need_docking()
+    from md20.build.receptor import prepare_receptor
+    from md20.build.peptide import peptide_smiles
+    from md20.docking import dock, LigandInput, Box
+    P = hsieh2025.PAPER
+    man = prepare_receptor(rcsb("4CXT"), tmp_path / "rec", keep_hetero=set(), ligand_resnames={"SXJ"})
+    assert man["status"] != "NEEDS_HUMAN", man["gates"]
+    rec = Path(man["receptor_pdb"])
+    box = Box(tuple(P["box_center"]), tuple(P["box_size"]), "paper", "Hsieh 2025 §2.13")
+    res = dock(rec, [LigandInput("GRP", smiles=peptide_smiles(P["sequence"]))], box, tmp_path / "dock",
+               exhaustiveness=32, n_poses=9)
+    e = res.entry("GRP")
+    rtxt = rec.read_text()
+    poses = []
+    for i, p in enumerate(e["poses"][:5]):
+        r = _pose_residues(e["pose_sdfs"]["GRP"][i], rtxt)
+        ov = hsieh2025.PAPER["hbond_residues"] + hsieh2025.PAPER["contact_residues"]
+        poses.append({"rank": p["rank"], "score": p["score"], "cluster": p.get("cluster_size"),
+                      "recall_vs_paper": round(len(set(ov) & r) / len(ov), 3), "contacts": sorted(r)})
+    out = {"paper_affinity": P["affinity_kcal_mol"], "recommended_rank": e["recommended_rank"],
+           "recommendation": e["reason"], "poses": poses}
+    _save("hsieh2025_docking", out)
+    print(json.dumps(out, ensure_ascii=False, indent=1))
+    assert e["poses"][0]["score"] < 0

@@ -150,7 +150,8 @@ class Workflow:
         self.structure_gate(raw, box_res)
         man = prepare_receptor(raw, self.dir / "docking_receptor", ph=self.cfg.get("ph", 7.4), decisions=self.dec,
                                keep_hetero=set(self.cfg.get("keep_hetero", [])), ligand_resnames=lig_res,
-                               human_choices=self.cfg.get("human_choices", {}).get("receptor"))
+                               human_choices=self.cfg.get("human_choices", {}).get("receptor"),
+                               exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])))
         if man["status"] == "NEEDS_HUMAN":
             blocking = [g for g in man["gates"]["gates"] if g["status"] == "NEEDS_HUMAN"]
             self._block("receptor_docking", "受體需要人工決定：" + "；".join(f"{g['name']}：{g['explanation']}（選項：{' / '.join(g['options'])}）" for g in blocking),
@@ -231,13 +232,14 @@ class Workflow:
         from .build.gates import NEEDS_HUMAN
         seq = clean_sequence(l["sequence"])
         gate, rec = cpp_gate(seq, target_location=l.get("target_location"), experimental_evidence=l.get("cpp_evidence"))
-        if gate.status == NEEDS_HUMAN and not l.get("cpp_override"):
-            self._block("docking_preflight", f"胜肽 {l['name']}：{gate.explanation}（或設定 cpp_override 並說明理由）")
+        # record the CPP result (incl. redesign suggestions) first, so a blocked run still surfaces them in state/report
         self.dec.record("peptide.cpp", l["name"], rec.get("status"), gate.explanation,
                         kind="human" if l.get("cpp_override") else "auto")
         st = self.state(); st.setdefault("cpp", {})[l["name"]] = {**rec, "gate": gate.status, "explanation": gate.explanation,
                                                                   "override": bool(l.get("cpp_override"))}
         atomic_write_json(st, self.state_path)
+        if gate.status == NEEDS_HUMAN and not l.get("cpp_override"):
+            self._block("docking_preflight", f"胜肽 {l['name']}：{gate.explanation}（確認要繼續請在該配體設定 cpp_override 並說明理由）")
         return peptide_smiles(seq, l.get("termini", "charged"))
 
     def run_docking(self, clean: Path, raw: Path, progress_cb=None):
@@ -370,7 +372,8 @@ class Workflow:
             poses = [sel["ligands"][n]["sdf"] for n in small]
             s = build_case(case, receptor=raw, ligand_references=refs, ligand_poses=poses, ph=self.cfg.get("ph", 7.4),
                            padding_nm=self._padding_nm(), keep_hetero=set(self.cfg.get("keep_hetero", [])),
-                           extra_ligand_resnames=drop, peptides=peps or None, ligand_names=small)
+                           extra_ligand_resnames=drop, peptides=peps or None, ligand_names=small,
+                           exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])))
             lmap = {n: f"L{i:02d}" for i, n in enumerate(small, 1)} | {p["name"]: p["name"] for p in peps}
             built[spec["key"]] = {"case_id": case.case_id, "mode": spec["mode"], "ligands": spec["ligands"], "ligand_map": lmap,
                                   "status": s["status"], "blocking": s.get("blocking"), "blocking_detail": s.get("blocking_detail")}

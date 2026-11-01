@@ -18,7 +18,8 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
                ionic_strength_molar: float = 0.15, human_choices: dict | None = None, run_smoke_test: bool = True,
                cocrystal_resnames: list[str] | None = None, keep_hetero: set[str] | None = None,
                extra_ligand_resnames: set[str] | None = None, peptides: list[dict] | None = None,
-               ligand_names: list[str] | None = None, peptide_policy: dict | None = None) -> dict:
+               ligand_names: list[str] | None = None, peptide_policy: dict | None = None,
+               exclude_chains: set[str] | None = None) -> dict:
     """Build a case.
 
     `cocrystal_resnames[i]` (optional) names the HETATM residue whose coordinates are the pose for ligand i.
@@ -34,7 +35,7 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
     rman = prepare_receptor(rec_in["path"], bdir / "receptor", ph=ph, decisions=decisions, keep_hetero=keep_hetero,
                             human_choices=(human_choices or {}).get("receptor"),
                             ligand_resnames=set(cocrystal) | set(x for x in (extra_ligand_resnames or ()) if x),
-                            exclude_chains=pep_chains_in_file)
+                            exclude_chains=pep_chains_in_file | set(exclude_chains or ()))
     summary = {"status": "RUNNING", "receptor": rman, "ligands": [], "created_at": now_iso()}
     if rman["status"] == NEEDS_HUMAN:
         summary["status"] = NEEDS_HUMAN

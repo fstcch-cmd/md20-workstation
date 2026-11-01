@@ -255,6 +255,95 @@ def cpp_features(seq: str) -> dict:
             "closest_known_cpp": best[0], "identity_to_closest": round(best[1], 3)}
 
 
+def _cpp_score(f: dict) -> tuple[int, list[str]]:
+    """Heuristic CPP score 0–8 from sequence features, plus the reasons it lost points."""
+    score, reasons = 0, []
+    if 5 <= f["length"] <= 30:
+        score += 1
+    else:
+        reasons.append(f"長度 {f['length']}（典型 CPP 5–30）")
+    if f["net_charge"] >= 3:
+        score += 2
+    else:
+        reasons.append(f"淨電荷 {f['net_charge']:+d}（典型 CPP ≥ +3）")
+    if f["arg_lys_fraction"] >= 0.3 or f["arg_count"] >= 5:
+        score += 2
+    else:
+        reasons.append(f"Arg/Lys 比例 {f['arg_lys_fraction']:.0%}（典型 CPP ≥ 30%）")
+    if f["hydrophobic_moment"] >= 0.35 and f["net_charge"] >= 2:
+        score += 1    # amphipathic
+    if f["identity_to_closest"] >= 0.6:
+        score += 2
+    return score, reasons
+
+
+# External CPP predictors to confirm the in-house heuristic (the heuristic is a screen, not a verdict).
+CPP_PREDICTORS = [
+    ("BIOPEP-UWM", "https://biochemia.uwm.edu.pl/biopep-uwm/", "胜肽生物活性剖析（可檢索 CPP 等活性片段）"),
+    ("CellPPD / CellPPD-Mod", "https://webs.iiitd.edu.in/raghava/cellppd/", "SVM 預測 CPP 與其化學修飾版"),
+    ("CPPpred", "http://distilldeep.ucd.ie/CPPpred/", "N-to-1 神經網路 CPP 預測"),
+    ("MLCPP 2.0", "https://balalab-skku.org/mlcpp2/", "CPP 與其攝取效率預測"),
+]
+
+
+def cpp_redesign_suggestions(seq: str, *, max_each: int = 3) -> dict:
+    """When a peptide fails the CPP screen, propose concrete sequence changes and rank them by the same heuristic.
+
+    Strategies, most conservative first:
+      1. sub-motifs — the user's own K/P/G rearrangements (e.g. GGGGGKP → GKP, KP, GG): keep the active motif, drop
+         glycine filler.  Almost never raises the score (still low charge) — included to make that visible.
+      2. cationic enrichment — replace trailing/filler Gly with Lys or Arg to reach net charge ≥ +3.
+      3. CPP conjugation — N-terminal fusion of a validated vector (R8, TAT 47–57, penetratin) via a GG/GS linker;
+         this is the only route with experimental precedent for an otherwise non-penetrating cargo.
+    Each candidate is scored; none is asserted to penetrate — they are hypotheses to test experimentally or with the
+    external predictors in CPP_PREDICTORS.
+    """
+    s = clean_sequence(seq)
+    seen = {s}
+    out: dict[str, list[dict]] = {"submotifs": [], "cationic": [], "conjugates": []}
+
+    def _add(bucket: str, cand: str, how: str) -> None:
+        cand = clean_sequence(cand)
+        if not cand or cand in seen or len(out[bucket]) >= max_each:
+            return
+        seen.add(cand)
+        f = cpp_features(cand)
+        sc, _ = _cpp_score(f)
+        out[bucket].append({"sequence": cand, "how": how, "score": sc, "net_charge": f["net_charge"],
+                            "arg_lys_fraction": f["arg_lys_fraction"], "prediction": "可能穿膜" if sc >= 4 else "仍不足"})
+
+    # 1. sub-motifs: distinct short windows that keep any K/R, newest-to-shortest
+    charged_pos = [i for i, c in enumerate(s) if c in "KR"]
+    if charged_pos:
+        lo = min(charged_pos)
+        for end in (len(s), min(len(s), max(charged_pos) + 2)):
+            _add("submotifs", s[lo:end], "保留帶電殘基、去掉 Gly 填充")
+    for w in (3, 2):
+        if len(s) > w:
+            _add("submotifs", s[-w:], f"C 端 {w} 殘基片段")
+    # 2. cationic enrichment: turn filler Gly into K / R from the C-terminus until net charge ≥ +3
+    for cat in ("K", "R"):
+        t = list(s)
+        changed = 0
+        for i in range(len(t) - 1, -1, -1):
+            f = cpp_features("".join(t))
+            if f["net_charge"] >= 3:
+                break
+            if t[i] == "G":
+                t[i] = cat
+                changed += 1
+        if changed:
+            _add("cationic", "".join(t), f"將 {changed} 個 Gly 換成 {cat} 以達淨電荷 ≥ +3")
+    # 3. conjugation with a validated vector
+    for tag, vec in (("R8", "RRRRRRRR"), ("TAT(47-57)", "YGRKKRRQRRR"), ("penetratin", "RQIKIWFQNRRMKWKK")):
+        _add("conjugates", vec + "GG" + s, f"N 端接 {tag} 穿膜載體 + GG linker")
+    return {k: v for k, v in out.items() if v}
+
+
+def _predictor_lines() -> list[str]:
+    return [f"{name}（{desc}）：{url}" for name, url, desc in CPP_PREDICTORS]
+
+
 def cpp_gate(seq: str, *, target_location: str | None, experimental_evidence: str | None = None) -> tuple[Gate, dict]:
     """Returns (gate, record).  record['status'] ∈ 實驗證實 / 計算預測 / 未評估 / 不適用."""
     if not target_location:
@@ -268,30 +357,28 @@ def cpp_gate(seq: str, *, target_location: str | None, experimental_evidence: st
         return (Gate("CPP", PASS, f"使用者提供穿膜實驗證據：{experimental_evidence}"),
                 {"status": "實驗證實", "evidence": experimental_evidence, "target": target_location})
     f = cpp_features(seq)
-    score = 0
-    reasons = []
-    if 5 <= f["length"] <= 30:
-        score += 1
-    else:
-        reasons.append(f"長度 {f['length']}（典型 CPP 5–30）")
-    if f["net_charge"] >= 3:
-        score += 2
-    else:
-        reasons.append(f"淨電荷 {f['net_charge']:+d}（典型 CPP ≥ +3）")
-    if f["arg_lys_fraction"] >= 0.3 or f["arg_count"] >= 5:
-        score += 2
-    else:
-        reasons.append(f"Arg/Lys 比例 {f['arg_lys_fraction']:.0%}")
-    if f["hydrophobic_moment"] >= 0.35 and f["net_charge"] >= 2:
-        score += 1    # amphipathic
-    if f["identity_to_closest"] >= 0.6:
-        score += 2
+    score, reasons = _cpp_score(f)
     rec = {"status": "計算預測", "target": target_location, "features": f, "score": score, "max_score": 8}
     if score >= 4:
         rec["prediction"] = "可能穿膜"
         return (Gate("CPP", AUTO_FIXED, f"依序列特徵預測可能穿膜（分數 {score}/8；最接近已知 CPP：{f['closest_known_cpp']}，"
-                     f"相同度 {f['identity_to_closest']:.0%}）。這是**預測**而非驗證，報告會標註「CPP 狀態：計算預測」。",
-                     options=["提供實驗證據", "接受預測並繼續"]), rec)
+                     f"相同度 {f['identity_to_closest']:.0%}）。這是**預測**而非驗證，建議以外部工具確認後再進行；"
+                     f"報告會標註「CPP 狀態：計算預測」。",
+                     options=["提供實驗證據", "接受預測並繼續"],
+                     evidence={"predictors": _predictor_lines()}), rec)
     rec["prediction"] = "不太可能穿膜"
-    return (Gate("CPP", NEEDS_HUMAN, "依序列特徵預測不太可能進入細胞（分數 %d/8；%s）。對胞內標靶而言，後續 docking/MD 在生物學上可能沒有意義。" % (score, "；".join(reasons)),
-                 options=["提供實驗證據（文獻或自有數據）", "改設計：加入 CPP 序列（如 TAT、R8）", "仍要繼續（報告標註）"]), rec)
+    suggestions = cpp_redesign_suggestions(seq)
+    rec["redesign_suggestions"] = suggestions
+    rec["predictors"] = [{"name": n, "url": u, "note": d} for n, u, d in CPP_PREDICTORS]
+    flat = [f"{c['sequence']}（{c['how']}，預測分數 {c['score']}/8）"
+            for bucket in suggestions.values() for c in bucket]
+    sug_txt = ("建議的替代排列（以相同啟發式評分，僅供假設，需實驗或外部工具確認）：" + "；".join(flat[:6]) + "。") if flat else ""
+    pred_txt = "可用外部 CPP 預測工具交叉確認：" + "；".join(_predictor_lines()) + "。"
+    g = Gate("CPP", NEEDS_HUMAN,
+             "依序列特徵預測此胜肽不太可能進入細胞（分數 %d/8；%s）。標靶在胞內，若胜肽無法穿膜，"
+             "後續 docking/MD 在生物學上可能沒有意義——這是科學假設層面的問題，不只是計算設定問題。%s%s"
+             % (score, "；".join(reasons), sug_txt, pred_txt),
+             options=["提供實驗證據（文獻或自有數據）", "改設計：縮短為帶電核心（如 GKP、KP）或富集 Arg/Lys",
+                      "改設計：N 端接 TAT／R8／penetratin 等穿膜載體", "仍要繼續（報告標註為未驗證穿膜性）"],
+             evidence={"redesign_suggestions": suggestions, "predictors": _predictor_lines()})
+    return g, rec

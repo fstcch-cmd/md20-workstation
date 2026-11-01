@@ -100,6 +100,21 @@ def _cpp_section(wf) -> str:
         rows.append(f"<tr><td>{_esc(name)}</td><td>{_esc(st)}</td><td>{_esc(r.get('prediction', '—'))}</td>"
                     f"<td>{_esc(r.get('explanation', ''))}</td></tr>")
     rows.append("</table><p class=muted>「計算預測」僅依序列特徵，不能取代穿膜實驗；胞內標靶的結論需實驗確認。</p>")
+    for name, r in cpp.items():
+        sug = r.get("redesign_suggestions") or {}
+        if not sug:
+            continue
+        rows.append(f"<h4>{_esc(name)}：無法穿膜時的替代設計建議（假設，需驗證）</h4><ul>")
+        label = {"submotifs": "縮短為帶電核心", "cationic": "富集 Arg/Lys", "conjugates": "接穿膜載體"}
+        for bucket, items in sug.items():
+            for c in items:
+                rows.append(f"<li><b>{_esc(c['sequence'])}</b>（{_esc(label.get(bucket, bucket))}：{_esc(c['how'])}）"
+                            f" — 預測分數 {c['score']}/8、淨電荷 {c['net_charge']:+d}</li>")
+        rows.append("</ul>")
+        preds = r.get("predictors") or []
+        if preds:
+            rows.append("<p class=muted>外部 CPP 預測工具交叉確認：" +
+                        "、".join(f'<a href="{_esc(p["url"])}">{_esc(p["name"])}</a>' for p in preds) + "。</p>")
     return "".join(rows)
 
 

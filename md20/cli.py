@@ -219,6 +219,20 @@ def cmd_resume(a):
     return rc
 
 
+def cmd_validate(a):
+    """Write the workflow config of a paper-validation case (then: md20 pipeline run <file>)."""
+    from .validation import CASES
+    if a.case not in CASES:
+        _p("可用案例：" + "、".join(f"{k}（{v.PAPER['citation'][:60]}…）" for k, v in CASES.items()))
+        return 1
+    mod = CASES[a.case]
+    cfg = mod.workflow_config(tier=a.tier) if a.case != "hsieh2025" else mod.workflow_config(tier=a.tier, cpp_override=a.cpp_override)
+    out = Path(a.out or f"{cfg['name']}.json")
+    out.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    _p(f"已寫入 {out}\n{(mod.__doc__ or '').strip()}\n下一步：md20 pipeline run {out}")
+    return 0
+
+
 def cmd_gui(a):
     from .gui.app import main as gui_main
     gui_main(projects_dir=a.dir, port=a.port, show=not a.no_browser)
@@ -337,6 +351,9 @@ def main(argv=None) -> int:
     rs.add_argument("--include-blocked", action="store_true"); rs.add_argument("--ignore-battery", action="store_true")
     rs.add_argument("--install-autostart", action="store_true", help="登入時自動續跑（可隨時移除）")
     rs.add_argument("--remove-autostart", action="store_true"); rs.set_defaults(fn=cmd_resume)
+    va = sub.add_parser("validate", help="以 HCC Lab 論文建立驗證／教學案例")
+    va.add_argument("case", nargs="?", default="list"); va.add_argument("--out"); va.add_argument("--tier", default="classroom")
+    va.add_argument("--cpp-override", help="胜肽 CPP 未通過仍要繼續的理由（會寫入報告）"); va.set_defaults(fn=cmd_validate)
     g = sub.add_parser("gui", help="圖形介面（瀏覽器）"); g.add_argument("--port", type=int, default=8020)
     g.add_argument("--no-browser", action="store_true"); g.set_defaults(fn=cmd_gui)
     stp = sub.add_parser("stamp", help="檢查／解開 HCC Lab 戳記"); stp.add_argument("action", choices=["verify", "decrypt", "keygen"])

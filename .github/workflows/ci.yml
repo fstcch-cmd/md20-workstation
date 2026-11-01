@@ -103,6 +103,15 @@ jobs:
           doc=$("$MAMBA_EXE" run -n md20 md20 doctor --no-benchmark 2>/dev/null | head -c 6000 || true)
           body="### CI summary: openmm-stack (${{ matrix.os }}) — ${{ job.status }}"$'\n```\n'"$sum"$'\n```\n<details><summary>doctor</summary>\n\n'"$doc"$'\n</details>'
           gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$body" >/dev/null || true
+      - name: Post paper-validation results (always)
+        if: always()
+        shell: bash
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          [ -d validation_results ] || exit 0
+          body="### Paper validation (${{ matrix.os }})"$'\n'
+          for f in validation_results/*.json; do body+=$'\n<details><summary>'"$(basename $f)"$'</summary>\n\n```json\n'"$(head -c 12000 $f)"$'\n```\n</details>'; done
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$body" >/dev/null || true
       - name: Upload doctor report
         if: always()
         uses: actions/upload-artifact@v4
