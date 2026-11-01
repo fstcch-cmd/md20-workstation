@@ -81,6 +81,8 @@ def test_viewer_renders_in_headless_browser(tmp_path):
             pg.click("button")                            # play / pause the trajectory
             pg.wait_for_timeout(300)
             pg.click("button")
+            pg.click("text=表面")                         # vdW surface on, interactions off → redraw without errors
+            pg.click("text=互作")
             b.close()
     except Exception as exc:  # noqa: BLE001  (no browser on this runner)
         if "Executable doesn't exist" in str(exc) or "playwright install" in str(exc):
@@ -159,3 +161,29 @@ def test_viewer_targets_and_scene(tmp_path):
     from md20.report.workflow_report import _viewer_section
     sec = _viewer_section(wf)                  # trajectory needs mdtraj + DCD → falls back to the start structure
     assert "md20Mount" in sec and "docked_BEN" in sec
+
+
+def test_ligand_interactions_geometry_and_occupancy():
+    from md20.gui.views import ligand_interactions, interaction_table_html
+    sa = [{"e": "O", "n": "O1", "r": "L01", "s": "1", "k": "L"}, {"e": "C", "n": "C1", "r": "L01", "s": "1", "k": "L"},
+          {"e": "O", "n": "OG", "r": "SER", "s": "195", "k": "P"}, {"e": "C", "n": "CD1", "r": "LEU", "s": "99", "k": "P"},
+          {"e": "C", "n": "CA", "r": "LEU", "s": "99", "k": "P"}, {"e": "C", "n": "CB", "r": "SER", "s": "195", "k": "P"},
+          {"e": "Zn", "n": "ZN", "r": "ZN", "s": "301", "k": "M"}]
+    f0 = np.array([[0, 0, 0], [3, 0, 0], [0, 3.0, 0], [3, 3.8, 0], [3.0, -3.5, 0], [0, -3.9, 0], [-2.1, 0, 0]], float)
+    f1 = f0.copy(); f1[:2] += [0, 0, 20.0]                   # ligand leaves the pocket in frame 2
+    out = ligand_interactions(sa, np.stack([f0, f1]))
+    kinds = {(sa[j]["r"] + sa[j]["s"], t) for i, j, t in out["frames"][0]}
+    assert kinds == {("SER195", "h"), ("LEU99", "c"), ("ZN301", "m")}   # Leu CA (backbone) and Ser CB are not hydrophobic contacts
+    assert out["frames"][1] == []
+    assert {o["fraction"] for o in out["occupancy"]} == {0.5}
+    h = interaction_table_html({"interactions": out, "summary": {"n_frames": 2}})
+    assert "SER195" in h and "氫鍵候選" in h and "50%" in h and "未檢查角度" in h
+
+
+def test_scene_carries_interactions_and_viewer_shows_table():
+    atoms, xyz = parse_pdb_atoms(_mini_pdb())
+    sc = build_scene(atoms, xyz, pocket_cutoff_A=5.0)
+    assert len(sc["interactions"]["frames"]) == 1
+    assert any(o["type"] == "c" for o in sc["interactions"]["occupancy"])      # ligand C next to an Ala CB
+    h = viewer_html(sc)
+    assert "疏水接觸" in h and "不是溶劑可及表面" in h

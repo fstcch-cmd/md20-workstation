@@ -67,8 +67,10 @@
 
 ## 6. 還沒做 / 可以接著做的
 - 鍵結金屬:目前是**幾何**鍵結模型;擬合參數(MCPB.py/QM)、配體直接配位金屬仍是 NEEDS_HUMAN。
-- 閘門卡片的選項目前是文字,尚未一鍵寫回設定(pose 例外)。
-- 3D viewer 沒有表面/卡通/互作標示(Canvas 2D 自寫,刻意保持離線、無依賴)。
+- (第三個 session 已做)閘門卡片一鍵寫回設定:`md20/gui/actions.py`(選項→config patch→寫回→`invalidate_from`)。
+  新增可點選項時,在 `_option_action` 加映射,**且程式必須真的執行它**;否則留在 `manual`。
+- (第三個 session 已做)3D 互作標示與 vdW 表面:`views.ligand_interactions` + `md20view.js`。仍沒有卡通/SES 表面。
+- 受體閘門其他選項(長 loop 截斷/補建、未知殘基移除、改用 mmCIF)尚未實作,目前誠實地維持擋關。
 
 ## 7. HCC Lab 戳記(防盜用)
 - 模組:`md20/util/stamp.py`。可見文字 + 隱藏標記(PNG tEXt / SVG metadata / PDB REMARK 999 / SDF 屬性 / JSON `_md20` / 零寬 HTML / zip comment)+ RSA 加密溯源。

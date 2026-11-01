@@ -23,26 +23,44 @@ STEP_LABEL = {"receptor_input": "受體來源", "structure_gate": "結構可信�
 
 
 # ------------------------------------------------------------------------------------------- gate cards
-def _card(source: str, g: dict) -> dict:
+def _card(source: str, g: dict, *, step: str | None = None, ligand: str | None = None) -> dict:
+    from .actions import gate_actions
     st = g.get("status", "PASS")
     label, color = STATUS_STYLE.get(st, (st, "grey"))
+    actions, manual = gate_actions(g, step=step, ligand=ligand) if step else ([], list(g.get("options") or []))
     return {"source": source, "title": g.get("name", ""), "status": st, "label": label, "color": color,
-            "explanation": g.get("explanation") or g.get("message") or "", "options": list(g.get("options") or [])}
+            "explanation": g.get("explanation") or g.get("message") or "", "options": list(g.get("options") or []),
+            "actions": actions, "manual": manual if st == "NEEDS_HUMAN" else []}
 
 
 def gate_cards(wf, *, include_pass: bool = False) -> list[dict]:
-    """Every gate the student should look at, most urgent first: workflow blocks, then build gates per case."""
+    """Every gate the student should look at, most urgent first: workflow blocks, then build gates per case.
+
+    Each NEEDS_HUMAN card carries `actions` (one-click decisions written back to config, see gui.actions)
+    and `manual` (options that need work outside the program)."""
     cards = []
     steps = wf.state().get("steps", {})
     for k, s in steps.items():
-        if s.get("status") == "NEEDS_HUMAN":
-            msg = s.get("message", "")
-            opts = []
-            if "（選項：" in msg:
-                msg, o = msg.split("（選項：", 1)
-                opts = [x.strip() for x in o.rstrip("）").split(" / ") if x.strip()]
-            cards.append(_card(STEP_LABEL.get(k, k), {"name": STEP_LABEL.get(k, k), "status": "NEEDS_HUMAN",
-                                                      "message": msg, "options": opts}))
+        if s.get("status") != "NEEDS_HUMAN":
+            continue
+        structured = [g for g in (s.get("gates") or []) if isinstance(g, dict)]
+        if k == "md_cases":
+            for ckey, c in (s.get("cases") or {}).items():
+                det = c.get("blocking_detail")
+                if isinstance(det, list):
+                    structured += [dict(g, _source=f"{ckey}") for g in det if isinstance(g, dict)]
+        if structured:
+            for g in structured:
+                src = STEP_LABEL.get(k, k) + (f" · {g['_source']}" if g.get("_source") else "")
+                cards.append(_card(src, {**g, "status": g.get("status", "NEEDS_HUMAN")}, step=k, ligand=s.get("ligand")))
+            continue
+        msg = s.get("message", "")
+        opts = []
+        if "（選項：" in msg:
+            msg, o = msg.split("（選項：", 1)
+            opts = [x.strip() for x in o.rstrip("）").split(" / ") if x.strip()]
+        cards.append(_card(STEP_LABEL.get(k, k), {"name": STEP_LABEL.get(k, k), "status": "NEEDS_HUMAN",
+                                                  "message": msg, "options": opts}))
     for key, c in ((steps.get("md_cases") or {}).get("cases") or {}).items():
         try:
             case = wf.project.case(c["case_id"])
@@ -55,7 +73,7 @@ def gate_cards(wf, *, include_pass: bool = False) -> list[dict]:
         for src, rep in groups:
             for g in rep.get("gates", []):
                 if include_pass or g.get("status") != "PASS":
-                    cards.append(_card(f"{key} · {src}", g))
+                    cards.append(_card(f"{key} · {src}", g, step="md_cases"))
     order = {"NEEDS_HUMAN": 0, "AUTO_FIXED": 1, "PASS": 2}
     return sorted(cards, key=lambda c: order.get(c["status"], 3))
 
@@ -137,6 +155,68 @@ def parse_pdb_atoms(text: str) -> tuple[list[dict], np.ndarray]:
     return atoms, np.asarray(xyz, dtype=float).reshape(-1, 3)
 
 
+HYDROPHOBIC = {"ALA", "VAL", "LEU", "ILE", "MET", "PHE", "TRP", "PRO", "TYR", "CYS", "CYM", "CYX"}
+BACKBONE = {"N", "CA", "C", "O"}
+INTERACTION_TYPES = {
+    "h": {"label": "氫鍵候選", "rule": "配體 N/O 與口袋 N/O 重原子距離 ≤ 3.5 Å（氫已省略，未檢查角度）"},
+    "c": {"label": "疏水接觸", "rule": "配體 C 與疏水殘基側鏈 C 距離 ≤ 4.0 Å（每殘基每幀取最近一對）"},
+    "m": {"label": "金屬配位", "rule": "配體 N/O/S 與金屬距離 ≤ 2.8 Å"},
+}
+
+
+def ligand_interactions(sa: list[dict], frames: np.ndarray) -> dict:
+    """Geometric ligand–pocket contacts per frame + per-residue occupancy over the trajectory.
+
+    Purely distance-based on the heavy atoms in the scene — a teaching overlay, not an energy decomposition.
+    Returns {"frames": [[[i, j, type], ...] per frame], "occupancy": [{residue, type, label, fraction}], "types"}."""
+    lig = [i for i, a in enumerate(sa) if a["k"] == "L"]
+    poc = [i for i, a in enumerate(sa) if a["k"] in ("P", "M")]
+    out = {"frames": [], "occupancy": [], "types": INTERACTION_TYPES}
+    if not lig or not poc:
+        return out
+    counts: dict[tuple[str, str], int] = {}
+    for f in np.asarray(frames, dtype=float):
+        d = np.linalg.norm(f[lig][:, None, :] - f[poc][None, :, :], axis=-1)
+        best: dict[tuple, tuple[float, int, int]] = {}
+        for li, pj in zip(*np.where(d <= 4.0)):
+            a, b, dist = sa[lig[li]], sa[poc[pj]], float(d[li, pj])
+            res = f"{b['r']}{b['s']}"
+            if b["k"] == "M":
+                t = "m" if a["e"] in ("N", "O", "S") and dist <= 2.8 else None
+            elif a["e"] in ("N", "O") and b["e"] in ("N", "O") and dist <= 3.5:
+                t = "h"
+            elif a["e"] == "C" and b["e"] == "C" and b["r"] in HYDROPHOBIC and b["n"] not in BACKBONE:
+                t = "c"
+            else:
+                t = None
+            if t is None:
+                continue
+            key = (res, t) if t == "c" else (res, t, lig[li], poc[pj])
+            if key not in best or dist < best[key][0]:
+                best[key] = (dist, lig[li], poc[pj])
+        items = [[i, j, k[1]] for k, (_, i, j) in sorted(best.items(), key=lambda kv: kv[1][0])]
+        out["frames"].append(items)
+        for res, t in {(k[0], k[1]) for k in best}:
+            counts[(res, t)] = counts.get((res, t), 0) + 1
+    n = max(1, len(out["frames"]))
+    out["occupancy"] = sorted(({"residue": r, "type": t, "label": INTERACTION_TYPES[t]["label"], "fraction": round(c / n, 3)}
+                               for (r, t), c in counts.items()), key=lambda x: (-x["fraction"], x["type"], x["residue"]))
+    return out
+
+
+def interaction_table_html(scene: dict, *, limit: int = 12) -> str:
+    occ = (scene.get("interactions") or {}).get("occupancy") or []
+    if not occ:
+        return "<p style='font-size:12px;color:#667'>配體與口袋之間沒有符合幾何準則的互作。</p>"
+    n = (scene.get("summary") or {}).get("n_frames", 1)
+    head = "佔有率（軌跡中出現的幀比例）" if n > 1 else "起始結構"
+    rows = "".join(f"<tr><td>{html.escape(o['residue'])}</td><td>{html.escape(o['label'])}</td>"
+                   f"<td style='text-align:right'>{o['fraction'] * 100:.0f}%</td></tr>" for o in occ[:limit])
+    rules = "；".join(f"{v['label']}：{v['rule']}" for v in INTERACTION_TYPES.values())
+    return (f"<table style='font-size:12px;border-collapse:collapse' cellpadding=3><tr><th>殘基</th><th>類型</th><th>{head}</th></tr>"
+            f"{rows}</table><p style='font-size:11px;color:#667'>幾何準則（教學用，不是能量分解）：{html.escape(rules)}。</p>")
+
+
 def build_scene(atoms: list[dict], frames: np.ndarray, *, ligand_indices: list[int] | None = None,
                 ligand_resnames: set[str] | None = None, pocket_cutoff_A: float = 6.0, max_atoms: int = 4000,
                 times_ps: list[float] | None = None) -> dict:
@@ -199,9 +279,10 @@ def build_scene(atoms: list[dict], frames: np.ndarray, *, ligand_indices: list[i
         if atoms[i]["c"] == atoms[j]["c"] and np.linalg.norm(x0[i] - x0[j]) < 4.3:
             bonds.append([idx[i], idx[j]])
     fr = [np.round(f[keep].reshape(-1), 2).tolist() for f in frames]
-    scene = {"atoms": sa, "bonds": bonds, "frames": fr,
+    inter = ligand_interactions(sa, frames[:, keep, :]) if keep else {"frames": [], "occupancy": []}
+    scene = {"atoms": sa, "bonds": bonds, "frames": fr, "interactions": inter,
              "summary": {"n_ligand_atoms": sum(1 for k in kind.values() if k == "L"), "n_pocket_residues": len(near_res),
-                         "n_frames": len(fr)}}
+                         "n_frames": len(fr), "n_interaction_types": len(inter["occupancy"])}}
     if times_ps is not None:
         scene["times_ps"] = [float(t) for t in times_ps][:len(fr)]
     return scene
@@ -232,9 +313,10 @@ def viewer_html(scene: dict, *, title: str = "MD20 3D", standalone: bool = True,
     uid = "md20v" + hashlib.sha1(data.encode()).hexdigest()[:10]
     s = scene.get("summary", {})
     cap = (f"配體 {s.get('n_ligand_atoms', 0)} 個重原子、口袋 {s.get('n_pocket_residues', 0)} 個殘基"
-           + (f"、{s['n_frames']} 幀" if s.get("n_frames", 1) > 1 else "") + "；拖曳旋轉、滾輪縮放。")
+           + (f"、{s['n_frames']} 幀" if s.get("n_frames", 1) > 1 else "") +
+           "；拖曳旋轉、滾輪縮放。虛線：黃＝氫鍵候選、灰＝疏水接觸、紫＝金屬配位；「表面」為口袋原子 vdW 球近似，不是溶劑可及表面。")
     body = (f'<div id="{uid}" style="width:100%;max-width:900px;min-height:{height_px}px;background:#111418;border-radius:6px"></div>'
-            f'<p style="font-size:12px;color:#667">{html.escape(cap)}</p>'
+            f'<p style="font-size:12px;color:#667">{html.escape(cap)}</p>' + interaction_table_html(scene) +
             f"<script>{js}</script><script>md20Mount(document.getElementById('{uid}'), {data});</script>")
     if not standalone:
         return body

@@ -207,6 +207,18 @@ def gate_inspection(insp: PDBInspection, *, keep_hetero: set[str], max_auto_gap:
     return rep
 
 
+# Receptor gate choices that prepare_receptor actually executes.  Anything else (truncate a loop, model with
+# AlphaFold, parameterise an unknown residue …) needs work outside the program, so the gate stays NEEDS_HUMAN.
+def receptor_choice_action(gate_name: str, choice: str) -> str | None:
+    c = str(choice or "")
+    if gate_name == "hetero groups":
+        if "參考配體" in c or "移除" in c:
+            return "remove"            # reference-only ligands leave the receptor; the box still reads the raw file
+        if "參數化" in c or c.strip() == "保留":
+            return "keep"              # kept in the receptor; force-field templates are checked at build time
+    return None
+
+
 def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4, keep_hetero: set[str] | None = None,
                      decisions: DecisionLog | None = None, max_auto_gap: int = 6, keep_pocket_waters: bool = False,
                      human_choices: dict | None = None, ligand_resnames: set[str] | None = None,
@@ -231,9 +243,19 @@ def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4
     insp = inspect_pdb_text(text) if text else PDBInspection(format=source.suffix.lower().lstrip("."))
     report = gate_inspection(insp, keep_hetero=keep_hetero, max_auto_gap=max_auto_gap,
                              ligand_resnames=set(ligand_resnames or ())) if text else GateReport()
-    # resolve gates with human choices
+    # resolve gates with human choices — only choices the code really carries out (寧可擋也不要猜)
+    resolved: dict[str, str] = {}
     for g in report.gates:
         if g.status == NEEDS_HUMAN and g.name in human_choices:
+            action = receptor_choice_action(g.name, human_choices[g.name])
+            if action is None:
+                g.explanation += (f"（你選了「{human_choices[g.name]}」，但這個選項目前不會由程式自動執行；"
+                                  "請在外部處理後重新提供結構，閘門維持擋關。）")
+                if decisions:
+                    decisions.record("build.receptor", g.name, human_choices[g.name],
+                                     "使用者的選擇尚未自動化；為避免「選了卻沒做」，閘門維持 NEEDS_HUMAN。", kind="human")
+                continue
+            resolved[g.name] = action
             g.status = AUTO_FIXED
             g.explanation += f"（使用者選擇：{human_choices[g.name]}）"
             if decisions:
@@ -256,7 +278,7 @@ def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4
     # (and water if requested).  This replaces PDBFixer.removeHeterogens, which cannot keep a subset.
     filtered = out_dir / "receptor_prefiltered.pdb"
     keep_set = set(keep_hetero)
-    if "保留" in human_choices.get("hetero groups", ""):
+    if resolved.get("hetero groups") == "keep":
         keep_set |= set(insp.hetero_residues)
     kept_lines, dropped = [], {}
     for line in (text or source.read_text(encoding="utf-8", errors="ignore")).splitlines():

@@ -221,19 +221,25 @@ class Workflow:
                     self.dec.record("docking.redock", res, "skipped", "使用者明確設定 docking.skip_redock；本次對接沒有共晶自檢，"
                                     "pose 可信度未經驗證，報告將標註。", kind="human")
                 else:
-                    self._block("docking_preflight",
-                                f"box 取自共晶配體 {res}，但沒有任何配體以它作為 reference_resname 進行 redocking 自檢。"
-                                f"請加入一個 {{name: {res}, smiles: <共晶配體 SMILES>, reference_resname: {res}}}，"
-                                f"或設定 docking.skip_redock: true（會記錄在報告）。")
+                    msg = (f"box 取自共晶配體 {res}，但沒有任何配體以它作為 reference_resname 進行 redocking 自檢。"
+                           f"請加入一個 {{name: {res}, smiles: <共晶配體 SMILES>, reference_resname: {res}}}，"
+                           f"或設定 docking.skip_redock: true（會記錄在報告）。")
+                    self._block("docking_preflight", msg, gates=[{
+                        "name": "redocking", "status": "NEEDS_HUMAN", "explanation": msg, "evidence": {"residue": res},
+                        "options": [f"加入共晶配體 {res} 作為 redocking 參考（需要 SMILES）",
+                                    "docking.skip_redock: true（不做自檢，報告標註）"]}])
             else:
                 self.dec.record("docking.redock", res, "required",
                                 "共晶 box：對接共晶配體並與晶體姿勢比較，RMSD > 2 Å 時不推薦任何 pose。")
         elif not b.get("center"):
             co = self.cocrystal_ligands(raw)
             if co and not b.get("allow_blind"):
-                self._block("docking_preflight",
-                            f"結構中有共晶配體（{', '.join(sorted(co))}），卻使用全蛋白盲對接。"
-                            f"建議 box.from_residue: {sorted(co)[0]}；若確定要盲對接，請設定 box.allow_blind: true。")
+                msg = (f"結構中有共晶配體（{', '.join(sorted(co))}），卻使用全蛋白盲對接。"
+                       f"建議 box.from_residue: {sorted(co)[0]}；若確定要盲對接，請設定 box.allow_blind: true。")
+                self._block("docking_preflight", msg, gates=[{
+                    "name": "blind docking", "status": "NEEDS_HUMAN", "explanation": msg,
+                    "evidence": {"cocrystal": sorted(co)},
+                    "options": [f"box.from_residue: {r}" for r in sorted(co)] + ["box.allow_blind: true（盲對接，報告標註）"]}])
             if co or b.get("allow_blind"):
                 self.dec.record("docking.box", "blind", "allowed", "使用者明確允許盲對接；盲對接分數與口袋排名可信度較低。",
                                 kind="human" if b.get("allow_blind") else "auto")
@@ -251,7 +257,8 @@ class Workflow:
                                                                   "override": bool(l.get("cpp_override"))}
         atomic_write_json(st, self.state_path)
         if gate.status == NEEDS_HUMAN and not l.get("cpp_override"):
-            self._block("docking_preflight", f"胜肽 {l['name']}：{gate.explanation}（確認要繼續請在該配體設定 cpp_override 並說明理由）")
+            self._block("docking_preflight", f"胜肽 {l['name']}：{gate.explanation}（確認要繼續請在該配體設定 cpp_override 並說明理由）",
+                        gates=[gate.to_dict()], ligand=l["name"])
         return peptide_smiles(seq, l.get("termini", "charged"))
 
     def run_docking(self, clean: Path, raw: Path, progress_cb=None):
@@ -479,7 +486,8 @@ class Workflow:
                        padding_nm=self._padding_nm(), keep_hetero=set(self.cfg.get("keep_hetero", [])),
                        extra_ligand_resnames=drop, peptides=peps or None, ligand_names=small,
                        exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])),
-                       metal_policy=self.cfg.get("metal_policy") or None)
+                       metal_policy=self.cfg.get("metal_policy") or None,
+                       peptide_policy=self.cfg.get("peptide_policy") or None)
         lmap = {n: f"L{i:02d}" for i, n in enumerate(small, 1)} | {p["name"]: p["name"] for p in peps}
         return s, lmap
 

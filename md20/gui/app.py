@@ -12,6 +12,7 @@ from ..project import Project
 from ..util import default_projects_dir, load_json, safe_name
 from ..workflow import Workflow
 from .logic import Runner, config_from_form, list_workflows, pose_table, set_pose_choice
+from .actions import apply_gate_action
 from .views import gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html
 
 RUNNER = Runner()
@@ -120,6 +121,31 @@ def _start(wf: Workflow):
     return RUNNER.start(wf, lambda case, proto: make_backend_factory(case, proto, platform=platform, resource_mode="balanced"), platform, should_pause=policy)
 
 
+def _gate_buttons(wf: Workflow, card: dict):
+    """One-click decisions on a NEEDS_HUMAN card; options the program cannot carry out stay as text."""
+    if card["status"] != "NEEDS_HUMAN":
+        return
+    for a in card.get("actions", []):
+        with ui.row().classes("items-center gap-2 w-full"):
+            note = ui.input(a["text_hint"]).classes("w-96") if a["needs_text"] else None
+
+            def do(a=a, note=note):
+                job = RUNNER.get(wf)
+                if job and job.thread and job.thread.is_alive():
+                    ui.notify("流程執行中；請先暫停或等它停在閘門再做決定", type="warning"); return
+                try:
+                    out = apply_gate_action(wf, a, note.value if note else "")
+                except (ValueError, KeyError) as exc:
+                    ui.notify(str(exc), type="negative"); return
+                ui.notify(f"已寫回設定：{a['label']}；自 {a['from_step']} 起重跑（{len(out['invalidated'])} 個步驟）。"
+                          "按「開始／繼續」執行。", type="positive")
+            ui.button(a["label"], on_click=do).props("outline color=primary no-caps")
+    if card.get("manual"):
+        ui.label("需要在程式外處理（處理後重新提供輸入）：").classes("text-xs text-gray-500")
+        for o in card["manual"]:
+            ui.label(f"→ {o}").classes("text-sm text-gray-700")
+
+
 @ui.page("/wf/{project}/{name}")
 def workflow_page(project: str, name: str):
     _header()
@@ -214,8 +240,10 @@ def workflow_page(project: str, name: str):
                                 ui.badge(c["label"], color=c["color"])
                                 ui.label(f"{c['source']} · {c['title']}").classes("font-semibold")
                             ui.label(c["explanation"]).classes("text-sm whitespace-pre-wrap")
-                            for o in c["options"]:
-                                ui.label(f"→ {o}").classes("text-sm text-primary")
+                            if c["status"] != "NEEDS_HUMAN":
+                                for o in c["options"]:
+                                    ui.label(f"→ {o}").classes("text-sm text-primary")
+                            _gate_buttons(wf, c)
             tl = timeline(wf, limit=120)
             if len(tl) != time_sig["v"]:
                 time_sig["v"] = len(tl)

@@ -28,4 +28,5 @@ Claude-Session: <本次 session 連結>
 
 ## 現況與還沒做
 WP5、WP9、WP13、金屬 policy/幾何鍵結模型已實作(真實驗證狀態見 `docs/STATUS.md`)。
-還沒做:擬合的金屬參數(MCPB.py/QM)、GUI 閘門一鍵決定、3D 表面/互作標示。細節見 `docs/HANDOFF.md` §6。
+GUI 閘門一鍵決定(`md20/gui/actions.py`)與 3D 互作/vdW 表面已實作。
+還沒做:擬合的金屬參數(MCPB.py/QM)、受體長 loop 等選項的自動處理。細節見 `docs/HANDOFF.md` §6。

@@ -21,7 +21,9 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 | **短 MD 篩 pose(WP5)** | test_pose_screen | 候選挑選(推薦 + 每個其他 cluster)、穩定判定(後段 RMSD、接觸保留)、三態決策、暫停續跑快取、人工選擇不被覆寫 |
 | **多配體結合(WP9)** | test_multi_binding | 拉離路徑閘門、ΔΔ 比較(ΔΔG° 只在全部有 ΔG° 時;< 2σ 不可區分)、共存效應、docked_multi 每個配體各自拉離、**bootstrap σ**、**replica 彙總與 research tier 以實際完成數判定** |
 | **金屬** | test_metal | 配位位點辨識、bonded 計畫(鍵/角/CYM/HID/HIE)、擋關情境(< 3 配位、配體配位、His 雙氮)、policy 優先序、二硫鍵不被誤判為 CYM |
-| **GUI 檢視(WP13)** | test_gui_views、test_gui_logic | 閘門卡片、時間軸、即時曲線、3D 場景;**離線 3D viewer 在 headless Chromium 實際繪圖且無 JS 錯誤**;pose 表顯示短 MD 結果 |
+| **GUI 檢視(WP13)** | test_gui_views、test_gui_logic | 閘門卡片、時間軸、即時曲線、3D 場景;**離線 3D viewer 在 headless Chromium 實際繪圖且無 JS 錯誤**(含互作/表面切換);pose 表顯示短 MD 結果 |
+| **閘門一鍵決定** | test_gate_actions | 選項→設定修補(structure_override、metal_policy、human_choices、box、skip_redock、CPP、peptide_policy);需理由的選項必填;寫回 config.json、記 human 決策、自該步驟起失效重跑;**沒實作的選項不給按鈕、閘門維持擋關**(受體長 loop/未知殘基等) |
+| **3D 互作標示** | test_gui_views | 逐幀幾何互作(氫鍵候選 N/O ≤3.5 Å 未檢查角度、疏水 C–C ≤4.0 Å、配體–金屬 ≤2.8 Å)+ 殘基佔有率表;vdW 球表面近似 |
 | 工作流程閘門 | test_workflow_gates | 共晶盒必做 redocking、盲對接需同意、結合計算加大 padding、**binding 讀取組裝後原子索引(L01 迴歸)** |
 | 胜肽/CPP、結構可信度、續跑/鎖、資源模式、PMF/採樣、專案/佇列/報告/doctor/stamp | 各檔 | 同前版 |
 
@@ -61,8 +63,9 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 - **多配體 PMF**:共存效應是「單獨 vs 共同口袋」的趨勢比較,不是封閉的熱力學循環;拉離路徑被另一配體擋住時不計算。
 - **誤差**:σ 為 bootstrap(每個重抽樣 PMF 重算 ΔPMF/ΔG°)與 replica 標準誤取大者;不含力場誤差。
 - **ΔG°**:一維 COM 距離 PMF + 徑向積分,未做方向/構形限制校正;classroom 不輸出;research 需 ≥3 個**實際完成**的 replica + 半段收斂。
-- **3D viewer** 是自寫的 Canvas 2D(離線、無 WebGL):球棍 + Cα 骨架 + 口袋殘基,可旋轉/縮放/播放軌跡;沒有表面、卡通、互作標示。
-- **GUI** 閘門卡片列出選項,但選擇仍需寫入設定檔(pose 例外,點表格即可)。
+- **3D viewer** 是自寫的 Canvas 2D(離線、無 WebGL):球棍 + Cα 骨架 + 口袋殘基,可旋轉/縮放/播放軌跡;互作為**純距離準則**(氫鍵不檢查角度,不是能量分解);「表面」是口袋原子 vdW 球近似,**不是**溶劑可及表面;沒有卡通。
+- **GUI 閘門一鍵決定**只涵蓋程式真的會執行的選項;換結構、改序列、MCPB.py/QM 參數、補長 loop 等仍需在程式外處理(卡片列為「需要在程式外處理」)。
+- **受體閘門的 human_choices**(修正):先前任何選擇都會讓閘門轉為已處理,但長 loop/未知殘基/重複原子名的選項並未實作(例如長 loop 仍被丟棄→主鏈斷裂);現在只接受 hetero groups 的移除/保留,其他選擇維持 NEEDS_HUMAN 並說明原因。「保留為參考配體」改為**不**留在 MD 受體中。
 - **PROPKA** 只審查/提示,不自動改質子化。
 
 ### C3. 平台
