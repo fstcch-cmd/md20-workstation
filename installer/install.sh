@@ -33,6 +33,21 @@ if [ "$IS_WIN" = 1 ]; then
   fi
   case "$GPU" in cuda) GPUYML="$HERE/../environment/windows-cuda.yml" ;; *) GPUYML="$HERE/../environment/windows-opencl.yml"; export CONDA_OVERRIDE_CUDA=12.4 ;; esac
   PREFIX="$ROOT/envs/md20"
+  if [ "$GPU" = cuda ]; then
+    SMI="$(command -v nvidia-smi || echo /c/Windows/System32/nvidia-smi.exe)"
+    DRV="$("$SMI" 2>/dev/null | sed -n 's/.*CUDA Version: *\([0-9][0-9]*\.[0-9]*\).*/\1/p' | head -1)"
+    if [ -n "$DRV" ]; then
+      MAJ=${DRV%%.*}; MIN=${DRV#*.}
+      if [ "$MAJ" -lt 11 ] || { [ "$MAJ" -eq 11 ] && [ "$MIN" -lt 8 ]; }; then
+        echo "!! 驅動只支援 CUDA $DRV（< 11.8）：改用 OpenCL；更新驅動後可重跑。"; GPU=opencl
+        GPUYML="$HERE/../environment/windows-opencl.yml"; export CONDA_OVERRIDE_CUDA=12.4
+      else
+        if [ "$MAJ" -lt 12 ]; then CV=11.8; elif [ "$MAJ" -gt 12 ] || [ "$MIN" -ge 4 ]; then CV=12.4; else CV=$DRV; fi
+        sed "s/cuda-version=[0-9.]*/cuda-version=$CV/" "$GPUYML" > "$ROOT/windows-cuda-$CV.yml"; GPUYML="$ROOT/windows-cuda-$CV.yml"
+        echo "驅動支援 CUDA $DRV → 使用 cuda-version=$CV"
+      fi
+    fi
+  fi
   # micromamba.exe wants Windows-style paths
   W_PREFIX="$(cygpath -w "$PREFIX")"; W_BASE="$(cygpath -w "$HERE/../environment/base.yml")"; W_GPU="$(cygpath -w "$GPUYML")"; W_PKG="$(cygpath -w "$HERE/..")"
   # pip and conda use %TEMP% (usually on C:); keep all scratch under the install root

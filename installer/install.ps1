@@ -21,6 +21,22 @@ $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Base = Join-Path $Here "..\environment\base.yml"
 $GpuYml = Join-Path $Here ("..\environment\windows-" + ($(if ($Gpu -eq "cpu") {"opencl"} else {$Gpu})) + ".yml")
 $Prefix = Join-Path $Root "envs\md20"
+if ($Gpu -eq "cuda") {
+  # pick cuda-version from what the installed driver supports (nvidia-smi "CUDA Version: X.Y")
+  $smi = (& nvidia-smi 2>$null | Out-String)
+  $m = [regex]::Match($smi, "CUDA Version:\s*([0-9]+\.[0-9]+)")
+  if ($m.Success) {
+    $drv = [double]$m.Groups[1].Value
+    if ($drv -lt 11.8) { Write-Host "!! 驅動只支援 CUDA $drv（< 11.8）：改用 OpenCL。更新 NVIDIA 驅動後可重跑本安裝器改用 CUDA。"; $Gpu = "opencl"; $env:CONDA_OVERRIDE_CUDA = "12.4"; $GpuYml = Join-Path $Here "..\environment\windows-opencl.yml" }
+    else {
+      $cv = if ($drv -lt 12.0) { "11.8" } elseif ($drv -ge 12.4) { "12.4" } else { $m.Groups[1].Value }
+      $tmpYml = Join-Path $Root "windows-cuda-$cv.yml"
+      (Get-Content $GpuYml) -replace "cuda-version=[0-9.]+", "cuda-version=$cv" | Set-Content -Encoding UTF8 $tmpYml
+      $GpuYml = $tmpYml
+      Write-Host "驅動支援 CUDA $drv → 使用 cuda-version=$cv"
+    }
+  }
+}
 if ($Gpu -ne "cuda") { $env:CONDA_OVERRIDE_CUDA = "12.4" }   # win-64 openmm builds are CUDA-linked; override the virtual package
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "tmp") | Out-Null
 $env:TMP = Join-Path $Root "tmp"; $env:TEMP = $env:TMP; $env:PIP_CACHE_DIR = Join-Path $Root "pipcache"
