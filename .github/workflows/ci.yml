@@ -80,7 +80,7 @@ jobs:
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           set -o pipefail
-          "$MAMBA_EXE" run -n md20 python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" -e . 2>&1 | tee -a env.log
+          "$MAMBA_EXE" run -n md20 python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" gemmi -e . 2>&1 | tee -a env.log
           "$MAMBA_EXE" run -n md20 md20 setup-vina 2>&1 | tee -a env.log
       - name: Doctor (CPU platform)
         shell: bash -el {0}
@@ -90,6 +90,7 @@ jobs:
         # all three OS run the same suite (~20–30 min); MD20_HEAVY tests run in the parallel `heavy` jobs below.
         # A step timeout (unlike the job timeout) still lets the failure-log step post pytest.log.
         timeout-minutes: 90
+        env: { MD20_STACK: "1" }   # the full stack is expected here: a missing core package is a FAILURE, not a skip
         run: |
           set -o pipefail
           "$MAMBA_EXE" run -n md20 pytest -vv -rs --durations=15 2>&1 | tee pytest.log
@@ -172,7 +173,7 @@ jobs:
         shell: bash -el {0}
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          "$MAMBA_EXE" run -n md20 python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" -e .
+          "$MAMBA_EXE" run -n md20 python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" gemmi -e .
           "$MAMBA_EXE" run -n md20 md20 setup-vina
       - name: Heavy tests (${{ matrix.group }})
         shell: bash -el {0}
@@ -208,7 +209,7 @@ jobs:
       - name: Install md20
         shell: bash -el {0}
         run: |
-          "$MAMBA_EXE" run -n md20 python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" -e .
+          "$MAMBA_EXE" run -n md20 python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" gemmi -e .
           "$MAMBA_EXE" run -n md20 md20 setup-vina
       - name: Paper docking reproductions
         shell: bash -el {0}

@@ -49,7 +49,7 @@ if (Test-Path (Join-Path $Prefix "conda-meta")) {
   Write-Host "[2/4] 建立環境 ($Gpu) ..."; & $Mamba create -y -p $Prefix -f $Base -f $GpuYml
 }
 Write-Host "[3/4] 安裝 md20 ..."
-& $Mamba run -p $Prefix pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" -e (Join-Path $Here "..")
+& $Mamba run -p $Prefix pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" gemmi -e (Join-Path $Here "..")
 & $Mamba run -p $Prefix md20 setup-vina
 # launchers: md20.cmd (command line) and MD20-GUI.cmd (double-click → browser GUI), both next to micromamba.exe
 $Cmd = Join-Path $Root "md20.cmd"

@@ -6,6 +6,7 @@
 ## 進行中
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| 巡檢 #2（04:30）：99c8b64 全綠屬實，但 Windows 的 meeko 因缺 gemmi 而 import 失敗 → 對接／HTS 整合測試在 Windows 全被 SKIPPED（D-30 已修：gemmi + MD20_STACK 守門）；等這輪確認 | — | session_016gcJzBDnGh3heY9HLWnva3 | 2026-11-02 04:45 | 下一次 07:45 |
 | 巡檢 #1（01:00）：`installer-windows` **綠**（PS 5.1 真跑：環境、Vina、doctor、demo、範本）；pure-python 6/6 綠；heavy(metal) 紅＝測試不穩定（D-29 已修）；openmm-stack 三 OS 與 heavy(workflow) 仍在跑 | — | session_016gcJzBDnGh3heY9HLWnva3 | 2026-11-02 01:10 | 下一次 04:30 |
 | **里程碑：11/02 09:00 使用者在獨顯 Windows 筆電上安裝並跑起來**（CI 條件已達成：99c8b64 main 全綠，含 installer-windows；session_016gcJz8q2F6515MWPncJEZu 19:20 UTC 確認）——目標 main 全綠（含 `installer-windows`），之後所有 push 不得讓 Windows 紅 | 使用者 | 全部 session | 2026-11-01 23:40 | 本 session 夜間巡檢 CI；紅了修到綠優先於新功能 |
 | 約束策略修正：分組約束（backbone/sidechain/ligand 單一力 grp 參數）、主要釋放移到 NPT、配體 k 1000、`md.restraints` standard/gentle/hold_backbone、受約束 RMSD 標註（D-23、specs/restraints_freeze_truncation.md §3.1） | session_016gcJz8q2F6515MWPncJEZu | 本 commit（CI 待驗） |
