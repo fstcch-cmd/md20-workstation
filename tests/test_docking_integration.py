@@ -3,8 +3,13 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("vina")
 pytest.importorskip("meeko")
+try:
+    import vina  # noqa: F401
+except ImportError:  # Windows: official executable instead of the python bindings
+    from md20.docking.vina_cli import find_vina_exe
+    if not find_vina_exe():
+        pytest.skip("neither vina bindings nor executable available", allow_module_level=True)
 pytest.importorskip("pdbfixer")
 
 from md20.build.receptor import prepare_receptor

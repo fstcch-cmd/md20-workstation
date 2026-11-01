@@ -9,7 +9,7 @@ import pytest
 
 if os.environ.get("MD20_HEAVY") != "1":
     pytest.skip("set MD20_HEAVY=1 to run the full workflow test", allow_module_level=True)
-pytest.importorskip("vina"); pytest.importorskip("openmm"); pytest.importorskip("openff.toolkit"); pytest.importorskip("mdtraj")
+pytest.importorskip("openmm"); pytest.importorskip("openff.toolkit"); pytest.importorskip("mdtraj")
 
 from md20.project import Project
 from md20.workflow import Workflow, example_config
