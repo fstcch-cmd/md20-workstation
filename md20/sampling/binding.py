@@ -113,12 +113,17 @@ def build_pulling_system(system, positions_nm: np.ndarray, anchor: np.ndarray, l
         if isinstance(f, mm.MonteCarloBarostat):
             f.setFrequency(0)
         if isinstance(f, mm.CustomExternalForce) and f.getName() == "msw_position_restraints":
+            # pulling/umbrella: only the backbone keeps a (weak, master-scaled) restraint.  The ligand must be free
+            # and so must the side chains (a pocket that cannot rearrange biases the PMF).  Older builds have no
+            # `grp` parameter (backbone + ligand only); newer ones mark side chains with grp = 1.
             lig_set = set(int(x) for x in ligand)
             for p in range(f.getNumParticles()):
                 idx, prm = f.getParticleParameters(p)
-                k = 0.0 if idx in lig_set else prm[0]
+                prm = list(prm)
+                side = len(prm) > 4 and int(round(prm[4])) == 1
+                k = 0.0 if (idx in lig_set or side) else prm[0]
                 x, y, z = positions_nm[idx]
-                f.setParticleParameters(p, idx, [k, x, y, z])
+                f.setParticleParameters(p, idx, [k, x, y, z] + prm[4:])
     bias = mm.CustomCentroidBondForce(2, "0.5*k_cv*(distance(g1,g2)-r0_cv)^2")
     bias.addGlobalParameter("k_cv", 0.0)
     bias.addGlobalParameter("r0_cv", 0.0)

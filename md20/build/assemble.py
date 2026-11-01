@@ -61,33 +61,54 @@ def _ligand_openmm(rec: LigandRecord):
     return top, pos * unit.nanometer, offmol
 
 
-def add_position_restraints(system, topology, positions, *, k_protein=1000.0, k_ligand=500.0,
+RESTRAINT_GROUPS = ("backbone", "sidechain", "ligand")
+_PROTEIN_RESNAMES = {"ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE", "LEU", "LYS", "MET", "PHE",
+                     "PRO", "SER", "THR", "TRP", "TYR", "VAL", "HID", "HIE", "HIP", "HSD", "HSE", "HSP", "CYX", "CYM",
+                     "ASH", "GLH", "LYN", "ARN", "SEP", "TPO", "PTR", "MSE", "ACE", "NME", "NMA"}
+_BACKBONE = {"CA", "C", "N", "O", "OXT"}
+
+
+def add_position_restraints(system, topology, positions, *, k_protein=1000.0, k_sidechain=1000.0, k_ligand=1000.0,
                             ligand_resnames: set[str] = frozenset(), ligand_atom_indices: set[int] = frozenset()) -> dict:
-    """Harmonic restraints on protein backbone + ligand heavy atoms, scaled by global `msw_restraint_scale`."""
+    """Grouped harmonic position restraints (consultation §1 Q1, D-23).
+
+    One force ``msw_position_restraints`` with per-particle ``k, x0, y0, z0, grp`` (grp 0 = backbone N/CA/C/O,
+    1 = protein side-chain heavy atoms, 2 = ligand heavy atoms); energy
+    ``0.5·msw_restraint_scale·msw_rs_<grp>·k·d²``.  Every ``msw_rs_*`` defaults to 1.0, so a protocol without
+    ``restraint_groups`` behaves like the old single schedule.  The ligand k (1000) is no longer below the protein's:
+    minimization is when a docked pose drifts most easily."""
     import openmm as mm
     from openmm import unit
-    force = mm.CustomExternalForce("0.5*msw_restraint_scale*k*periodicdistance(x,y,z,x0,y0,z0)^2")
+    force = mm.CustomExternalForce(
+        "0.5*msw_restraint_scale*k*(delta(grp)*msw_rs_backbone + delta(grp-1)*msw_rs_sidechain"
+        " + delta(grp-2)*msw_rs_ligand)*periodicdistance(x,y,z,x0,y0,z0)^2")
     force.addGlobalParameter("msw_restraint_scale", 1.0)
-    for p in ("k", "x0", "y0", "z0"):
+    for g in RESTRAINT_GROUPS:
+        force.addGlobalParameter(f"msw_rs_{g}", 1.0)
+    for p in ("k", "x0", "y0", "z0", "grp"):
         force.addPerParticleParameter(p)
-    n_prot = n_lig = 0
+    counts = {g: 0 for g in RESTRAINT_GROUPS}
     pos = positions.value_in_unit(unit.nanometer)
-    backbone = {"CA", "C", "N", "O"}
     for atom in topology.atoms():
-        rn = atom.residue.name
-        is_lig = rn in ligand_resnames or atom.index in ligand_atom_indices
-        if is_lig and atom.element is not None and atom.element.symbol != "H":
-            k = k_ligand; n_lig += 1
-        elif atom.name in backbone and rn not in {"HOH", "WAT"} and not is_lig and atom.element is not None and atom.element.symbol != "H":
-            k = k_protein; n_prot += 1
-        else:
+        if atom.element is None or atom.element.symbol == "H":
             continue
+        rn = atom.residue.name
+        if rn in ligand_resnames or atom.index in ligand_atom_indices:
+            grp, k = 2, k_ligand
+        elif rn in _PROTEIN_RESNAMES:
+            grp, k = (0, k_protein) if atom.name in _BACKBONE else (1, k_sidechain)
+        else:
+            continue          # water, ions, metals (their own bonded model), cofactors
+        counts[RESTRAINT_GROUPS[grp]] += 1
         x, y, z = pos[atom.index]
-        force.addParticle(atom.index, [k, x, y, z])
+        force.addParticle(atom.index, [k, x, y, z, float(grp)])
     force.setName("msw_position_restraints")
     system.addForce(force)
-    return {"type": "CustomExternalForce", "global_parameter": "msw_restraint_scale", "protein_backbone_atoms": n_prot,
-            "ligand_heavy_atoms": n_lig, "k_protein_kj_mol_nm2": k_protein, "k_ligand_kj_mol_nm2": k_ligand}
+    return {"type": "CustomExternalForce", "global_parameter": "msw_restraint_scale",
+            "group_parameters": {g: f"msw_rs_{g}" for g in RESTRAINT_GROUPS},
+            "protein_backbone_atoms": counts["backbone"], "protein_sidechain_atoms": counts["sidechain"],
+            "ligand_heavy_atoms": counts["ligand"], "k_protein_kj_mol_nm2": k_protein,
+            "k_sidechain_kj_mol_nm2": k_sidechain, "k_ligand_kj_mol_nm2": k_ligand}
 
 
 def add_gbn2_force(system, topology, *, solvent_dielectric: float = 78.5, solute_dielectric: float = 1.0) -> dict:

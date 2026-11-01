@@ -246,8 +246,13 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
                              f"原始 DCD 的最後一幀中 {name} 與口袋質心距離 {chk['apparent_nm'] * 10:.1f} Å（看起來已解離），"
                              f"歸零／錨定後為 {chk['true_nm'] * 10:.1f} Å：這是週期邊界的視覺假象，不是解離；分析與報告都用歸零後的座標。",
                              kind="auto_fixed")
+    from ..engine.protocol import production_restraints
+    restrained = production_restraints(load_json(run_dir / "run.json", {}).get("protocol") or {})
+    if restrained:
+        m["restrained_production"] = restrained
+        label = f"{label}（受約束：{', '.join(restrained)}）" if label else f"受約束：{', '.join(restrained)}"
     figs = plot_metrics(m, run_dir / "figures", label=label)
-    summary = {"status": "PASS", "metrics_file": str(adir / "metrics.json"), "figures": figs, "created_at": now_iso(),
+    summary = {"status": "PASS", "restrained_production": restrained, "metrics_file": str(adir / "metrics.json"), "figures": figs, "created_at": now_iso(),
                "n_frames": m["n_frames"], "centered": {k: v for k, v in cen.items() if k != "pbc_checks"},
                "pbc_checks": cen.get("pbc_checks", {}),
                "rmsd_backbone_mean_A": float(np.mean(m["rmsd_backbone_A"])) if "rmsd_backbone_A" in m else None,

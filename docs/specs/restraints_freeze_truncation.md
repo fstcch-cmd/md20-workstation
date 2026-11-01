@@ -1,8 +1,8 @@
 # 約束策略、凍結、口袋截斷模型與資源估算
 
-狀態：**[設計中]**。使用者需求（2026-11-01）：約束要隨 minimization → NVT → NPT → production 分階段下降；提供凍結
+狀態：**§3.1 分組約束＋分階段釋放已實作（D-23，2026-11-01）；§3.1 智慧建議、§3.2–3.4 仍為 [設計中]**。使用者需求（2026-11-01）：約束要隨 minimization → NVT → NPT → production 分階段下降；提供凍結
 （整條主鏈、指定殘基）；約束與凍結都要能智慧化建議，讓使用者直觀地降低運算資源；也允許整顆蛋白自由模擬。
-已加入的引擎掛鉤（尚未被任何流程使用）：`StageSpec.restraint_groups`（每組 [起, 迄] 倍率）、`StageSpec.freeze`，
+已加入的引擎掛鉤（D-23 起由 `make_protocol(restraints=…)` 使用）：`StageSpec.restraint_groups`（每組 [起, 迄] 倍率）、`StageSpec.freeze`，
 `chunks._apply_schedule` 會逐批設定 `msw_rs_<group>`；兩個新欄位在預設值時不進入 protocol 雜湊（進行中的 run 可續跑）。
 
 ## 1. 現況（已存在）
@@ -30,13 +30,20 @@ OpenMM 以質量 0 凍結：積分器不移動它，但所有力（含凍結原�
   （保留主倍率，舊流程、watchdog、binding 的主倍率控制都不變）：
   `backbone`（N CA C O）、`sidechain`（蛋白其他重原子）、`ligand`（配體重原子）、`shell`（截斷模型邊界殼層，全程不釋放）、
   `prefreeze`（將被凍結的原子，平衡期間強約束、production 改凍結）。
-- 預設策略（每組 [起, 迄]，主倍率固定 1.0）：
+- 預設策略（每組 [起, 迄]，主倍率固定 1.0）——**依會診 §1 Q1 修正後的實作值**（原設計表保留於下方「原設計」）：
 
 | 策略 | minimize | NVT（升溫） | NPT | production |
 |---|---|---|---|---|
-| standard | 全 1.0（現有 1.0→0.5→0 階梯） | bb 1→0.5、sc 1→0.1、lig 1→0.5 | bb 0.5→0、sc 0.1→0、lig 0.5→0 | 0（shell 保持 1） |
-| gentle（粗糙起始結構） | 同上 | bb 1→1、sc 1→0.5、lig 1→1 | bb 1→0、sc 0.5→0、lig 1→0，NPT 加長 ×2 | 0 |
-| hold_backbone | 同 standard | 同 standard | bb 0.5→0.05 | bb 0.05（50 kJ/mol/nm²）全程 |
+| standard（預設） | 主倍率階梯 1.0→0.5→0，各組 1 | bb 1→1、sc 1→0.5、lig 1→1 | bb 1→0、sc 0.5→0、lig 1→0 | 0 |
+| gentle | 同上 | bb 1→1、sc 1→1、lig 1→1 | 全部 →0，NPT 長度 ×2 | 0 |
+| hold_backbone | 同上 | 同 standard | bb 1→0.05、sc 0.5→0、lig 1→0 | bb 0.05（50 kJ/mol/nm²）全程；RMSD／RMSF 標「受約束」 |
+
+- 實作細節：單一力 `msw_position_restraints`，每粒子 `k, x0, y0, z0, grp`（0 主鏈、1 側鏈、2 配體），
+  表達式 `0.5·msw_restraint_scale·k·(δ(grp)·msw_rs_backbone + δ(grp−1)·msw_rs_sidechain + δ(grp−2)·msw_rs_ligand)·d²`。
+  k 主鏈／側鏈／配體皆 1000 kJ/mol/nm²（配體原 500：最小化時配體 ≥ 蛋白）。`shell`、`prefreeze` 組待截斷／凍結實作時再加（grp 3、4）。
+  SMD／umbrella 把側鏈與配體 k 設 0，只留主鏈（主倍率 = `backbone_restraint_scale`）。
+- 原設計（被會診修正，保留歷史）：standard NVT bb 1→0.5、sc 1→0.1、lig 1→0.5，NPT 全 →0；理由是 WP4 擔心約束＋barostat 偏壓體積——
+  會診指出 Amber／Desmond 都在 NPT 中釋放、k ≤ 1000 時偏差可忽略，因此改為 NVT 只升溫。
 
 - **智慧建議**（`recommend_restraint_strategy`，寫 DecisionLog）：
   - 解析度 > 2.5 Å、AlphaFold 模型或低 pLDDT、PDBFixer 補過 loop、對接 pose 有碰撞、胜肽配體、金屬鍵結模型 → gentle；

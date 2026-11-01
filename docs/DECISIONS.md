@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-11-01（第一個 session，續）
+
+### D-23　約束策略修正：分組約束、主要釋放移到 NPT、配體 k ≥ 蛋白、受約束 RMSD 標註（會診 §1 Q1）
+- 決定：
+  - `add_position_restraints` 改為**單一力、三組**：`msw_position_restraints` 每粒子參數 `k, x0, y0, z0, grp`
+    （0 主鏈 N/CA/C/O/OXT、1 蛋白側鏈重原子、2 配體重原子），能量 `0.5·msw_restraint_scale·msw_rs_<grp>·k·d²`；
+    各組 `msw_rs_*` 預設 1.0。k：主鏈 1000、側鏈 1000、**配體 1000（原 500）**。水、離子、金屬、輔因子不約束。
+  - `make_protocol(restraints=standard|gentle|hold_backbone)`，設定鍵 `md.restraints`（未知值 → NEEDS_HUMAN，選項可一鍵寫回）。
+    standard：NVT 主倍率固定 1.0、bb 1→1、sc 1→0.5、lig 1→1（只升溫）；NPT bb 1→0、sc 0.5→0、lig 1→0；production 0。
+    gentle：NVT 全 1→1，NPT 全 →0 且 NPT 長度 ×2。hold_backbone：NPT bb 1→0.05，production bb 0.05（50 kJ/mol/nm²）全程。
+  - `engine.protocol.production_restraints()` 判斷 production 是否受約束；`analyse_run` 寫入 `restrained_production`，
+    圖例與工作流程報告的 RMSD 欄標「受約束；低 RMSD 不代表結構穩定」。
+  - SMD／umbrella（`build_pulling_system`）把配體**與側鏈**的 k 設 0，只留主倍率縮放後的主鏈；舊 build（4 參數、無 grp）照舊處理。
+- 理由：會診 Q1——Amber／Desmond 都在 NPT 內釋放，NVT 中釋放＝在錯誤密度下鬆弛；k ≤ 1000 的位置約束對 barostat 體積偏差可忽略，
+  先前 WP4「約束主要在 NVT 放掉」的顧慮被業界慣例否決。最小化時配體 k 低於蛋白是反的（溶劑未鬆弛前對接 pose 最容易漂）。
+  單一力＋`grp` 參數比三個力好：binding、metal 整合測試與舊 system.xml 都只認 `msw_position_restraints` 這個名字。
+  側鏈在拉離時必須自由，否則口袋無法重排、PMF 偏高。
+- 取捨／影響：預設 protocol 的雜湊改變——**新程式對進行中的舊 run 會從受影響的 stage 重新跑**（identity 不同，這是正確行為：
+  約束排程改了，舊平衡不再代表新 protocol）；已 COMPLETE 的 workflow MD 不重跑。側鏈現在也被約束（原本不約束），最小化與 NVT 更穩。
+- 被否決：三個分開的力（破壞既有名稱約定）；把主倍率也做斜坡（與各組斜坡重複、難以閱讀）；hold_backbone 直接當預設（低 RMSD 誤導學生）。
+- 證據：`tests/test_restraint_strategy.py`（7，純 Python：排程、連續性、gentle/hold、未知策略擋下、GUI 一鍵、報告標註）、
+  `tests/test_restraint_groups_openmm.py`（Reference 平台實算各組能量與 binding 釋放側鏈；CI openmm-stack 驗證）。
+- 未決：`recommend_restraint_strategy`（依解析度、AlphaFold、補 loop、碰撞、胜肽、金屬自動建議 gentle）尚未做；凍結與截斷仍在規格階段。
+  hold_backbone 時 NPT 末段 density 驗收仍在約束下計算（可接受，待真實資料確認）。
+
 ## 2026-11-01（第三個 session）
 
 ### D-22　水盒不過大：菱形十二面體 + tier padding + 下限閘門（使用者原則）

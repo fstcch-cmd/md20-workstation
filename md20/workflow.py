@@ -838,6 +838,19 @@ class Workflow:
                 self._block("md_cases", f"{spec['key']} 建模需要人工決定：{s.get('blocking')}：{s.get('blocking_detail')}", cases=built)
         return built
 
+    def _restraint_strategy(self) -> str:
+        """md.restraints: standard（預設）| gentle | hold_backbone（D-23）。未知值 → 擋下，不猜。"""
+        from .engine.protocol import RESTRAINT_STRATEGIES
+        name = (self.cfg.get("md") or {}).get("restraints") or "standard"
+        if name not in RESTRAINT_STRATEGIES:
+            self._block("md_runs", f"md.restraints = {name!r} 不是已知的約束策略。",
+                        options=[f"md.restraints: {k}" for k in RESTRAINT_STRATEGIES])
+        if name == "hold_backbone":
+            self.dec.record("workflow.md", "restraints", name,
+                            "production 全程保留主鏈 5% 約束（50 kJ/mol/nm²）：主鏈 RMSD／RMSF 會被約束壓低，報告標註「受約束」，"
+                            "不能當作結構穩定的證據。", kind="auto")
+        return name
+
     def run_md(self, built: dict, make_factory: Callable, *, should_pause=None, progress_cb=None) -> dict:
         from .engine import make_protocol, run_replicas
         md = self.cfg.get("md", {})
@@ -851,7 +864,8 @@ class Workflow:
                                 f"{c['case_id']}）；舊結果不沿用，重新執行 MD。")
                 runs.pop(key, None)
             case = self.project.case(c["case_id"])
-            proto = make_protocol(md.get("tier", "teaching"), production_ns=md.get("production_ns"), replicas=md.get("replicas", 1))
+            proto = make_protocol(md.get("tier", "teaching"), production_ns=md.get("production_ns"), replicas=md.get("replicas", 1),
+                                  restraints=self._restraint_strategy())
             if self._solvent() == "gbn2":
                 from .engine.protocol import implicit_solvent_protocol
                 proto = implicit_solvent_protocol(proto)

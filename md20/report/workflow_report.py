@@ -8,6 +8,14 @@ from ..util import load_json, now_iso
 from .html import _img, _esc, _CSS, _decisions_table, build_run_report
 
 
+def _restrained_tag(summary: dict) -> str:
+    """D-23: RMSD measured under a production restraint is not evidence of stability — say so next to the number."""
+    r = (summary or {}).get("restrained_production") or {}
+    if not r:
+        return ""
+    return f"<br><small>（受約束：{_esc(', '.join(r))}；低 RMSD 不代表結構穩定）</small>"
+
+
 def _fmt(x, nd: int = 2) -> str:
     return "" if x is None else f"{float(x):.{nd}f}"
 
@@ -94,7 +102,7 @@ def _md_section(wf) -> str:
                 link = f"（報告失敗：{_esc(exc)}）"
         rm = s.get("rmsd_backbone_mean_A")
         parts.append(f"<tr><td>{_esc(key)}</td><td>{_esc(c['mode'])}</td><td>{_esc(', '.join(c['ligands']) or '—')}</td>"
-                     f"<td>{_esc(r.get('status', c.get('status')))}</td><td>{_fmt(rm)}</td><td>{_esc(bound)}</td><td>{link}</td></tr>")
+                     f"<td>{_esc(r.get('status', c.get('status')))}</td><td>{_fmt(rm)}{_restrained_tag(s)}</td><td>{_esc(bound)}</td><td>{link}</td></tr>")
     parts.append("</table>")
     comp = ana.get("comparison") or {}
     if comp.get("figures", {}).get("compare"):

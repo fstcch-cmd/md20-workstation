@@ -40,6 +40,10 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
     # implicit solvent gates (GBn2): back to explicit water, or no binding step
     if option.startswith("md.solvent: explicit"):
         return _act(option, [{"path": ["md", "solvent"], "value": "explicit"}], "md_cases")
+    # restraint strategy (D-23): "md.restraints: gentle"
+    m = re.match(r"md\.restraints:\s*(standard|gentle|hold_backbone)\b", option)
+    if m:
+        return _act(option, [{"path": ["md", "restraints"], "value": m.group(1)}], "md_runs")
     if option.startswith("binding.enabled: false"):
         return _act(option, [{"path": ["binding", "enabled"], "value": False}], "binding")
     # pocket metal before docking: "metal_policy: {ZN: bonded}…"

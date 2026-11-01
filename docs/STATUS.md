@@ -57,6 +57,7 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 
 ## B. 寫好、靠 CI 驗證(開發容器裝不了 OpenMM/NiceGUI,也連不到 PyPI/npm/RCSB)
 - **3D viewer headless 繪圖**(`test_viewer_renders_in_headless_browser`):需要 playwright,CI 環境沒有 → 從未執行過;只有純資料層測試是 A 級。
+- **約束策略（D-23）**：分組約束（主鏈／側鏈／配體）、主要釋放移到 NPT、`md.restraints` standard/gentle/hold_backbone、受約束 RMSD 標註。純 Python 排程測試本地通過；`test_restraint_groups_openmm`（Reference 平台實算各組能量、binding 釋放側鏈）與 3PTB 全流程在新排程下的驗收待 openmm-stack／heavy。
 - **HTS 真下載＋真 Vina**(`test_screen_integration.py`,3PTB + PubChem/RCSB):待 openmm-stack。
 - **金屬 1-3/1-4 經金屬排除**是否讓 3KS3 的 Zn–His 守住:待 Ubuntu heavy(現在 main 不再被取消)。
 - **受體缺口**:無 SEQRES 時擋關、補建後 CA–CA 檢查,真實 PDBFixer 路徑待 CI。

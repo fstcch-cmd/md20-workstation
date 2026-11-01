@@ -267,7 +267,8 @@ class FakeBackend:
         self._vol = 240.0
         self._rng = random.Random(seed)
         self._nan_at = nan_at_step
-        self._params: dict[str, float] = {"msw_restraint_scale": 1.0}
+        self._params: dict[str, float] = {"msw_restraint_scale": 1.0, "msw_rs_backbone": 1.0,
+                                           "msw_rs_sidechain": 1.0, "msw_rs_ligand": 1.0}
         self._log = None
         self._report_steps = 1000
         self._dcd = None

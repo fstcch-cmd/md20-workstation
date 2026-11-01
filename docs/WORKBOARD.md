@@ -6,7 +6,7 @@
 ## 進行中
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
-| 約束策略修正（會診 §1 Q1）：釋放移到 NPT、最小化配體 k ≥ 蛋白、分組約束（backbone/sidechain/ligand）、hold_backbone 的 RMSD 標註 | REVIEW_ANSWERS §1 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 21:30 | |
+| 約束策略修正：分組約束（backbone/sidechain/ligand 單一力 grp 參數）、主要釋放移到 NPT、配體 k 1000、`md.restraints` standard/gentle/hold_backbone、受約束 RMSD 標註（D-23、specs/restraints_freeze_truncation.md §3.1） | session_016gcJz8q2F6515MWPncJEZu | 本 commit（CI 待驗） |
 | 監看 CI：3e7f941 / c016a08 的 Ubuntu 重測（鋅模型、補窗、NaCl 冪等） | — | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 | 結果記入 STATUS / DECISIONS |
 
 ## 待認領（依重要性）
@@ -14,7 +14,7 @@
 |---|---|
 | 金屬：力常數依元素×配位原子表、配位水納入鍵結、配體配位金屬的距離約束後備 | 同上 §3 |
 | umbrella：MBAR overlap matrix 門檻、OpenMM 內建 metadynamics 後備、funnel 約束（研究 tier ΔG°） | 同上 §2 |
-| 約束分組分階段／凍結／口袋截斷／資源估算（**等使用者審查規格後才實作**） | `docs/specs/restraints_freeze_truncation.md` |
+| 約束策略智慧建議 `recommend_restraint_strategy`；凍結／口袋截斷／資源估算（分組分階段已完成 D-23；其餘依會診 §1 Q2–Q6） | `docs/specs/restraints_freeze_truncation.md` |
 | 對接盒子過大防呆閘門（任一邊 > 40 Å 或盒內殘基 > 300，提示格點數 ×0.375） | DECISIONS D-14、REVIEW_QUESTIONS #6 |
 | Vina 執行檔 sha256 表、micromamba 與環境版本鎖定 | REVIEW #19 |
 | 戳記改為私鑰簽章（目前只有公鑰加密，不能證明來源） | REVIEW #20 |
