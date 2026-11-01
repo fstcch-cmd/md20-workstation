@@ -225,3 +225,33 @@ jobs:
           body="### Paper docking (ubuntu, exhaustiveness 8) — ${{ job.status }}"$'\n```\n'"$(grep -E 'PASSED|FAILED|SKIPPED|ERROR|passed|failed|slowest|^[0-9.]+s call' pytest.log 2>/dev/null | tail -c 6000)"$'\n```\n'
           for f in validation_results/*_docking.json; do [ -f "$f" ] && body+=$'\n<details><summary>'"$(basename $f)"$'</summary>\n\n```json\n'"$(head -c 12000 $f)"$'\n```\n</details>'; done
           gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$body" >/dev/null || true
+
+  installer-windows:
+    # The student's path: the real installer under Windows PowerShell 5.1 (`shell: powershell`, not pwsh), then the
+    # launchers it writes.  CPU only (no GPU on the runner); ~15–25 min.  This is what the laptop will run tomorrow.
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run installer (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $env:MD20_ROOT = "$env:RUNNER_TEMP\MD20"
+          powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Gpu cpu
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Launchers work (doctor, demo, pipeline example, screen template)
+        shell: cmd
+        run: |
+          set MD20=%RUNNER_TEMP%\MD20
+          call "%MD20%\md20.cmd" doctor --no-benchmark || exit /b 1
+          call "%MD20%\md20.cmd" demo --dir "%RUNNER_TEMP%\md20demo" || exit /b 1
+          call "%MD20%\md20.cmd" pipeline example --screen > "%RUNNER_TEMP%\example.json" || exit /b 1
+          call "%MD20%\md20.cmd" screen template --out "%RUNNER_TEMP%\lib.xlsx" || exit /b 1
+          dir "%MD20%\MD20-GUI.cmd" || exit /b 1
+      - name: Post result as commit comment
+        if: always()
+        shell: bash
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          body="### Windows installer (PowerShell 5.1, CPU) — ${{ job.status }}"
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$body" >/dev/null || true

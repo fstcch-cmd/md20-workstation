@@ -6,6 +6,7 @@
 ## 進行中
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **里程碑：11/02 09:00 使用者在獨顯 Windows 筆電上安裝並跑起來**——目標 main 全綠（含 `installer-windows`），之後所有 push 不得讓 Windows 紅 | 使用者 | 全部 session | 2026-11-01 23:40 | 本 session 夜間巡檢 CI；紅了修到綠優先於新功能 |
 | 約束策略修正：分組約束（backbone/sidechain/ligand 單一力 grp 參數）、主要釋放移到 NPT、配體 k 1000、`md.restraints` standard/gentle/hold_backbone、受約束 RMSD 標註（D-23、specs/restraints_freeze_truncation.md §3.1） | session_016gcJz8q2F6515MWPncJEZu | 本 commit（CI 待驗） |
 | 監看 CI：3e7f941 / c016a08 的 Ubuntu 重測（鋅模型、補窗、NaCl 冪等） | — | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 | 結果記入 STATUS / DECISIONS |
 
@@ -23,6 +24,7 @@
 ## 完成
 | 項目 | session | commit |
 |---|---|---|
+| Windows 安裝器 5.1 相容＋啟動器＋CI `installer-windows`＋`docs/WINDOWS_QUICKSTART.md`（明早 09:00 筆電測試用；D-26） | session_016gcJzBDnGh3heY9HLWnva3 | 本 commit |
 | 水盒不過大：十二面體、tier padding、下限閘門、離子強度可調（D-22、specs/solvent_box.md） | session_016gcJzBDnGh3heY9HLWnva3 | 本 commit（CI 待驗） |
 | PBC 歸零／錨定（`analysis/pbc.py`、`center_trajectory`、歸零 DCD、視覺性解離閘門；D-21、specs/pbc_centering.md；GBn2 無盒情況已處理） | session_016gcJzBDnGh3heY9HLWnva3 | 本 commit（CI 待驗） |
 | 會診 §1 Q6 隱式溶劑 GBn2（D-20，待 CI） | session_016gcJz8q2F6515MWPncJEZu | 見 git log |

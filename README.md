@@ -5,7 +5,7 @@
 > © HCC Lab, National Kaohsiung University of Science and Technology. All rights reserved.
 > 本 repo 暫時公開僅供持續整合（CI）測試使用；未附授權，請勿重製、散布或用於其他用途。
 
-> 接手開發看 [`docs/HANDOFF.md`](docs/HANDOFF.md);現況看 [`docs/STATUS.md`](docs/STATUS.md)。
+> 接手開發看 [`docs/HANDOFF.md`](docs/HANDOFF.md);現況看 [`docs/STATUS.md`](docs/STATUS.md);**Windows 筆電安裝與測試看 [`docs/WINDOWS_QUICKSTART.md`](docs/WINDOWS_QUICKSTART.md)**。
 
 Docking → 建模 → MD → 增強取樣，在學生自己的筆電上跑（Windows 優先；NVIDIA／AMD／內顯／純 CPU），
 環境、拓撲、PDB 修復、驗收與圖表全部自動，每個自動決策都留下「為什麼」。
@@ -21,7 +21,7 @@ powershell -ExecutionPolicy Bypass -File installer\install.ps1      # 自動偵�
 bash installer/install.sh
 ```
 
-安裝器內嵌 micromamba、建立 `md20` 環境、安裝套件並立即執行 `md20 doctor`。
+安裝器內嵌 micromamba、建立 `md20` 環境、安裝套件並立即執行 `md20 doctor`；Windows 會在桌面放 **`MD20-GUI.cmd`**（雙擊開圖形介面）並產生 `%LOCALAPPDATA%\MD20\md20.cmd`（命令列）。
 
 ```text
 md20 gui                         # 圖形介面（瀏覽器）：建立流程、即時曲線、改選 pose、看報告
