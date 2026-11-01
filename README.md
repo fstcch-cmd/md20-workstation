@@ -1,5 +1,7 @@
 # MD20 單機教學版工作站（開發中）
 
+[![CI](https://github.com/fstcch-cmd/md20-workstation/actions/workflows/ci.yml/badge.svg)](https://github.com/fstcch-cmd/md20-workstation/actions/workflows/ci.yml)
+
 > © HCC Lab, National Kaohsiung University of Science and Technology. All rights reserved.
 > 本 repo 暫時公開僅供持續整合（CI）測試使用；未附授權，請勿重製、散布或用於其他用途。
 

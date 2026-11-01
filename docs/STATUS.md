@@ -1,45 +1,71 @@
-# M0 + M1(部分) 狀態報告（2026-10-31）
+# MD20 單機教學版 — 狀態報告（2026-11-01）
 
-開發環境限制：本次開發的雲端工作區無法連 PyPI／conda-forge，**OpenMM、RDKit、PDBFixer、OpenFF 未安裝**。
-因此下表嚴格分成三類。
+本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
+原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
-## A. 已真實執行並通過測試（本工作區，Python 3.13，numpy/pandas/matplotlib）
+當前 CI(commit b20ff7d/0d9dfb1,`fstcch-cmd/md20-workstation`):
+- **pure-python 工作(Windows / macOS / Linux × Py3.11/3.12,共 6 個):全綠。**
+- **openmm-stack(真實 OpenMM + Vina):Windows OpenCL 綠**(使用者主力平台);macOS、Ubuntu(含 `MD20_HEAVY=1` 重測)撰寫此檔時仍在跑,結果見 commit 留言。
+- 測試總數:91 個測試函式(含 2 篇論文驗證案例)。
 
-| 模組 | 測試 | 內容 |
+---
+
+## A. 真實執行並通過
+
+### A1. 無 OpenMM 也能跑(pure-python,6 平台 CI 全綠)
+| 模組 | 測試檔 | 重點 |
 |---|---|---|
-| `engine` chunk 引擎 | `tests/test_engine_fake.py`（7） | 分段執行與封存、損壞 chunk 續跑、identity 不符拒絕、watchdog 連續失敗升級 NEEDS_HUMAN、watchdog dt 減半後恢復、完整 protocol（minimize→NVT→NPT→production）＋圖表、驗收延長建議 |
-| `build` 閘門 | `tests/test_build_gates.py`（5） | 乾淨 PDB 通過；docking 損壞 PDB（缺 element、LIG、重複原子名、氫、水、MSE）正確分類；長／短 loop 判定；serial 溢位與輔因子；閘門狀態優先序 |
-| `project` 檔案庫 | `tests/test_project_store.py`（4） | 專案／case／run 建立與階段推斷、Windows 保留檔名、便宜指紋、檔案鎖逾時、JSON 備份回退 |
-| `sampling` PMF | `tests/test_sampling.py`（4） | window 規劃間距／overlap；WHAM 由合成 umbrella 資料還原平坦 PMF 與諧振井；gap 偵測 |
-| `cli demo` | 手動執行 | 專案→case→run→四階段→5 張圖→決策日誌→HTML 報告 |
-| `report` | `tests/test_report.py`（1） | 自含 HTML 報告（圖內嵌 base64、方法段落中英、驗收表、閘門表、決策日誌、protocol）；可重現包 zip（含 SHA manifest） |
-| `engine.replicas` / `engine.queue` | `tests/test_queue_replicas.py`（4） | 多 replica（seed+1000i）執行與彙總（mean±SD、疊圖）；暫停策略（PAUSE 檔／電池／時段）；chunk 邊界暫停與續跑；佇列暫停後續跑同一組 run 不重複建立 |
-| `env.doctor.recommend_tier` | `tests/test_doctor_tier.py`（1） | 由 ns/day 與系統大小推薦 tier 與 ETA |
-| `env.doctor` | 手動執行（無 OpenMM 的降級模式） | 硬體探測、套件報告、Markdown 輸出 |
+| chunk 引擎 | test_engine_fake（9） | 分段封存/續跑、損壞 chunk 丟棄、identity 不符拒絕、watchdog dt 減半升級、**GPU context 重建**、**裝置反覆出錯→NEEDS_HUMAN** |
+| build 閘門 | test_build_gates（9） | 壞 PDB 分類、loop 判定、serial 溢位、**口袋質子化審查(PROPKA)** |
+| docking 推薦邏輯 | test_docking_pure（10） | 保守推薦、**無合格候選→不推薦**、口袋體積過小、同號電荷、redocking 自檢擋關 |
+| 胜肽/CPP | test_peptide（7） | 序列模板、capped 端點、CPP 閘門、**無法穿膜時給替代設計(GKP/KP/富集/載體)+外部預測工具** |
+| 結構可信度 | test_structure_gate（5） | 解析度/R-free/B-factor/occupancy/組裝、**口袋金屬閘門** |
+| 工作流程閘門 | test_workflow_gates（5） | 共晶盒必做 redocking、盲對接需同意、無推薦擋 pose 選擇、結合計算自動加大 padding |
+| 續跑/鎖 | test_resume（3） | owner lock、死 PID stale 接手、工作流程探索 |
+| 資源模式 | test_resources（3） | background/balanced/full 執行緒數、RAM/GPU 溫度守門、GPU duty cycle |
+| PMF/採樣 | test_sampling（5） | window 規劃、WHAM 還原、gap 偵測 |
+| 專案/佇列/報告/doctor/GUI/stamp | 各檔 | 檔案庫、replica 彙總、暫停策略、HTML 報告、tier 建議、GUI 邏輯、**HCC Lab 戳記(可見+隱藏+擁有者加密)** |
 
-## B. 已寫、未在此執行（需要 OpenMM／RDKit／OpenFF；請在你的機器執行 `pytest tests/test_openmm_integration.py -v`）
-
-| 模組 | 風險點 |
+### A2. 真實 OpenMM + Vina(CI openmm-stack;Windows 已綠)
+| 測試檔 | 內容 |
 |---|---|
-| `engine.backend.OpenMMBackend` | HMR 質量重分配、barostat 參數重設、reporter 關閉；DCD/log 路徑在 Windows 的檔案鎖定 |
-| `env.platforms.choose_platform` | 各平台 property 名稱（`Precision`、`DeviceIndex`）、HIP 平台名稱 |
-| `env.doctor.benchmark` | PME 水盒以程式建構；約束與 exception 設定需實測 |
-| `build.receptor.prepare_receptor` | PDBFixer 缺失 loop 篩選邏輯（`missingResidues` 鍵為 (chain index, residue index)） |
-| `build.ligand` | `AssignBondOrdersFromTemplate` 對 PDBQT 的容錯；OpenFF NAGL 模型名稱與 wrapper API 隨版本變動 **[最需驗證]**；`vacuum_smoke_test` 的 ForceField 註冊 |
-| `build.assemble` | `Modeller.addSolvent(boxShape=…)`、配體 chain/resname 設定、總電荷計算 |
-| `tests/test_openmm_integration.py` | 水盒 fixture 用 `Modeller.addSolvent(boxSize=…)` 於空拓撲 |
-| `build.protonation` | pdb2pqr CLI 參數與 .pka 檔格式（PROPKA 3.x）；尚未接入 `prepare_receptor`（M2） |
+| test_openmm_integration（4） | 平台選擇、HMR、benchmark、doctor |
+| test_real_case_integration（2） | 3PTB 真實建模 + 短 MD;胜肽案例 |
+| test_docking_integration（2） | 苯甲脒 redocking RMSD<2Å;多配體 simultaneous(遵守無候選規則) |
+| test_binding_integration（2） | NaCl PMF(Jacobian 校正、auto-refine、resume);**水盒過小擋關** |
+| test_workflow_integration（1） | 3PTB 全流程 apo+docked→分析→binding→報告,且可重入 |
 
-## C. 設計上已知未完成（M1 之後）
+### A3. 使用者實機(先前回報)
+- Windows 10 + GTX 1060 → OpenCL,約 200 ns/day;當時 28 個本地測試通過。
+- HCC Lab 戳記端到端驗證:私鑰可解開 demo 輸出的加密溯源。
 
-- GUI（NiceGUI）、Dimorphite-DL、ProLIF、P2Rank、膜與醣、多 replica 彙總、SMD 執行器、MM/GBSA、TI 玩具系統、docking 分冊移植、工作站佇列。
-- Windows 安裝器 `installer/install.ps1` 未在 Windows 實測（micromamba 下載路徑與 tar 解壓）。
-- `environment/*.yml` 尚未鎖定精確版本；第一次在各 OS 成功建立後請匯出 lock。
+---
 
-## 驗證指令（在你的機器）
+## B. 寫好、靠 CI 驗證(需要重環境,本地沙盒無法裝)
+- `MD20_HEAVY=1` 的 Ubuntu 工作額外跑**兩篇論文的真實對接重現**(見 C 下方),結果以 JSON 貼到 commit 留言。
+- openmm-stack 的 macOS/Ubuntu 結果每次 push 由 CI 回報;若某 OS 紅,留言含失敗 log。
 
-```bash
-pytest -v                                   # 純 Python + OpenMM 整合測試（有 openmm 才會跑）
-md20 doctor                                 # 看平台階梯與 ns/day
-md20 demo                                   # 合成後端完整流程
-```
+---
+
+## C. 已知限制與未完成(誠實交代)
+
+### C1. 論文驗證案例(教學背景用)
+兩個案例以 `md20 validate <case>` 產生設定。目的是**示範把關流程**,不是逐位重現論文數字(exhaustiveness/質子化/亂數種子未公開)。
+- **hsieh2024**(NF-κB RELA,六配體同時對接):論文標 PDB 1VKF,但 1VKF 其實是 *Thermotoga* 甘油操縱子蛋白;系統以「殘基是否存在」判定正解為 **1VKX**。這正是結構可信度閘門要抓的錯。
+- **hsieh2025**(Keap1-BTB 4CXT,胜肽 GGGGGKP):胞內標靶但胜肽淨電荷僅 +1,**CPP 閘門擋下並給替代設計**;論文稱的「covalent bonding」實為凡得瓦接觸;其盒子比整個 domain 還大(等同盲對接)。
+
+### C2. 尚未做或刻意簡化
+- **WP5**(choose_poses 前做短 MD 篩 pose):未實作;目前以對接保守推薦 + 建模短 MD 驗證替代。
+- **WP9**(多配體各自的 PMF / ΔΔG):binding 目前一次一個配體;多配體共同 PMF 未實作。
+- **WP13 GUI**:離線 3D viewer、即時曲線、閘門卡片、時間軸尚未做;GUI 目前為表單 + 檔案瀏覽 + 執行。
+- **金屬**:僅有「口袋金屬閘門」提示與 `metal_policy`(保留非鍵結/移除);未做鍵結金屬(bonded model)參數化。
+- **PROPKA**:只做口袋質子化**審查/提示**,不自動改變質子化狀態(避免未經同意更動化學)。
+- ΔG° 的 tier 限制:classroom 不輸出絕對 ΔG°;research 要 ≥3 replica + 半段收斂,否則只給 ΔPMF。
+
+### C3. 平台
+- AMD GPU 走 OpenCL(非 HIP,除非該機有 ROCm OpenMM build);Apple Silicon 走 CPU/OpenCL。
+- Vina:Windows 無 python bindings 時用官方執行檔(`md20 setup-vina` 下載)。
+
+---
+
+**一句話**:核心引擎、建模/對接/結合的把關閘門、戳記、兩篇論文案例都已就緒且(pure-python)6 平台 CI 全綠,真實 OpenMM 路徑 Windows 已綠;未完成的是 GUI 視覺化、多配體 PMF、短 MD 篩 pose 與鍵結金屬。
