@@ -74,7 +74,7 @@ def test_other_policies_and_defaults():
     assert [g.status for g in site_gates([plan_site(s, "bonded")])] == ["AUTO_FIXED"]
 
 
-def test_calcium_cooordinated_by_protein_is_not_mistaken_for_calpha():
+def test_calcium_coordinated_by_protein_is_not_mistaken_for_calpha():
     atoms = [_atom(0, "CA", "ALA", 5, (0, 0, 0), "C"), _atom(1, "CA", "CA", 480, (5, 5, 5), "Ca", prot=False)]
     sites = find_sites(atoms)
     assert [s["key"] for s in sites] == ["CA:A480"]
