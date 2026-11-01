@@ -34,7 +34,9 @@ PROTONATE = [
     ("amidine", "[NX2;+0;!a;!$(N-[#8,#7,#16]);!$(N-C=[O,S])]=[CX3;!a;!$(C(=N)(N)N)]([NX3;!$(N-C=[O,S]);!$(N-[#8,#7,#16])])[#6,#1]", 0),
     # aliphatic amine: every heavy neighbour is an sp3 carbon (excludes anilines, amides, sulfonamides, enamines,
     # hydrazines, hydroxylamines, N-aryl, carbamates)
-    ("aliphatic amine", "[NX3;+0;!$(N~[!#6;!#1]);!$(N-[!CX4])]", 0),
+    # (SMARTS note: "[!CX4]" would mean "not aliphatic C AND degree 4" — implicit AND binds tighter than "!" applies
+    # to the whole bracket; the neighbour test is therefore "any carbon that is not 4-connected", D-25)
+    ("aliphatic amine", "[NX3;+0;!$(N~[!#6;!#1]);!$(N~[#6;!X4])]", 0),
 ]
 NOTE_ONLY = [
     ("imidazole-like (pKa ~6–7, left neutral)", "c1ncc[nH]1"),

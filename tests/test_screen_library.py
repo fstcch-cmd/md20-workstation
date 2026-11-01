@@ -12,6 +12,15 @@ from md20.util import DecisionLog
 SDF = "\n  fake\n\n  1  0  0  0  0  0  0  0  0  0999 V2000\n    0.0000    0.0000    0.0000 C   0  0\nM  END\n$$$$\n"
 
 
+@pytest.fixture(autouse=True)
+def _pure_library_path(monkeypatch):
+    """These tests pin the no-RDKit path (fake one-atom SDFs, honest `checked: False`).  In the openmm-stack env RDKit
+    is installed and its size filters would skip every fake compound (CI c4b5de6, D-25); the RDKit path is covered by
+    tests/test_screen_integration.py."""
+    import md20.docking.library as lib
+    monkeypatch.setattr(lib, "_rdkit_available", lambda: False)
+
+
 # ----------------------------------------------------------------------------- sheet parsing
 def test_read_csv_with_aliases(tmp_path):
     p = tmp_path / "lib.csv"

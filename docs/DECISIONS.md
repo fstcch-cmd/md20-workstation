@@ -7,6 +7,24 @@
 
 ## 2026-11-01（第一個 session，續）
 
+### D-25　c4b5de6 openmm-stack 三 OS 紅：質子化 SMARTS 寫錯、HTS 純路徑測試遇到 RDKit、GBn2 在 CPU 極慢
+- 事實（run 41309973844；Ubuntu 16 failed／239 passed，87 分鐘；Windows／macOS 撞 90 分鐘上限）：
+  1. **我寫的** `ionize` 脂肪胺規則 `[NX3;…;!$(N-[!CX4])]`：SMARTS 隱式 AND 比 `!` 緊，`[!CX4]` 是「非脂肪碳 **且** 4 連接」，
+     幾乎什麼都不匹配 → 苯胺、乙醯胺、醯基胍、已帶電苯甲脒的 NH2 都被質子化（苯甲脒變 +2）。這是 D-18 的錯，本地沒有 RDKit 所以沒抓到。
+  2. `test_ligand_mapping`：numpy.int64 傳給 `Conformer.GetAtomPosition`（Boost 不收），測試本身的錯。
+  3. HTS 的 `test_screen_library`／`test_screen_workflow`（另一個 session）：測試用 1 原子的假 SDF，在有 RDKit 的環境被大小篩選
+     （5–80 重原子）全部略過。程式行為正確，是測試只為無 RDKit 環境寫。
+  4. `test_3ptb_build_and_short_md`／胜肽：D-22 的 `np` 未匯入（D-24 已修）。
+  5. **GBn2 3PTB 測試在 Ubuntu CPU 跑了 3921 s（65 分鐘）才通過**；Windows/macOS 因此超時。CustomGBForce＋NoCutoff 是 O(N²)，
+     CPU 上每次能量評估約秒級。
+- 決定：(1) 規則改為 `!$(N~[#6;!X4])`（任何非 4 連接的碳鄰居都排除），程式內註明這個 SMARTS 陷阱；
+  (2) 測試以 `int` 索引；(3) 兩個 HTS 測試檔加 autouse fixture 把 `_rdkit_available` 固定為 False（RDKit 路徑由 `test_screen_integration` 驗證）；
+  (4) GBn2 整合測試縮到每 stage 0.4 ps、最小化 100 次（只驗管線，不驗物理）；GBn2 的決策說明改為「**有 GPU 才明顯較快，CPU 上可能比顯式水慢**」。
+- 更正 D-20／`implicit_solvent.md`：原寫「筆電上快很多」只對有 GPU 的筆電成立。使用者主力 GTX 1060（OpenCL）適用；純 CPU 筆電不該推薦 GBn2。
+- 被否決：把 openmm-stack 步驟上限從 90 分鐘拉長（掩蓋真問題）；預設給 GB 加截斷（改變物理，需另行驗證）。
+- 未決：GBn2 在 CPU 平台時應自動 NEEDS_HUMAN 或建議 explicit（需要在 workflow 取得實際平台）；GBn2 截斷（2 nm、CutoffNonPeriodic）的準確度與速度評估；
+  NaCl PMF 測試 1190 s 偏長。
+
 ### D-24　heavy CI 紅：`np` 未匯入（fc4da13）＋純 Python 靜態未定義名稱檢查；鋅鍵結模型確認修好
 - 事實：c4b5de6（run 41309973844）heavy workflow 與 pose-screen 都死在 `build/assemble.py` 溶劑化後的 `np.linalg.det`
   （D-22 新增的盒體積紀錄；模組沒有 `import numpy as np`）。同一輪 **heavy metal 全綠**——`test_bonded_zinc_ca2` 通過，

@@ -20,6 +20,15 @@ PDB = ("ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00  0.00      
        "ATOM      2  CA  ALA A   1       1.500   0.000   0.000  1.00  0.00           C\n"
        "HETATM    3  C1  BEN A   2       3.000   0.000   0.000  1.00  0.00           C\nEND\n")
 SDF = "\n  fake\n\n  1  0  0  0  0  0  0  0  0  0999 V2000\n    0.0000    0.0000    0.0000 C   0  0\nM  END\n$$$$\n"
+
+
+@pytest.fixture(autouse=True)
+def _pure_library_path(monkeypatch):
+    """These tests pin the no-RDKit path (fake one-atom SDFs, honest `checked: False`).  In the openmm-stack env RDKit
+    is installed and its size filters would skip every fake compound (CI c4b5de6, D-25); the RDKit path is covered by
+    tests/test_screen_integration.py."""
+    import md20.docking.library as lib
+    monkeypatch.setattr(lib, "_rdkit_available", lambda: False)
 SCORES = {"c1": -7.2, "c2": -7.9, "c3": -5.1, "c4": -7.5}
 
 

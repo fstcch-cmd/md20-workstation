@@ -15,7 +15,7 @@ def _xyz_pose(mol_h, order):
     heavy = Chem.RemoveHs(mol_h)
     conf = heavy.GetConformer()
     lines = [str(len(order)), ""]
-    for i in order:
+    for i in map(int, order):
         p = conf.GetAtomPosition(i)
         lines.append(f"{heavy.GetAtomWithIdx(i).GetSymbol()} {p.x:.4f} {p.y:.4f} {p.z:.4f}")
     return Chem.MolFromXYZBlock("\n".join(lines)), heavy

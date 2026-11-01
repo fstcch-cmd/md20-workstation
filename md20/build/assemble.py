@@ -276,7 +276,7 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
         modeller.topology.setPeriodicBoxVectors(None)
         if decisions:
             decisions.record("build.solvate", "solvent", "GBn2 implicit",
-                             "隱式溶劑：不加水與離子、無週期盒、無 PME，原子數少 80–90%，筆電上快很多。適合短 MD 篩 pose 與教學 MD；"
+                             "隱式溶劑：不加水與離子、無週期盒、無 PME，原子數少 80–90%；**有 GPU（CUDA/OpenCL）時**才明顯較快——CPU 上 GB 力（O(N²)）可能比顯式水還慢（D-25）。適合短 MD 篩 pose 與教學 MD；"
                              "不適合金屬位點、水橋接的結合、SMD/傘狀採樣（溶劑化能障會失真）。")
     else:
         # solvate — the box is where the compute goes (80–90 % of the atoms are water), so: smallest shape that keeps
