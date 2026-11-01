@@ -1,0 +1,44 @@
+# 全流程：docking → MD → 結合強度
+
+```bash
+md20 pipeline example > my.json          # 產生範本（3PTB trypsin + benzamidine）
+md20 pipeline run my.json --project 課堂A # 執行；可隨時中斷，重跑同一指令即從中斷處接續
+md20 gui                                  # 或用圖形介面（瀏覽器 http://127.0.0.1:8020）
+```
+
+## 設定檔欄位
+
+| 欄位 | 說明 |
+|---|---|
+| `receptor` | `{"pdb_id": "3PTB"}`（自動從 RCSB 下載）或 `{"file": "my.pdb"}` |
+| `ph` | 質子化 pH（受體） |
+| `keep_hetero` | 要保留的輔因子／金屬殘基名，如 `["CA", "ZN", "HEM"]`；其餘 HETATM（緩衝鹽、甘油…）自動移除並記錄 |
+| `box` | `{"from_residue": "BEN"}` 以晶體配體定義；`{"center": [x,y,z], "size": [sx,sy,sz]}`（Å）；`{"whole_receptor": true}` 盲對接 |
+| `ligands` | `[{"name": "BEN", "smiles": "...", "reference_resname": "BEN"}]`；`reference_resname` 用來計算與晶體 pose 的 RMSD（redocking 驗證） |
+| `docking.mode` | `independent`：每個配體各自對接並排名；`simultaneous`：多配體同時放進同一 box（joint pose） |
+| `pose_choices` | 覆寫推薦：`{"BEN": 3}`；simultaneous 模式用 `{"joint": 2}` |
+| `md.systems` | `apo`（原始蛋白）、`docked_single`（每個配體一個系統）、`docked_multi`（多配體同一系統） |
+| `md.tier` | `classroom`（2 ns）、`teaching`（10 ns）、`research`（100 ns）；`production_ns` 可直接指定 |
+| `md.replicas` | 獨立 seed 的重複數（研究建議 ≥ 3） |
+| `binding` | `{"enabled": true, "ligands": ["BEN"], "config": {...}}`；config 見下 |
+
+`binding.config`（`BindingConfig`）：`pull_distance_nm`（1.5）、`pull_velocity_nm_per_ps`（0.01）、`k_pull`、`k_umbrella`（1000）、`target_overlap`（0.25）、`window_equil_ps`（10）、`window_prod_ps`（50）、`max_windows`（40）。
+
+## 智慧化處理（每一項都寫進決策日誌）
+
+- **受體**：一律從原始檔重做；docking 處理過的 PDB 不回流 MD。編號跳號（chymotrypsin numbering）以 CA–CA 距離判斷，不誤判為缺失 loop。
+- **配體**：化學（鍵序、電荷）只取自 SMILES／SDF；pose 只提供座標，以子結構比對逐原子對應。對不上就停下來說明哪些原子，不猜。
+- **Pose 推薦**：最佳分數 1 kcal/mol 內、所屬 cluster 最大的 pose（Vina 分數誤差約 1–2 kcal/mol，搜尋重複找到的結合模式較可靠）；有晶體配體時同時報告 RMSD。
+- **simultaneous**：配體間最短距離 < 2 Å 的 joint pose 視為碰撞、不推薦。
+- **docked_multi 由 independent 結果組成**：只有選定 pose 彼此距離 ≥ 2.5 Å 才允許，否則停下來請你改用 simultaneous 或改選 pose。
+- **MD**：watchdog 自動回滾＋縮小 dt；平衡未達標自動延長；電池／PAUSE 檔／時段在 chunk 邊界暫停。
+- **結合強度**：SMD 拉出配體 → 依 k、T、目標 overlap 自動規劃 window → 每個 window 可續跑 → WHAM/MBAR PMF ± bootstrap → ΔPMF 與 ΔG° 估計（附限制說明）。
+
+## 需要人工決定時
+
+流程停在 `NEEDS_HUMAN`，訊息會列出閘門與選項。把選擇寫進設定檔後重跑同一指令：
+
+```json
+"human_choices": {"receptor": {"hetero groups": "全部移除（預設）"}},
+"pose_choices": {"BEN": 2}
+```
