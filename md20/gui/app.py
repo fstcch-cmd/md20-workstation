@@ -12,6 +12,7 @@ from ..project import Project
 from ..util import default_projects_dir, load_json, safe_name
 from ..workflow import Workflow
 from .logic import Runner, config_from_form, list_workflows, pose_table, set_pose_choice
+from .views import gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html
 
 RUNNER = Runner()
 STATE: dict = {"projects_dir": default_projects_dir(), "platform": None, "doctor": None}
@@ -146,9 +147,38 @@ def workflow_page(project: str, name: str):
             set_pose_choice(wf, row["entry"], row["rank"])
             ui.notify(f"{row['entry']} 改用第 {row['rank']} 名 pose；按「開始／繼續」重新執行後續步驟")
         poses.on("rowClick", pick)
-        chart = ui.echart({"xAxis": {"type": "value", "name": "步"}, "yAxis": {"type": "value", "name": "T (K)"},
-                           "series": [{"type": "line", "showSymbol": False, "data": []}], "title": {"text": "即時溫度", "textStyle": {"fontSize": 12}}}
-                          ).classes("w-full h-64")
+        # ---- WP13: gate cards / live curves / timeline / offline 3D -------------------------------------
+        with ui.tabs().classes("w-full") as tabs:
+            t_gate, t_live, t_time, t_3d = (ui.tab("閘門"), ui.tab("即時曲線"), ui.tab("時間軸"), ui.tab("3D 檢視"))
+        with ui.tab_panels(tabs, value=t_gate).classes("w-full"):
+            with ui.tab_panel(t_gate):
+                cards_box = ui.column().classes("w-full gap-2")
+            with ui.tab_panel(t_live):
+                prog = ui.label("").classes("text-sm")
+                bar = ui.linear_progress(value=0, show_value=False).classes("w-full")
+                with ui.row().classes("w-full"):
+                    ch_t = ui.echart(echart_options([], title="溫度", x="步", y="K")).classes("w-[48%] h-60")
+                    ch_e = ui.echart(echart_options([], title="位能", x="步", y="kJ/mol")).classes("w-[48%] h-60")
+                with ui.row().classes("w-full"):
+                    ch_f = ui.echart(echart_options([], title="SMD 拉力", x="r (nm)", y="kJ/mol/nm")).classes("w-[48%] h-60")
+                    ch_w = ui.echart(echart_options([], title="SMD 功", x="r (nm)", y="kJ/mol")).classes("w-[48%] h-60")
+            with ui.tab_panel(t_time):
+                time_box = ui.column().classes("w-full gap-1")
+            with ui.tab_panel(t_3d):
+                targets = viewer_targets(wf)
+                if not targets:
+                    ui.label("建模完成後即可檢視 3D 結構；production 完成後可播放軌跡。").classes("text-gray-500")
+                else:
+                    pick3d = ui.select({i: t["label"] for i, t in enumerate(targets)}, value=0, label="結構").classes("w-96")
+                    frame = ui.html("").classes("w-full")
+
+                    def show3d():
+                        frame.set_content(f'<iframe src="/viewer?project={project}&name={name}&i={pick3d.value}" '
+                                          'style="width:100%;height:560px;border:0"></iframe>')
+                    pick3d.on_value_change(lambda _: show3d())
+                    show3d()
+        cards_sig = {"v": None}
+        time_sig = {"v": None}
 
         def refresh():
             job = RUNNER.get(wf)
@@ -162,12 +192,65 @@ def workflow_page(project: str, name: str):
                 r["tag"] = ("★" if r["recommended"] else "") + ("✔" if r["chosen"] else "") + ("⚠碰撞" if r["clash"] else "")
             poses.rows = rows
             reason.set_content("\n\n".join(f"**{r['entry']} 推薦理由：** {r['reason']}" for r in rows if r["reason"]))
-            pts = [[h.get("absolute_step", i), h["temperature_k"]] for i, h in enumerate(snap["history"]) if "temperature_k" in h]
-            chart.options["series"][0]["data"] = pts[-500:]
-            chart.update()
+            ls = live_series(snap["history"])
+            for ch, k in ((ch_t, "temperature"), (ch_e, "potential"), (ch_f, "smd_force"), (ch_w, "smd_work")):
+                ch.options["series"][0]["data"] = ls[k]
+                ch.update()
+            pg = ls["progress"]
+            if pg:
+                prog.set_text(f"{pg['stage']}：{pg['pct']}%" + (f"（傘狀採樣 window {ls['umbrella']['window']}/{ls['umbrella']['n']}）"
+                                                               if ls.get("umbrella") else ""))
+                bar.set_value((pg["pct"] or 0) / 100.0)
+            cards = gate_cards(wf)
+            if cards != cards_sig["v"]:
+                cards_sig["v"] = cards
+                cards_box.clear()
+                with cards_box:
+                    if not cards:
+                        ui.label("目前沒有需要注意的閘門。").classes("text-gray-500")
+                    for c in cards:
+                        with ui.card().classes("w-full"):
+                            with ui.row().classes("items-center gap-2"):
+                                ui.badge(c["label"], color=c["color"])
+                                ui.label(f"{c['source']} · {c['title']}").classes("font-semibold")
+                            ui.label(c["explanation"]).classes("text-sm whitespace-pre-wrap")
+                            for o in c["options"]:
+                                ui.label(f"→ {o}").classes("text-sm text-primary")
+            tl = timeline(wf, limit=120)
+            if len(tl) != time_sig["v"]:
+                time_sig["v"] = len(tl)
+                time_box.clear()
+                with time_box:
+                    for e in reversed(tl):
+                        with ui.row().classes("w-full items-start gap-2"):
+                            ui.label(e["at"][11:19]).classes("text-xs text-gray-500 w-16")
+                            ui.badge("人工" if e["status"] == "human" else ("步驟" if e["kind"] == "step" else "自動"),
+                                     color="negative" if e["status"] in ("human", "NEEDS_HUMAN") else
+                                     ("primary" if e["kind"] == "step" else "grey"))
+                            with ui.column().classes("gap-0"):
+                                ui.label(e["title"]).classes("text-sm font-semibold")
+                                if e["text"]:
+                                    ui.label(e["text"]).classes("text-xs whitespace-pre-wrap")
             report_btn.set_visibility((wf.dir / "workflow_report.html").is_file())
         ui.timer(2.0, refresh)
         refresh()
+
+
+@app.get("/viewer")
+def serve_viewer(project: str, name: str, i: int = 0):
+    """Offline 3D viewer page (inline JS, no CDN) for one case of a workflow."""
+    from fastapi.responses import HTMLResponse
+    if safe_name(project) != project or safe_name(name) != name:
+        return HTMLResponse("not allowed", status_code=403)
+    proj = Project(Path(STATE["projects_dir"]) / project)
+    wf = Workflow(proj, load_json(proj.dir / "workflows" / name / "config.json", {}))
+    targets = viewer_targets(wf)
+    if not 0 <= i < len(targets):
+        return HTMLResponse("沒有可檢視的結構", status_code=404)
+    try:
+        return HTMLResponse(viewer_html(scene_for(targets[i]), title=targets[i]["label"]))
+    except Exception as exc:  # noqa: BLE001
+        return HTMLResponse(f"無法產生 3D 場景：{type(exc).__name__}: {exc}", status_code=500)
 
 
 @app.get("/file")

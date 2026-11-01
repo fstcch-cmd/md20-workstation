@@ -172,6 +172,33 @@ def _comparison_html(comp: dict) -> str:
     parts.append("<ul class=muted>" + "".join(f"<li>{_esc(n)}</li>" for n in comp.get("notes", [])) + "</ul>")
     return "".join(parts)
 
+
+def _viewer_section(wf) -> str:
+    """WP13: offline 3D view (inline JS) of each docked case — production trajectory if available, else the start."""
+    try:
+        from ..gui.views import viewer_targets, scene_for, viewer_html
+    except Exception:  # noqa: BLE001
+        return ""
+    parts = []
+    by_key: dict = {}
+    for t in viewer_targets(wf):
+        if t["key"] == "apo":
+            continue
+        by_key[t["key"]] = t if t["mode"] == "traj" or t["key"] not in by_key else by_key[t["key"]]
+    for key, t in by_key.items():
+        try:
+            sc = scene_for(t, max_frames=40)
+        except Exception:  # noqa: BLE001  (e.g. no mdtraj): fall back to the start structure
+            try:
+                sc = scene_for({**t, "mode": "start"})
+                t = {**t, "label": f"{key}：建模起始結構"}
+            except Exception:  # noqa: BLE001
+                continue
+        parts.append(f"<h3>{_esc(t['label'])}</h3>" + viewer_html(sc, standalone=False, height_px=380))
+    if not parts:
+        return ""
+    return "<h2>3D 檢視（離線，可拖曳旋轉；軌跡可播放）</h2>" + "".join(parts)
+
 def build_workflow_report(wf, out_path: Path | None = None) -> Path:
     out_path = Path(out_path) if out_path else wf.dir / "workflow_report.html"
     cfg = wf.cfg
@@ -183,6 +210,7 @@ def build_workflow_report(wf, out_path: Path | None = None) -> Path:
             "<h2>2. 分子對接與 pose 選擇</h2>", _structure_section(wf), _docking_section(wf), _cpp_section(wf),
             "<h2>3. 分子動力學（apo vs 對接結合態）</h2>", _md_section(wf),
             "<h2>4. 結合強度（SMD + 傘狀採樣）</h2>", _binding_section(wf),
+            _viewer_section(wf),
             "<h2>5. 決策日誌</h2>", _decisions_table(rows), __import__("md20.util.stamp", fromlist=["html_footer"]).html_footer(), "</body></html>"]
     out_path.write_text("".join(html), encoding="utf-8")
     return out_path

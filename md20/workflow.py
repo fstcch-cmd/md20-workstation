@@ -46,7 +46,7 @@ def manifest_ligands(bm: dict) -> list[dict]:
     (written by assemble_system).  Older manifests only have the pre-assembly records at top level, which
     carry no indices — callers must then block, not guess."""
     asm = (bm.get("assembly") or {}).get("ligands") or []
-    if any(l.get("heavy_atom_indices") for l in asm):
+    if any(l.get("heavy_atom_indices") or l.get("atom_indices") for l in asm):
         return asm
     return bm.get("ligands") or []
 

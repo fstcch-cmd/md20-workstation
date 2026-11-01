@@ -42,7 +42,7 @@ md20 = "md20.cli:main"
 include = ["md20*"]
 
 [tool.setuptools.package-data]
-md20 = ["util/*.pem"]
+md20 = ["util/*.pem", "gui/static/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

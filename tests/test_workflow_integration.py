@@ -41,6 +41,7 @@ def test_full_workflow_3ptb(pdb_3ptb, tmp_path):
     assert b["status"] == "PASS" and b["delta_pmf_kj_mol"] is not None
     html = Path(out["report"]).read_text(encoding="utf-8")
     assert "分子對接" in html and "ΔPMF" in html and "apo" in html
+    assert "md20Mount" in html and "production 軌跡" in html      # WP13: offline 3D trajectory embedded in the report
     # idempotent re-run: everything is skipped
     out2 = wf.run(lambda case, proto: make_backend_factory(case, proto, platform=platform), platform)
     assert out2["status"] == "COMPLETE"
