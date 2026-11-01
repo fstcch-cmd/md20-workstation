@@ -1,4 +1,8 @@
 """Docking logic that needs no Vina/Meeko: receptor typing and pose recommendation."""
+import os
+from pathlib import Path
+
+import pytest
 import numpy as np
 
 from md20.docking import receptor_to_pdbqt, ad4_type, analyse_poses, recommend_pose, cluster_poses, box_from_coords
@@ -147,3 +151,36 @@ def test_docking_result_load_ignores_stamp(tmp_path):
     assert "_md20" in (tmp_path / "docking_results.json").read_text(encoding="utf-8")
     back = DockingResult.load(tmp_path / "docking_results.json")
     assert back.entry("BEN") == {"name": "BEN"} and back.mode == "independent"
+
+
+def test_setup_vina_falls_back_to_pinned_release_when_api_is_rate_limited(monkeypatch, tmp_path):
+    import urllib.error
+    import urllib.request
+    from md20.docking import vina_cli
+    monkeypatch.setattr(vina_cli, "find_vina_exe", lambda: None)
+    monkeypatch.setenv("GH_TOKEN", "t0ken")
+    seen = {}
+
+    def urlopen(req, timeout=60):
+        seen["auth"] = req.get_header("Authorization")
+        raise urllib.error.HTTPError(req.full_url, 403, "rate limit exceeded", {}, None)
+
+    def urlretrieve(url, target):
+        seen["url"] = url
+        Path(target).write_bytes(b"\x7fELF")
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(urllib.request, "urlretrieve", urlretrieve)
+    out = vina_cli.ensure_vina_exe(tmp_path)
+    assert seen["auth"] == "Bearer t0ken"                                   # token used when present
+    assert "/releases/download/" in seen["url"] and Path(out).is_file()     # pinned asset, not the API
+
+
+@pytest.mark.skipif(not os.environ.get("GITHUB_ACTIONS"), reason="checks real GitHub URLs; CI only")
+def test_pinned_vina_assets_exist():
+    import urllib.request
+    from md20.docking import vina_cli
+    for name in vina_cli.PINNED_ASSETS.values():
+        url = f"https://github.com/ccsb-scripps/AutoDock-Vina/releases/download/{vina_cli.PINNED_VERSION}/{name}"
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req, timeout=60) as r:
+            assert r.status == 200, url

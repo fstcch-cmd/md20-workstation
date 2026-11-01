@@ -50,18 +50,62 @@ def ensure_vina_exe(dest_dir: Path | None = None) -> str:
         return found
     dest = Path(dest_dir) if dest_dir else app_data_dir() / "bin"
     dest.mkdir(parents=True, exist_ok=True)
+    target = dest / ("vina.exe" if sys.platform.startswith("win") else "vina")
+    errors = []
+    for url in _candidate_urls(errors):
+        try:
+            urllib.request.urlretrieve(url, target)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{url}: {exc}")
+            continue
+        target.chmod(target.stat().st_mode | stat.S_IEXEC)
+        return str(target)
+    raise RuntimeError("找不到或下載不到此作業系統的 AutoDock Vina 執行檔；請手動下載並設定 MD20_VINA_EXE。"
+                       + ("（" + "；".join(errors[-3:]) + "）" if errors else ""))
+
+
+# Release-asset downloads (github.com/…/releases/download/…) are not subject to the REST API's 60 requests/hour
+# per-IP limit, which a classroom behind one NAT — or a CI runner pool — exhausts quickly.
+PINNED_VERSION = "v1.2.5"
+PINNED_ASSETS = {("Windows", "x86_64"): "vina_1.2.5_win.exe", ("Linux", "x86_64"): "vina_1.2.5_linux_x86_64",
+                 ("Darwin", "x86_64"): "vina_1.2.5_mac_x86_64", ("Darwin", "arm64"): "vina_1.2.5_mac_aarch64",
+                 ("Linux", "aarch64"): "vina_1.2.5_linux_aarch64"}
+
+
+def _pinned_url() -> str | None:
+    m = platform.machine().lower()
+    arch = "arm64" if m in {"arm64", "aarch64"} and platform.system() == "Darwin" else \
+           "aarch64" if m in {"arm64", "aarch64"} else "x86_64"
+    name = PINNED_ASSETS.get((platform.system(), arch))
+    return f"https://github.com/ccsb-scripps/AutoDock-Vina/releases/download/{PINNED_VERSION}/{name}" if name else None
+
+
+def _candidate_urls(errors: list[str]) -> list[str]:
+    """Latest matching asset from the releases API (token used when GH_TOKEN/GITHUB_TOKEN is set), then the pinned
+    release as a fallback when the API is rate-limited or unreachable."""
+    urls = []
     pat = _asset_pattern()
-    with urllib.request.urlopen(RELEASES, timeout=60) as r:
-        releases = json.loads(r.read().decode())
-    for rel in releases:
-        for a in rel.get("assets", []):
-            name = a.get("name", "")
-            if pat.search(name) and not name.endswith((".tar.gz", ".zip", ".sha256")) and "split" not in name:
-                target = dest / ("vina.exe" if sys.platform.startswith("win") else "vina")
-                urllib.request.urlretrieve(a["browser_download_url"], target)
-                target.chmod(target.stat().st_mode | stat.S_IEXEC)
-                return str(target)
-    raise RuntimeError("找不到此作業系統的 AutoDock Vina 執行檔；請手動下載並設定 MD20_VINA_EXE。")
+    req = urllib.request.Request(RELEASES, headers={"Accept": "application/vnd.github+json"})
+    tok = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if tok:
+        req.add_header("Authorization", f"Bearer {tok}")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            releases = json.loads(r.read().decode())
+        for rel in releases:
+            for a in rel.get("assets", []):
+                name = a.get("name", "")
+                if pat.search(name) and not name.endswith((".tar.gz", ".zip", ".sha256")) and "split" not in name:
+                    urls.append(a["browser_download_url"])
+                    break
+            if urls:
+                break
+    except Exception as exc:  # noqa: BLE001  (HTTP 403 rate limit, offline proxy …)
+        errors.append(f"releases API: {exc}")
+    pinned = _pinned_url()
+    if pinned and pinned not in urls:
+        urls.append(pinned)
+    return urls
 
 
 _RESULT = re.compile(r"REMARK VINA RESULT:\s+(-?\d+\.\d+)")
