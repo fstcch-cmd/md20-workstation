@@ -12,6 +12,7 @@ CI 依據(`fstcch-cmd/md20-workstation`):
   37bc6b1 那輪 Ubuntu heavy 被下一個 push 取消前已印出 `test_bonded_zinc_ca2 FAILED`,所以「1-3 排除」並沒有修好鋅配位;本 session 加了 donor–donor 排除,待這輪確認。
   全部發現與處置見 `docs/REVIEW_2026-11-01.md`。
 - **c4b5de6（run 41309973844）heavy metal 全綠**:`test_metal_integration`（含 `test_bonded_zinc_ca2`）在 Ubuntu 真跑通過——鋅鍵結模型守住配位（經金屬 1-3/1-4 修正有效）。同輪 heavy workflow／pose-screen 因 `assemble.py` 漏 `import numpy` 失敗（D-24 已修，待下一輪）。
+- **81b72d9（run 41326677606）openmm-stack 三 OS 全綠**:**Windows OpenCL 351 passed**（67 分鐘）、Ubuntu 355 passed（55 分鐘）、macOS 355 passed（67 分鐘）;heavy workflow（3PTB 全流程含 binding，**D-23 新約束排程**）、heavy pose-screen、installer-windows、paper-docking 綠。因此升為 A 級（真跑過）:配體質子化（真 RDKit）、連接圖 pose 對應、分組約束（Reference 實算）、GBn2 管線、HTS 純路徑、PBC 歸零於全流程。唯一紅:heavy metal 單幀判定的鋅測試（測試問題，D-29 已改平均判定，待 99c8b64）。跳過項:MD20_HEAVY 專屬（由 heavy job 跑）、論文對接（由 paper-docking 跑）、playwright 繪圖（環境沒有，仍是 B 級）。
 - **f140a49 openmm-stack（D-28）**:Ubuntu／macOS **342 passed、1 failed**（49／68 分鐘，不再超時）。真 RDKit 下質子化、HTS、GBn2 管線、**分組約束 Reference 實算**通過;heavy pose-screen（新約束排程）、metal、paper-docking 綠。剩配體連接圖對應（已修）與全流程測試鍵名（已修），待下一輪;Windows 結果待出。
 - **c4b5de6 openmm-stack（D-25）**:Ubuntu 16 failed／239 passed;Windows／macOS 撞 90 分鐘上限。真 bug:**配體質子化把苯胺／醯胺／苯甲脒 NH2 也質子化**（SMARTS 錯，已修）;HTS 純路徑測試在有 RDKit 的環境失敗（測試問題，已修）;**GBn2 在 CPU 上極慢**（3PTB 65 分鐘），「GBn2 較快」降為「僅 GPU 成立」。`test_restraint_groups_openmm`、質子化與配體對應的真 RDKit 驗證待下一輪。
 - 測試函式:約 220 個(pure-python 部分本地全過)。
