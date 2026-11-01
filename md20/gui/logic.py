@@ -155,14 +155,24 @@ def pose_table(wf: Workflow) -> list[dict]:
         return []
     res = load_json(d["result"], {})
     sel = (wf.state()["steps"].get("pose_selection") or {}).get("selection", {}).get("ligands", {})
+    screen = load_json(wf.dir / "pose_screen.json", {})       # WP5 short-MD verdicts, if the screen ran
     rows = []
     for e in res.get("entries", []):
         chosen = {v["rank"] for v in sel.values() if v.get("entry") == e["name"]}
         for p in e["poses"]:
             rows.append({"entry": e["name"], "rank": p["rank"], "score": round(p["score"], 2), "cluster": f"{p['cluster']} ({p['cluster_size']})",
                          "contacts": p["contacts"], "rmsd_ref": p["rmsd_ref"], "clash": p.get("clash", False),
-                         "recommended": p["recommended"], "chosen": p["rank"] in chosen, "reason": e["reason"] if p["recommended"] else ""})
+                         "recommended": p["recommended"], "chosen": p["rank"] in chosen, "reason": e["reason"] if p["recommended"] else "",
+                         "md_screen": _screen_label((screen.get(e["name"]) or {}).get(str(p["rank"])))})
     return rows
+
+
+def _screen_label(a: dict | None) -> str:
+    if not a:
+        return ""
+    v = {"STABLE": "穩定", "UNSTABLE": "不穩定", "FAILED": "失敗"}.get(a.get("verdict"), a.get("verdict", ""))
+    r = a.get("worst_tail_rmsd_A")
+    return f"{v}（{r:.1f} Å）" if r is not None else v
 
 
 def list_workflows(projects_dir: Path) -> list[dict]:

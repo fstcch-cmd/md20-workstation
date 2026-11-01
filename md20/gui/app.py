@@ -139,7 +139,7 @@ def workflow_page(project: str, name: str):
         ui.label("Pose（★ 推薦、✔ 已選；點選某列改用該 pose，系統會從 pose 選擇之後重新執行）").classes("font-semibold")
         poses = ui.table(columns=[{"name": k, "label": l, "field": k} for k, l in
                                   (("entry", "配體"), ("rank", "rank"), ("score", "score"), ("cluster", "cluster"), ("contacts", "接觸"),
-                                   ("rmsd_ref", "RMSD 晶體"), ("tag", ""))], rows=[], row_key="key").classes("w-full")
+                                   ("rmsd_ref", "RMSD 晶體"), ("md_screen", "短 MD"), ("tag", ""))], rows=[], row_key="key").classes("w-full")
         reason = ui.markdown("")
 
         def pick(e):

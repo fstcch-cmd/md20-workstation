@@ -39,3 +39,20 @@ def test_gui_module_imports():
     pytest.importorskip("nicegui")
     import md20.gui.app as gapp
     assert callable(gapp.main)
+
+
+def test_pose_table_shows_md_screen_verdicts(tmp_path):
+    import copy
+    from md20.gui.logic import pose_table
+    from md20.project.store import Project
+    from md20.util.jsonio import atomic_write_json
+    from md20.workflow import Workflow, example_config
+    wf = Workflow(Project.create(tmp_path, "p"), copy.deepcopy(example_config()))
+    poses = [{"rank": r, "score": -8.0 + r * 0.1, "cluster": r, "cluster_size": 1, "contacts": 20, "rmsd_ref": None,
+              "recommended": r == 1} for r in (1, 2)]
+    atomic_write_json({"entries": [{"name": "BEN", "poses": poses, "reason": "r"}]}, wf.dir / "dock.json")
+    wf._mark("docking", result=str(wf.dir / "dock.json"))
+    atomic_write_json({"BEN": {"1": {"verdict": "UNSTABLE", "worst_tail_rmsd_A": 4.2}, "2": {"verdict": "STABLE", "worst_tail_rmsd_A": 1.1}}},
+                      wf.dir / "pose_screen.json")
+    rows = {r["rank"]: r for r in pose_table(wf)}
+    assert rows[1]["md_screen"] == "不穩定（4.2 Å）" and rows[2]["md_screen"] == "穩定（1.1 Å）"
