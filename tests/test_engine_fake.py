@@ -113,3 +113,41 @@ def test_acceptance_extend_recommendation():
     acc = evaluate_acceptance(df, ensemble="NPT", target_temperature_k=300, length_ps=100)
     assert acc.status == "EXTEND" and acc.extend_ps == 50.0
     assert any(c["check"] == "temperature" and not c["ok"] for c in acc.checks)
+
+
+def test_device_error_rebuilds_context_and_continues(tmp_path: Path):
+    """WP11: a transient GPU/driver error mid-stage → rebuild context from the last good chunk, no lost chunks."""
+    spec = StageSpec(name="npt", ensemble="NPT", length_ps=20.0, timestep_fs=2.0, report_interval_ps=0.2,
+                     checkpoint_interval_ps=5.0)
+    fired = {"n": 0}
+
+    class Flaky(FakeBackend):
+        def step(self, n):
+            if self._step >= 6000 and fired["n"] == 0:
+                fired["n"] += 1
+                raise RuntimeError("CUDA_ERROR_LAUNCH_FAILED (simulated driver reset)")
+            return super().step(n)
+
+    def make(spec_, dt):
+        return Flaky(timestep_fs=dt, temperature_k=spec_.temperature_k, ensemble=spec_.ensemble)
+
+    log = DecisionLog(tmp_path / "decisions.jsonl")
+    res = run_stage(tmp_path / "npt", spec, make, identity={"run": "r1"}, initial_state=None, batch_steps=250,
+                    decisions=log)
+    assert res.status == "PASS" and res.steps == 10000 and fired["n"] == 1
+    assert any(d.get("what") == "context rebuild" for d in log.read())
+
+
+def test_persistent_device_error_needs_human(tmp_path: Path):
+    spec = StageSpec(name="npt", ensemble="NPT", length_ps=20.0, timestep_fs=2.0, report_interval_ps=0.2,
+                     checkpoint_interval_ps=5.0)
+
+    class Broken(FakeBackend):
+        def step(self, n):
+            if self._step >= 3000:
+                raise RuntimeError("OpenCL error -5")
+            return super().step(n)
+
+    with pytest.raises(NeedsHuman, match="運算裝置"):
+        run_stage(tmp_path / "npt", spec, lambda s, dt: Broken(timestep_fs=dt, ensemble="NPT"), identity={"run": "r1"},
+                  initial_state=None, batch_steps=250)

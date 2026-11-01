@@ -159,7 +159,12 @@ def run_stage(stage_dir: Path | str, spec: StageSpec, make_backend: BackendFacto
                     n = min(batch, todo - advanced)
                     frac_after = (completed + advanced + n) / total
                     _apply_schedule(backend, spec, frac_after)
-                    backend.step(n)
+                    try:
+                        backend.step(n)
+                    except Exception as exc:  # noqa: BLE001
+                        if "nan" in str(exc).lower():   # OpenMM's NaN check = numerical instability, not a device fault
+                            raise WatchdogError(f"OpenMM 偵測到 NaN：{str(exc)[:120]}") from exc
+                        raise
                     advanced += n
                     s = backend.summary()
                     _watch(s, spec, frac_after, chunk_id)
@@ -225,6 +230,35 @@ def run_stage(stage_dir: Path | str, spec: StageSpec, make_backend: BackendFacto
                 backend.initialize(str(last_state) if last_state else (str(initial_state) if initial_state else None),
                                    spec.start_temperature_k if spec.start_temperature_k is not None else spec.temperature_k,
                                    spec.seed + retries, True)
+                absolute_start = backend.current_step() - completed
+            except (Paused, NeedsHuman):
+                raise
+            except Exception as exc:  # noqa: BLE001 — WP11: GPU/driver hiccup → rebuild the context from the last good chunk
+                backend.stop_reporters()
+                shutil.rmtree(tmp, ignore_errors=True)
+                msg = str(exc)
+                gpu_rebuilds = sum(1 for e in events if e.get("kind") == "context_rebuild")
+                events.append({"chunk": chunk_id, "kind": "context_rebuild", "error": msg[:300], "at": now_iso()})
+                if gpu_rebuilds >= 2:
+                    atomic_write_json({**identity, "status": "NEEDS_HUMAN", "stage": name, "error": msg[:500],
+                                       "completed_local_steps": completed, "chunks": chunks,
+                                       "watchdog_events": events, "updated_at": now_iso()}, progress_path)
+                    raise NeedsHuman(f"{name} 階段運算裝置反覆出錯（{msg[:200]}）。已重建 GPU context {gpu_rebuilds} 次仍失敗；"
+                                     "請執行 md20 doctor，或改用 CPU/OpenCL 平台續跑（進度會保留）。", stage=name,
+                                     evidence={"events": events}) from exc
+                if decisions:
+                    decisions.record(f"engine.{name}", "context rebuild", f"chunk {chunk_id}",
+                                     f"運算裝置回報錯誤（{msg[:160]}）；可能是驅動重置或 GPU 被其他程式占用。"
+                                     f"從最後確認的 chunk {len(chunks)} 重建 context 後續跑。", kind="auto_fixed")
+                try:
+                    backend.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(2.0)
+                backend = make_backend(spec, dt)
+                backend.initialize(str(last_state) if last_state else (str(initial_state) if initial_state else None),
+                                   spec.start_temperature_k if spec.start_temperature_k is not None else spec.temperature_k,
+                                   spec.seed, completed == 0 and spec.regenerate_velocities)
                 absolute_start = backend.current_step() - completed
         # ---- seal stage -----------------------------------------------------
         final_state = stage_dir / f"{name}_state.xml"

@@ -176,6 +176,44 @@ def cmd_pipeline(a):
     return 0
 
 
+def cmd_resume(a):
+    """WP11: continue every unfinished workflow (after a reboot, crash or closed window)."""
+    from .workflow import Workflow, WorkflowBlocked, find_workflows
+    from .project import Project
+    from .engine import PausePolicy
+    from .engine.factory import make_backend_factory
+    from .env import choose_platform
+    from .env.hardware import _power_state
+    if a.install_autostart or a.remove_autostart:
+        from .env.autostart import install_autostart, remove_autostart
+        _p(remove_autostart() if a.remove_autostart else install_autostart(a.dir))
+        return 0
+    rows = find_workflows(a.dir)
+    todo = [r for r in rows if r["status"] in ("INCOMPLETE", "NEW") or (a.include_blocked and r["status"] == "NEEDS_HUMAN")]
+    for r in rows:
+        _p(f"  {r['status']:<12} {r['name']}  ({r['workflow_dir']})")
+    if a.list or not todo:
+        _p("沒有需要續跑的工作流程。" if not todo else f"{len(todo)} 個可續跑（去掉 --list 開始）。")
+        return 0
+    platform = choose_platform()
+    _p(f"平台：{platform.name}；續跑 {len(todo)} 個工作流程")
+    rc = 0
+    for r in todo:
+        proj = Project(r["project_dir"])
+        cfg = json.loads((Path(r["workflow_dir"]) / "config.json").read_text(encoding="utf-8"))
+        policy = PausePolicy(pause_file=proj.dir / "PAUSE", pause_on_battery=not a.ignore_battery, power_probe=_power_state)
+        try:
+            out = Workflow(proj, cfg).run(lambda case, proto: make_backend_factory(case, proto, platform=platform), platform,
+                                          should_pause=policy)
+            _p(f"[{out['status']}] {r['name']}")
+            if out["status"] == "PAUSED":
+                return 0
+        except WorkflowBlocked as exc:
+            _p(f"[NEEDS_HUMAN] {r['name']}：{exc}")
+            rc = 3
+    return rc
+
+
 def cmd_gui(a):
     from .gui.app import main as gui_main
     gui_main(projects_dir=a.dir, port=a.port, show=not a.no_browser)
@@ -287,6 +325,11 @@ def main(argv=None) -> int:
     pl.add_argument("action", choices=["run", "example"]); pl.add_argument("config", nargs="?")
     pl.add_argument("--project", default="MD20_Pipelines"); pl.add_argument("--hours"); pl.add_argument("--ignore-battery", action="store_true")
     pl.add_argument("--fake", action="store_true"); pl.set_defaults(fn=cmd_pipeline)
+    rs = sub.add_parser("resume", help="續跑所有未完成的工作流程（重開機／當機後）")
+    rs.add_argument("--all", action="store_true", help="（預設行為）所有未完成者"); rs.add_argument("--list", action="store_true")
+    rs.add_argument("--include-blocked", action="store_true"); rs.add_argument("--ignore-battery", action="store_true")
+    rs.add_argument("--install-autostart", action="store_true", help="登入時自動續跑（可隨時移除）")
+    rs.add_argument("--remove-autostart", action="store_true"); rs.set_defaults(fn=cmd_resume)
     g = sub.add_parser("gui", help="圖形介面（瀏覽器）"); g.add_argument("--port", type=int, default=8020)
     g.add_argument("--no-browser", action="store_true"); g.set_defaults(fn=cmd_gui)
     stp = sub.add_parser("stamp", help="檢查／解開 HCC Lab 戳記"); stp.add_argument("action", choices=["verify", "decrypt", "keygen"])

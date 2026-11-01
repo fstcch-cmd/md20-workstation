@@ -440,6 +440,34 @@ class Workflow:
 
     # ------------------------------------------------------------------ driver
     def run(self, make_factory: Callable, platform, *, should_pause=None, progress_cb=None) -> dict:
+        """Resumable driver.  One owner at a time (stale owner locks are taken over); hardware changes are logged —
+        chunks resume from platform-independent State XML, so a run started on CUDA can finish on OpenCL/CPU."""
+        from .util.locks import OwnerLock
+        lock = OwnerLock(self.dir / "running.json")
+        try:
+            lock.acquire()
+        except RuntimeError as exc:
+            raise WorkflowBlocked(str(exc)) from exc
+        try:
+            if lock.took_over:
+                self.dec.record("workflow.resume", "stale lock", lock.took_over,
+                                "上次執行的程序已不存在（當機、重開機或視窗被關閉）；自動接手並從最後確認的 chunk 續跑。")
+            hw = {"platform": getattr(platform, "name", str(platform)),
+                  "device": (getattr(platform, "properties", None) or {}).get("DeviceIndex", ""),
+                  "detail": getattr(platform, "device_name", "") or ""}
+            st = self.state()
+            if st.get("hardware") and st["hardware"] != hw:
+                self.dec.record("workflow.resume", "hardware changed", hw,
+                                f"運算平台由 {st['hardware'].get('platform')} 變為 {hw['platform']}；續跑使用與平台無關的 "
+                                f"State XML，結果可接續，但速度與數值雜訊會不同（報告會註記）。")
+            st["hardware"] = hw
+            st.setdefault("hardware_history", []).append({**hw, "at": now_iso()})
+            atomic_write_json(st, self.state_path)
+            return self._run(make_factory, platform, should_pause=should_pause, progress_cb=progress_cb)
+        finally:
+            lock.release()
+
+    def _run(self, make_factory: Callable, platform, *, should_pause=None, progress_cb=None) -> dict:
         raw = self.fetch_receptor()
         clean = self.prepare_docking_receptor(raw)
         sel = None
@@ -459,3 +487,28 @@ class Workflow:
         rep = build_workflow_report(self)
         self._mark("report", path=str(rep))
         return {"status": "COMPLETE", "report": str(rep), "binding": bind, "analysis": ana}
+
+
+# ---------------------------------------------------------------------- resume support (WP11)
+def workflow_status(state: dict) -> str:
+    steps = state.get("steps", {})
+    if (steps.get("report") or {}).get("status") == "PASS":
+        return "COMPLETE"
+    if any((s or {}).get("status") == "NEEDS_HUMAN" for s in steps.values()):
+        return "NEEDS_HUMAN"
+    return "INCOMPLETE" if steps else "NEW"
+
+
+def find_workflows(projects_dir: Path | str) -> list[dict]:
+    """Every workflow under a projects root, with its status (for `md20 resume --all` and the GUI)."""
+    out = []
+    root = Path(projects_dir)
+    if not root.is_dir():
+        return out
+    for cfgp in sorted(root.glob("*/workflows/*/config.json")):
+        wdir = cfgp.parent
+        st = load_json(wdir / "state.json", {"steps": {}})
+        lock = load_json(wdir / "running.json", {})
+        out.append({"project_dir": str(wdir.parent.parent), "workflow_dir": str(wdir), "name": wdir.name,
+                    "status": workflow_status(st), "running_pid": lock.get("pid"), "updated_at": st.get("updated_at")})
+    return out

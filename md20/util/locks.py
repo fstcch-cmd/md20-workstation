@@ -78,3 +78,59 @@ class FileLock:
 
 
 IS_WINDOWS = sys.platform.startswith("win")
+
+
+# --------------------------------------------------------------------------- owner lock (WP11)
+class OwnerLock:
+    """"Who is running this workflow" marker: {pid, host, started}.
+
+    A second process refuses to start while the owner is alive; a lock whose process is gone (crash, reboot, killed
+    window) is *stale* and is taken over automatically.  Unlike FileLock this survives across the whole run.
+    """
+
+    def __init__(self, path: Path | str):
+        self.path = Path(path)
+        self.took_over: dict | None = None
+
+    @staticmethod
+    def _alive(pid: int) -> bool:
+        try:
+            import psutil
+            return psutil.pid_exists(int(pid))
+        except ImportError:  # pragma: no cover
+            try:
+                os.kill(int(pid), 0)
+                return True
+            except OSError:
+                return False
+
+    def acquire(self) -> "OwnerLock":
+        import json
+        import socket
+        host = socket.gethostname()
+        if self.path.is_file():
+            try:
+                cur = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                cur = {}
+            same_host = cur.get("host") == host
+            if cur.get("pid") and cur.get("pid") != os.getpid() and same_host and self._alive(cur["pid"]):
+                raise RuntimeError(f"另一個 MD20 程序（PID {cur['pid']}，{cur.get('started')} 開始）正在執行這個工作流程。")
+            self.took_over = cur or None
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps({"pid": os.getpid(), "host": host,
+                                         "started": time.strftime("%Y-%m-%d %H:%M:%S")}), encoding="utf-8")
+        return self
+
+    def release(self) -> None:
+        try:
+            self.path.unlink()
+        except OSError:
+            pass
+
+    def __enter__(self):
+        return self.acquire()
+
+    def __exit__(self, *exc):
+        self.release()
+        return False
