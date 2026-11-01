@@ -194,6 +194,26 @@ def cmd_setup_vina(a):
     return 0
 
 
+def cmd_stamp(a):
+    from .util import stamp as st
+    if a.action == "keygen":
+        priv, pub = st.keygen(a.out)
+        _p(f"私鑰（請離線保存，切勿上傳）：{priv}\n公鑰（放進 md20/util/owner_pub.pem）：{pub}")
+        return 0
+    for f in a.files:
+        found = st.find_markers(f)
+        _p(f"{f}\n  可見戳記：{'有' if found['visible'] else '無'}\n  隱藏標記：{', '.join(found['hidden']) or '無'}\n"
+           f"  加密來源紀錄：{'有' if found['blob'] else '無'}")
+        if a.action == "decrypt" and found["blob"]:
+            if not a.key:
+                _p("  （需要 --key 私鑰才能解開）"); continue
+            try:
+                _p("  解密內容：" + json.dumps(st.decrypt_blob(found["blob"], a.key), ensure_ascii=False))
+            except Exception as exc:  # noqa: BLE001
+                _p(f"  解密失敗：{type(exc).__name__}（金鑰不符或內容被竄改）")
+    return 0
+
+
 def cmd_status(a):
     proj = _open_project(a)
     for c in proj.cases():
@@ -269,6 +289,8 @@ def main(argv=None) -> int:
     pl.add_argument("--fake", action="store_true"); pl.set_defaults(fn=cmd_pipeline)
     g = sub.add_parser("gui", help="圖形介面（瀏覽器）"); g.add_argument("--port", type=int, default=8020)
     g.add_argument("--no-browser", action="store_true"); g.set_defaults(fn=cmd_gui)
+    stp = sub.add_parser("stamp", help="檢查／解開 HCC Lab 戳記"); stp.add_argument("action", choices=["verify", "decrypt", "keygen"])
+    stp.add_argument("files", nargs="*"); stp.add_argument("--key"); stp.add_argument("--out", default="."); stp.set_defaults(fn=cmd_stamp)
     sv = sub.add_parser("setup-vina", help="下載 AutoDock Vina 執行檔（Windows）"); sv.set_defaults(fn=cmd_setup_vina)
     rp = sub.add_parser("report"); rp.add_argument("--project", required=True); rp.add_argument("--case", required=True)
     rp.add_argument("--run"); rp.add_argument("--bundle", action="store_true"); rp.set_defaults(fn=cmd_report)

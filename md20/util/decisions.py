@@ -31,6 +31,9 @@ class DecisionLog:
 
     def add(self, decision: Decision) -> Decision:
         with open(self.path, "a", encoding="utf-8") as fh:
+            if fh.tell() == 0:
+                from .stamp import stamp_record
+                fh.write(json.dumps({"_md20": stamp_record()}, ensure_ascii=False) + "\n")
             fh.write(json.dumps(asdict(decision), ensure_ascii=False, default=str) + "\n")
         return decision
 
@@ -46,9 +49,12 @@ class DecisionLog:
                 line = line.strip()
                 if line:
                     try:
-                        rows.append(json.loads(line))
+                        row = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    if "_md20" in row and "stage" not in row:
+                        continue
+                    rows.append(row)
         return rows
 
     def by_stage(self, prefix: str) -> list[dict]:

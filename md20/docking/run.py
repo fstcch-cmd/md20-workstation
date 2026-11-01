@@ -131,6 +131,8 @@ def _write_pose_sdf(mol, conf_id: int, path: Path, props: dict) -> None:
     m.RemoveAllConformers(); m.AddConformer(conf, assignId=True)
     for k, v in props.items():
         m.SetProp(k, str(v))
+    from ..util.stamp import stamp_rdkit_mol
+    stamp_rdkit_mol(m)
     path.parent.mkdir(parents=True, exist_ok=True)
     w = Chem.SDWriter(str(path)); w.write(m); w.close()
 
@@ -190,6 +192,8 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
         pdbqts[lig.name] = _meeko_pdbqt(mol)
         (lig_dir / f"{lig.name}.pdbqt").write_text(pdbqts[lig.name], encoding="utf-8")
         from rdkit import Chem
+        from ..util.stamp import stamp_rdkit_mol
+        stamp_rdkit_mol(mol)
         w = Chem.SDWriter(str(lig_dir / f"{lig.name}_input.sdf")); w.write(mol); w.close()
     res = DockingResult(mode=mode, receptor_pdbqt=str(rec_pdbqt), box=box.to_dict(), params=params)
 

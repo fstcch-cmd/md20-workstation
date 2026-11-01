@@ -175,7 +175,8 @@ def build_run_report(run: Run, out_path: Path | str | None = None, *, lang: str 
     parts.append("<h2>可重現性</h2>")
     parts.append(f"<p>MD20 {__version__} · Python {_platform.python_version()} · {_esc(_platform.platform())} · protocol hash <code>{_esc(rm.get('protocol_hash'))}</code></p>")
     parts.append(f"<details><summary>Protocol JSON</summary><pre>{_esc(json.dumps(rm.get('protocol'), ensure_ascii=False, indent=1))}</pre></details>")
-    parts.append("</body></html>")
+    from ..util.stamp import html_footer
+    parts.append(html_footer() + "</body></html>")
     out_path.write_text("".join(parts), encoding="utf-8")
     return out_path
 
@@ -195,7 +196,10 @@ def reproducibility_bundle(run: Run, out_zip: Path | str | None = None) -> Path:
         files.append(run.dir / "report.html")
     manifest = {"created_at": now_iso(), "md20_version": __version__, "files": []}
     root = run.case.project.dir
+    from ..util.stamp import zip_comment, stamp_record
+    manifest["_md20"] = stamp_record()
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.comment = zip_comment()
         for f in files:
             if f.is_file():
                 arc = str(f.relative_to(root)) if root in f.parents else f.name

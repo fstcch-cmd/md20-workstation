@@ -167,8 +167,10 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
     top_pdb = out_dir / "topology.pdb"
     with open(top_pdb, "w", encoding="utf-8") as fh:
         app.PDBFile.writeFile(modeller.topology, modeller.positions, fh, keepIds=True)
+    from ..util.stamp import stamp_pdb_file, TAG, VISIBLE
+    stamp_pdb_file(top_pdb)
     sys_xml = out_dir / "system.xml"
-    sys_xml.write_text(XmlSerializer.serialize(system), encoding="utf-8")
+    sys_xml.write_text(f"<!-- {VISIBLE} {TAG} -->\n" + XmlSerializer.serialize(system), encoding="utf-8")
     res = BuildResult(status=report.status, system_xml=str(sys_xml), topology_pdb=str(top_pdb), n_atoms=n_atoms,
                       n_protein_atoms=n_protein, n_ligand_atoms=n_lig, n_waters=n_water, n_ions=counts, box_nm=box_nm,
                       total_charge=total_q, forcefields=list(forcefield_files) + generators,

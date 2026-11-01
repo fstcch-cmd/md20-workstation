@@ -110,5 +110,6 @@ def receptor_to_pdbqt(pdb_in: Path | str, pdbqt_out: Path | str) -> dict:
         out.append(f"{rec}{serial % 100000:5d} {l[12:16]}{' '}{l[17:20]} {l[21]}{l[22:26]}{l[26]}   "
                    f"{a['xyz'][0]:8.3f}{a['xyz'][1]:8.3f}{a['xyz'][2]:8.3f}{1.0:6.2f}{0.0:6.2f}    {0.0:+6.3f} {t:<2s}")
         counts[t] += 1
-    Path(pdbqt_out).write_text("\n".join(out) + "\nTER\n", encoding="utf-8")
+    from ..util.stamp import pdb_remarks
+    Path(pdbqt_out).write_text("\n".join(pdb_remarks() + out) + "\nTER\n", encoding="utf-8")
     return dict(counts)

@@ -303,6 +303,8 @@ def prepare_ligand(reference: str | Path, pose: Path | str | None, out_dir: Path
             report.add(Gate("3D", AUTO_FIXED, "參考分子無 3D 座標，以 ETKDG + MMFF 產生。"))
     rec.n_atoms = mol.GetNumAtoms()
     mol.SetProp("_Name", name)
+    from ..util.stamp import stamp_rdkit_mol
+    stamp_rdkit_mol(mol)
     sdf = out_dir / f"{name}.sdf"
     w = Chem.SDWriter(str(sdf)); w.write(mol); w.close()
     rec.sdf_path = str(sdf)

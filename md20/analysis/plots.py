@@ -31,8 +31,10 @@ def _mpl():
 def _save(fig, out_base: Path) -> dict:
     out_base.parent.mkdir(parents=True, exist_ok=True)
     png, svg = out_base.with_suffix(".png"), out_base.with_suffix(".svg")
-    fig.savefig(png, bbox_inches="tight")
-    fig.savefig(svg, bbox_inches="tight")
+    from ..util.stamp import figure_metadata, OWNER_SHORT
+    fig.text(0.995, 0.003, f"© {OWNER_SHORT} · MD20", ha="right", va="bottom", fontsize=5, color="#b8b7b2", alpha=0.8)
+    fig.savefig(png, bbox_inches="tight", metadata=figure_metadata("png"))
+    fig.savefig(svg, bbox_inches="tight", metadata=figure_metadata("svg"))
     import matplotlib.pyplot as plt
     plt.close(fig)
     return {"png": str(png), "svg": str(svg)}
@@ -146,5 +148,7 @@ def _plotly_lines(df: pd.DataFrame, t: np.ndarray, panels, path: Path, title: st
     fig.update_layout(title=title, height=220 * len(panels) + 80, template="plotly_white", showlegend=False,
                       margin=dict(l=60, r=20, t=60, b=40))
     fig.update_xaxes(title_text="Time (ns)", row=len(panels), col=1)
-    fig.write_html(str(path), include_plotlyjs="cdn")
+    from ..util.stamp import html_footer
+    fig.write_html(str(path), include_plotlyjs="cdn", post_script=None, full_html=True)
+    path.write_text(path.read_text(encoding="utf-8").replace("</body>", html_footer() + "</body>"), encoding="utf-8")
     return str(path)

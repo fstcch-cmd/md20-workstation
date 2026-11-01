@@ -230,6 +230,8 @@ class OpenMMBackend:
         st = self.sim.context.getState(getPositions=True, enforcePeriodicBox=True)
         with open(path, "w", encoding="utf-8") as fh:
             self.app.PDBFile.writeFile(self.sim.topology, st.getPositions(), fh, keepIds=True)
+        from ..util.stamp import stamp_pdb_file
+        stamp_pdb_file(path)
 
     def close(self) -> None:
         self.stop_reporters()

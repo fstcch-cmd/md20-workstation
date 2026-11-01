@@ -292,6 +292,8 @@ def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4
     out_pdb = out_dir / "receptor_clean.pdb"
     with open(out_pdb, "w", encoding="utf-8") as fh:
         PDBFile.writeFile(fixer.topology, fixer.positions, fh, keepIds=True)
+    from ..util.stamp import stamp_pdb_file
+    stamp_pdb_file(out_pdb)
     out_cif = out_dir / "receptor_clean.cif"
     with open(out_cif, "w", encoding="utf-8") as fh:
         PDBxFile.writeFile(fixer.topology, fixer.positions, fh, keepIds=True)

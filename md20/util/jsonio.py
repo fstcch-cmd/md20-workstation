@@ -13,6 +13,9 @@ from typing import Any
 def atomic_write_json(data: Any, path: Path | str, *, backup: bool = True) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(data, dict):
+        from .stamp import stamp_record
+        data = {**data, "_md20": stamp_record()}
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
     try:
         with open(tmp, "w", encoding="utf-8") as fh:

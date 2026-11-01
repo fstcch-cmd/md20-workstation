@@ -102,6 +102,6 @@ def build_workflow_report(wf, out_path: Path | None = None) -> Path:
             "<h2>2. 分子對接與 pose 選擇</h2>", _docking_section(wf),
             "<h2>3. 分子動力學（apo vs 對接結合態）</h2>", _md_section(wf),
             "<h2>4. 結合強度（SMD + 傘狀採樣）</h2>", _binding_section(wf),
-            "<h2>5. 決策日誌</h2>", _decisions_table(rows), "</body></html>"]
+            "<h2>5. 決策日誌</h2>", _decisions_table(rows), __import__("md20.util.stamp", fromlist=["html_footer"]).html_footer(), "</body></html>"]
     out_path.write_text("".join(html), encoding="utf-8")
     return out_path

@@ -13,6 +13,7 @@ dependencies = [
     "numpy>=1.26",
     "pandas>=2.0",
     "matplotlib>=3.8",
+    "cryptography>=41",
 ]
 
 [project.optional-dependencies]
@@ -39,6 +40,9 @@ md20 = "md20.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["md20*"]
+
+[tool.setuptools.package-data]
+md20 = ["util/*.pem"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
