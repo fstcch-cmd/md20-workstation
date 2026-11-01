@@ -182,6 +182,18 @@ def cmd_gui(a):
     return 0
 
 
+def cmd_setup_vina(a):
+    from .docking.vina_cli import ensure_vina_exe
+    try:
+        import vina  # noqa: F401
+        _p("vina Python bindings 已安裝；不需要執行檔。")
+        return 0
+    except ImportError:
+        pass
+    _p(f"vina 執行檔：{ensure_vina_exe()}")
+    return 0
+
+
 def cmd_status(a):
     proj = _open_project(a)
     for c in proj.cases():
@@ -257,6 +269,7 @@ def main(argv=None) -> int:
     pl.add_argument("--fake", action="store_true"); pl.set_defaults(fn=cmd_pipeline)
     g = sub.add_parser("gui", help="圖形介面（瀏覽器）"); g.add_argument("--port", type=int, default=8020)
     g.add_argument("--no-browser", action="store_true"); g.set_defaults(fn=cmd_gui)
+    sv = sub.add_parser("setup-vina", help="下載 AutoDock Vina 執行檔（Windows）"); sv.set_defaults(fn=cmd_setup_vina)
     rp = sub.add_parser("report"); rp.add_argument("--project", required=True); rp.add_argument("--case", required=True)
     rp.add_argument("--run"); rp.add_argument("--bundle", action="store_true"); rp.set_defaults(fn=cmd_report)
     m = sub.add_parser("demo"); m.add_argument("--dir"); m.set_defaults(fn=cmd_demo)

@@ -30,7 +30,8 @@ if (Test-Path (Join-Path $Prefix "conda-meta")) {
   Write-Host "[2/4] 建立環境 ($Gpu) ..."; & $Mamba create -y -p $Prefix -f $Base -f $GpuYml
 }
 Write-Host "[3/4] 安裝 md20 ..."
-& $Mamba run -p $Prefix pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" "vina>=1.2.5" -e (Join-Path $Here "..")
+& $Mamba run -p $Prefix pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" -e (Join-Path $Here "..")
+& $Mamba run -p $Prefix md20 setup-vina
 Write-Host "[4/4] Doctor ..."
 & $Mamba run -p $Prefix md20 doctor
 Write-Host "`n完成。之後執行：  $Mamba run -p $Prefix md20 <command>"

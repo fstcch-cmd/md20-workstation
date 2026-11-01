@@ -70,18 +70,18 @@ jobs:
         run: micromamba create -y -n md20 -f environment/base.yml -f ${{ matrix.gpu_yml }} 2>&1 | tee env.log; exit ${PIPESTATUS[0]}
       - name: Install md20 (+ pip-only deps)
         shell: bash -el {0}
+        env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          micromamba activate md20
-          EXTRA="openmmforcefields>=0.14 meeko>=0.5"
-          if [ "$RUNNER_OS" = "Windows" ]; then EXTRA="$EXTRA vina>=1.2.5"; fi
-          pip install --no-cache-dir $EXTRA -e . 2>&1 | tee -a env.log; exit ${PIPESTATUS[0]}
+          micromamba run -n md20 python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" -e . 2>&1 | tee -a env.log
+          test ${PIPESTATUS[0]} -eq 0 || exit 1
+          micromamba run -n md20 md20 setup-vina 2>&1 | tee -a env.log; exit ${PIPESTATUS[0]}
       - name: Doctor (CPU platform)
         shell: bash -el {0}
-        run: micromamba activate md20 && md20 doctor --seconds 5 || true
+        run: micromamba run -n md20 md20 doctor --seconds 5 || true
       - name: Full test suite incl. real OpenMM
         shell: bash -el {0}
         env: { MD20_HEAVY: "${{ matrix.heavy }}" }
-        run: micromamba activate md20 && pytest -v --durations=15 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
+        run: micromamba run -n md20 pytest -v --durations=15 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
       - name: Post failure log as commit comment
         if: failure()
         shell: bash

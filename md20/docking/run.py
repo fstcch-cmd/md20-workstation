@@ -160,7 +160,12 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
          mode: str = "independent", scoring: str = "vina", exhaustiveness: int = 16, n_poses: int = 9,
          energy_range: float = 3.0, seed: int = 2026, cpu: int = 0, decisions: DecisionLog | None = None,
          progress_cb=None) -> DockingResult:
-    from vina import Vina
+    try:
+        from vina import Vina
+        vina_exe = None
+    except ImportError:
+        from .vina_cli import ensure_vina_exe
+        Vina, vina_exe = None, ensure_vina_exe()
     if mode not in {"independent", "simultaneous"}:
         raise ValueError("mode 必須是 independent 或 simultaneous")
     if mode == "simultaneous" and len(ligands) < 2:
@@ -188,7 +193,15 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
         w = Chem.SDWriter(str(lig_dir / f"{lig.name}_input.sdf")); w.write(mol); w.close()
     res = DockingResult(mode=mode, receptor_pdbqt=str(rec_pdbqt), box=box.to_dict(), params=params)
 
+    if decisions:
+        decisions.record("docking.setup", "engine", "vina python bindings" if vina_exe is None else f"vina executable {vina_exe}",
+                         "優先用 Python bindings；Windows 上 pip 套件無法編譯時改用官方執行檔（結果相同）。")
+
     def run_vina(ligand_strings):
+        if vina_exe is not None:
+            from .vina_cli import run_vina_cli
+            return run_vina_cli(vina_exe, str(rec_pdbqt), ligand_strings, box.center, box.size, scoring=scoring,
+                                exhaustiveness=exhaustiveness, n_poses=n_poses, energy_range=energy_range, seed=seed, cpu=cpu)
         v = Vina(sf_name=scoring, cpu=int(cpu), seed=int(seed), verbosity=0)
         v.set_receptor(str(rec_pdbqt))
         v.set_ligand_from_string(ligand_strings if len(ligand_strings) > 1 else ligand_strings[0])
