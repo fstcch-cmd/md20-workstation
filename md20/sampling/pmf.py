@@ -25,9 +25,11 @@ class PMFResult:
     delta_pmf_kj_mol: float
     quality: dict = field(default_factory=dict)
     figures: dict = field(default_factory=dict)
+    boot_pmfs: np.ndarray | None = field(default=None, repr=False)   # bootstrap replicates (not serialised)
 
     def to_dict(self) -> dict:
         d = asdict(self)
+        d.pop("boot_pmfs", None)
         for k in ("grid_nm", "pmf_kj_mol", "err_kj_mol"):
             if d[k] is not None:
                 d[k] = np.asarray(d[k]).tolist()
@@ -62,7 +64,8 @@ def pmf_from_windows(samples_by_center: dict[float, np.ndarray], *, force_consta
     finite = np.isfinite(pmf)
     delta = float(np.nanmax(pmf[finite]) - np.nanmin(pmf[finite])) if finite.any() else float("nan")
     res = PMFResult(grid_nm=grid, pmf_kj_mol=pmf, err_kj_mol=err, method=str(base.get("method", "")),
-                    converged=bool(base.get("converged", True)), delta_pmf_kj_mol=delta, quality=quality)
+                    converged=bool(base.get("converged", True)), delta_pmf_kj_mol=delta, quality=quality,
+                    boot_pmfs=base.get("bootstrap_pmfs"))
     if out_dir is not None:
         out = Path(out_dir)
         res.figures["histograms"] = plot_umbrella_histograms(samples_by_center, out / "umbrella_histograms")

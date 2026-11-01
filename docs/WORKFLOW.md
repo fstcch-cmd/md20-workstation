@@ -16,11 +16,13 @@ md20 gui                                  # 或用圖形介面（瀏覽器 http:
 | `box` | `{"from_residue": "BEN"}` 以晶體配體定義；`{"center": [x,y,z], "size": [sx,sy,sz]}`（Å）；`{"whole_receptor": true}` 盲對接 |
 | `ligands` | `[{"name": "BEN", "smiles": "...", "reference_resname": "BEN"}]`；`reference_resname` 用來計算與晶體 pose 的 RMSD（redocking 驗證） |
 | `docking.mode` | `independent`：每個配體各自對接並排名；`simultaneous`：多配體同時放進同一 box（joint pose） |
-| `pose_choices` | 覆寫推薦：`{"BEN": 3}`；simultaneous 模式用 `{"joint": 2}` |
+| `pose_choices` | 覆寫推薦：`{"BEN": 3}`；simultaneous 模式用 `{"joint": 2}`（人工選擇不會被短 MD 篩選覆寫） |
+| `docking.pose_md_screen` | 短 MD 篩 pose：`{"enabled": true, "top_n": 3, "production_ps": 200, "max_rmsd_A": 2.5, "min_contact_retention": 0.5}`；research tier 預設開，其餘預設關 |
+| `metal_policy` | 金屬處理（元素或單一位點，位點優先）：`{"ZN": "bonded"}`、`{"ZN:A301": "keep_nonbonded"}`、`{"MG": "remove"}` |
 | `md.systems` | `apo`（原始蛋白）、`docked_single`（每個配體一個系統）、`docked_multi`（多配體同一系統） |
 | `md.tier` | `classroom`（2 ns）、`teaching`（10 ns）、`research`（100 ns）；`production_ns` 可直接指定 |
 | `md.replicas` | 獨立 seed 的重複數（研究建議 ≥ 3） |
-| `binding` | `{"enabled": true, "ligands": ["BEN"], "config": {...}}`；config 見下 |
+| `binding` | `{"enabled": true, "ligands": ["BEN"], "multi": true, "config": {...}}`；`docked_multi` 系統中每個配體會各自從共同口袋拉離（`multi:<配體>`）；config 見下 |
 
 `binding.config`（`BindingConfig`）：`pull_distance_nm`（1.5）、`pull_velocity_nm_per_ps`（0.01）、`k_pull`、`k_umbrella`（1000）、`target_overlap`（0.25）、`window_equil_ps`（10）、`window_prod_ps`（50）、`max_windows`（40）。
 
@@ -31,8 +33,11 @@ md20 gui                                  # 或用圖形介面（瀏覽器 http:
 - **Pose 推薦**：最佳分數 1 kcal/mol 內、所屬 cluster 最大的 pose（Vina 分數誤差約 1–2 kcal/mol，搜尋重複找到的結合模式較可靠）；有晶體配體時同時報告 RMSD。
 - **simultaneous**：配體間最短距離 < 2 Å 的 joint pose 視為碰撞、不推薦。
 - **docked_multi 由 independent 結果組成**：只有選定 pose 彼此距離 ≥ 2.5 Å 才允許，否則停下來請你改用 simultaneous 或改選 pose。
+- **短 MD 篩 pose（WP5）**：推薦 pose ＋ 其他通過對接保守條件、不同 cluster 的 pose 各跑一段短 MD；後段配體 RMSD ≤ 2.5 Å 且接觸殘基保留 ≥ 50% 才算穩定。推薦的穩定 → 維持；推薦的不穩定但別的穩定 → 自動改用並記錄；都不穩定或模擬失敗 → 停下來。短 MD 只排除會散開的 pose，不代表結合較強。
+- **金屬**：`bonded` 以晶體幾何建立諧和鍵／角、排除金屬–配位原子間非鍵結作用，並把配位的 Cys 改為 CYM、His 依配位的氮決定互變異構體（這是幾何模型，不是 MCPB.py/ZAFF 擬合參數）。少於 3 個蛋白配位原子、配體直接配位、His 兩個氮同時配位 → 停下來。`keep_nonbonded` 會加一個 production 也不解除的位置限制。
 - **MD**：watchdog 自動回滾＋縮小 dt；平衡未達標自動延長；電池／PAUSE 檔／時段在 chunk 邊界暫停。
-- **結合強度**：SMD 拉出配體 → 依 k、T、目標 overlap 自動規劃 window → 每個 window 可續跑 → WHAM/MBAR PMF ± bootstrap → ΔPMF 與 ΔG° 估計（附限制說明）。
+- **結合強度**：SMD 拉出配體 → 依 k、T、目標 overlap 自動規劃 window → 每個 window 可續跑 → WHAM/MBAR PMF ± bootstrap → ΔPMF（含 σ）與 ΔG° 估計（附限制說明）。
+- **多配體（WP9）**：共同口袋拉離前先檢查拉離路徑上有沒有其他配體（有就停下）；配體間比較只在同一情境內做，所有配體都有 tier 允許的 ΔG° 才給 ΔΔG°，否則給定性的 ΔΔPMF；差距 < 2σ 判為不可區分；同一配體「單獨 vs 共同口袋」的差值列為共存效應（趨勢，不是熱力學循環）。
 
 ## 需要人工決定時
 

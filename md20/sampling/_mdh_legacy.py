@@ -1238,6 +1238,7 @@ def bootstrap_pmf_1d(
     base["bootstrap_success"] = int(bootstrap_success)
     base["bootstrap_requested"] = int(n_bootstrap)
     base["bootstrap_method"] = "moving-block"
+    base["bootstrap_pmfs"] = np.vstack(boot_pmfs) if boot_pmfs else None   # per-replicate curves (for derived σ)
     return base
 
 

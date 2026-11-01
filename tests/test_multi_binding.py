@@ -98,3 +98,24 @@ def test_workflow_multi_targets_and_comparison(tmp_path, monkeypatch):
     from md20.report.workflow_report import _binding_section
     html = _binding_section(wf)
     assert "配體間比較" in html and "共存效應" in html and "共同口袋" in html
+
+
+def test_bootstrap_sigma_of_derived_quantities():
+    from md20.sampling.binding import bootstrap_binding_sigma
+    g = np.linspace(0.3, 2.0, 120)
+    rng = np.random.default_rng(1)
+    # well of depth ≈ 20 kJ/mol at 0.5 nm, flat beyond ~1.2 nm (raw W includes −2kT ln r, removed by radial_pmf)
+    kT = 0.0083145 * 300
+    base = -20 * np.exp(-((g - 0.5) / 0.15) ** 2) - 2 * kT * np.log(g)
+    boot = np.vstack([base + rng.normal(0, 1.0) * np.exp(-((g - 0.5) / 0.15) ** 2) for _ in range(60)])
+    s = bootstrap_binding_sigma(g, boot, 300.0)
+    assert s["n"] == 60 and 0.5 < s["delta_pmf_sd"] < 1.6          # depth jitter SD = 1 kJ/mol
+    assert s["dG_sd"] is not None and s["dG_sd"] > 0
+    assert bootstrap_binding_sigma(g, None, 300.0)["delta_pmf_sd"] is None
+    assert bootstrap_binding_sigma(g, boot[:5], 300.0)["delta_pmf_sd"] is None   # too few replicates → no σ
+
+
+def test_compare_dG_uses_errors_when_present():
+    res = {"A": {**_r(30.0, 1.0, dG=-25.0), "dG_err_kj_mol": 1.0}, "B": {**_r(20.0, 1.0, dG=-24.0), "dG_err_kj_mol": 1.0}}
+    rows = compare_binding(res, contexts={"single": ["A", "B"]})["contexts"]["single"]["rows"]
+    assert "不可區分" in rows[1]["verdict"]

@@ -135,6 +135,7 @@ class BindingResult:
     pmf: dict = field(default_factory=dict)
     delta_pmf_kj_mol: float | None = None
     delta_pmf_err_kj_mol: float | None = None
+    dG_err_kj_mol: float | None = None
     dG_standard_kj_mol: float | None = None
     dG_standard_kcal_mol: float | None = None
     figures: dict = field(default_factory=dict)
@@ -178,6 +179,31 @@ def radial_pmf(pres, temperature_k: float) -> dict:
     from .multi import delta_pmf_error
     return {"grid": g, "W": Wv, "W_raw": W_raw - np.min(W_raw), "err": err, "w_bulk": w_bulk, "r_min": float(g[i_min]),
             "r_cut": r_cut, "delta_pmf": dpmf, "delta_pmf_err": delta_pmf_error(g, err, i_min, tail), "dG": dG}
+
+
+def bootstrap_binding_sigma(grid_nm, boot_pmfs, temperature_k: float, *, min_ok: int = 10) -> dict:
+    """σ of ΔPMF and ΔG° from the bootstrap PMF replicates: each replicate goes through the same Jacobian
+    correction / well / radial integration as the estimate, so the SD is that of the derived quantity."""
+    from types import SimpleNamespace
+    out = {"delta_pmf_sd": None, "dG_sd": None, "n": 0}
+    if boot_pmfs is None or len(boot_pmfs) == 0:
+        return out
+    dp, dg = [], []
+    for curve in np.asarray(boot_pmfs, dtype=float):
+        try:
+            r = radial_pmf(SimpleNamespace(grid_nm=grid_nm, pmf_kj_mol=curve, err_kj_mol=None), temperature_k)
+        except Exception:  # noqa: BLE001
+            continue
+        if r["delta_pmf"] is not None and np.isfinite(r["delta_pmf"]):
+            dp.append(r["delta_pmf"])
+        if r["dG"] is not None and np.isfinite(r["dG"]):
+            dg.append(r["dG"])
+    out["n"] = len(dp)
+    if len(dp) >= min_ok:
+        out["delta_pmf_sd"] = round(float(np.std(dp, ddof=1)), 3)
+    if len(dg) >= min_ok:
+        out["dG_sd"] = round(float(np.std(dg, ddof=1)), 3)
+    return out
 
 
 def _unwrap_near(xyz: np.ndarray, ref: np.ndarray, box: np.ndarray) -> np.ndarray:
@@ -393,7 +419,10 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     rp = radial_pmf(pres, cfg.temperature_k)
     g, Wv, err = rp["grid"], rp["W"], rp["err"]
     res.delta_pmf_kj_mol, res.dG_standard_kj_mol = rp["delta_pmf"], rp["dG"]
-    res.delta_pmf_err_kj_mol = rp["delta_pmf_err"]
+    bs = bootstrap_binding_sigma(pres.grid_nm, getattr(pres, "boot_pmfs", None), cfg.temperature_k)
+    # bootstrap SD of the derived quantities; the point-wise approximation is only a fallback
+    res.delta_pmf_err_kj_mol = bs["delta_pmf_sd"] if bs["delta_pmf_sd"] is not None else rp["delta_pmf_err"]
+    res.dG_err_kj_mol = bs["dG_sd"]
     if res.dG_standard_kj_mol is not None:
         res.dG_standard_kcal_mol = round(res.dG_standard_kj_mol / 4.184, 3)
     # half-split convergence: first vs second half of every window
@@ -428,6 +457,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     if not res.pmf["quality"].get("graph_connected", True) or not pres.converged:
         res.caveats.insert(1, "PMF 未收斂或 window overlap 不足（見直方圖）；不輸出 ΔG°，只保留 ΔPMF 作定性參考。")
         res.dG_standard_kj_mol = res.dG_standard_kcal_mol = None
+        res.dG_err_kj_mol = None
         res.pmf["dG_withheld"] = "not converged"
     manifest.update({"status": "PASS", "result": res.to_dict()})
     atomic_write_json(json.loads(json.dumps(manifest, default=_np_default)), out / "binding_manifest.json")

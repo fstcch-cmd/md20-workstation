@@ -46,6 +46,7 @@ def test_nacl_pmf(tmp_path):
     assert (res.dG_standard_kj_mol is not None) or res.pmf.get("dG_withheld"), "ΔG° missing without a stated reason"
     assert "first_half_dpmf" in res.pmf["half_split"], res.pmf["half_split"]
     assert res.delta_pmf_err_kj_mol is None or (np.isfinite(res.delta_pmf_err_kj_mol) and res.delta_pmf_err_kj_mol >= 0)
+    assert res.dG_err_kj_mol is None or (np.isfinite(res.dG_err_kj_mol) and res.dG_err_kj_mol >= 0)
     assert "骨架" in res.caveats[0]
     for k in ("pmf", "histograms", "smd"):
         assert Path(res.figures[k]["png"]).is_file()

@@ -631,10 +631,11 @@ class Workflow:
             if reason and dG is not None:
                 dG, dGk, withheld = None, None, reason
                 self.dec.record("binding.result", name, "ΔG° withheld", reason)
+            dG_err = getattr(res, "dG_err_kj_mol", None) if dG is not None else None
             results[name] = {"status": res.status, "ligand": t["ligand"], "context": "single" if not t["others"] else f"multi:{key}",
                              "co_ligands": t["others"], "delta_pmf_kj_mol": res.delta_pmf_kj_mol,
                              "delta_pmf_err_kj_mol": getattr(res, "delta_pmf_err_kj_mol", None),
-                             "dG_standard_kj_mol": dG, "dG_standard_kcal_mol": dGk, "dG_withheld": withheld,
+                             "dG_standard_kj_mol": dG, "dG_err_kj_mol": dG_err, "dG_standard_kcal_mol": dGk, "dG_withheld": withheld,
                              "half_split": res.pmf.get("half_split"),
                              "r_min_nm": res.pmf.get("r_min_nm"), "figures": res.figures, "caveats": res.caveats,
                              "max_force": res.smd.get("max_force_kj_mol_nm"), "work": res.smd.get("final_work_kj_mol")}

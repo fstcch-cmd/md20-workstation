@@ -26,5 +26,6 @@ Claude-Session: <本次 session 連結>
 ## 戳記
 `md20/util/stamp.py`;公鑰 `md20/util/owner_pub.pem` 在 repo,**私鑰不在 repo 也不該進 repo**(使用者離線保管)。`system.xml` 不可加註解(OpenMM 會讀不了)。
 
-## 還沒做
-WP5(短 MD 篩 pose)、WP9(多配體各自 PMF)、WP13(GUI 3D/即時曲線)、鍵結金屬參數化。細節見 `docs/HANDOFF.md` §6。
+## 現況與還沒做
+WP5、WP9、WP13、金屬 policy/幾何鍵結模型已實作(真實驗證狀態見 `docs/STATUS.md`)。
+還沒做:擬合的金屬參數(MCPB.py/QM)、結合計算多 replica、ΔG° 誤差、GUI 閘門一鍵決定。細節見 `docs/HANDOFF.md` §6。

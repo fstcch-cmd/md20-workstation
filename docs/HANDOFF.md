@@ -1,6 +1,6 @@
 # MD20 開發交接檔(給新的 Claude Code session 接手用)
 
-> 最後更新:2026-11-01,HEAD `01c81d1`。讀完這份就能無縫接續開發與 CI 監看。
+> 最後更新:2026-11-01(第二個 session,見 §5)。讀完這份就能無縫接續開發與 CI 監看。
 > **重點:所有成果都在這個 repo + GitHub Actions 上,不在任何對話容器裡。** 新 session 只要 clone 本 repo 即可完整接手;正在跑的「虛擬機」就是 GitHub Actions CI,與 session 無關,不會因為舊對話結束而消失。
 
 ## 0. 新 session 第一步
@@ -13,8 +13,8 @@
 - 擁有者:HCC Lab, NKUST(Chen-Che Hsieh)。
 - Commit 屬名(每次 commit 結尾加):
   ```
-  Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
-  Claude-Session: https://claude.ai/code/session_016gcJz8P81rkvkDCdebyRMV
+  Co-Authored-By: Claude <noreply@anthropic.com>
+  Claude-Session: <你這個 session 的連結>
   ```
   (新 session 會有自己的 session 連結,用自己的即可。)
 
@@ -48,16 +48,22 @@
 - `STATUS.md` 要誠實(真跑過 / 靠 CI / 未完成 三級),不誇大。
 - 任何改動都要有測試且 CI 綠才算完成。
 
-## 5. 現在的狀態(2026-11-01)
-- pure-python:6 平台 CI 全綠。openmm-stack:Windows OpenCL 綠(使用者主力);mac/ubuntu 結果看最新 commit 留言。
-- 測試 91 個函式。
-- 已完成工作包:WP0, WP2, WP3, WP4, WP6, WP7, WP8, WP10, WP11, WP12(細節見 `docs/STATUS.md` 與 commit 訊息)。
+## 5. 現在的狀態(2026-11-01,第二個 session 之後)
+- 各工作包的真實驗證狀態以 `docs/STATUS.md` 為準(三級)。
+- 已完成工作包:WP0, WP2–WP13 全部有實作與測試;另修了「binding/analysis 讀不到配體原子索引」的 bug
+  (`build_manifest.json` 被 `build_case` 覆寫後,索引只在 `assembly.ligands`;現在頂層也帶索引,讀取一律走 `workflow.manifest_ligands()`)。
+- 第二個 session 新增:
+  - **WP5** `md20/docking/pose_screen.py` + `Workflow.choose_poses(screen=...)` / `_screen_pose`:短 MD 篩 pose(結果快取在 `workflows/<name>/pose_screen.json`,暫停可續)。
+  - **WP9** `md20/sampling/multi.py`:拉離路徑閘門、`compare_binding`(ΔΔ ± 2σ、共存效應);`Workflow._binding_targets` 把 docked_multi 每個配體列為 `multi:<名>`。
+  - **金屬** `md20/build/metal.py`:`metal_policy` 真正套用(remove/keep_nonbonded/bonded);bonded = 晶體幾何鍵/角 + 排除 1-2 非鍵 + CYM/HID/HIE。
+  - **WP13** `md20/gui/views.py` + `md20/gui/static/md20view.js`(自寫 Canvas 2D 離線 3D,無 CDN、無 WebGL);GUI 分頁:閘門/即時曲線/時間軸/3D;報告內嵌 3D。
+- 開發容器補充:PyPI/npm 在第二個 session **也連不到**(pip/npm 都失敗),所以 NiceGUI、3Dmol.js 都裝不了;GUI 頁面靠 CI 的 `tests/test_gui_server.py` 實際啟動伺服器驗證,3D viewer 用容器內建的 Playwright Chromium 驗證。
 
-## 6. 還沒做的(接手可從這裡開始)
-- **WP5**:`choose_poses` 之前做短 MD 篩 pose。
-- **WP9**:多配體各自的 PMF / ΔΔG(目前 binding 一次一個配體)。
-- **WP13 GUI**:離線 3D viewer、即時曲線、閘門卡片、時間軸(`md20/gui/`,目前是表單+檔案瀏覽+執行)。
-- **鍵結金屬**:目前只有口袋金屬閘門提示 + `metal_policy`(保留非鍵結/移除);未做 bonded model 參數化。
+## 6. 還沒做 / 可以接著做的
+- 鍵結金屬:目前是**幾何**鍵結模型;擬合參數(MCPB.py/QM)、配體直接配位金屬仍是 NEEDS_HUMAN。
+- 結合計算的多 replica(research tier 要求 ≥3)尚未自動跑;目前只檢查並拒絕輸出 ΔG°。
+- ΔG° 的誤差(`dG_err_kj_mol`)尚未估計,所以 ΔΔG° 比較一律標「缺誤差」;ΔΔPMF 有 bootstrap σ。
+- GUI 的 pose 表尚未顯示短 MD 篩選結果欄;閘門卡片的選項目前是文字,尚未一鍵寫回設定。
 
 ## 7. HCC Lab 戳記(防盜用)
 - 模組:`md20/util/stamp.py`。可見文字 + 隱藏標記(PNG tEXt / SVG metadata / PDB REMARK 999 / SDF 屬性 / JSON `_md20` / 零寬 HTML / zip comment)+ RSA 加密溯源。

@@ -127,7 +127,10 @@ def _binding_section(wf) -> str:
     for name, r in b.items():
         dg = r.get('dG_standard_kj_mol') if r.get('dG_standard_kj_mol') is not None else "不輸出"
         dgk = r.get('dG_standard_kcal_mol') if r.get('dG_standard_kcal_mol') is not None else "—"
-        parts.append(f"<tr><td>{_esc(name)}</td><td>{r.get('delta_pmf_kj_mol')}</td><td>{dg}</td>"
+        pm = lambda v, e: f"{v} ± {e}" if v is not None and e is not None else (v if v is not None else "—")  # noqa: E731
+        if r.get('dG_standard_kj_mol') is not None:
+            dg = pm(r['dG_standard_kj_mol'], r.get('dG_err_kj_mol'))
+        parts.append(f"<tr><td>{_esc(name)}</td><td>{pm(r.get('delta_pmf_kj_mol'), r.get('delta_pmf_err_kj_mol'))}</td><td>{dg}</td>"
                      f"<td>{dgk}</td><td>{r.get('r_min_nm') and round(r['r_min_nm'], 3)}</td>"
                      f"<td>{r.get('max_force') and round(r['max_force'])}</td><td>{r.get('work') and round(r['work'], 1)}</td></tr>")
     parts.append("</table>")
