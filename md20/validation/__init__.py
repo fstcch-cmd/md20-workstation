@@ -21,6 +21,18 @@ def residues_in_box(pdb_text: str, center, size, *, chain: str | None = None) ->
     return out
 
 
+def protein_residues(pdb_text: str) -> set[str]:
+    """{"LYS195", …} for every protein residue present (name+number), any chain — coordinate-frame independent."""
+    out = set()
+    for l in pdb_text.splitlines():
+        if l.startswith("ATOM") and len(l) >= 26:
+            try:
+                out.add(f"{l[17:20].strip()}{int(l[22:26])}")
+            except ValueError:
+                continue
+    return out
+
+
 def residues_near(pdb_text: str, coords, cutoff: float = 4.0) -> set[str]:
     import numpy as np
     pts = np.asarray(coords, float)
