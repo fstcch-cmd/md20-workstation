@@ -5,7 +5,7 @@
 
 CI 依據(`fstcch-cmd/md20-workstation`):
 - **63d363b（第二個 session 最終版）openmm-stack**:**Windows OpenCL 124 passed、macOS 126 passed**,各只有 1 個失敗——`test_gui_pages_render`,原因是 NiceGUI 在子行程看到 pytest 環境變數就切到它自己的測試模式(非 GUI 本身問題),本 session 已修;Ubuntu `MD20_HEAVY=1` 重測結果見該 commit 留言。
-- 第三個 session 新功能(閘門一鍵決定、3D 互作、金屬擬合參數)的 CI 結果見最新 commit 留言。
+- **f879764(第三個 session:閘門一鍵決定、3D 互作、金屬擬合參數、GUI server 測試修正)openmm-stack**:**Windows OpenCL 與 macOS 全綠**(含 `test_gui_pages_render`);Ubuntu `MD20_HEAVY=1` 重測(金屬/pose 篩選/論文重現)見該 commit 留言。
 - 測試函式:約 160 個(pure-python 部分本地全過)。
 
 ---
@@ -34,11 +34,11 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 | test_openmm_integration | 平台選擇、HMR、benchmark、doctor | 三平台綠(a72ba6b:mac/win) |
 | test_real_case_integration | 3PTB 建模 + 短 MD;胜肽 | 同上 |
 | test_docking_integration | 苯甲脒 redocking RMSD<2Å;多配體 | 同上 |
-| test_binding_integration | NaCl PMF;水盒過小擋關;**拉離路徑被擋(WP9)** | 見 B |
+| test_binding_integration | NaCl PMF;水盒過小擋關;**拉離路徑被擋(WP9)** | **f879764:Windows OpenCL / macOS 真跑通過** |
 | test_workflow_integration | 3PTB 全流程(含 binding);**短 MD 篩 pose(WP5)** | Ubuntu 重測,見 B |
 | test_binding_integration / test_real_case / test_docking / test_openmm | NaCl PMF、拉離路徑閘門(WP9)、3PTB 建模與胜肽、redocking、平台/HMR/doctor | **63d363b:Windows OpenCL 與 macOS 真跑通過** |
 | test_metal_integration | **CA II(3KS3)Zn–His3 鍵結模型**:建模、互變異構體、力項、最小化+MD 後鍵長維持;**JSON 擬合參數套用與 r0 偏差擋關**;QM 小模型輸入產生 | Ubuntu 重測,見 B |
-| test_gui_server | **啟動 `md20 gui` 並請求每個頁面與 /viewer** | 有 NiceGUI 的 CI 環境 |
+| test_gui_server | **啟動 `md20 gui` 並請求每個頁面與 /viewer**(含閘門一鍵按鈕) | **f879764:Windows OpenCL / macOS 真跑通過** |
 
 ### A3. 使用者實機(先前回報)
 - Windows 10 + GTX 1060 → OpenCL,約 200 ns/day。

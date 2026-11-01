@@ -129,7 +129,7 @@ def test_parsers_roundtrip(cluster, tmp_path):
     d = load_hessian(f)
     assert d["z"] == z and np.allclose(d["xyz_A"], xyz, atol=1e-6) and np.allclose(d["hessian"], h, rtol=1e-6)
     o = tmp_path / "zn.hess"; o.write_text(_orca_text(z, xyz, h))
-    d2 = parse_orca_hess(o.read_text())
+    d2 = parse_orca_hess(o.read_text(encoding="utf-8"))
     assert d2["z"] == z and np.allclose(d2["xyz_A"], xyz, atol=1e-6) and np.allclose(d2["hessian"], h, rtol=1e-4)
 
 
@@ -345,14 +345,14 @@ def test_write_qm_cluster_caps_and_charges(tmp_path):
     out = write_qm_cluster(atoms, site, tmp_path / "qm")
     assert out["status"] == "PASS" and out["charge"] == 0 and out["multiplicity"] == 1       # +2 −1 (CYM) −1 (ASP)
     assert out["n_atoms"] == 1 + (11 + 1) + (4 + 1) + (6 + 1) and len(out["frozen"]) == 3
-    xyz = (tmp_path / "qm" / "cluster.xyz").read_text().splitlines()
+    xyz = (tmp_path / "qm" / "cluster.xyz").read_text(encoding="utf-8").splitlines()
     assert xyz[0] == str(out["n_atoms"]) and xyz[2].startswith("Zn") and xyz[-1].startswith("H")   # capping H last per residue
-    assert "CA" not in (tmp_path / "qm" / "cluster.xyz").read_text()                            # no backbone in the model
-    inp = (tmp_path / "qm" / "orca.inp").read_text()
+    assert "CA" not in (tmp_path / "qm" / "cluster.xyz").read_text(encoding="utf-8")                            # no backbone in the model
+    inp = (tmp_path / "qm" / "orca.inp").read_text(encoding="utf-8")
     assert "Opt Freq" in inp and "* xyz 0 1" in inp and inp.count("{ C ") == 3
-    gjf = (tmp_path / "qm" / "gaussian.gjf").read_text()
+    gjf = (tmp_path / "qm" / "gaussian.gjf").read_text(encoding="utf-8")
     assert "freq" in gjf and "\n0 1\n" in gjf and "X 2 F" in gjf
-    assert "metal_params" in (tmp_path / "qm" / "README.md").read_text()
+    assert "metal_params" in (tmp_path / "qm" / "README.md").read_text(encoding="utf-8")
     # the capping H sits 1.09 Å from CB along CB→CA
     hid_cb = next(a for a in atoms if a["resname"] == "HID" and a["name"] == "CB"); hid_ca = next(a for a in atoms if a["resname"] == "HID" and a["name"] == "CA")
     cap = np.array([float(v) for v in xyz[2 + 11 + 1].split()[1:]])
@@ -369,4 +369,4 @@ def test_write_qm_cluster_open_shell_needs_human(tmp_path):
     out = write_qm_cluster(atoms, site, tmp_path / "qm")
     assert out["status"] == NEEDS_HUMAN and "自旋" in out["why"] and not (tmp_path / "qm").exists()
     out = write_qm_cluster(atoms, site, tmp_path / "qm", charge=2, multiplicity=5)
-    assert out["status"] == "PASS" and out["charge"] == 0 and "* xyz 0 5" in (tmp_path / "qm" / "orca.inp").read_text()
+    assert out["status"] == "PASS" and out["charge"] == 0 and "* xyz 0 5" in (tmp_path / "qm" / "orca.inp").read_text(encoding="utf-8")
