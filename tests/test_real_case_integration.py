@@ -109,7 +109,9 @@ def test_3ptb_gbn2_implicit_solvent_short_md(pdb_3ptb, tmp_path):
     assert any(system.getForce(i).getName() == "msw_gbn2" for i in range(system.getNumForces()))
     nb = next(f for f in system.getForces() if isinstance(f, mm.NonbondedForce))
     assert nb.getNonbondedMethod() == mm.NonbondedForce.NoCutoff
-    choice = choose_platform(probe_steps=20)
+    # CPU on every OS: macOS hit a NaN inside the minimizer on its auto-chosen platform once (1634916) while the same
+    # code passed there before — platform variance is not what this plumbing test is about (D-32)
+    choice = choose_platform(order=("CPU",), probe_steps=20)
     proto = implicit_solvent_protocol(make_protocol("classroom"))
     assert all(st.ensemble in ("MIN", "NVT") for st in proto.stages)
     for st in proto.stages:

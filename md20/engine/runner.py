@@ -31,7 +31,15 @@ def _minimize(stage_dir: Path, spec: StageSpec, make_backend, *, identity: dict,
         for k in ladder:
             if k is not None:
                 backend.set_global_parameter("msw_restraint_scale", k)
-            backend.minimize(spec.tolerance_kj_mol_nm, spec.max_iterations)
+            try:
+                backend.minimize(spec.tolerance_kj_mol_nm, spec.max_iterations)
+            except Exception as exc:  # noqa: BLE001 — OpenMMException "Particle coordinate is NaN" (CI 1634916, D-32)
+                if "nan" not in str(exc).lower():
+                    raise
+                raise NeedsHuman(f"最小化途中座標變成 NaN（約束倍率 {k}，平台 {getattr(backend, 'platform_name', '?')}）：{exc}。"
+                                 "常見原因：起始結構嚴重碰撞、配體參數錯誤，或 GPU 單／混合精度下的隱式溶劑數值問題。"
+                                 "選項：回到 build 閘門檢查碰撞；改用 CPU 平台重跑最小化；隱式溶劑改回 md.solvent: explicit。",
+                                 stage="minimize") from exc
             s = backend.summary()
             if not s.finite():
                 raise NeedsHuman("最小化後能量為 NaN：起始結構有嚴重碰撞或配體參數錯誤；請回到 build 閘門檢查。", stage="minimize")

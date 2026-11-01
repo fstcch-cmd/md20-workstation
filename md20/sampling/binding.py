@@ -155,11 +155,12 @@ class BindingResult:
         return asdict(self)
 
 
-def _make_context(system, positions, platform_name, properties, cfg: BindingConfig, seed: int):
+def _make_context(system, positions, platform_name, properties, cfg: BindingConfig, seed: int,
+                  timestep_fs: float | None = None):
     import openmm as mm
     from openmm import unit
     integ = mm.LangevinMiddleIntegrator(cfg.temperature_k * unit.kelvin, cfg.friction_per_ps / unit.picosecond,
-                                        cfg.timestep_fs * unit.femtoseconds)
+                                        (timestep_fs or cfg.timestep_fs) * unit.femtoseconds)
     integ.setRandomNumberSeed(int(seed))
     ctx = mm.Context(system, integ, mm.Platform.getPlatformByName(platform_name), properties or {})
     return ctx, integ
@@ -392,7 +393,27 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                           out / "coverage.json")
 
     def sim_window(c: float, k: float, start_xml: str, seed: int, equilibrate: bool) -> tuple[np.ndarray, str]:
-        ctx, integ = _make_context(system, pos, platform_name, platform_properties, cfg, seed)
+        """One window; a NaN blow-up (OpenMM raises) is retried once from the same start after a short restrained
+        minimization at half the timestep (same simulated time) — CI 1634916, D-32.  A second failure is reported."""
+        try:
+            return _sim_window(c, k, start_xml, seed, equilibrate, retry=False)
+        except Exception as exc:  # noqa: BLE001 — OpenMMException "Particle coordinate is NaN"
+            if "nan" not in str(exc).lower():
+                raise
+            if decisions is not None:
+                decisions.record("binding.umbrella", f"window {c:.3f} nm", "NaN → retry",
+                                 f"window {c:.3f} nm（k = {k:.0f}）在 {cfg.timestep_fs:g} fs 下出現 NaN；從同一起點先做短暫最小化（偏壓開著），"
+                                 f"再以 {cfg.timestep_fs / 2:g} fs、相同模擬時間重跑一次。再失敗就停下回報。", kind="auto_fixed")
+            try:
+                return _sim_window(c, k, start_xml, seed + 1, equilibrate, retry=True)
+            except Exception as exc2:  # noqa: BLE001
+                raise RuntimeError(f"window {c:.3f} nm 兩次都出現 NaN（{cfg.timestep_fs:g} 與 {cfg.timestep_fs / 2:g} fs）：{exc2}。"
+                                   "請檢查 SMD 起始幀與 k_umbrella；不以內插或略過 window 代替。") from exc2
+
+    def _sim_window(c: float, k: float, start_xml: str, seed: int, equilibrate: bool, *, retry: bool) -> tuple[np.ndarray, str]:
+        dt = cfg.timestep_fs / 2.0 if retry else cfg.timestep_fs
+        f = 2 if retry else 1
+        ctx, integ = _make_context(system, pos, platform_name, platform_properties, cfg, seed, timestep_fs=dt)
         ctx.setState(XmlSerializer.deserialize(Path(start_xml).read_text(encoding="utf-8")))
         if "msw_restraint_scale" in ctx.getParameters():
             ctx.setParameter("msw_restraint_scale", cfg.backbone_restraint_scale)
@@ -400,11 +421,15 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             ctx.setParameter("msw_fb_scale", 0.0)
         ctx.setParameter("k_cv", float(k))
         ctx.setParameter("r0_cv", float(c))
+        if retry:
+            import openmm as _mm
+            _mm.LocalEnergyMinimizer.minimize(ctx, 10.0, 200)
+            ctx.setVelocitiesToTemperature(cfg.temperature_k * unit.kelvin, int(seed))
         if equilibrate:
-            integ.step(eq_steps)
+            integ.step(eq_steps * f)
         vals = []
         for _ in range(0, pr_steps, cfg.sample_every_steps):
-            integ.step(cfg.sample_every_steps)
+            integ.step(cfg.sample_every_steps * f)
             xyz_, box_ = _state_xyz_box(ctx)
             vals.append(cv_distance(xyz_, box_, anchor, ligand, masses))
         arr = np.asarray(vals)

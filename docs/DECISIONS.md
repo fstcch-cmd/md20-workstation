@@ -7,6 +7,21 @@
 
 ## 2026-11-01（第一個 session，續）
 
+### D-32　1634916：Windows 真全綠；macOS GBn2 最小化 NaN、heavy workflow umbrella window NaN、鋅模型平均偏 0.31 Å
+- 事實（run 41347336927）：**Windows OpenCL 366 passed、5 skipped**（skip 全是設計內：MD20_HEAVY／MD20_PAPERS／playwright），
+  `test_docking_integration`、`test_screen_integration` 這次真跑通過（D-31 有效）；Ubuntu 366 passed；installer-windows、pose-screen、paper-docking 綠。紅三項：
+  1. macOS `test_3ptb_gbn2…`：OpenMM 在**最小化途中**丟 `Particle coordinate is NaN`；同一測試在 99c8b64 的 macOS 通過（程式未變）→ 平台差異或數值偶發，原因未確定。
+  2. heavy workflow：umbrella 第一批 window 的平衡段 NaN，例外直接中止整個 workflow（81b72d9、99c8b64 同程式通過；本輪 gemmi 讓 meeko 正常 import，對接 pose 可能不同）。
+  3. heavy metal：D-29 的平均判定下 Zn–His94 NE2 平均 2.34 Å（r0 2.03，σ 0.08 Å）——**依 D-29 的約定這是模型問題，不再調測試**。
+- 決定：
+  - 引擎 `_minimize`：最小化途中的 NaN 轉為 NEEDS_HUMAN（學生看得懂的原因與選項：檢查碰撞／改 CPU 平台／改 explicit），不再是原始 traceback。測試 `test_minimizer_nan_becomes_needs_human`。
+  - umbrella `sim_window`：NaN → 從同一起點（偏壓開著）短暫最小化、重給速度、**半步長、相同模擬時間**重跑一次並記 AUTO_FIXED；再失敗就停下回報，不內插、不略過 window。
+  - GBn2 整合測試固定用 CPU 平台（三 OS 一致；GPU 上的 GBn2 留給真機驗證）。
+  - 鋅模型：不改測試，列為模型待修（會診 §3 Q2 依元素×配位原子的力常數表、§3 Q1 Li–Merz IOD LJ、配位水納入鍵結），**不擋 Windows 里程碑**（只在 Ubuntu heavy 跑）。
+- 被否決：再放寬鋅的容差（違反 D-29 約定）；umbrella NaN 時跳過該 window（會留下覆蓋斷點、把錯藏起來）。
+- 證據：純 Python 本地全過；NaN 重試路徑待 heavy workflow 重跑（無法在容器內觸發真 NaN）。
+- 未決：GBn2 在 macOS 最小化 NaN 的根因；heavy workflow 的 NaN 是 pose 不同還是 D-23 釋放側鏈後拉離更劇烈。
+
 ### D-31　Windows 的 meeko 其實沒裝好（缺 gemmi）→ 對接／HTS 整合測試在 Windows 一直是 SKIPPED，綠是假的
 - 現象：99c8b64 Windows openmm-stack「351 passed, 7 skipped」綠，但 skip 原因是 `could not import 'meeko': No module named 'gemmi'`——
   `test_docking_integration`、`test_screen_integration` 整檔跳過。明早筆電用同一條安裝路徑，對接第一個配體就會 ImportError。

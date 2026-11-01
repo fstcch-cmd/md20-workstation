@@ -241,3 +241,19 @@ def test_unextendable_acceptance_fails_fast(tmp_path: Path, monkeypatch):
     with pytest.raises(NeedsHuman, match="nvt 未通過驗收"):
         run_protocol(tmp_path / "run1", proto, _factory(), identity={"case": "c1"}, batch_steps=50)
     assert calls["n"] == 1
+
+
+def test_minimizer_nan_becomes_needs_human(tmp_path):
+    """D-32: an OpenMM 'Particle coordinate is NaN' inside the minimizer is a student-readable NEEDS_HUMAN with options,
+    not a raw traceback."""
+    from md20.engine.chunks import NeedsHuman
+    from md20.engine.runner import _minimize
+
+    class NanMin(FakeBackend):
+        def minimize(self, tolerance_kj_mol_nm, max_iterations):
+            raise RuntimeError("Particle coordinate is NaN.  For more information, see the OpenMM FAQ")
+
+    spec = StageSpec(name="minimize", ensemble="MIN", timestep_fs=2.0)
+    with pytest.raises(NeedsHuman) as ei:
+        _minimize(tmp_path / "min", spec, lambda s, dt: NanMin(n_atoms=100), identity={"case_id": "c"}, decisions=None)
+    assert "NaN" in str(ei.value) and "CPU" in str(ei.value)
