@@ -624,7 +624,10 @@ class Workflow:
         b = self.cfg.get("binding", {})
         if not b.get("enabled"):
             return {}
-        results = dict((self._done("binding") or {}).get("results", {}))
+        # keep every finished target even when the step itself was paused or reopened (manual resampling of one
+        # target must not recompute the others)
+        results = {k: v for k, v in ((self.state()["steps"].get("binding") or {}).get("results") or {}).items()
+                   if v.get("status") == "PASS"}
         valid = {f.name for f in fields(BindingConfig)}
         cfg = BindingConfig(**{k: v for k, v in (b.get("config") or {}).items() if k in valid})
         targets, contexts = self._binding_targets(runs, built)
@@ -652,7 +655,8 @@ class Workflow:
             for i in range(n_rep):
                 # replica i starts from MD replica i (cycled) with its own seed → independent SMD/umbrella paths
                 rdir = case.dir / "runs" / md_runs[i % len(md_runs)]
-                rcfg = BindingConfig(**{**cfg.to_dict(), "seed": cfg.seed + 1000 * i})
+                rcfg = BindingConfig(**{**cfg.to_dict(), "seed": cfg.seed + 1000 * i,
+                                        "extra_windows": list((b.get("manual_windows") or {}).get(name, []))})
                 odir = self.dir / "binding" / name.replace(":", "_")
                 res = run_binding(bm["system_xml"], bm["topology_pdb"], rdir / "stages" / "production" / "production_state.xml",
                                   odir if n_rep == 1 else odir / f"rep{i + 1}",

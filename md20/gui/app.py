@@ -12,8 +12,9 @@ from ..project import Project
 from ..util import default_projects_dir, load_json, safe_name
 from ..workflow import Workflow
 from .logic import Runner, config_from_form, list_workflows, pose_table, set_pose_choice
-from .actions import apply_gate_action
-from .views import gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html
+from .actions import apply_gate_action, resample_range
+from .views import (gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html,
+                    coverage_targets, coverage_chart, coverage_summary)
 
 RUNNER = Runner()
 STATE: dict = {"projects_dir": default_projects_dir(), "platform": None, "doctor": None}
@@ -175,7 +176,8 @@ def workflow_page(project: str, name: str):
         poses.on("rowClick", pick)
         # ---- WP13: gate cards / live curves / timeline / offline 3D -------------------------------------
         with ui.tabs().classes("w-full") as tabs:
-            t_gate, t_live, t_time, t_3d = (ui.tab("閘門"), ui.tab("即時曲線"), ui.tab("時間軸"), ui.tab("3D 檢視"))
+            t_gate, t_live, t_umb, t_time, t_3d = (ui.tab("閘門"), ui.tab("即時曲線"), ui.tab("傘狀採樣覆蓋"),
+                                                   ui.tab("時間軸"), ui.tab("3D 檢視"))
         with ui.tab_panels(tabs, value=t_gate).classes("w-full"):
             with ui.tab_panel(t_gate):
                 cards_box = ui.column().classes("w-full gap-2")
@@ -188,6 +190,33 @@ def workflow_page(project: str, name: str):
                 with ui.row().classes("w-full"):
                     ch_f = ui.echart(echart_options([], title="SMD 拉力", x="r (nm)", y="kJ/mol/nm")).classes("w-[48%] h-60")
                     ch_w = ui.echart(echart_options([], title="SMD 功", x="r (nm)", y="kJ/mol")).classes("w-[48%] h-60")
+            with ui.tab_panel(t_umb):
+                ui.label("每個 window 的取樣分佈（細線）與合併樣本（面積）；紅色 = 斷點，PMF 在那裡不可信。"
+                         "自動補窗會由大缺口到小缺口補齊；若你看到想補的區間，輸入範圍後按「補採樣」。").classes("text-sm")
+                cov_pick = ui.select({}, label="結合目標").classes("w-96")
+                cov_info = ui.label("").classes("text-sm")
+                ch_cov = ui.echart(coverage_chart({})).classes("w-full h-80")
+                with ui.row().classes("items-end gap-2"):
+                    rs_lo = ui.number("從 (nm)", step=0.01, format="%.3f").classes("w-32")
+                    rs_hi = ui.number("到 (nm)", step=0.01, format="%.3f").classes("w-32")
+                    rs_k = ui.number("k（選填，kJ/mol/nm²）", step=100).classes("w-48")
+                    rs_note = ui.input("備註（為什麼補這段）").classes("w-72")
+
+                    def do_resample():
+                        job = RUNNER.get(wf)
+                        if job and job.thread and job.thread.is_alive():
+                            ui.notify("流程執行中；請先暫停再補採樣", type="warning"); return
+                        if not cov_pick.value or rs_lo.value is None or rs_hi.value is None:
+                            ui.notify("請選擇結合目標並輸入範圍", type="warning"); return
+                        target = cov_pick.value.split("|")[0]
+                        try:
+                            out = resample_range(wf, target, float(rs_lo.value), float(rs_hi.value),
+                                                 k=float(rs_k.value) if rs_k.value else None, note=rs_note.value or "")
+                        except ValueError as exc:
+                            ui.notify(str(exc), type="negative"); return
+                        ui.notify(f"{target}：在此區間新增 {len(out['windows'])} 個 window（k {out['k']:.0f}、間距 "
+                                  f"{out['spacing_nm']:.3f} nm）；按「開始／繼續」執行，已完成的 window 不重跑。", type="positive")
+                    ui.button("補採樣", on_click=do_resample).props("color=primary")
             with ui.tab_panel(t_time):
                 time_box = ui.column().classes("w-full gap-1")
             with ui.tab_panel(t_3d):
@@ -204,6 +233,7 @@ def workflow_page(project: str, name: str):
                     pick3d.on_value_change(lambda _: show3d())
                     show3d()
         cards_sig = {"v": None}
+        cov_sig = {"v": None}
         time_sig = {"v": None}
 
         def refresh():
@@ -227,6 +257,16 @@ def workflow_page(project: str, name: str):
                 prog.set_text(f"{pg['stage']}：{pg['pct']}%" + (f"（傘狀採樣 window {ls['umbrella']['window']}/{ls['umbrella']['n']}）"
                                                                if ls.get("umbrella") else ""))
                 bar.set_value((pg["pct"] or 0) / 100.0)
+            tg = coverage_targets(wf)
+            opts = {f"{t['target']}|{t['dir']}": t["label"] for t in tg}
+            if opts != cov_pick.options:
+                cov_pick.set_options(opts, value=cov_pick.value if cov_pick.value in opts else (next(iter(opts), None)))
+            if cov_pick.value:
+                cov = load_json(Path(cov_pick.value.split("|", 1)[1]) / "coverage.json", {})
+                if cov.get("updated_at") != cov_sig["v"]:
+                    cov_sig["v"] = cov.get("updated_at")
+                    ch_cov.options.clear(); ch_cov.options.update(coverage_chart(cov)); ch_cov.update()
+                    cov_info.set_text(coverage_summary(cov))
             cards = gate_cards(wf)
             if cards != cards_sig["v"]:
                 cards_sig["v"] = cards

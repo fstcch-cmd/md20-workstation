@@ -33,7 +33,11 @@ class BindingConfig:
     pull_velocity_nm_per_ps: float = 0.01  # 10 m/s — fast teaching default; research: 0.001–0.005
     k_pull: float = 1000.0                 # kJ/mol/nm² SMD spring
     k_umbrella: float = 1000.0             # kJ/mol/nm² window spring
-    target_overlap: float = 0.25
+    target_overlap: float = 0.2            # neighbouring windows (and the adaptive refinement's stop criterion)
+    k_umbrella_max: float = 5000.0         # stiffest spring refinement may use on steep stretches
+    max_refine_rounds: int = 6
+    max_new_per_round: int = 12
+    extra_windows: list = field(default_factory=list)   # manual "resample a–b": [{"center", "k"}] from plan_range
     window_equil_ps: float = 10.0
     window_prod_ps: float = 50.0
     sample_every_steps: int = 50
@@ -345,77 +349,156 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                "plan": plan.to_dict(), "sealed_at": now_iso()}
         atomic_write_json(smd, smd_file)
     del ctx, integ
-    # ------------------------------------------------------------------ umbrella windows
+    # ------------------------------------------------------------------ umbrella windows (adaptive, coarse → fine)
+    from .adaptive import plan_refinement, coverage_view, continuity_report
     eq_steps = int(cfg.window_equil_ps * 1000 / cfg.timestep_fs)
     pr_steps = int(cfg.window_prod_ps * 1000 / cfg.timestep_fs)
     samples: dict[float, np.ndarray] = {}
     finals: dict[float, str] = {}
+    k_file = wdir / "windows_k.json"
+    ks: dict[float, float] = {float(c): float(v) for c, v in load_json(k_file, {}).items() if not c.startswith("_")}
+    refine_log: list[dict] = load_json(out / "refine_log.json", [])
 
     def wfile(c: float, kind: str) -> Path:
         return wdir / f"w_{c:.4f}_{kind}"
 
-    def run_window(c: float, start_xml: str, seed: int) -> bool:
-        npy = wfile(c, "cv.npy")
-        if npy.is_file():
-            samples[c] = np.load(npy)
-            finals[c] = str(wfile(c, "final.xml"))
-            return True
-        if should_pause is not None and (reason := should_pause()):
-            manifest.update({"status": "PAUSED", "reason": reason, "windows_done": len(samples)})
-            atomic_write_json(manifest, out / "binding_manifest.json")
-            return False
+    def write_coverage(status: str) -> None:
+        """Live data for the GUI coverage chart, rewritten after every window."""
+        view = coverage_view(samples, ks) if len(samples) >= 1 else {}
+        atomic_write_json({"status": status, "updated_at": now_iso(), "d0_nm": d0,
+                           "cv_range_nm": [d0, d0 + cfg.pull_distance_nm], "rounds": refine_log, **view},
+                          out / "coverage.json")
+
+    def sim_window(c: float, k: float, start_xml: str, seed: int, equilibrate: bool) -> tuple[np.ndarray, str]:
         ctx, integ = _make_context(system, pos, platform_name, platform_properties, cfg, seed)
         ctx.setState(XmlSerializer.deserialize(Path(start_xml).read_text(encoding="utf-8")))
         if "msw_restraint_scale" in ctx.getParameters():
             ctx.setParameter("msw_restraint_scale", cfg.backbone_restraint_scale)
         if "msw_fb_scale" in ctx.getParameters():
             ctx.setParameter("msw_fb_scale", 0.0)
-        ctx.setParameter("k_cv", cfg.k_umbrella)
+        ctx.setParameter("k_cv", float(k))
         ctx.setParameter("r0_cv", float(c))
-        integ.step(eq_steps)
+        if equilibrate:
+            integ.step(eq_steps)
         vals = []
         for _ in range(0, pr_steps, cfg.sample_every_steps):
             integ.step(cfg.sample_every_steps)
-            xyz, box = _state_xyz_box(ctx)
-            vals.append(cv_distance(xyz, box, anchor, ligand, masses))
+            xyz_, box_ = _state_xyz_box(ctx)
+            vals.append(cv_distance(xyz_, box_, anchor, ligand, masses))
         arr = np.asarray(vals)
         if not np.all(np.isfinite(arr)):
             raise RuntimeError(f"window {c:.3f} nm 出現 NaN")
-        wfile(c, "final.xml").write_text(XmlSerializer.serialize(ctx.getState(getPositions=True, getVelocities=True)), encoding="utf-8")
-        np.save(npy, arr)
-        samples[c], finals[c] = arr, str(wfile(c, "final.xml"))
+        xml = XmlSerializer.serialize(ctx.getState(getPositions=True, getVelocities=True))
         del ctx, integ
+        return arr, xml
+
+    def paused() -> bool:
+        if should_pause is not None and (reason := should_pause()):
+            manifest.update({"status": "PAUSED", "reason": reason, "windows_done": len(samples)})
+            atomic_write_json(manifest, out / "binding_manifest.json")
+            write_coverage("PAUSED")
+            return True
+        return False
+
+    def run_window(c: float, start_xml: str, seed: int, k: float) -> bool:
+        npy = wfile(c, "cv.npy")
+        if npy.is_file():
+            samples[c] = np.load(npy)
+            finals[c] = str(wfile(c, "final.xml"))
+            ks.setdefault(c, float(k))
+            return True
+        if paused():
+            return False
+        arr, xml = sim_window(c, k, start_xml, seed, equilibrate=True)
+        wfile(c, "final.xml").write_text(xml, encoding="utf-8")
+        np.save(npy, arr)
+        samples[c], finals[c], ks[c] = arr, str(wfile(c, "final.xml")), float(k)
+        atomic_write_json({f"{kc:.4f}": kv for kc, kv in ks.items()}, k_file)
+        write_coverage("RUNNING")
         if progress_cb:
-            progress_cb({"stage": "umbrella", "window": len(samples), "n": len(centers), "mean": float(arr.mean())})
+            progress_cb({"stage": "umbrella", "window": len(samples), "n": max(len(samples), len(centers)),
+                         "mean": float(arr.mean()), "k": float(k), "continuous": continuity_report(samples)["continuous"]
+                         if len(samples) >= 2 else None})
         return True
+
+    def extend_window(c: float, rnd: int) -> bool:
+        """More samples for a window (continue from its last frame; no re-equilibration) — never a duplicate window."""
+        marker = wfile(c, f"ext{rnd}.done")
+        if marker.is_file():
+            return True
+        if paused():
+            return False
+        arr, xml = sim_window(c, ks[c], finals[c], cfg.seed + 104729 + rnd + int(c * 1e4), equilibrate=False)
+        samples[c] = np.concatenate([samples[c], arr])
+        np.save(wfile(c, "cv.npy"), samples[c])
+        wfile(c, "final.xml").write_text(xml, encoding="utf-8")
+        marker.write_text(now_iso(), encoding="utf-8")
+        write_coverage("RUNNING")
+        return True
+
+    smd_starts = [(float(v["cv"]), v["path"]) for v in smd.get("window_starts", {}).values()]
+
+    def start_for(c: float) -> str:
+        """Start a new window from the configuration that actually sampled closest to c (a finished window's last
+        frame, judged by its sampled mean — not its centre) or the nearest SMD frame."""
+        cands = [(abs(float(np.mean(samples[w])) - c), finals[w]) for w in samples] + [(abs(cv - c), pth) for cv, pth in smd_starts]
+        return min(cands)[1]
 
     centers = [float(c) for c in smd["plan"]["centers_nm"]]
     for w, c in enumerate(centers):
-        if not run_window(c, smd["window_starts"][str(w)]["path"], cfg.seed + 17 * (w + 1)):
+        if not run_window(c, smd["window_starts"][str(w)]["path"], cfg.seed + 17 * (w + 1), cfg.k_umbrella):
             return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[manifest.get("reason", "")])
-    # automatic refinement: add windows where neighbours do not overlap (max 2 rounds, ≤ 12 extra windows)
-    from .pmf import umbrella_quality
-    added = []
-    for rnd in range(2):
-        q, _, _ = umbrella_quality(samples, target_overlap=cfg.target_overlap * 0.6)
-        new = [float(round(c, 4)) for c in (q.get("insert_centers_nm") or []) if float(round(c, 4)) not in samples][:6]
-        if not new:
+    # manual "resample a–b" windows requested by the user (GUI coverage chart → plan_range → config)
+    manual = []
+    for i, ew in enumerate(cfg.extra_windows or []):
+        c, k = float(round(float(ew["center"]), 4)), float(ew.get("k") or cfg.k_umbrella)
+        if c not in samples:
+            if not run_window(c, start_for(c), cfg.seed + 6151 + i, k):
+                return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[manifest.get("reason", "")])
+            manual.append(c)
+    if manual and decisions:
+        decisions.record("binding.windows", "manual resample", [round(c, 3) for c in manual],
+                         "使用者在覆蓋圖上指定區間補採樣（plan_range：依附近斜率決定 k 與中心偏移）。", kind="human")
+    # adaptive refinement: large holes first, then the residual small ones; extend instead of duplicating
+    added: list[float] = []
+    final_plan = None
+    for rnd in range(cfg.max_refine_rounds):
+        rp = plan_refinement(samples, ks, temperature_k=cfg.temperature_k, target_overlap=cfg.target_overlap,
+                             k_max=cfg.k_umbrella_max, max_new_per_round=cfg.max_new_per_round,
+                             max_total_windows=cfg.max_windows, cv_range=(d0, d0 + cfg.pull_distance_nm),
+                             min_effective_samples=min(100.0, 0.25 * pr_steps / cfg.sample_every_steps))
+        final_plan = rp
+        entry = {"round": rnd + 1, "insert": rp.insert, "extend": [e["center"] for e in rp.extend],
+                 "holes": rp.holes, "unsamplable": rp.unsamplable, "notes": rp.notes, "continuous": rp.continuous}
+        if not refine_log or refine_log[-1].get("round") != rnd + 1:
+            refine_log.append(entry)
+        else:
+            refine_log[-1] = entry
+        atomic_write_json(refine_log, out / "refine_log.json")
+        if rp.done or (not rp.insert and not rp.extend):
             break
-        for c in new:
-            near = min(finals, key=lambda x: abs(x - c))
-            if not run_window(c, finals[near], cfg.seed + 7919 + len(samples)):
+        for e in rp.extend:
+            if not extend_window(float(e["center"]), rnd + 1):
+                return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[manifest.get("reason", "")])
+        for j, ins in enumerate(rp.insert):
+            c = float(ins["center"])
+            if not run_window(c, start_for(c), cfg.seed + 7919 * (rnd + 1) + j, float(ins["k"])):
                 return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[manifest.get("reason", "")])
             added.append(c)
-            centers.append(c)
-    if added and decisions:
-        decisions.record("binding.windows", "auto-refine", [round(c, 3) for c in added],
-                         "相鄰 window 的分佈重疊不足（PMF 會斷裂）；自動在缺口中點補 window，起始結構取最近 window 的末態。")
+        if decisions:
+            decisions.record("binding.windows", f"refine round {rnd + 1}",
+                             {"insert": [(round(i["center"], 3), i["k"]) for i in rp.insert],
+                              "extend": [round(e["center"], 3) for e in rp.extend]},
+                             "；".join(dict.fromkeys(i["why"] for i in rp.insert)) or "只延長樣本不足的 window。")
+    cont = continuity_report(samples)
+    write_coverage("DONE")
     centers = sorted(samples)
     # ------------------------------------------------------------------ PMF + ΔG
-    pres = pmf_from_windows(samples, force_constant_kj_mol_nm2=cfg.k_umbrella, temperature_k=cfg.temperature_k,
+    pres = pmf_from_windows(samples, force_constant_kj_mol_nm2=dict(ks), temperature_k=cfg.temperature_k,
                             out_dir=out, n_bootstrap=100)
-    res = BindingResult(status="PASS", d_bound_nm=d0, smd=smd, windows=[{"center_nm": c, "n": int(len(samples[c])),
-                        "mean_nm": float(samples[c].mean()), "sd_nm": float(samples[c].std()), "added": c in added} for c in centers])
+    res = BindingResult(status="PASS", d_bound_nm=d0, smd=smd, windows=[{"center_nm": c, "k": ks[c], "n": int(len(samples[c])),
+                        "mean_nm": float(samples[c].mean()), "sd_nm": float(samples[c].std()), "added": c in added,
+                        "manual": c in manual} for c in centers])
     rp = radial_pmf(pres, cfg.temperature_k)
     g, Wv, err = rp["grid"], rp["W"], rp["err"]
     res.delta_pmf_kj_mol, res.dG_standard_kj_mol = rp["delta_pmf"], rp["dG"]
@@ -430,9 +513,9 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     try:
         h1 = {c: v[: len(v) // 2] for c, v in samples.items()}
         h2 = {c: v[len(v) // 2:] for c, v in samples.items()}
-        a = radial_pmf(pmf_from_windows(h1, force_constant_kj_mol_nm2=cfg.k_umbrella, temperature_k=cfg.temperature_k,
+        a = radial_pmf(pmf_from_windows(h1, force_constant_kj_mol_nm2=dict(ks), temperature_k=cfg.temperature_k,
                                         n_bootstrap=0), cfg.temperature_k)
-        b = radial_pmf(pmf_from_windows(h2, force_constant_kj_mol_nm2=cfg.k_umbrella, temperature_k=cfg.temperature_k,
+        b = radial_pmf(pmf_from_windows(h2, force_constant_kj_mol_nm2=dict(ks), temperature_k=cfg.temperature_k,
                                         n_bootstrap=0), cfg.temperature_k)
         half = {"first_half_dpmf": a["delta_pmf"], "second_half_dpmf": b["delta_pmf"],
                 "diff_kj_mol": round(abs(a["delta_pmf"] - b["delta_pmf"]), 3)}
@@ -454,6 +537,15 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         "ΔG° 以徑向積分與 1 M 標準態估算，未包含方向／構形約束校正；適合比較配體間趨勢。",
         "SMD 的功與拉伸速度有關（不可逆），只有 PMF 是自由能剖面。",
     ]
+    res.pmf["coverage"] = {"continuous": cont["continuous"], "breaks": cont["breaks"], "n_windows": len(samples),
+                           "n_added": len(added), "n_manual": len(manual), "k_values": sorted({round(v, 1) for v in ks.values()}),
+                           "rounds": len(refine_log), "unsamplable": final_plan.unsamplable if final_plan else []}
+    if not cont["continuous"]:
+        res.caveats.insert(1, f"CV 取樣仍有斷點 {cont['breaks']} nm（自動補窗 {len(refine_log)} 輪後）；PMF 在斷點處不可信，"
+                              "不輸出 ΔG°。可在覆蓋圖上指定該區間補採樣，或提高 k_umbrella_max。")
+        res.dG_standard_kj_mol = res.dG_standard_kcal_mol = None
+        res.dG_err_kj_mol = None
+        res.pmf["dG_withheld"] = "sampling discontinuous"
     if not res.pmf["quality"].get("graph_connected", True) or not pres.converged:
         res.caveats.insert(1, "PMF 未收斂或 window overlap 不足（見直方圖）；不輸出 ΔG°，只保留 ΔPMF 作定性參考。")
         res.dG_standard_kj_mol = res.dG_standard_kcal_mol = None

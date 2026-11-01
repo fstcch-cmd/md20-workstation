@@ -33,12 +33,27 @@ class StageSpec:
     regenerate_velocities: bool = False
     seed: int = 2026
     accept: dict = field(default_factory=dict)  # acceptance thresholds, e.g. {"temp_tol_k":5,"density_cv":0.03}
+    # per-group restraint multipliers {group: [start, end]} on top of msw_restraint_scale (see engine/restraints.py);
+    # empty = the single global schedule above (pre-strategy behaviour)
+    restraint_groups: dict = field(default_factory=dict)
+    freeze: bool = False                        # use the build's frozen-atom set (mass 0) in this stage
 
     def steps(self) -> int:
         return max(1, int(round(self.length_ps * 1000.0 / self.timestep_fs)))
 
     def interval_steps(self, ps: float) -> int:
         return max(1, int(round(ps * 1000.0 / self.timestep_fs)))
+
+
+def _stage_dict(s: StageSpec) -> dict:
+    """asdict without the optional fields at their defaults, so protocols (and their hashes) written before those
+    fields existed are unchanged — runs in progress keep resuming."""
+    d = asdict(s)
+    if not d.get("restraint_groups"):
+        d.pop("restraint_groups", None)
+    if not d.get("freeze"):
+        d.pop("freeze", None)
+    return d
 
 
 @dataclass
@@ -51,7 +66,7 @@ class Protocol:
 
     def to_dict(self) -> dict:
         return {"tier": self.tier, "hmr": self.hmr, "replicas": self.replicas, "notes": self.notes,
-                "stages": [asdict(s) for s in self.stages]}
+                "stages": [_stage_dict(s) for s in self.stages]}
 
     @classmethod
     def from_dict(cls, d: dict) -> "Protocol":

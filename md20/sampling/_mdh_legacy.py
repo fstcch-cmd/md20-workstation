@@ -933,6 +933,17 @@ def _logsumexp(a: np.ndarray, axis: int | None = None) -> np.ndarray:
     return out
 
 
+def _k_column(force_constant, n_windows: int) -> np.ndarray:
+    """Umbrella force constant(s) as a (K, 1) column: one shared k, or one per window (adaptive refinement uses
+    stiffer springs where the PMF is steep)."""
+    k = np.asarray(force_constant, dtype=float).reshape(-1)
+    if k.size == 1:
+        return np.full((n_windows, 1), float(k[0]))
+    if k.size != n_windows:
+        raise ValueError(f"{k.size} force constants for {n_windows} windows")
+    return k.reshape(-1, 1)
+
+
 def stable_wham_1d(
     sample_lists: Sequence[Sequence[float]],
     centers_nm: Sequence[float],
@@ -970,7 +981,7 @@ def stable_wham_1d(
     u_kl = (
         beta
         * 0.5
-        * float(force_constant_kj_mol_nm2)
+        * _k_column(force_constant_kj_mol_nm2, K)
         * (grid[None, :] - centers[:, None]) ** 2
     )
 
@@ -1039,7 +1050,7 @@ def mbar_pmf_1d(
     u_kn = (
         beta
         * 0.5
-        * float(force_constant_kj_mol_nm2)
+        * _k_column(force_constant_kj_mol_nm2, len(centers))
         * (x_n[None, :] - centers[:, None]) ** 2
     )
     mbar = MBAR(

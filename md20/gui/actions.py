@@ -161,3 +161,61 @@ def apply_gate_action(wf, action: dict, text: str = "") -> dict:
     wf.dec.record("gui.gate", action.get("gate", ""), action["label"], why, kind="human",
                   patch=[{"path": p["path"], "value": text if p["value"] == "{text}" else p["value"]} for p in action["patch"]])
     return {"config": new, "invalidated": dropped}
+
+
+# ------------------------------------------------------------------------------- umbrella: manual range resampling
+def binding_dirs(wf, target: str) -> list:
+    from pathlib import Path
+    tdir = Path(wf.dir) / "binding" / target.replace(":", "_")
+    reps = sorted(p for p in tdir.glob("rep*") if p.is_dir())
+    return reps or ([tdir] if tdir.is_dir() else [])
+
+
+def load_windows(odir) -> tuple[dict, dict]:
+    """{centre: samples} and {centre: k} from a binding output directory (w_<c>_cv.npy + windows_k.json)."""
+    import numpy as np
+    from pathlib import Path
+    wdir = Path(odir) / "windows"
+    kmap = {float(c): float(v) for c, v in load_json(wdir / "windows_k.json", {}).items() if not c.startswith("_")}  # skip stamp
+    samples = {}
+    for f in sorted(wdir.glob("w_*_cv.npy")):
+        c = float(f.name[2:].split("_cv")[0])
+        samples[c] = np.load(f)
+    return samples, {c: kmap.get(c, 1000.0) for c in samples}
+
+
+def resample_range(wf, target: str, lo_nm: float, hi_nm: float, *, k: float | None = None, note: str = "") -> dict:
+    """The student marks a stretch of the coverage chart: plan windows there (plan_range), add them to this target's
+    `binding.manual_windows`, and reopen only this target — finished windows are reused, refinement then continues
+    and the PMF is recomputed."""
+    from ..sampling.adaptive import plan_range
+    from ..sampling.binding import BindingConfig
+    dirs = binding_dirs(wf, target)
+    if not dirs:
+        raise ValueError(f"{target} 還沒有傘狀採樣結果可以補")
+    samples, ks = load_windows(dirs[0])
+    if not samples:
+        raise ValueError(f"{target} 還沒有完成的 window")
+    cfg = load_json(wf.dir / "config.json", wf.cfg)
+    bc = BindingConfig(**{kk: v for kk, v in ((cfg.get("binding") or {}).get("config") or {}).items()
+                          if kk in BindingConfig.__dataclass_fields__})
+    plan = plan_range(lo_nm, hi_nm, samples, ks, temperature_k=bc.temperature_k, target_overlap=bc.target_overlap,
+                      k=k, k_max=bc.k_umbrella_max, base_k=bc.k_umbrella)
+    mw = cfg.setdefault("binding", {}).setdefault("manual_windows", {})
+    have = {round(float(w["center"]), 4) for w in mw.get(target, [])}
+    new = [{"center": w["center"], "k": w["k"]} for w in plan["windows"] if round(w["center"], 4) not in have]
+    mw.setdefault(target, []).extend(new)
+    atomic_write_json(cfg, wf.dir / "config.json")
+    wf.cfg = cfg
+    st = wf.state()
+    b = st["steps"].get("binding")
+    if b:
+        (b.get("results") or {}).pop(target, None)
+        b["status"] = "PENDING"
+    st["steps"].pop("report", None)
+    atomic_write_json(st, wf.state_path)
+    wf.dec.record("gui.umbrella", target, f"resample {min(lo_nm, hi_nm):.3f}–{max(lo_nm, hi_nm):.3f} nm",
+                  (plan["windows"][0]["why"] if plan["windows"] else "") + (f" 使用者備註：{note}" if note else "")
+                  + f" 新增 {len(new)} 個 window；其餘結合目標不重算。", kind="human",
+                  windows=new, replicas=len(dirs))
+    return {"windows": new, "k": plan["k"], "spacing_nm": plan["spacing_nm"], "breaks_in_range": plan["breaks_in_range"]}

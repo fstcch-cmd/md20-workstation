@@ -25,6 +25,7 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 | **金屬擬合參數** | test_metal_params | QM Hessian(Gaussian fchk / ORCA hess)→ 內座標轉換擬合鍵/角力常數(對已知諧和模型**完全還原**,含共用角);cluster 與蛋白位點以元素+最佳置換疊合對應;MCPB.py frcmod/mol2/pdb 轉譯(鍵角查表、RESP 電荷、原子名一致性);JSON 匯入;檢查閘門(r0 與晶體差、力常數範圍、電荷整數與力場一致);QM 小模型輸入產生(Cα 封端、電荷/多重度、開殼層擋關) |
 | **GUI 檢視(WP13)** | test_gui_views、test_gui_logic | 閘門卡片、時間軸、即時曲線、3D 場景;**離線 3D viewer 在 headless Chromium 實際繪圖且無 JS 錯誤**(含互作/表面切換);pose 表顯示短 MD 結果 |
 | **閘門一鍵決定** | test_gate_actions | 選項→設定修補(structure_override、metal_policy、human_choices、box、skip_redock、CPP、peptide_policy);需理由的選項必填;寫回 config.json、記 human 決策、自該步驟起失效重跑;**沒實作的選項不給按鈕、閘門維持擋關**(受體長 loop/未知殘基等) |
+| **傘狀採樣智慧補窗** | test_adaptive_windows、test_umbrella_manual | 合成自由能剖面＋精確偏壓取樣:陡牆案例舊規則留斷點、新規則補成連續且 PMF 誤差較小;每 window 各自 k 的 WHAM/MBAR;極端能障明確回報補不起來;覆蓋圖資料、手動區間補採樣只重開單一目標(真實 OpenMM 路徑待 CI) |
 | **3D 互作標示** | test_gui_views | 逐幀幾何互作(氫鍵候選 N/O ≤3.5 Å 未檢查角度、疏水 C–C ≤4.0 Å、配體–金屬 ≤2.8 Å)+ 殘基佔有率表;vdW 球表面近似 |
 | 工作流程閘門 | test_workflow_gates | 共晶盒必做 redocking、盲對接需同意、結合計算加大 padding、**binding 讀取組裝後原子索引(L01 迴歸)** |
 | 胜肽/CPP、結構可信度、續跑/鎖、資源模式、PMF/採樣、專案/佇列/報告/doctor/stamp | 各檔 | 同前版 |

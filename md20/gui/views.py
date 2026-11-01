@@ -353,3 +353,55 @@ def scene_for(target: dict, *, max_frames: int = 60) -> dict:
         return scene_from_run(target["run_dir"], target["topology_pdb"], ligand_indices=target["ligand_indices"] or None,
                               max_frames=max_frames)
     return scene_from_pdb(target["topology_pdb"], ligand_indices=target["ligand_indices"] or None)
+
+
+# ------------------------------------------------------------------------------ umbrella coverage (live)
+def coverage_targets(wf) -> list[dict]:
+    """Binding targets that have (or are writing) a coverage.json — one entry per replica directory."""
+    root = Path(wf.dir) / "binding"
+    out = []
+    if not root.is_dir():
+        return out
+    for tdir in sorted(p for p in root.iterdir() if p.is_dir()):
+        reps = sorted(p for p in tdir.glob("rep*") if p.is_dir()) or [tdir]
+        for r in reps:
+            if (r / "coverage.json").is_file():
+                name = tdir.name.replace("_", ":", 1) if tdir.name.startswith("multi_") else tdir.name
+                out.append({"target": name, "dir": str(r),
+                            "label": name + (f"（{r.name}）" if r != tdir else "")})
+    return out
+
+
+def coverage_chart(cov: dict) -> dict:
+    """ECharts option: pooled samples per CV bin (area) + each window's histogram (thin lines); breaks shaded red."""
+    edges = cov.get("edges") or []
+    if len(edges) < 2:
+        return {"title": {"text": "尚無取樣", "textStyle": {"fontSize": 12}}, "xAxis": {}, "yAxis": {}, "series": []}
+    mids = [round((a + b) / 2, 4) for a, b in zip(edges[:-1], edges[1:])]
+    series = [{"name": "合併樣本", "type": "line", "step": "middle", "showSymbol": False, "areaStyle": {"opacity": 0.25},
+               "lineStyle": {"width": 1.5}, "data": [[x, y] for x, y in zip(mids, cov.get("pooled") or [])],
+               "markArea": {"itemStyle": {"color": "rgba(220,38,38,0.25)"},
+                            "data": [[{"xAxis": lo, "name": "斷點"}, {"xAxis": hi}] for lo, hi in cov.get("breaks") or []]}}]
+    for w in cov.get("windows") or []:
+        series.append({"name": f"{w['center']:.3f}" + (f" (k {w['k']:.0f})" if w.get("k") else ""), "type": "line",
+                       "showSymbol": False, "lineStyle": {"width": 0.8, "opacity": 0.7},
+                       "data": [[x, y] for x, y in zip(mids, w["counts"]) if y > 0]})
+    rng = cov.get("cv_range_nm") or [mids[0], mids[-1]]
+    state = "連續" if cov.get("continuous") else f"{len(cov.get('breaks') or [])} 個斷點"
+    return {"title": {"text": f"CV 取樣覆蓋（{len(cov.get('windows') or [])} 個 window，{state}）", "textStyle": {"fontSize": 12}},
+            "tooltip": {"trigger": "axis"}, "legend": {"show": False},
+            "xAxis": {"type": "value", "name": "anchor–配體 COM 距離 (nm)", "min": round(min(rng[0], mids[0]), 3),
+                      "max": round(max(rng[1], mids[-1]), 3)},
+            "yAxis": {"type": "value", "name": "樣本數"}, "series": series, "grid": {"left": 60, "right": 20}}
+
+
+def coverage_summary(cov: dict) -> str:
+    rounds = cov.get("rounds") or []
+    parts = [f"狀態：{cov.get('status', '')}", f"window {len(cov.get('windows') or [])} 個",
+             "取樣連續" if cov.get("continuous") else "斷點（紅色）：" + "、".join(f"{a:.3f}–{b:.3f} nm" for a, b in cov.get("breaks") or [])]
+    if rounds:
+        last = rounds[-1]
+        parts.append(f"自動補窗第 {last['round']} 輪：補 {len(last.get('insert') or [])}、延長 {len(last.get('extend') or [])}")
+        if last.get("unsamplable"):
+            parts.append("在 k 上限仍取樣不到：" + "、".join(f"{a:.3f}–{b:.3f}" for a, b in last["unsamplable"]))
+    return "；".join(parts)

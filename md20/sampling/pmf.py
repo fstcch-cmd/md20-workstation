@@ -49,13 +49,16 @@ def umbrella_quality(samples_by_center: dict[float, np.ndarray], *, target_overl
     return mdh.quality_report_to_dict(report), eq, unc
 
 
-def pmf_from_windows(samples_by_center: dict[float, np.ndarray], *, force_constant_kj_mol_nm2: float,
+def pmf_from_windows(samples_by_center: dict[float, np.ndarray], *, force_constant_kj_mol_nm2: float | dict,
                      temperature_k: float = 300.0, out_dir: Path | str | None = None, n_bootstrap: int = 100,
                      bins: int = 200, prefer_mbar: bool = True, seed: int = 2026) -> PMFResult:
+    """`force_constant_kj_mol_nm2`: one k for all windows, or {center: k} when refinement used stiffer springs."""
     centers = sorted(samples_by_center)
     quality, eq, unc = umbrella_quality(samples_by_center)
     eq_lists = [np.asarray(eq[c], dtype=float) for c in centers]
-    base = mdh.bootstrap_pmf_1d(eq_lists, centers, force_constant_kj_mol_nm2, temperature_k, bins=bins,
+    k = ([float(force_constant_kj_mol_nm2[c]) for c in centers] if isinstance(force_constant_kj_mol_nm2, dict)
+         else force_constant_kj_mol_nm2)
+    base = mdh.bootstrap_pmf_1d(eq_lists, centers, k, temperature_k, bins=bins,
                                 n_bootstrap=n_bootstrap, seed=seed, prefer_mbar=prefer_mbar)
     grid = np.asarray(base["grid_nm"], dtype=float)
     pmf = np.asarray(base["pmf_kj_mol"], dtype=float)

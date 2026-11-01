@@ -294,6 +294,8 @@ def _apply_schedule(backend: Backend, spec: StageSpec, frac: float) -> None:
         backend.set_global_parameter("msw_restraint_scale", k)
     else:
         backend.set_global_parameter("msw_restraint_scale", spec.restraint_scale)
+    for group, (a, b) in (spec.restraint_groups or {}).items():
+        backend.set_global_parameter(f"msw_rs_{group}", a + (b - a) * min(1.0, frac))
 
 
 def _ramp_target(spec: StageSpec, frac: float) -> float:

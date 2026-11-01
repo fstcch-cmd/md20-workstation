@@ -67,6 +67,10 @@
 - **第三個 session 看到的 CI(63d363b)**:Windows OpenCL 124 passed、macOS 126 passed,各僅 `test_gui_pages_render` 失敗(NiceGUI 在子行程讀到 `PYTEST_CURRENT_TEST` 就要求 `NICEGUI_SCREEN_TEST_PORT`);已在 `tests/test_gui_server.py` 把 `PYTEST_*` 從子行程環境移除。新 session 請看最新 commit 的 openmm-stack 三 OS 結果,全綠後把 STATUS 中「見 B」的項目升級。
 
 ## 6. 還沒做 / 可以接著做的
+- **規格與構想全集在 `docs/specs/`**(README 為索引,每份標明 已驗證／待 CI／設計中,並列出想請審查者回答的問題)。使用者會用更強的模型審查後回饋。
+- (第三個 session)傘狀採樣智慧補窗 `md20/sampling/adaptive.py` + 即時覆蓋圖 + 手動補採樣:已實作、純測試通過、待 CI。
+- (第三個 session)約束分組分階段／凍結／口袋截斷／資源估算:**設計中**(`docs/specs/restraints_freeze_truncation.md`);
+  引擎掛鉤 `StageSpec.restraint_groups`、`StageSpec.freeze` 已加但尚無流程使用。
 - (第三個 session 已做)金屬擬合參數 `md20/build/metal_params.py`:`metal_params: {"ZN:A262": {"source": "hessian"|"mcpb"|"json", ...}}`。
   原理:仿 MCPB.py——小模型 QM Hessian 給鍵/角力常數、RESP 給電荷、其餘沿用力場;但不依賴 AmberTools:
   Hessian 以 Wilson B 矩陣 pseudo-inverse 轉成位點內座標力常數(比 Seminario 精確,測試對已知模型完全還原),
