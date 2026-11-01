@@ -67,6 +67,11 @@ WHAM 與 MBAR 改為接受**每個 window 各自的 k**（`_mdh_legacy._k_column
     之後自動補窗繼續，PMF 重算；記人工決策。
 - PMF 若仍不連續：報告列出斷點、**不輸出 ΔG°**，並提示可手動補採樣或提高 `k_umbrella_max`。
 
+## 5b. 續跑與冪等（D-16）
+補窗進度存在 `refine_log.json`（每輪 `completed`）與 `refine_state.json`（`finished`、手動 window 簽章、起始輪次）。
+續跑從下一個未完成輪次接續；已結束則不再規劃（否則以擴大後的樣本重規劃會再加 window、改變已完成的 PMF）。
+新的手動補採樣請求會重新開啟補窗，給一份新的 `max_refine_rounds` 預算。
+
 ## 6. 設定（`binding.config`）
 `target_overlap` 0.2、`k_umbrella` 1000、`k_umbrella_max` 5000、`max_refine_rounds` 6、`max_new_per_round` 12、
 `max_windows` 40、`window_equil_ps`、`window_prod_ps`、`sample_every_steps`；手動：`binding.manual_windows`。

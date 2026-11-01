@@ -476,12 +476,24 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     if manual and decisions:
         decisions.record("binding.windows", "manual resample", [round(c, 3) for c in manual],
                          "使用者在覆蓋圖上指定區間補採樣（plan_range：依附近斜率決定 k 與中心偏移）。", kind="human")
-    # adaptive refinement: large holes first, then the residual small ones; extend instead of duplicating
-    added: list[float] = []
+    # adaptive refinement: large holes first, then the residual small ones; extend instead of duplicating.
+    # Resumable and idempotent: rounds that completed are not re-planned (re-planning on the enlarged sample set
+    # would add windows and change a finished PMF); a new manual request reopens refinement with a fresh budget.
+    added: list[float] = [c for e in refine_log for c in (i["center"] for i in e.get("insert", []))]
     final_plan = None
-    ext_count: dict[float, int] = {c: sum(1 for r in range(1, cfg.max_refine_rounds + 1) if wfile(c, f"ext{r}.done").is_file())
-                                   for c in samples}
-    for rnd in range(cfg.max_refine_rounds):
+    # extensions already done per window (any round, incl. rounds reopened by a manual request)
+    ext_count: dict[float, int] = {c: len(list(wdir.glob(f"w_{c:.4f}_ext*.done"))) for c in samples}
+    # mid-refinement resume (pause/crash): continue from the next incomplete round instead of re-planning finished
+    # rounds; a finished run is returned earlier by finished_result(); a new manual request reopens with a new budget
+    state_file = out / "refine_state.json"
+    rstate = load_json(state_file, {})
+    manual_sig = sorted(round(float(ew["center"]), 4) for ew in (cfg.extra_windows or []))
+    if rstate.get("manual") != manual_sig:
+        rstate = {"finished": False, "base_round": len([e for e in refine_log if e.get("completed")]), "manual": manual_sig}
+        atomic_write_json(rstate, state_file)
+    first = len([e for e in refine_log if e.get("completed")])
+    last = rstate["base_round"] + cfg.max_refine_rounds
+    for rnd in (range(first, last) if not rstate.get("finished") else range(0)):
         rp = plan_refinement(samples, ks, temperature_k=cfg.temperature_k, target_overlap=cfg.target_overlap,
                              k_max=cfg.k_umbrella_max, max_new_per_round=cfg.max_new_per_round,
                              max_total_windows=cfg.max_windows, cv_range=(d0, d0 + cfg.pull_distance_nm),
@@ -496,6 +508,8 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             refine_log[-1] = entry
         atomic_write_json(refine_log, out / "refine_log.json")
         if rp.done or (not rp.insert and not rp.extend):
+            refine_log[-1]["completed"] = True
+            atomic_write_json(refine_log, out / "refine_log.json")
             break
         for e in rp.extend:
             if not extend_window(float(e["center"]), rnd + 1):
@@ -506,11 +520,20 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             if not run_window(c, start_for(c), cfg.seed + 7919 * (rnd + 1) + j, float(ins["k"])):
                 return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[manifest.get("reason", "")])
             added.append(c)
+        refine_log[-1]["completed"] = True
+        atomic_write_json(refine_log, out / "refine_log.json")
         if decisions:
             decisions.record("binding.windows", f"refine round {rnd + 1}",
                              {"insert": [(round(i["center"], 3), i["k"]) for i in rp.insert],
                               "extend": [round(e["center"], 3) for e in rp.extend]},
                              "；".join(dict.fromkeys(i["why"] for i in rp.insert)) or "只延長樣本不足的 window。")
+    if not rstate.get("finished"):
+        rstate["finished"] = True
+        atomic_write_json(rstate, state_file)
+    if final_plan is None and refine_log:          # resumed after refinement had finished: report its last state
+        last_e = refine_log[-1]
+        from types import SimpleNamespace
+        final_plan = SimpleNamespace(unsamplable=last_e.get("unsamplable", []))
     cont = continuity_report(samples)
     write_coverage("DONE")
     centers = sorted(samples)
