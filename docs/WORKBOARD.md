@@ -7,7 +7,6 @@
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
 | 監看 CI：3e7f941 / c016a08 的 Ubuntu 重測（鋅模型、補窗、NaCl 冪等） | — | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 | 結果記入 STATUS / DECISIONS |
-| 會診 §0：配體質子化（規則式離子化，對接／HTS／MD 共用同一結果）、GUI 預設 127.0.0.1、舊規格標示取代 | REVIEW_ANSWERS §0 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 21:05 | |
 | 會診 §1 Q6：`md.solvent: gbn2`（WP5 篩 pose、classroom tier；binding 擋下） | REVIEW_ANSWERS §1 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 21:05 | §0 之後 |
 
 ## 待認領（依重要性）
@@ -25,6 +24,7 @@
 ## 完成
 | 項目 | session | commit |
 |---|---|---|
+| 會診 §0.1 配體質子化（pH 7.4 規則表）、§0.2 GUI 預設本機（D-18，ionize 測試待 CI） | session_016gcJz8q2F6515MWPncJEZu | 見 git log |
 | 開發文件會診（所有規格的審查問題回答＋未寫到的科學缺口＋優先順序）；此 session（ND20 審查）只做會診，不認領實作 | session_016gcJzBDnGh3heY9HLWnva3 | 6a1a833 |
 | REVIEW #15 配體直接配位金屬 → NEEDS_HUMAN；REVIEW #16 pose 對應改連接圖（D-17，待 CI） | session_016gcJz8q2F6515MWPncJEZu | 見 git log |
 | 補窗續跑冪等：已完成直接回傳（finished_result）＋中途暫停從未完成輪次接續 | 第四個 session ＋ session_016gcJz8q2F6515MWPncJEZu | 21bb0f1、c016a08 |

@@ -26,6 +26,8 @@ from .receptor_pdbqt import receptor_to_pdbqt
 class LigandInput:
     name: str
     smiles: str = ""
+    protonation: str = "auto"          # "auto": pH 7.4 major ionisation state (docking/ionize.py) | "as_given"
+    ph: float = 7.4
     sdf: str = ""                      # SDF with bond orders (preferred when available)
     reference_pose: str = ""           # optional crystal pose (PDB/SDF) for RMSD
     reference_resname: str = ""        # or: HETATM residue name inside the receptor file
@@ -59,16 +61,22 @@ class DockingResult:
 
 # --------------------------------------------------------------------------- ligand prep
 def _ligand_mol(lig: LigandInput):
+    """3D ligand in the pH-7.4 major ionisation state (unless protonation='as_given').  The protonation record is
+    stored on the molecule (prop `md20_protonation`, JSON) and copied into the docking entry."""
+    import json as _json
     from rdkit import Chem
     from rdkit.Chem import AllChem
+    from .ionize import ionize
     if lig.sdf:
         mol = next(m for m in Chem.SDMolSupplier(lig.sdf, removeHs=False) if m is not None)
-        mol = Chem.AddHs(mol, addCoords=True)
+        heavy, ion = ionize(mol, ph=lig.ph, mode=lig.protonation)
+        mol = Chem.AddHs(heavy, addCoords=heavy.GetNumConformers() > 0)   # heavy-atom coordinates kept
     else:
         mol = Chem.MolFromSmiles(lig.smiles)
         if mol is None:
             raise ValueError(f"{lig.name}: 無法解析 SMILES {lig.smiles}")
-        mol = Chem.AddHs(mol)
+        heavy, ion = ionize(mol, ph=lig.ph, mode=lig.protonation)
+        mol = Chem.AddHs(heavy)
         params = AllChem.ETKDGv3(); params.randomSeed = 2026
         if AllChem.EmbedMolecule(mol, params) != 0:
             AllChem.EmbedMolecule(mol, randomSeed=2026, useRandomCoords=True)
@@ -77,6 +85,7 @@ def _ligand_mol(lig: LigandInput):
         except Exception:  # noqa: BLE001
             AllChem.UFFOptimizeMolecule(mol, maxIters=2000)
     mol.SetProp("_Name", lig.name)
+    mol.SetProp("md20_protonation", _json.dumps(ion.to_dict(), ensure_ascii=False))
     return mol
 
 
@@ -195,9 +204,14 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
         decisions.record("docking.setup", "box", box.to_dict(), box.note or "使用者指定的 box。")
     lig_dir = out / "ligands"; lig_dir.mkdir(exist_ok=True)
     mols, pdbqts = {}, {}
+    protonation = {}
     for lig in ligands:
         mol = _ligand_mol(lig)
         mols[lig.name] = mol
+        protonation[lig.name] = json.loads(mol.GetProp("md20_protonation"))
+        if decisions and (protonation[lig.name]["changes"] or protonation[lig.name]["ambiguous"]):
+            decisions.record("docking.protonation", lig.name, protonation[lig.name]["net_charge_after"],
+                             protonation[lig.name]["why"], changes=protonation[lig.name]["changes"])
         pdbqts[lig.name] = _meeko_pdbqt(mol)
         (lig_dir / f"{lig.name}.pdbqt").write_text(pdbqts[lig.name], encoding="utf-8")
         from rdkit import Chem
@@ -245,6 +259,7 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
                 _write_pose_sdf(dmol, k, p, {"score_kcal_mol": f"{energies[k]:.3f}", "rank": k + 1, "ligand": lig.name})
                 sdfs.append(str(p))
             res.entries.append({"name": lig.name, "ligands": [lig.name], "smiles": _smiles(mols[lig.name]),
+                                "protonation": protonation[lig.name],
                                 "poses": [x.to_dict() for x in infos], "pose_sdfs": {lig.name: sdfs},
                                 "recommended_rank": pick.rank if pick else None, "reason": recinfo.get("reason", ""),
                                 "recommendation_status": recinfo.get("status", "NEEDS_HUMAN"),
@@ -290,6 +305,7 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
                 _write_pose_sdf(m, k, p, {"score_kcal_mol": f"{energies[k]:.3f}", "rank": k + 1, "ligand": nm, "joint": "+".join(names)})
                 sdfs[nm].append(str(p))
         res.entries.append({"name": "joint", "ligands": names, "smiles": {nm: _smiles(mols[nm]) for nm in names},
+                            "protonation": {nm: protonation[nm] for nm in names},
                             "poses": [x.to_dict() for x in infos], "pose_sdfs": sdfs,
                             "recommended_rank": pick.rank if pick else None, "reason": recinfo.get("reason", ""),
                             "recommendation_status": recinfo.get("status", "NEEDS_HUMAN")})

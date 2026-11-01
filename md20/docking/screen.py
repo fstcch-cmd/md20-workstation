@@ -36,6 +36,8 @@ class ScreenConfig:
     workers: int = 4                # download threads
     library: str = ""
     sheet: str | int | None = None
+    protonation: str = "auto"       # pH-7.4 major ionisation state for every compound (docking/ionize.py) | "as_given"
+    ph: float = 7.4
 
     @classmethod
     def from_cfg(cls, d: dict | None) -> "ScreenConfig":
@@ -44,8 +46,9 @@ class ScreenConfig:
 
     def params(self) -> dict:
         return {"exhaustiveness": self.exhaustiveness, "n_poses": self.n_poses, "scoring": self.scoring, "seed": self.seed,
-                "reduced_search": True,
-                "note": "篩選用縮減搜尋（exhaustiveness 低、pose 少）；分數只用於剔除，不是結合自由能。"}
+                "reduced_search": True, "protonation": self.protonation, "ph": self.ph,
+                "note": "篩選用縮減搜尋（exhaustiveness 低、pose 少）；分數只用於剔除，不是結合自由能。"
+                        "配體以 pH 主要離子態對接（PubChem/ChEMBL 給的中性結構會先離子化），與受體加氫一致。"}
 
 
 # ----------------------------------------------------------------------------- batch docking
@@ -79,7 +82,8 @@ def screen_dock(receptor_pdb: Path | str, entries: list[dict], box: Box, out_dir
                      "library_path": e.get("path", ""), "at": now_iso()}
         t1 = time.monotonic()
         try:
-            lig = LigandInput(name=name, sdf=e.get("path", ""), smiles="" if e.get("path") else e.get("smiles", ""))
+            lig = LigandInput(name=name, sdf=e.get("path", ""), smiles="" if e.get("path") else e.get("smiles", ""),
+                              protonation=getattr(cfg, "protonation", "auto"), ph=float(getattr(cfg, "ph", 7.4)))
             r = dock_fn(receptor_pdb, [lig], box, out / "poses" / name, mode="independent", scoring=cfg.scoring,
                         exhaustiveness=cfg.exhaustiveness, n_poses=cfg.n_poses, seed=cfg.seed, cpu=cfg.cpu,
                         receptor_pdbqt=rec_pdbqt)

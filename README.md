@@ -25,6 +25,7 @@ bash installer/install.sh
 
 ```text
 md20 gui                         # 圖形介面（瀏覽器）：建立流程、即時曲線、改選 pose、看報告
+                                 #   預設只本機可連（127.0.0.1）；教室要分享請加 --host 0.0.0.0（同網路任何人都能操作）
 md20 pipeline example > my.json  # 全流程範本：docking → MD（apo/docked）→ SMD＋傘狀採樣 → 報告
 md20 pipeline run my.json --project 課堂A
 md20 doctor                      # 硬體／平台／套件診斷 + 20 秒 benchmark → ns/day 與 ETA

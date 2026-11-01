@@ -257,7 +257,7 @@ def cmd_screen(a):
 
 def cmd_gui(a):
     from .gui.app import main as gui_main
-    gui_main(projects_dir=a.dir, port=a.port, show=not a.no_browser)
+    gui_main(projects_dir=a.dir, port=a.port, show=not a.no_browser, host=a.host)
     return 0
 
 
@@ -380,6 +380,7 @@ def main(argv=None) -> int:
     sc = sub.add_parser("screen", help="高通量篩選：化合物庫範本")
     sc.add_argument("action", choices=["template"]); sc.add_argument("--out", default="compound_library.xlsx"); sc.set_defaults(fn=cmd_screen)
     g = sub.add_parser("gui", help="圖形介面（瀏覽器）"); g.add_argument("--port", type=int, default=8020)
+    g.add_argument("--host", default="127.0.0.1", help="預設只本機可連；0.0.0.0 才對網路開放（教室 Wi-Fi 上任何人都能操作）")
     g.add_argument("--no-browser", action="store_true"); g.set_defaults(fn=cmd_gui)
     stp = sub.add_parser("stamp", help="檢查／解開 HCC Lab 戳記"); stp.add_argument("action", choices=["verify", "decrypt", "keygen"])
     stp.add_argument("files", nargs="*"); stp.add_argument("--key"); stp.add_argument("--out", default="."); stp.set_defaults(fn=cmd_stamp)

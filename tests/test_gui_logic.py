@@ -56,3 +56,17 @@ def test_pose_table_shows_md_screen_verdicts(tmp_path):
                       wf.dir / "pose_screen.json")
     rows = {r["rank"]: r for r in pose_table(wf)}
     assert rows[1]["md_screen"] == "不穩定（4.2 Å）" and rows[2]["md_screen"] == "穩定（1.1 Å）"
+
+
+def test_gui_listens_on_localhost_by_default(monkeypatch):
+    """Consultation §0.2: NiceGUI defaults to 0.0.0.0; on a classroom Wi-Fi that exposes every student's workstation."""
+    import md20.cli as cli
+    seen = {}
+    import types
+    fake = types.ModuleType("md20.gui.app")
+    fake.main = lambda **kw: seen.update(kw)
+    monkeypatch.setitem(__import__("sys").modules, "md20.gui.app", fake)
+    cli.main(["gui", "--no-browser"])
+    assert seen["host"] == "127.0.0.1"
+    cli.main(["gui", "--no-browser", "--host", "0.0.0.0"])
+    assert seen["host"] == "0.0.0.0"

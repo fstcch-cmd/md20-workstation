@@ -377,8 +377,12 @@ def serve_file(path: str):
     return FileResponse(p)
 
 
-def main(projects_dir: str | None = None, port: int = 8020, show: bool = True):
+def main(projects_dir: str | None = None, port: int = 8020, show: bool = True, host: str = "127.0.0.1"):
+    """Local-only by default: NiceGUI would otherwise listen on 0.0.0.0, and on a classroom Wi-Fi anyone could open
+    another student's GUI, start/pause runs, rewrite config and download project files.  `--host 0.0.0.0` opts in."""
     if projects_dir:
         STATE["projects_dir"] = Path(projects_dir)
     Path(STATE["projects_dir"]).mkdir(parents=True, exist_ok=True)
-    ui.run(title="MD20", port=port, show=show, reload=False, language="zh-TW")
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"注意：GUI 對外開放於 {host}:{port}——同一網路上的任何人都能操作此工作站與下載專案檔。", flush=True)
+    ui.run(title="MD20", host=host, port=port, show=show, reload=False, language="zh-TW")

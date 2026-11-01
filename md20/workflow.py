@@ -368,7 +368,10 @@ class Workflow:
     # ------------------------------------------------------------------ HTS pre-screen (docs/specs/hts_screen.md)
     def _screen_config(self):
         from .docking.screen import ScreenConfig
-        return ScreenConfig.from_cfg(self.cfg.get("screen"))
+        sc = dict(self.cfg.get("screen") or {})
+        sc.setdefault("ph", float(self.cfg.get("ph", 7.4)))              # same pH as the receptor protonation
+        sc.setdefault("protonation", (self.cfg.get("docking") or {}).get("protonation", "auto"))
+        return ScreenConfig.from_cfg(sc)
 
     def _library_path(self) -> Path:
         lib = (self.cfg.get("screen") or {}).get("library") or ""
@@ -531,7 +534,9 @@ class Workflow:
             smi = l.get("smiles", "")
             if l.get("sequence"):
                 smi = self._peptide_preflight(l)
-            ligs.append(LigandInput(name=l["name"], smiles=smi, sdf=l.get("sdf", ""), reference_pose=ref))
+            ligs.append(LigandInput(name=l["name"], smiles=smi, sdf=l.get("sdf", ""), reference_pose=ref,
+                                    protonation=l.get("protonation") or dcfg.get("protonation", "auto"),
+                                    ph=float(self.cfg.get("ph", 7.4))))
         exh = dcfg.get("exhaustiveness", 16)
         if any(l.get("sequence") for l in self.cfg["ligands"]) and exh < 32:
             self.dec.record("docking.setup", "exhaustiveness", 32, f"胜肽配體自由度高，exhaustiveness 由 {exh} 自動提高到 32。")
