@@ -131,3 +131,16 @@ def make_protocol(tier: str = "teaching", *, seed: int = 2026, replicas: int | N
     return Protocol(tier=tier, hmr=bool(t["hmr"]), stages=stages,
                     replicas=int(replicas if replicas is not None else (3 if tier == "research" else 1)),
                     notes=t["notes"])
+
+
+def implicit_solvent_protocol(proto: Protocol) -> Protocol:
+    """GBn2 has no box: NPT stages become NVT (the restraint release they carry is kept) and the density acceptance is
+    dropped.  Only used when the build is implicit, so explicit-solvent protocols and their hashes are unchanged."""
+    import copy
+    out = copy.deepcopy(proto)
+    for st in out.stages:
+        if st.ensemble == "NPT":
+            st.ensemble = "NVT"
+            st.accept = {k: v for k, v in (st.accept or {}).items() if k != "density_cv"}
+    out.notes = (out.notes + " " if out.notes else "") + "隱式溶劑（GBn2）：無週期盒，全部 NVT。"
+    return out

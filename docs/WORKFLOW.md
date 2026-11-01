@@ -17,6 +17,7 @@ md20 gui                                  # 或用圖形介面（瀏覽器 http:
 | `ligands` | `[{"name": "BEN", "smiles": "...", "reference_resname": "BEN"}]`；`reference_resname` 用來計算與晶體 pose 的 RMSD（redocking 驗證） |
 | `docking.mode` | `independent`：每個配體各自對接並排名；`simultaneous`：多配體同時放進同一 box（joint pose） |
 | `pose_choices` | 覆寫推薦：`{"BEN": 3}`；simultaneous 模式用 `{"joint": 2}`（人工選擇不會被短 MD 篩選覆寫） |
+| `md.solvent` | `explicit`（預設，TIP3P 水盒）或 `gbn2`（隱式溶劑：原子少 80–90%、全 NVT；金屬位點與結合自由能會被擋下）。篩 pose 可另設 `docking.pose_md_screen.solvent` |
 | `docking.protonation` | `auto`（預設）：配體以 `ph` 下的主要離子態對接（羧酸、磺酸、磷酸第一個 OH、四唑、醯基磺醯胺去質子化；脂肪胺、脒、胍質子化；咪唑、羥肟酸等 pKa 接近 7.4 的不改、只註記；已寫成帶電型的基團不動）。HTS 與 MD 用同一結果。`as_given`：照輸入。每個配體也可設 `protonation` |
 | `docking.pose_md_screen` | 短 MD 篩 pose：`{"enabled": true, "top_n": 3, "production_ps": 200, "max_rmsd_A": 2.5, "min_contact_retention": 0.5}`；research tier 預設開，其餘預設關 |
 | `metal_policy` | 金屬處理（元素或單一位點，位點優先）：`{"ZN": "bonded"}`、`{"ZN:A301": "keep_nonbonded"}`、`{"MG": "remove"}` |

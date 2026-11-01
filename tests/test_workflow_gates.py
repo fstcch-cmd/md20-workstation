@@ -120,3 +120,25 @@ def test_binding_blocks_without_indices(tmp_path):
     wf, built, runs = _binding_fixture(tmp_path, {"ligands": [{"name": "L01"}], "system_xml": "s", "topology_pdb": "t"})
     with pytest.raises(WorkflowBlocked, match="原子索引"):
         wf.binding(runs, built, SimpleNamespace(name="CPU", properties={}))
+
+
+def test_gbn2_protocol_and_binding_gate(tmp_path):
+    """GBn2: NPT stages become NVT without density acceptance; binding is blocked; the GUI can switch back."""
+    from md20.engine import make_protocol
+    from md20.engine.protocol import implicit_solvent_protocol
+    p = make_protocol("teaching")
+    q = implicit_solvent_protocol(p)
+    assert [s.ensemble for s in q.stages] == ["MIN", "NVT", "NVT", "NVT"] and [s.ensemble for s in p.stages][2] == "NPT"
+    assert all("density_cv" not in (s.accept or {}) for s in q.stages)
+    assert [s.restraint_scale for s in q.stages] == [s.restraint_scale for s in p.stages]   # release schedule kept
+    assert p.hash() != q.hash()
+    wf = _wf(tmp_path)
+    wf.cfg["md"]["solvent"] = "gbn2"
+    assert wf._solvent() == "gbn2" and wf._solvent(screen=True) == "gbn2"
+    wf.cfg["docking"]["pose_md_screen"] = {"solvent": "explicit"}
+    assert wf._solvent(screen=True) == "explicit"
+    with pytest.raises(WorkflowBlocked, match="隱式溶劑"):
+        wf.binding({}, {}, None)
+    from md20.gui.views import gate_cards
+    card = next(c for c in gate_cards(wf) if c["title"] == "implicit solvent + binding")
+    assert {a["patch"][0]["path"][0] for a in card["actions"]} == {"md", "binding"}

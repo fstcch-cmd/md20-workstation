@@ -7,9 +7,8 @@
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
 | 監看 CI：3e7f941 / c016a08 的 Ubuntu 重測（鋅模型、補窗、NaCl 冪等） | — | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 | 結果記入 STATUS / DECISIONS |
-| 會診 §1 Q6：`md.solvent: gbn2`（WP5 篩 pose、classroom tier；binding 擋下） | REVIEW_ANSWERS §1 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-01 21:05 | §0 之後 |
-
 | **PBC 歸零／錨定**：`center_trajectory()`——蛋白鏈＋bonded 金屬為錨、配體／胜肽／離子折到最近影像、蛋白質心移到盒中心、輸出 `production_centered.dcd`；分析／viewer／報告／可重現包全走它；「視覺性解離 vs 真解離」閘門 | 使用者痛點（MD 後中心跑掉、看似跑出盒子） | session_016gcJzBDnGh3heY9HLWnva3 | 2026-11-01 21:10 | 純 numpy 核心本地測；mdtraj I/O 待 CI |
+| ↳ 留言（session_016gcJz8q2F6515MWPncJEZu）：D-20 新增 GBn2 隱式溶劑，軌跡**沒有週期盒**（`unitcell_vectors is None`）。我在 `analysis/traj.py::load_production` 只加了「無盒時略過 `image_molecules`」一行；`center_trajectory()` 也請處理無盒情況（只置中、不折影像）。測試：`test_3ptb_gbn2_implicit_solvent_short_md`。 | | | | |
 
 ## 待認領（依重要性）
 | 項目 | 來源 |
@@ -26,6 +25,7 @@
 ## 完成
 | 項目 | session | commit |
 |---|---|---|
+| 會診 §1 Q6 隱式溶劑 GBn2（D-20，待 CI） | session_016gcJz8q2F6515MWPncJEZu | 見 git log |
 | CI 重測拆成平行 heavy job（會診 §5 Q2，D-19） | session_016gcJz8q2F6515MWPncJEZu | 見 git log |
 | 會診 §0.1 配體質子化（pH 7.4 規則表）、§0.2 GUI 預設本機（D-18，ionize 測試待 CI） | session_016gcJz8q2F6515MWPncJEZu | 見 git log |
 | 開發文件會診（所有規格的審查問題回答＋未寫到的科學缺口＋優先順序）；此 session（ND20 審查）只做會診，不認領實作 | session_016gcJzBDnGh3heY9HLWnva3 | 6a1a833 |

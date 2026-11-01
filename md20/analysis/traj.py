@@ -27,7 +27,8 @@ def load_production(run_dir: Path | str, topology_pdb: Path | str, *, stride: in
     if not dcds:
         raise FileNotFoundError("production 沒有 DCD；請確認 stage 已完成且 write_dcd=True")
     traj = md.load(dcds, top=str(topology_pdb), stride=stride)
-    traj.image_molecules(inplace=True)
+    if traj.unitcell_vectors is not None:            # implicit solvent (GBn2) trajectories have no box
+        traj.image_molecules(inplace=True)
     ca = traj.topology.select("protein and name CA")
     if len(ca):
         traj.superpose(traj, 0, atom_indices=ca)

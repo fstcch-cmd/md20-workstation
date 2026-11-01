@@ -37,6 +37,11 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
     if name in STRUCTURE_OVERRIDE and "structure_override" in option:
         return _act(option, [{"path": ["structure_override", STRUCTURE_OVERRIDE[name]], "value": "{text}"}], step,
                     needs_text=True, text_hint="為什麼這個結構仍可用（會寫進決策日誌與報告）")
+    # implicit solvent gates (GBn2): back to explicit water, or no binding step
+    if option.startswith("md.solvent: explicit"):
+        return _act(option, [{"path": ["md", "solvent"], "value": "explicit"}], "md_cases")
+    if option.startswith("binding.enabled: false"):
+        return _act(option, [{"path": ["binding", "enabled"], "value": False}], "binding")
     # pocket metal before docking: "metal_policy: {ZN: bonded}…"
     m = _METAL_OPT.search(option)
     if m:

@@ -25,7 +25,7 @@ def test_3ptb_build_and_short_md(pdb_3ptb, tmp_path):
                    keep_hetero=set(), padding_nm=0.8, run_smoke_test=True)
     assert s["status"] == "PASS", (s.get("blocking"), s.get("blocking_detail"))
     lig = s["ligands"][0]
-    assert lig["mapping"] in {"substructure", "order"} and lig["formal_charge"] == 1
+    assert lig["mapping"] in {"substructure", "connectivity"} and lig["formal_charge"] == 1
     assert lig["provider"] == "openff-sage", lig
     assert lig["smoke_test"]["ok"], lig["smoke_test"]
     asm = s["assembly"]
@@ -76,3 +76,45 @@ def test_3ptb_with_peptide_on_own_chain(pdb_3ptb, tmp_path):
     gates = {g["name"]: g["status"] for g in s["assembly"]["gates"]["gates"]}
     assert gates.get("peptide topology") == "PASS"
     assert len(s["assembly"]["ligands"][0]["heavy_atom_indices"]) == Chem.MolFromSequence("GAK").GetNumHeavyAtoms()
+
+
+def test_3ptb_gbn2_implicit_solvent_short_md(pdb_3ptb, tmp_path):
+    """Consultation §1 Q6: GBn2 implicit solvent — no water, no box, GB force present, NVT-only protocol runs, the
+    trajectory loads without PBC imaging, and the system is far smaller than the explicit one."""
+    import openmm as mm
+    from openmm import XmlSerializer
+    from md20.engine.protocol import implicit_solvent_protocol
+    proj = Project.create(tmp_path, "ci")
+    case = proj.new_case("trypsin_benzamidine_gbn2")
+    s = build_case(case, receptor=pdb_3ptb, ligand_references=["NC(=[NH2+])c1ccccc1"], cocrystal_resnames=["BEN"],
+                   keep_hetero=set(), run_smoke_test=True, solvent="gbn2")
+    assert s["status"] == "PASS", (s.get("blocking"), s.get("blocking_detail"))
+    asm = s["assembly"]
+    assert asm["solvent"] == "gbn2" and asm["n_waters"] == 0 and asm["box_nm"] == []
+    assert asm["n_atoms"] < 5000, asm["n_atoms"]                         # explicit 3PTB at 0.8 nm padding: > 15 000
+    system = XmlSerializer.deserialize(open(s["system_xml"], encoding="utf-8").read())
+    assert not system.usesPeriodicBoundaryConditions()
+    assert any(system.getForce(i).getName() == "msw_gbn2" for i in range(system.getNumForces()))
+    nb = next(f for f in system.getForces() if isinstance(f, mm.NonbondedForce))
+    assert nb.getNonbondedMethod() == mm.NonbondedForce.NoCutoff
+    choice = choose_platform(probe_steps=20)
+    proto = implicit_solvent_protocol(make_protocol("classroom"))
+    assert all(st.ensemble in ("MIN", "NVT") for st in proto.stages)
+    for st in proto.stages:
+        if st.ensemble != "MIN":
+            st.length_ps = 4.0; st.checkpoint_interval_ps = 2.0; st.report_interval_ps = 0.1; st.trajectory_interval_ps = 0.5
+            st.accept = {}
+        else:
+            st.max_iterations = 500
+    def make(spec, dt):
+        return OpenMMBackend(s["system_xml"], s["topology_pdb"], platform_name=choice.name, platform_properties=choice.properties,
+                             timestep_fs=dt, temperature_k=spec.temperature_k, ensemble=spec.ensemble,
+                             pressure_bar=spec.pressure_bar, hmr=proto.hmr, seed=spec.seed)
+    run = case.new_run(proto.to_dict())
+    st = run_protocol(run.dir, proto, make, identity={"case_id": case.case_id, "run_id": run.run_id},
+                      decisions=proj.decisions, max_extensions=0)
+    assert st["status"] == "COMPLETE", st
+    pytest.importorskip("mdtraj")
+    from md20.analysis.traj import load_production
+    traj = load_production(run.dir, s["topology_pdb"])
+    assert traj.n_frames >= 4 and traj.unitcell_vectors is None

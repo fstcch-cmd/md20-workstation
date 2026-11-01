@@ -183,4 +183,5 @@ Fe/Cu 的 M–N 偏低、M–O 偏高。做一張 `{元素}×{N,S,O}` 的小表�
 | §0.1 配體質子化 | ✅（改用自建規則表，不引入 dimorphite-dl） | 規則透明可教、零依賴；接近 pKa 的基團不猜、只註記 | DECISIONS D-18 |
 | §0.2 GUI 預設 127.0.0.1 | ✅ | `--host 0.0.0.0` 才對外並警告 | D-18 |
 | §0.3 舊規格標示取代 | ✅（另一 session） | | — |
-| §1 Q6 `md.solvent: gbn2` | 進行中 | | WORKBOARD |
+| §1 Q6 `md.solvent: gbn2` | ✅（預設仍 explicit，待 CI 後再議篩 pose 預設） | GBSAGBn2Force 涵蓋配體；金屬與 binding 擋下 | D-20 |
+| §5 Q2 CI 拆平行 heavy job | ✅ | workflow／pose-screen／metal 三組 | D-19 |

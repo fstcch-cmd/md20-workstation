@@ -670,6 +670,9 @@ class Workflow:
             md = self.cfg.get("md", {})
             proto = make_protocol(md.get("tier", "teaching"), production_ns=scfg.production_ps / 1000.0, replicas=1,
                                   seed=int(self.cfg.get("docking", {}).get("seed", 2026)))
+            if self._solvent(screen=True) == "gbn2":
+                from .engine.protocol import implicit_solvent_protocol
+                proto = implicit_solvent_protocol(proto)
             for st in proto.stages:
                 if st.name in ("nvt", "npt"):
                     st.length_ps = getattr(scfg, f"{st.name}_ps")
@@ -733,6 +736,14 @@ class Workflow:
         self.dec.record("workflow.md", "docked_multi from independent", "allowed",
                         "配體分別對接，但選定 pose 彼此距離 ≥ 2.5 Å，可組成多配體系統；嚴格的共同佔位請用 simultaneous 模式。")
 
+    def _solvent(self, screen: bool = False) -> str:
+        """`md.solvent` (explicit | gbn2); the short-MD pose screen may set its own (`docking.pose_md_screen.solvent`)."""
+        md = self.cfg.get("md") or {}
+        if screen:
+            ps = (self.cfg.get("docking") or {}).get("pose_md_screen") or {}
+            return ps.get("solvent") or md.get("solvent", "explicit")
+        return md.get("solvent", "explicit")
+
     def _metal_params(self) -> dict | None:
         """`metal_params` with relative file paths resolved against the workflow directory."""
         mp = self.cfg.get("metal_params") or None
@@ -786,7 +797,7 @@ class Workflow:
                        exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])),
                        metal_policy=self.cfg.get("metal_policy") or None,
                        peptide_policy=self.cfg.get("peptide_policy") or None,
-                       metal_params=self._metal_params())
+                       metal_params=self._metal_params(), solvent=self._solvent(screen))
         lmap = {n: f"L{i:02d}" for i, n in enumerate(small, 1)} | {p["name"]: p["name"] for p in peps}
         return s, lmap
 
@@ -818,6 +829,9 @@ class Workflow:
                 runs.pop(key, None)
             case = self.project.case(c["case_id"])
             proto = make_protocol(md.get("tier", "teaching"), production_ns=md.get("production_ns"), replicas=md.get("replicas", 1))
+            if self._solvent() == "gbn2":
+                from .engine.protocol import implicit_solvent_protocol
+                proto = implicit_solvent_protocol(proto)
             if md.get("stage_overrides"):
                 for st in proto.stages:
                     for k, v in md["stage_overrides"].get(st.name, {}).items():
@@ -909,6 +923,10 @@ class Workflow:
         b = self.cfg.get("binding", {})
         if not b.get("enabled"):
             return {}
+        if self._solvent() == "gbn2":
+            msg = ("隱式溶劑（GBn2）不做 SMD／傘狀採樣：拉離過程的去溶劑化能障在連續介質模型下會失真，PMF 與 ΔG° 不可信。")
+            self._block("binding", msg, gates=[{"name": "implicit solvent + binding", "status": "NEEDS_HUMAN", "explanation": msg,
+                                                "options": ["md.solvent: explicit（顯式水，重建並重跑 MD）", "binding.enabled: false（只做 MD）"]}])
         # keep every finished target even when the step itself was paused or reopened (manual resampling of one
         # target must not recompute the others)
         results = {k: v for k, v in ((self.state()["steps"].get("binding") or {}).get("results") or {}).items()

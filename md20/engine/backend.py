@@ -181,11 +181,12 @@ class OpenMMBackend:
 
     def start_reporters(self, log_path, dcd_path, report_steps, dcd_steps, total_steps) -> None:
         app = self.app
+        periodic = self.system.usesPeriodicBoundaryConditions()       # False for GBn2 implicit solvent
         self.sim.reporters.append(app.StateDataReporter(str(log_path), int(report_steps), step=True, time=True,
                                   potentialEnergy=True, kineticEnergy=True, totalEnergy=True, temperature=True,
-                                  volume=True, density=True, speed=True, totalSteps=int(total_steps), separator="\t"))
+                                  volume=periodic, density=periodic, speed=True, totalSteps=int(total_steps), separator="\t"))
         if dcd_path is not None:
-            self.sim.reporters.append(app.DCDReporter(str(dcd_path), int(dcd_steps), enforcePeriodicBox=True))
+            self.sim.reporters.append(app.DCDReporter(str(dcd_path), int(dcd_steps), enforcePeriodicBox=periodic))
 
     def stop_reporters(self) -> None:
         for r in self.sim.reporters:
@@ -205,11 +206,14 @@ class OpenMMBackend:
         st = self.sim.context.getState(getEnergy=True)
         pe = st.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
         ke = st.getKineticEnergy().value_in_unit(unit.kilojoule_per_mole)
-        vol = st.getPeriodicBoxVolume().value_in_unit(unit.nanometer ** 3)
+        # non-periodic (implicit solvent): no box — report a nominal 1 nm³ so the finite-state check still applies,
+        # and no density (acceptance has no density criterion there)
+        periodic = self.system.usesPeriodicBoundaryConditions()
+        vol = st.getPeriodicBoxVolume().value_in_unit(unit.nanometer ** 3) if periodic else 1.0
         dof = 3 * self.n_atoms - self.system.getNumConstraints() - 3
         temp = 2 * ke * 1000 / (dof * 8.314462618) if dof > 0 else float("nan")
         mass_amu = sum(self.system.getParticleMass(i).value_in_unit(unit.amu) for i in range(self.n_atoms))
-        density = mass_amu * 1.66053906660e-24 / (vol * 1e-21) if vol > 0 else None
+        density = mass_amu * 1.66053906660e-24 / (vol * 1e-21) if (periodic and vol > 0) else None
         return StateSummary(step=self.current_step(), time_ps=st.getTime().value_in_unit(unit.picosecond),
                             potential_kj_mol=pe, kinetic_kj_mol=ke, temperature_k=temp, volume_nm3=vol,
                             density_g_ml=density)

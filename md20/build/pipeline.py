@@ -20,7 +20,7 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
                extra_ligand_resnames: set[str] | None = None, peptides: list[dict] | None = None,
                ligand_names: list[str] | None = None, peptide_policy: dict | None = None,
                exclude_chains: set[str] | None = None, metal_policy: dict | None = None,
-               metal_params: dict | None = None) -> dict:
+               metal_params: dict | None = None, solvent: str = "explicit") -> dict:
     """Build a case.
 
     `cocrystal_resnames[i]` (optional) names the HETATM residue whose coordinates are the pose for ligand i.
@@ -120,7 +120,7 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
         ligs.append(prec)
     res = assemble_system(rman["receptor_pdb"], ligs, bdir, padding_nm=padding_nm,
                           ionic_strength_molar=ionic_strength_molar, decisions=decisions, metal_policy=metal_policy, ph=ph,
-                          metal_params=metal_params)
+                          metal_params=metal_params, solvent=solvent)
     if res.status == NEEDS_HUMAN:
         summary["blocking"] = "assembly"
         summary["blocking_detail"] = [g for g in (res.gates or {}).get("gates", []) if g.get("status") == NEEDS_HUMAN]
