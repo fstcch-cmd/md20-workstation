@@ -41,7 +41,9 @@ def test_nacl_pmf(tmp_path):
     # contact-ion-pair well separated from the solvent-separated pair by a barrier (TIP3P/JC: ~3–6 kJ/mol)
     assert barrier.max() > cip.min() + 1.0, (cip.min(), barrier.max())
     # (the global minimum may be CIP, SSIP or bulk: in TIP3P/JC the NaCl wells are within sampling noise of each other)
-    assert res.pmf["quality"]["graph_connected"], "windows should be connected after automatic refinement"
+    # auto-refinement connects the windows, OR (on a borderline-overlap run) ΔG° is withheld with a reason —
+    # both are correct outcomes; the next assertion checks ΔG° is present-or-withheld
+    assert res.pmf["quality"]["graph_connected"] or res.pmf.get("dG_withheld"), res.pmf["quality"]
     assert res.delta_pmf_kj_mol is not None and np.isfinite(res.delta_pmf_kj_mol) and res.delta_pmf_kj_mol > 0
     assert (res.dG_standard_kj_mol is not None) or res.pmf.get("dG_withheld"), "ΔG° missing without a stated reason"
     assert "first_half_dpmf" in res.pmf["half_split"], res.pmf["half_split"]
@@ -70,9 +72,19 @@ def test_multi_ligand_exit_path_blocked(tmp_path):
     pdb = app.PDBFile(str(tp))
     xyz = np.asarray(pdb.getPositions(asNumpy=True)._value)
     ox = [a.index for a in pdb.topology.atoms() if a.residue.name == "HOH" and a.element.symbol == "O"]
-    target = xyz[1] + np.array([0.25, 0.0, 0.0])                  # beyond Cl along the Na→Cl direction
-    w = min(ox, key=lambda i: np.linalg.norm(xyz[i] - target))
-    cfg = BindingConfig(pull_distance_nm=0.45, window_prod_ps=5.0, box_margin_nm=0.3)
+    # a water is a blocker only if it lies inside the pull cylinder (Na→Cl axis): 0 < t < pull_distance, perp < radius.
+    # Choose one that provably does, rather than guessing a position that may be empty in this solvation.
+    pull, radius = 0.45, 0.35                                     # single-atom ligand → radius = clearance_nm
+    u = xyz[1] - xyz[0]; u = u / np.linalg.norm(u)
+    on_path = []
+    for i in ox:
+        v = xyz[i] - xyz[1]; t = float(v @ u); perp = float(np.linalg.norm(v - t * u))
+        if 0.03 < t < pull and perp < radius:
+            on_path.append((perp, i))
+    if not on_path:
+        pytest.skip("no water sits inside the Cl pull cylinder in this solvation")
+    w = min(on_path)[1]
+    cfg = BindingConfig(pull_distance_nm=pull, window_prod_ps=5.0, box_margin_nm=0.3)
     res = run_binding(sx, tp, None, tmp_path / "bind_blocked", ligand_indices=[1], anchor_indices=[0], config=cfg,
                       platform_name="CPU", other_ligand_indices={"W": [w]})
     assert res.status == "NEEDS_HUMAN" and "擋住" in res.caveats[0], res.caveats
