@@ -5,6 +5,7 @@
 - `openmm-stack`：三個 OS 以 micromamba 建真實環境（OpenMM、RDKit、OpenFF、Vina）。Windows = 使用者主力平台（OpenCL/CPU）。
   Ubuntu 帶 `MD20_HEAVY=1` 跑重測（3PTB 全流程含 SMD/umbrella、短 MD 篩 pose、金屬、NaCl PMF）。
   測試步驟上限 100 分（Ubuntu 重測實測約 62 分）；pytest `faulthandler_timeout = 900` 會印出卡住測試的堆疊；`-vv`。
+- `heavy`（D-19）：Ubuntu 平行 3 組（workflow／pose-screen／metal），`MD20_HEAVY=1`，各自貼留言。
 - `paper-docking`：兩篇論文的對接重現（數小時 Vina），獨立、`continue-on-error`、exhaustiveness 8，結果 JSON 貼 commit 留言。
 - 所有結果、失敗 log、驗證 JSON 由 CI 貼到該 commit 的留言。
 

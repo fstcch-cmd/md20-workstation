@@ -10,7 +10,7 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  # PRs: a new push cancels the previous run.  main: never cancel — the Ubuntu MD20_HEAVY job needs ~60–70 min and
+  # PRs: a new push cancels the previous run.  main: never cancel — heavy jobs need up to ~60 min and
   # pushes come faster than that, so with cancellation the heavy tests almost never finished (and a killed pytest
   # prints no FAILURES section, so the posted log had no traceback either).
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -59,7 +59,6 @@ jobs:
           - os: ubuntu-latest
             gpu_yml: environment/linux-cuda.yml
             override_cuda: "12.4"
-            heavy: "1"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 170
     steps:
@@ -88,10 +87,9 @@ jobs:
         run: '"$MAMBA_EXE" run -n md20 md20 doctor --seconds 5 || true'
       - name: Full test suite incl. real OpenMM
         shell: bash -el {0}
-        # normal: mac ~16 min, windows ~23, ubuntu heavy ~62 (3PTB full workflow ~32, pose screen ~16); a step
-        # timeout (unlike the job timeout) still lets the failure-log step post pytest.log
-        timeout-minutes: 120
-        env: { MD20_HEAVY: "${{ matrix.heavy }}" }
+        # all three OS run the same suite (~20–30 min); MD20_HEAVY tests run in the parallel `heavy` jobs below.
+        # A step timeout (unlike the job timeout) still lets the failure-log step post pytest.log.
+        timeout-minutes: 90
         run: |
           set -o pipefail
           "$MAMBA_EXE" run -n md20 pytest -vv -rs --durations=15 2>&1 | tee pytest.log
@@ -143,6 +141,53 @@ jobs:
           name: lock-${{ runner.os }}
           path: md20-*-${{ runner.os }}.txt
           if-no-files-found: ignore
+
+  heavy:
+    # MD20_HEAVY tests split into parallel Ubuntu jobs (consultation §5 Q2): in one job a single slow test (3PTB
+    # workflow ~30 min, pose screen ~16) used up the step timeout and the killed pytest printed no traceback for
+    # the others (the zinc model's failure went unread for three runs).  Each group posts its own summary/log.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: workflow
+            select: "tests/test_workflow_integration.py -k full_workflow"
+          - group: pose-screen
+            select: "tests/test_workflow_integration.py -k pose_md_screen"
+          - group: metal
+            select: "tests/test_metal_integration.py"
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          init-shell: bash
+          cache-downloads: true
+      - name: Create environment
+        shell: bash -el {0}
+        env: { CONDA_OVERRIDE_CUDA: "12.4" }
+        run: '"$MAMBA_EXE" create -y -n md20 -f environment/base.yml -f environment/linux-cuda.yml'
+      - name: Install md20
+        shell: bash -el {0}
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          "$MAMBA_EXE" run -n md20 python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" -e .
+          "$MAMBA_EXE" run -n md20 md20 setup-vina
+      - name: Heavy tests (${{ matrix.group }})
+        shell: bash -el {0}
+        timeout-minutes: 75
+        env: { MD20_HEAVY: "1" }
+        run: |
+          set -o pipefail
+          "$MAMBA_EXE" run -n md20 pytest -vv -rs --durations=10 ${{ matrix.select }} 2>&1 | tee pytest.log
+      - name: Post result (always)
+        if: always()
+        shell: bash
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          body="### CI heavy (${{ matrix.group }}) — ${{ job.status }}"$'\n```\n'"$(tail -c 40000 pytest.log 2>/dev/null || echo 'no pytest.log')"$'\n```'
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$body" >/dev/null || true
 
   paper-docking:
     # Hsieh 2024/2025 docking reproductions: hours of Vina on 4 cores, so they live here — non-blocking, never

@@ -31,7 +31,8 @@
 ## 3. CI 運作方式(怎麼看結果)
 - Workflow:`.github/workflows/ci.yml`,兩類工作:
   - `pure-python`:3 OS × Py3.11/3.12,忽略 5 個重測檔;**這是必綠的門檻**。
-  - `openmm-stack`:3 OS 真實 OpenMM+Vina 用 micromamba 建環境;Ubuntu 帶 `MD20_HEAVY=1` 會多跑重測(正常約 30 分;測試步驟 75 分逾時,pytest `faulthandler_timeout` 15 分會印出卡住測試的堆疊)。
+  - `openmm-stack`:3 OS 真實 OpenMM+Vina 用 micromamba 建環境,跑同一套測試(約 20–30 分)。
+  - `heavy`(Ubuntu,平行 3 個 job:workflow / pose-screen / metal,`MD20_HEAVY=1`):每組各自逾時、各自貼留言「CI heavy (<組>)」(D-19)。
   - `paper-docking`:兩篇論文的對接重現(數小時 Vina),獨立、`continue-on-error`,不阻擋;結果 JSON 貼留言。
 - `concurrency: cancel-in-progress` → **一 push 新 commit,舊 run 還在跑的工作會被 cancel**。所以看到舊 run 的 mac/ubuntu 是 `cancelled` 多半是被新 push 取消,不是失敗。要等完整結果,push 完就別再 push,讓它跑完(Ubuntu 重測約 15–25 分)。
 - 看結果(單次指令,不要輪詢):
