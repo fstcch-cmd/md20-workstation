@@ -19,7 +19,7 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
                cocrystal_resnames: list[str] | None = None, keep_hetero: set[str] | None = None,
                extra_ligand_resnames: set[str] | None = None, peptides: list[dict] | None = None,
                ligand_names: list[str] | None = None, peptide_policy: dict | None = None,
-               exclude_chains: set[str] | None = None) -> dict:
+               exclude_chains: set[str] | None = None, metal_policy: dict | None = None) -> dict:
     """Build a case.
 
     `cocrystal_resnames[i]` (optional) names the HETATM residue whose coordinates are the pose for ligand i.
@@ -32,6 +32,11 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
     cocrystal = list(cocrystal_resnames or [])
     peptides = list(peptides or [])
     pep_chains_in_file = {p["cocrystal_chain"] for p in peptides if p.get("cocrystal_chain")}
+    if metal_policy:
+        # a metal with a keep/bonded policy must survive receptor clean-up; "remove" is applied at assembly
+        from .receptor import COFACTOR_KEEP_DEFAULT
+        keep_hetero = set(keep_hetero) if keep_hetero else set(COFACTOR_KEEP_DEFAULT)
+        keep_hetero |= {k.split(":")[0].upper() for k, v in metal_policy.items() if v in ("bonded", "keep_nonbonded")}
     rman = prepare_receptor(rec_in["path"], bdir / "receptor", ph=ph, decisions=decisions, keep_hetero=keep_hetero,
                             human_choices=(human_choices or {}).get("receptor"),
                             ligand_resnames=set(cocrystal) | set(x for x in (extra_ligand_resnames or ()) if x),
@@ -113,7 +118,7 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
             return summary
         ligs.append(prec)
     res = assemble_system(rman["receptor_pdb"], ligs, bdir, padding_nm=padding_nm,
-                          ionic_strength_molar=ionic_strength_molar, decisions=decisions)
+                          ionic_strength_molar=ionic_strength_molar, decisions=decisions, metal_policy=metal_policy, ph=ph)
     if res.status == NEEDS_HUMAN:
         summary["blocking"] = "assembly"
         summary["blocking_detail"] = [g for g in (res.gates or {}).get("gates", []) if g.get("status") == NEEDS_HUMAN]

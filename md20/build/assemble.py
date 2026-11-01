@@ -128,7 +128,7 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                     padding_nm: float = 1.0, ionic_strength_molar: float = 0.15, box_shape: str = "cube",
                     water_model: str = "tip3p", decisions: DecisionLog | None = None,
                     nonbonded_cutoff_nm: float = 1.0, forcefield_files: tuple[str, ...] = AMBER_PROTEIN,
-                    flat_bottom: bool | None = None) -> BuildResult:
+                    flat_bottom: bool | None = None, metal_policy: dict | None = None, ph: float = 7.4) -> BuildResult:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     report = GateReport()
@@ -141,9 +141,20 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
         return res
     pdb = app.PDBFile(str(receptor_pdb))
     modeller = app.Modeller(pdb.topology, pdb.positions)
+    ff = app.ForceField(*forcefield_files)
+    from .metal import apply_metal_policy, add_metal_forces, site_gates
+    metal_plans = apply_metal_policy(modeller, ff, metal_policy, ph=ph)
+    for g in site_gates(metal_plans):
+        report.add(g)
+        if decisions and g.status != PASS:
+            decisions.record("build.metal", g.name, g.evidence.get("action"), g.explanation,
+                             kind="human" if g.status == NEEDS_HUMAN else "auto_fixed")
+    if not report.ok:
+        res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict())
+        atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")
+        return res
     n_protein = modeller.topology.getNumAtoms()
     receptor_chain_ids = {c.id for c in modeller.topology.chains()}
-    ff = app.ForceField(*forcefield_files)
     lig_names = set()
     generators = []
     peptide_chains: list[str] = []
@@ -190,9 +201,18 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
             n_water += 1
         elif res_.name in {"NA", "CL", "K", "MG", "CA", "ZN"}:
             counts[res_.name] = counts.get(res_.name, 0) + 1
-    system = ff.createSystem(modeller.topology, nonbondedMethod=app.PME, nonbondedCutoff=nonbonded_cutoff_nm * unit.nanometer,
-                             constraints=app.HBonds, rigidWater=True, removeCMMotion=True)
+    try:
+        system = ff.createSystem(modeller.topology, nonbondedMethod=app.PME, nonbondedCutoff=nonbonded_cutoff_nm * unit.nanometer,
+                                 constraints=app.HBonds, rigidWater=True, removeCMMotion=True)
+    except ValueError as exc:
+        report.add(Gate("force field templates", NEEDS_HUMAN, f"力場缺少殘基樣板：{exc}（常見：金屬或輔因子沒有參數）。",
+                        options=["metal_policy: remove（若非必要）", "提供該殘基的參數", "從 keep_hetero 移除"]))
+        res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict())
+        atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")
+        return res
     lig_index_set = {i for _, a, b in lig_atom_ranges for i in range(a, b)}
+    import numpy as _np
+    metal_info = add_metal_forces(system, metal_plans, _np.asarray(modeller.positions.value_in_unit(unit.nanometer))) if metal_plans else {}
     restr = add_position_restraints(system, modeller.topology, modeller.positions, ligand_resnames=lig_names,
                                     ligand_atom_indices=lig_index_set)
     if flat_bottom is None:
@@ -247,7 +267,8 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                       ligands=[{**l.to_dict(), "atom_indices": list(range(a, b)),
                                 "heavy_atom_indices": [i for i in range(a, b) if atoms_el[i] != "H"]}
                                for l, (_, a, b) in zip(ligands, lig_atom_ranges)],
-                      restraints=restr, gates=report.to_dict(),
+                      restraints={**restr, "metals": {"plans": metal_plans, **metal_info}} if metal_plans else restr,
+                      gates=report.to_dict(),
                       hashes={"system_xml": sha256_file(sys_xml), "topology_pdb": sha256_file(top_pdb)})
     atomic_write_json({**res.to_dict(), "created_at": now_iso()}, out_dir / "build_manifest.json")
     return res

@@ -478,7 +478,8 @@ class Workflow:
                        ligand_poses=[picks[n]["sdf"] for n in small], ph=self.cfg.get("ph", 7.4),
                        padding_nm=self._padding_nm(), keep_hetero=set(self.cfg.get("keep_hetero", [])),
                        extra_ligand_resnames=drop, peptides=peps or None, ligand_names=small,
-                       exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])))
+                       exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])),
+                       metal_policy=self.cfg.get("metal_policy") or None)
         lmap = {n: f"L{i:02d}" for i, n in enumerate(small, 1)} | {p["name"]: p["name"] for p in peps}
         return s, lmap
 

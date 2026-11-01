@@ -136,7 +136,8 @@ def structure_confidence(pdb_text: str, *, pocket_center=None, pocket_radius_A: 
                     rep.add(Gate("metal", NEEDS_HUMAN,
                                  f"口袋 {d:.1f} Å 處有金屬 {key}。Amber 非鍵結離子模型常讓過渡金屬配位跑掉、Vina 也不計配位；"
                                  f"直接模擬可能得到錯誤的結合模式。",
-                                 options=["metal_policy: {" + rn + ": keep_nonbonded}（保留並加位置限制，報告標註）",
+                                 options=["metal_policy: {" + rn + ": bonded}（晶體幾何鍵結模型＋配位殘基質子化，報告標註）",
+                                          "metal_policy: {" + rn + ": keep_nonbonded}（保留並加位置限制，報告標註）",
                                           "metal_policy: {" + rn + ": remove}（若金屬非功能必要）", "換一個系統"],
                                  evidence={"metal": key, "distance_A": round(d, 1)}))
                 elif rn in TRANSITION_METALS:
