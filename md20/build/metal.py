@@ -39,6 +39,8 @@ WATER = {"HOH", "WAT", "TIP3", "SOL"}
 K_BOND = 2 * 46.0 * 4.184 * 100      # ZAFF-like Zn–N 46 kcal/mol/Å² → OpenMM ½k(r−r0)² in kJ/mol/nm²
 K_ANGLE = 2 * 25.0 * 4.184           # 25 kcal/mol/rad² → kJ/mol/rad²
 K_KEEP = 1000.0                      # kJ/mol/nm² position restraint for keep_nonbonded
+K_ANGLE_MDX = 2 * 50.0 * 4.184       # metal–donor–neighbour angle (ZAFF/MCPB-like ~50 kcal/mol/rad²)
+SCEE, SCNB = 1.2, 2.0                # Amber 1-4 scaling (electrostatics, LJ)
 
 
 def policy_for(key: str, policy: dict | None) -> str | None:
@@ -148,7 +150,8 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
                 angles.append({"a": a["index"], "metal": site["metal_index"], "b": b["index"],
                                "theta0_deg": round(_angle(xyz_of[a["index"]], mx, xyz_of[b["index"]]), 2), "k": K_ANGLE})
     geom = {4: "四配位", 5: "五配位", 6: "六配位"}.get(len(donors), f"{len(donors)} 配位")
-    caveats = ["鍵結模型為晶體幾何的諧和鍵與角（非擬合的 MCPB.py/ZAFF 參數）；電荷沿用力場，金屬–配位原子間非鍵結作用已排除。"]
+    caveats = ["鍵結模型為晶體幾何的諧和鍵與角（非擬合的 MCPB.py/ZAFF 參數）；電荷沿用力場。金屬被當成與配位原子共價相連："
+               "1-2、1-3 非鍵結作用排除、1-4 依 Amber 縮放（靜電 ÷1.2、LJ ÷2），並加金屬–配位原子–鄰原子角項固定環的朝向。"]
     fitted = ""
     if params and xyz_of:
         from .metal_params import resolve_site_params
@@ -280,8 +283,45 @@ def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float =
     return final
 
 
-def add_metal_forces(system, plans: list[dict], positions_nm) -> dict:
-    """Bonded model forces + exclusions, and always-on restraints for keep_nonbonded metals."""
+def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], positions_nm) -> dict:
+    """Topology terms that make a metal behave as covalently bound to its donors (pure Python).
+
+    Treating M–D as a bond means, exactly as for any bonded pair in Amber: M–D (1-2) and M–X with X bonded to D
+    (1-3) have no nonbonded interaction, M–Y with Y two bonds from D (1-4) is scaled, and the M–D–X angles keep
+    the donor group pointing at the metal.  Without 1-3 exclusion the +2 metal sits ~3 Å from the donor's
+    neighbours (e.g. His CE1/CD2 and their hydrogens) and is pushed off its site (CI: Zn–NE2 2.03 → 2.56 Å).
+    Returns {"excl13": [(m, x)], "pairs14": [(m, y)], "angles": [(m, d, x, θ0 rad)]} with no duplicates."""
+    import numpy as np  # noqa: F811
+    nbr: dict[int, set[int]] = {}
+    for a, b in bonds:
+        nbr.setdefault(a, set()).add(b); nbr.setdefault(b, set()).add(a)
+    pos = np.asarray(positions_nm, float)
+    excl12, excl13, pairs14, angles = set(), set(), set(), []
+    for p in plans:
+        if p.get("action") != "bonded":
+            continue
+        m = p["metal_index"]
+        donors = {b["donor"] for b in p["bonds"]}
+        excl12 |= {(m, d) for d in donors}
+        for d in donors:
+            for x in nbr.get(d, ()):
+                if x == m or x in donors:
+                    continue
+                excl13.add((m, x))
+                u, v = pos[m] - pos[d], pos[x] - pos[d]
+                th = float(np.arccos(np.clip(np.dot(u, v) / np.linalg.norm(u) / np.linalg.norm(v), -1.0, 1.0)))
+                angles.append((m, d, x, th))
+                for y in nbr.get(x, ()):
+                    if y not in (d, m) and y not in donors:
+                        pairs14.add((m, y))
+    excl13 -= excl12
+    pairs14 -= excl12 | excl13
+    return {"excl13": sorted(excl13), "pairs14": sorted(pairs14), "angles": angles}
+
+
+def add_metal_forces(system, plans: list[dict], positions_nm, topology=None) -> dict:
+    """Bonded model forces + exclusions, and always-on restraints for keep_nonbonded metals.
+    `topology` (OpenMM) supplies the covalent bonds for the 1-3 / 1-4 treatment (bonded_metal_terms)."""
     import openmm as mm
     import numpy as np  # noqa: F811
     info = {"bonds": 0, "angles": 0, "exclusions": 0, "restrained_metals": [], "charges_set": 0, "charge_problems": []}
@@ -316,6 +356,29 @@ def add_metal_forces(system, plans: list[dict], positions_nm) -> dict:
                         pass
             for a in p["angles"]:
                 ha.addAngle(a["a"], a["metal"], a["b"], math.radians(a["theta0_deg"]), a["k"]); info["angles"] += 1
+        if topology is not None:
+            terms = bonded_metal_terms([(b[0].index, b[1].index) for b in topology.bonds()], bonded, positions_nm)
+            for m, x in terms["excl13"]:
+                for f in nb:
+                    f.addException(m, x, 0.0, 0.1, 0.0, True)
+                for f in cnb:
+                    try:
+                        f.addExclusion(m, x)
+                    except Exception:  # noqa: BLE001
+                        pass
+            for m, y in terms["pairs14"]:
+                for f in nb:
+                    qm, sm, em = f.getParticleParameters(m)
+                    qy, sy, ey = f.getParticleParameters(y)
+                    f.addException(m, y, qm * qy / SCEE, (sm + sy) / 2, (em * ey) ** 0.5 / SCNB, True)
+                for f in cnb:
+                    try:
+                        f.addExclusion(m, y)
+                    except Exception:  # noqa: BLE001
+                        pass
+            for m, d, x, th in terms["angles"]:
+                ha.addAngle(m, d, x, th, K_ANGLE_MDX)
+            info.update(exclusions_13=len(terms["excl13"]), scaled_14=len(terms["pairs14"]), angles_mdx=len(terms["angles"]))
         system.addForce(hb); system.addForce(ha)
     keep = [p for p in plans if p["action"] == "keep_nonbonded"]
     if keep:

@@ -86,3 +86,26 @@ def test_residue_variant_from_hydrogens():
     assert residue_variant("CYS", {"HG"}) == "CYS" and residue_variant("CYS", {"SG"}) == "CYX"   # no HG = disulfide
     assert residue_variant("ASP", {"HD2"}) == "ASH" and residue_variant("GLU", set()) == "GLU"
     assert residue_variant("LYS", {"HZ1", "HZ2"}) == "LYN" and residue_variant("ALA", set()) is None
+
+
+def test_bonded_metal_terms_exclude_13_scale_14_and_add_mdx_angles():
+    """CI regression (3KS3): with only 1-2 exclusions Zn²⁺ was repelled by the imidazole ring next to NE2 and
+    Zn–NE2 drifted 2.03 → 2.56 Å.  Metal–donor is now treated like any covalent bond."""
+    import math
+    import numpy as np
+    from md20.build.metal import bonded_metal_terms
+    # Zn(0)–NE2(1); NE2–CE1(2), NE2–CD2(3); CE1–HE1(4), CE1–ND1(5); CD2–HD2(6), CD2–CG(7);  second donor SG(8)–CB(9)–CA(10)
+    bonds = [(1, 2), (1, 3), (2, 4), (2, 5), (3, 6), (3, 7), (8, 9), (9, 10)]
+    pos = np.zeros((11, 3))
+    pos[1] = [0.2, 0, 0]; pos[2] = [0.27, 0.11, 0]; pos[3] = [0.27, -0.11, 0]; pos[8] = [-0.23, 0, 0]; pos[9] = [-0.3, 0.15, 0]
+    pos[4] = [0.25, 0.21, 0]; pos[5] = [0.38, 0.08, 0]; pos[6] = [0.25, -0.21, 0]; pos[7] = [0.38, -0.08, 0]; pos[10] = [-0.45, 0.15, 0]
+    plans = [{"action": "bonded", "metal_index": 0, "bonds": [{"donor": 1}, {"donor": 8}]},
+             {"action": "keep_nonbonded", "metal_index": 0, "bonds": []}]
+    t = bonded_metal_terms(bonds, plans, pos)
+    assert t["excl13"] == [(0, 2), (0, 3), (0, 9)]
+    assert t["pairs14"] == [(0, 4), (0, 5), (0, 6), (0, 7), (0, 10)]
+    ang = {(d, x): th for _m, d, x, th in t["angles"]}
+    assert set(ang) == {(1, 2), (1, 3), (8, 9)}
+    u, v = pos[0] - pos[1], pos[2] - pos[1]
+    assert math.isclose(ang[(1, 2)], math.acos(np.dot(u, v) / np.linalg.norm(u) / np.linalg.norm(v)))
+    assert bonded_metal_terms(bonds, plans[1:], pos) == {"excl13": [], "pairs14": [], "angles": []}

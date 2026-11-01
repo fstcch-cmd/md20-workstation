@@ -26,6 +26,7 @@ def test_bonded_zinc_ca2(pdb_ca2, tmp_path):
     assert len(p["bonds"]) == 3, p["bonds"]                                    # His94, His96, His119
     assert set(p["variants"].values()) <= {"HID", "HIE"} and len(p["variants"]) == 3
     assert res.restraints["metals"]["exclusions"] == 3
+    assert res.restraints["metals"]["exclusions_13"] >= 6 and res.restraints["metals"]["angles_mdx"] >= 6   # CE1/CD2 per His
     qm = p["qm_input"]                                                       # QM small-model input for the upgrade path
     assert qm["status"] == "PASS" and qm["charge"] == 2 and qm["multiplicity"] == 1 and len(qm["residues"]) == 3
     assert (tmp_path / "sys" / "metal_qm" / "ZN_A262" / "orca.inp").is_file() or any("orca.inp" in f for f in qm["files"])

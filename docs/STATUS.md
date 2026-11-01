@@ -6,6 +6,7 @@
 CI 依據(`fstcch-cmd/md20-workstation`):
 - **63d363b（第二個 session 最終版）openmm-stack**:**Windows OpenCL 124 passed、macOS 126 passed**,各只有 1 個失敗——`test_gui_pages_render`,原因是 NiceGUI 在子行程看到 pytest 環境變數就切到它自己的測試模式(非 GUI 本身問題),本 session 已修;Ubuntu `MD20_HEAVY=1` 重測結果見該 commit 留言。
 - **f879764(第三個 session:閘門一鍵決定、3D 互作、金屬擬合參數、GUI server 測試修正)openmm-stack**:**Windows OpenCL 與 macOS 全綠**(含 `test_gui_pages_render`);Ubuntu `MD20_HEAVY=1` 重測卡在論文對接重現(已移出)。**ef32b48 的 Ubuntu 重測跑完:151 passed、4 failed,全是從未在 Ubuntu 跑完過的重測抓到的真 bug**,已修:(1)重複原子名閘門把 altloc A/B 同名原子算成重複(3KS3 被擋,兩個金屬整合測試因此失敗);(2)`DockingResult.load` 讀到戳記 `_md20` 欄位就當掉(全流程續跑時);(3)短 MD 篩 pose 的 2 ps stage 只記 4 筆 log → 無法驗收,且引擎用 +0 ps「延長」兩次白跑——現在短 stage 自動加密記錄、無法靠延長解決的直接 NEEDS_HUMAN;(4)workflow 讀 `pull_distance`(實際鍵名 `pull_distance_nm`),padding 一律被拉到 2.0 nm,且套到 apo 與篩選系統——全流程測試因此跑了 51 分鐘。
+- **12dcd80 Ubuntu 重測:158 passed、1 failed**。全流程(3PTB,含 binding)、短 MD 篩 pose、金屬擬合參數(JSON)整合測試**在 Ubuntu 真跑通過**。唯一失敗:**幾何鍵結的鋅模型守不住配位**——最小化+2 ps MD 後 Zn–His94 NE2 由 2.03 Å 拉到 2.56 Å。原因:只排除了金屬–配位原子(1-2)非鍵作用,+2 的鋅仍與咪唑環上 CE1/CD2(1-3)及其氫有完整靜電斥力。已改成與一般共價鍵相同的處理:1-2、1-3 排除,1-4 依 Amber 縮放(靜電 ÷1.2、LJ ÷2),並加金屬–配位原子–鄰原子角項;待下一輪 CI 確認。Windows OpenCL 該輪因 `setup-vina` 遇 GitHub API 限流在測試前失敗(已修:token + 固定版本後備下載)。
 - 測試函式:約 160 個(pure-python 部分本地全過)。
 
 ---

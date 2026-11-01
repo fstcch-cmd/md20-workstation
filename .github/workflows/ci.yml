@@ -83,9 +83,9 @@ jobs:
         run: '"$MAMBA_EXE" run -n md20 md20 doctor --seconds 5 || true'
       - name: Full test suite incl. real OpenMM
         shell: bash -el {0}
-        # normal: mac ~16 min, windows ~23, ubuntu heavy ~30; a step timeout (unlike the job timeout) still lets
-        # the failure-log step post pytest.log, whose -v lines show the test that never finished
-        timeout-minutes: 75
+        # normal: mac ~16 min, windows ~23, ubuntu heavy ~62 (3PTB full workflow ~32, pose screen ~16); a step
+        # timeout (unlike the job timeout) still lets the failure-log step post pytest.log
+        timeout-minutes: 100
         env: { MD20_HEAVY: "${{ matrix.heavy }}" }
         run: |
           set -o pipefail

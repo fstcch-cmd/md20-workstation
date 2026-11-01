@@ -214,7 +214,8 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
         return res
     lig_index_set = {i for _, a, b in lig_atom_ranges for i in range(a, b)}
     import numpy as _np
-    metal_info = add_metal_forces(system, metal_plans, _np.asarray(modeller.positions.value_in_unit(unit.nanometer))) if metal_plans else {}
+    metal_info = add_metal_forces(system, metal_plans, _np.asarray(modeller.positions.value_in_unit(unit.nanometer)),
+                                  topology=modeller.topology) if metal_plans else {}
     for key, prob in metal_info.get("charge_problems") or []:
         report.add(Gate(f"metal charges {key}", NEEDS_HUMAN, prob,
                         options=["metal_params 改為不套用電荷（charges: false）", "確認 MCPB 模型的質子化狀態"]))
