@@ -113,9 +113,10 @@ def new_pipeline():
 def _start(wf: Workflow):
     platform = _platform()
     policy = PausePolicy(pause_file=wf.project.dir / "PAUSE", pause_on_battery=True,
-                         power_probe=__import__("md20.env.hardware", fromlist=["_power_state"])._power_state)
+                         power_probe=__import__("md20.env.hardware", fromlist=["_power_state"])._power_state,
+                         resource_guard=__import__("md20.env.resources", fromlist=["CachedGuard"]).CachedGuard())
     (wf.project.dir / "PAUSE").unlink(missing_ok=True)
-    return RUNNER.start(wf, lambda case, proto: make_backend_factory(case, proto, platform=platform), platform, should_pause=policy)
+    return RUNNER.start(wf, lambda case, proto: make_backend_factory(case, proto, platform=platform, resource_mode="balanced"), platform, should_pause=policy)
 
 
 @ui.page("/wf/{project}/{name}")

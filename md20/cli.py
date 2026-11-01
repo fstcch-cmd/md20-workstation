@@ -18,6 +18,11 @@ from . import __version__
 from .util import default_projects_dir, load_json, safe_name
 
 
+def _guard():
+    from .env.resources import CachedGuard
+    return CachedGuard()
+
+
 def _p(msg: str) -> None:
     print(msg, flush=True)
 
@@ -66,7 +71,7 @@ def cmd_build(a):
 
 def _make_backend_factory(case, protocol, fake: bool):
     from .engine.factory import make_backend_factory
-    return make_backend_factory(case, protocol, fake=fake)
+    return make_backend_factory(case, protocol, fake=fake, resource_mode=None if fake else "balanced")
 
 
 def cmd_run(a):
@@ -127,7 +132,7 @@ def cmd_queue(a):
     elif a.action == "run":
         hours = tuple(int(x) for x in a.hours.split("-")) if a.hours else None
         policy = PausePolicy(pause_file=proj.dir / "PAUSE", pause_on_battery=not a.ignore_battery,
-                             allowed_hours=hours, power_probe=_power_state)
+                             allowed_hours=hours, power_probe=_power_state, resource_guard=_guard())
         while True:
             j = q.run_next(lambda case, proto: _make_backend_factory(case, proto, a.fake), should_pause=policy)
             if j is None:
@@ -156,7 +161,7 @@ def cmd_pipeline(a):
     _p(f"平台：{platform.name}；workflow 目錄：{wf.dir}")
     hours = tuple(int(x) for x in a.hours.split("-")) if a.hours else None
     policy = PausePolicy(pause_file=proj.dir / "PAUSE", pause_on_battery=not a.ignore_battery, allowed_hours=hours,
-                         power_probe=_power_state)
+                         power_probe=_power_state, resource_guard=_guard())
     last = {"t": 0.0}
 
     def cb(ev):
@@ -166,7 +171,7 @@ def cmd_pipeline(a):
             _p("  " + ", ".join(f"{k}={v:.3g}" if isinstance(v, float) else f"{k}={v}" for k, v in ev.items() if k in
                                 {"stage", "chunk", "completed_local_steps", "total_steps", "temperature_k", "ligand", "window", "n", "r0", "force"}))
     try:
-        out = wf.run(lambda case, proto: make_backend_factory(case, proto, fake=a.fake, platform=platform), platform,
+        out = wf.run(lambda case, proto: make_backend_factory(case, proto, fake=a.fake, platform=platform, resource_mode=a.mode), platform,
                      should_pause=policy, progress_cb=cb)
     except WorkflowBlocked as exc:
         _p(f"[NEEDS_HUMAN] {exc}")
@@ -201,9 +206,9 @@ def cmd_resume(a):
     for r in todo:
         proj = Project(r["project_dir"])
         cfg = json.loads((Path(r["workflow_dir"]) / "config.json").read_text(encoding="utf-8"))
-        policy = PausePolicy(pause_file=proj.dir / "PAUSE", pause_on_battery=not a.ignore_battery, power_probe=_power_state)
+        policy = PausePolicy(pause_file=proj.dir / "PAUSE", pause_on_battery=not a.ignore_battery, power_probe=_power_state, resource_guard=_guard())
         try:
-            out = Workflow(proj, cfg).run(lambda case, proto: make_backend_factory(case, proto, platform=platform), platform,
+            out = Workflow(proj, cfg).run(lambda case, proto: make_backend_factory(case, proto, platform=platform, resource_mode=a.mode), platform,
                                           should_pause=policy)
             _p(f"[{out['status']}] {r['name']}")
             if out["status"] == "PAUSED":
@@ -302,6 +307,8 @@ def main(argv=None) -> int:
     _utf8_console()
     ap = argparse.ArgumentParser(prog="md20", description=f"MD20 teaching workstation {__version__}")
     ap.add_argument("--dir", default=str(default_projects_dir()), help="projects root directory")
+    ap.add_argument("--mode", choices=["background", "balanced", "full"], default="balanced",
+                    help="資源模式：background（不干擾使用者）/ balanced / full（整台電腦）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("doctor"); d.add_argument("--no-benchmark", action="store_true"); d.add_argument("--seconds", type=float, default=20.0)
     d.set_defaults(fn=cmd_doctor)

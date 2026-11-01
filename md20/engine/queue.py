@@ -24,6 +24,7 @@ class PausePolicy:
     allowed_hours: tuple[int, int] | None = None  # (start_hour, end_hour) local time, may wrap midnight
     power_probe: Callable[[], dict] | None = None  # returns {"has_battery":..,"on_ac":..}
     clock: Callable[[], _dt.datetime] = field(default=_dt.datetime.now)
+    resource_guard: Callable[[], str | None] | None = None   # WP10: RAM / GPU temperature
 
     def __call__(self) -> str | None:
         if self.pause_file is not None and Path(self.pause_file).exists():
@@ -41,6 +42,11 @@ class PausePolicy:
             inside = (a <= h < b) if a <= b else (h >= a or h < b)
             if not inside:
                 return f"目前 {h:02d}:00 不在允許時段 {a:02d}:00–{b:02d}:00"
+        if self.resource_guard is not None:
+            try:
+                return self.resource_guard()
+            except Exception:  # noqa: BLE001
+                return None
         return None
 
 
