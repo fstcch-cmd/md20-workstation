@@ -222,6 +222,8 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     ctx.setPositions(pos * unit.nanometer)
     if "msw_restraint_scale" in ctx.getParameters():
         ctx.setParameter("msw_restraint_scale", cfg.backbone_restraint_scale)
+    if "msw_fb_scale" in ctx.getParameters():
+        ctx.setParameter("msw_fb_scale", 0.0)   # multi-ligand flat-bottom restraints are off for free-energy work
     xyz, box = _state_xyz_box(ctx)
     d0 = cv_distance(xyz, box, anchor, ligand, masses)
     lig_xyz = xyz[ligand]
@@ -310,6 +312,8 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         ctx.setState(XmlSerializer.deserialize(Path(start_xml).read_text(encoding="utf-8")))
         if "msw_restraint_scale" in ctx.getParameters():
             ctx.setParameter("msw_restraint_scale", cfg.backbone_restraint_scale)
+        if "msw_fb_scale" in ctx.getParameters():
+            ctx.setParameter("msw_fb_scale", 0.0)
         ctx.setParameter("k_cv", cfg.k_umbrella)
         ctx.setParameter("r0_cv", float(c))
         integ.step(eq_steps)

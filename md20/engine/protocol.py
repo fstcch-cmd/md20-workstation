@@ -93,14 +93,15 @@ def make_protocol(tier: str = "teaching", *, seed: int = 2026, replicas: int | N
     stages = [
         StageSpec(name="minimize", ensemble="MIN", timestep_fs=dt, restraint_scale=1.0,
                   max_iterations=5000, tolerance_kj_mol_nm=10.0, seed=seed),
-        # Heating 50 → 300 K under full restraints, then hold.
+        # Heating 50 → 300 K; restraints released 1.0 → 0.2 here (NVT) so that little restraint is left when the
+        # barostat starts: absolute-position restraints + MonteCarloBarostat bias the box volume (WP4).
         StageSpec(name="nvt", ensemble="NVT", length_ps=t["nvt_ps"], timestep_fs=dt, temperature_k=300.0,
-                  start_temperature_k=50.0, restraint_scale=1.0, report_interval_ps=0.5,
+                  start_temperature_k=50.0, restraint_scale=1.0, restraint_scale_end=0.2, report_interval_ps=0.5,
                   trajectory_interval_ps=10.0, checkpoint_interval_ps=25.0, regenerate_velocities=True,
                   seed=seed, accept={"temp_tol_k": 5.0, "last_fraction": 0.3}),
-        # Pressure coupling with restraints released linearly 1.0 → 0.0.
+        # Pressure coupling; the remaining 0.2 → 0.0 restraint is released here.
         StageSpec(name="npt", ensemble="NPT", length_ps=t["npt_ps"], timestep_fs=dt, temperature_k=300.0,
-                  restraint_scale=1.0, restraint_scale_end=0.0, report_interval_ps=1.0,
+                  restraint_scale=0.2, restraint_scale_end=0.0, report_interval_ps=1.0,
                   trajectory_interval_ps=10.0, checkpoint_interval_ps=50.0, seed=seed,
                   accept={"temp_tol_k": 5.0, "density_cv": 0.03, "last_fraction": 0.3}),
         StageSpec(name="production", ensemble="NPT", length_ps=prod_ps, timestep_fs=dt, temperature_k=300.0,

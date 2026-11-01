@@ -87,10 +87,48 @@ def add_position_restraints(system, topology, positions, *, k_protein=1000.0, k_
             "ligand_heavy_atoms": n_lig, "k_protein_kj_mol_nm2": k_protein, "k_ligand_kj_mol_nm2": k_ligand}
 
 
+def add_flat_bottom_restraints(system, topology, positions, lig_atom_ranges, *, k=1000.0, width_nm=0.4,
+                               pocket_cutoff_nm=0.8) -> list[dict]:
+    """WP4: multi-ligand runs — keep each ligand centroid within `width` of its starting distance to the pocket Cα centroid.
+
+    Zero force while the ligand stays in its site; only prevents a ligand drifting into bulk or into the other ligand's
+    site during short teaching runs.  Scaled by global `msw_fb_scale` (binding/free-energy steps set it to 0)."""
+    import numpy as np
+    import openmm as mm
+    from openmm import unit
+    pos = np.asarray(positions.value_in_unit(unit.nanometer))
+    atoms = list(topology.atoms())
+    lig_idx = {i for _, a, b in lig_atom_ranges for i in range(a, b)}
+    ca = np.array([a.index for a in atoms if a.name == "CA" and a.index not in lig_idx and a.residue.name not in {"CA"}], dtype=int)
+    f = mm.CustomCentroidBondForce(2, "0.5*msw_fb_scale*k_fb*max(0, abs(distance(g1,g2)-d0_fb)-w_fb)^2")
+    f.addGlobalParameter("msw_fb_scale", 1.0)
+    for name in ("k_fb", "d0_fb", "w_fb"):
+        f.addPerBondParameter(name)
+    out = []
+    for name, a, b in lig_atom_ranges:
+        heavy = [i for i in range(a, b) if atoms[i].element is not None and atoms[i].element.symbol != "H"]
+        if not heavy or not len(ca):
+            continue
+        d = np.min(np.linalg.norm(pos[ca][:, None, :] - pos[heavy][None, :, :], axis=2), axis=1)
+        pocket = ca[d <= pocket_cutoff_nm]
+        if len(pocket) < 3:
+            pocket = ca[np.argsort(d)[:3]]
+        g1 = f.addGroup(heavy, [1.0] * len(heavy))
+        g2 = f.addGroup(pocket.tolist(), [1.0] * len(pocket))
+        d0 = float(np.linalg.norm(pos[heavy].mean(0) - pos[pocket].mean(0)))
+        f.addBond([g1, g2], [k, d0, width_nm])
+        out.append({"ligand": name, "pocket_ca": len(pocket), "d0_nm": round(d0, 3), "width_nm": width_nm, "k": k})
+    f.setUsesPeriodicBoundaryConditions(True)
+    f.setName("msw_flat_bottom")
+    system.addForce(f)
+    return out
+
+
 def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_dir: Path | str, *,
                     padding_nm: float = 1.0, ionic_strength_molar: float = 0.15, box_shape: str = "cube",
                     water_model: str = "tip3p", decisions: DecisionLog | None = None,
-                    nonbonded_cutoff_nm: float = 1.0, forcefield_files: tuple[str, ...] = AMBER_PROTEIN) -> BuildResult:
+                    nonbonded_cutoff_nm: float = 1.0, forcefield_files: tuple[str, ...] = AMBER_PROTEIN,
+                    flat_bottom: bool | None = None) -> BuildResult:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     report = GateReport()
@@ -157,6 +195,13 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
     lig_index_set = {i for _, a, b in lig_atom_ranges for i in range(a, b)}
     restr = add_position_restraints(system, modeller.topology, modeller.positions, ligand_resnames=lig_names,
                                     ligand_atom_indices=lig_index_set)
+    if flat_bottom is None:
+        flat_bottom = len(lig_atom_ranges) > 1
+    if flat_bottom and lig_atom_ranges:
+        restr["flat_bottom"] = add_flat_bottom_restraints(system, modeller.topology, modeller.positions, lig_atom_ranges)
+        report.add(Gate("multi-ligand flat-bottom", AUTO_FIXED,
+                        f"多配體系統：每個配體質心對口袋 Cα 質心加平底限制（±0.4 nm 內零力），避免短模擬中配體漂離或互換位置；"
+                        f"結合自由能步驟會關閉。共 {len(restr['flat_bottom'])} 個。"))
     if peptide_chains:
         from .peptide import topology_gate
         for g in topology_gate(modeller.topology, receptor_chain_ids, peptide_chains).gates:
