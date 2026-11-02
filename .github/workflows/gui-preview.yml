@@ -8,7 +8,7 @@ on:
     paths: ["md20/gui/**", "tools/gui_preview.py", ".github/workflows/gui-preview.yml"]
 
 permissions:
-  contents: read
+  contents: write   # screenshots are also pushed to the `gui-preview` branch (artifact blobs are not reachable from the dev container)
 
 jobs:
   screenshots:
@@ -27,3 +27,9 @@ jobs:
         run: python tools/gui_preview.py gui_preview
       - uses: actions/upload-artifact@v4
         with: { name: gui-preview, path: gui_preview/*.png }
+      - name: Push screenshots to the gui-preview branch
+        run: |
+          mkdir /tmp/pv && cp gui_preview/*.png /tmp/pv/
+          cd /tmp/pv && git init -q && git checkout -q -b gui-preview
+          git -c user.name=ci -c user.email=ci@md20 add . && git -c user.name=ci -c user.email=ci@md20 commit -qm "GUI preview ${{ github.sha }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gui-preview
