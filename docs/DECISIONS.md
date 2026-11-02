@@ -7,6 +7,18 @@
 
 ## 2026-11-02
 
+### D-40　筆電第一次真跑結果判讀：流程正確，但 ΔPMF 80 kJ/mol 不可信；閘門擋下 ΔG° 是對的
+- 事實（RTX 4060 筆電，classroom 3PTB，workflow_report 05:06Z）：redocking RMSD 0.38 Å；MD 穩定（backbone 0.8–0.9 Å、BEN 全程在 S1 口袋，Asp189／Ser190／Gly219 接觸 100%）；
+  SMD 最大力 524 kJ/mol/nm、功 251 kJ/mol；umbrella 自動補窗 6 輪 13 → 40 個 window，連續性通過；**ΔPMF 井深 80.3 ± 1.0 kJ/mol（≈ 19 kcal/mol），ΔG° 不輸出（`not converged`：MBAR 求解未達容差，pymbar 退回梯度 2.1e-4 的解）**；前／後半 85.0／82.1。
+- 判讀（我的判斷）：苯甲脒–胰蛋白酶實驗 ΔG ≈ −6 kcal/mol（約 −26 kJ/mol），1D COM PMF 井深合理範圍約 25–50 kJ/mol；80 kJ/mol 偏大約 2–3 倍，**不能當作物理結果**。
+  證據指向取樣滯後而非程式錯誤：補窗紀錄顯示中心 0.604 nm 的 window 實際停在 0.268 nm（彈簧 1000 時回復力 ≈ 336 kJ/mol/nm），配體被強力拉回口袋——短 window（classroom）下溶劑重新進入 S1、Asp189 鹽橋斷開等正交自由度來不及鬆弛，一維 CV 會把這些累積成假的高能障。bootstrap ±1.0 只反映 window 內雜訊，低估真實不確定度。
+- 決定（下一步，尚未實作）：
+  1. 報告寫明**哪一個**收斂條件沒過（MBAR 求解、overlap 圖連通、半段差、tier 規則），不再只寫「not converged」；pymbar 警告捕捉後寫進 caveat，命令列不再噴紅字。
+  2. **井深合理性提示**：ΔPMF 超過「配體重原子數 × 經驗上限」或明顯大於 SMD 功的一半等條件時，報告標「井深異常偏大，常見原因：window 太短、路徑滯後」，給選項（teaching tier、延長 window、雙向／重跑）；不改數值、不擋流程。
+  3. 第一個定量驗收改用 **teaching tier**（window ≥ 500 ps）在筆電重跑同案例（約數小時），以 ΔPMF 是否回到合理範圍判斷是取樣問題還是模型問題。
+- 被否決：直接調參數讓數字變好看（沒有證據前不改物理）；把 classroom 的 ΔPMF 當驗收（tier 規則本來就不支持定量）。
+- 未決：Woo–Roux／funnel 校正前，1D PMF 與實驗 ΔG 只能比趨勢（會診 §2）。
+
 ### D-39　Doctor 文字：Windows 11 被報成「Windows 10」、GPU 名稱重複「NVIDIA NVIDIA」
 - 事實（MSI Cyborg 14 實機）：`platform.release()` 在 Python 3.11 的 Windows 11（build 26200）回傳 "10"；`nvidia-smi` 的名稱已含廠牌，前面再加 vendor 變成重複。
 - 決定：`hardware.os_release()` 以 build ≥ 22000 判定 Windows 11；`hardware.gpu_label()` 名稱已以廠牌開頭時不重複；Doctor 報告、驅動 finding、`md20 drivers plan` 都改用。只影響顯示文字，不影響平台選擇。
