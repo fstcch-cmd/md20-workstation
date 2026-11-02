@@ -198,13 +198,26 @@ def ligand_metal_contacts(atoms: list[dict], ligand_indices: set[int]) -> list[d
             d = float(np.linalg.norm(np.asarray(a["xyz"], float) - mx))
             if d <= CUTOFF_A[el]:
                 out.append({"metal": f"{m['resname'].upper()}:{m['chain']}{m['resseq']}", "ligand_resname": a["resname"],
-                            "atom": a["name"], "element": el, "distance_A": round(d, 2)})
+                            "atom": a["name"], "element": el, "distance_A": round(d, 2),
+                            "metal_index": int(m["index"]), "atom_index": int(a["index"])})
     return out
 
 
-def ligand_metal_gate(contacts: list[dict]) -> Gate | None:
+LM_FLAT_NM = 0.025          # ± 0.25 Å around the docked distance: no force
+LM_K = 5000.0               # kJ/mol/nm² outside the flat region
+
+
+def ligand_metal_gate(contacts: list[dict], policy: str | None = None) -> Gate | None:
     if not contacts:
         return None
+    if policy == "restrain":
+        desc = "、".join(f"{c['ligand_resname']}:{c['atom']}–{c['metal']} {c['distance_A']:.2f} Å" for c in contacts[:6])
+        return Gate("ligand–metal coordination", AUTO_FIXED,
+                    f"配體直接配位金屬（{desc}）：依使用者選擇以平底距離約束維持對接時的配位距離（± {LM_FLAT_NM * 10:.2f} Å 內零力，"
+                    f"外側 {LM_K:.0f} kJ mol⁻¹ nm⁻²），全程開啟。這是幾何後備，不是配位化學參數：配位能不在力場中，"
+                    "所以這個配體的結合自由能不計算，MD 只用來看其餘部分的接觸與蛋白反應（報告標註）。",
+                    diff=[f"{c['ligand_resname']}:{c['atom']} – {c['metal']}: {c['distance_A']:.2f} Å" for c in contacts],
+                    evidence={"contacts": contacts})
     metals = sorted({c["metal"] for c in contacts})
     rn = metals[0].split(":")[0]
     desc = "、".join(f"{c['ligand_resname']}:{c['atom']}–{c['metal']} {c['distance_A']:.2f} Å" for c in contacts[:6])
@@ -212,9 +225,28 @@ def ligand_metal_gate(contacts: list[dict]) -> Gate | None:
                 f"配體直接配位金屬（{desc}）。力場沒有配體–金屬鍵參數：非鍵結模型下配位會散開或塌陷，"
                 "Vina 也不計配位能；這個結合模式的 MD 與結合自由能都不可信，不自動處理。",
                 options=["換一個不直接配位金屬的 pose（pose 表點選）",
+                         "ligand_metal: restrain（以距離約束維持配位，報告標註；此配體不計算結合自由能）",
                          "以 MCPB.py/QM 參數化配體–金屬鍵後匯入（metal_params）",
                          "metal_policy: {" + rn + ": remove}（僅限金屬非功能必要）"],
                 evidence={"contacts": contacts, "metals": metals})
+
+
+def add_ligand_metal_restraints(system, contacts: list[dict], *, periodic: bool = True) -> list[dict]:
+    """Flat-bottom distance restraints that keep each ligand donor at its docked distance from the metal (D-53)."""
+    import openmm as mm
+    f = mm.CustomBondForce("k_lm*(step(r-hi)*(r-hi)^2 + step(lo-r)*(lo-r)^2)")
+    f.setName("msw_ligand_metal")
+    f.addGlobalParameter("k_lm", LM_K)
+    f.addPerBondParameter("lo")
+    f.addPerBondParameter("hi")
+    f.setUsesPeriodicBoundaryConditions(bool(periodic))
+    out = []
+    for c in contacts:
+        d = c["distance_A"] / 10.0
+        f.addBond(int(c["metal_index"]), int(c["atom_index"]), [max(0.0, d - LM_FLAT_NM), d + LM_FLAT_NM])
+        out.append({**c, "lo_nm": round(max(0.0, d - LM_FLAT_NM), 4), "hi_nm": round(d + LM_FLAT_NM, 4)})
+    system.addForce(f)
+    return out
 
 
 def site_gates(plans: list[dict]) -> list[Gate]:

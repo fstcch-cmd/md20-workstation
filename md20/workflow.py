@@ -125,7 +125,7 @@ def example_config(screen: bool = False) -> dict:
 DECISION_KEYS: tuple[tuple[str, ...], ...] = (
     ("pose_choices",), ("human_choices",), ("structure_override",), ("metal_policy",), ("metal_params",), ("peptide_policy",),
     ("docking", "skip_redock"), ("box", "allow_blind"), ("binding", "manual_windows"),
-    ("screen", "select"), ("screen", "next_mode"), ("screen", "allow_partial"), ("md_confirmed",),
+    ("screen", "select"), ("screen", "next_mode"), ("screen", "allow_partial"), ("md_confirmed",), ("ligand_metal",),
 )
 LIGAND_DECISION_KEYS = ("cpp_override", "cpp_evidence", "target_location")
 
@@ -897,7 +897,8 @@ class Workflow:
                        box_shape=self.cfg.get("md", {}).get("box_shape", "dodecahedron"),
                        ionic_strength_molar=float(self.cfg.get("md", {}).get("ionic_strength_molar", 0.15)),
                        ions=self.cfg.get("md", {}).get("ions") or None,
-                       human_choices=self.cfg.get("human_choices") or None)   # receptor gate choices apply to the MD build too
+                       human_choices=self.cfg.get("human_choices") or None,   # receptor gate choices apply to the MD build too
+                       ligand_metal=self.cfg.get("ligand_metal") or None)
         lmap = {n: f"L{i:02d}" for i, n in enumerate(small, 1)} | {p["name"]: p["name"] for p in peps}
         return s, lmap
 
@@ -1081,6 +1082,15 @@ class Workflow:
             lrec = recs.get(mname)
             if lrec is None or not lrec.get("heavy_atom_indices"):
                 self._block("binding", f"{name}：建模紀錄中找不到配體 {mname} 的原子索引，無法定義拉離座標。")
+            lm = [x for x in ((bm.get("restraints") or {}).get("ligand_metal") or []) if x.get("ligand_resname") == mname]
+            if lm:
+                # D-53: the coordination is held by a distance restraint, not by chemistry — pulling the ligand out would
+                # measure the restraint, so no free energy is computed for this ligand
+                why = (f"{name}：配體以距離約束維持與 {lm[0]['metal']} 的配位（ligand_metal: restrain）；拉離會量到約束而不是結合，"
+                       "此配體不計算結合自由能。要計算，請以 MCPB.py 或 QM 參數化配體–金屬鍵（metal_params）。")
+                results[name] = {"status": "SKIPPED", "ligand": t["ligand"], "caveats": [why]}
+                self.dec.record("workflow.binding", name, "skipped", why)
+                continue
             others = {}
             for o in t["others"]:
                 orec = recs.get(lmap.get(o, ""))

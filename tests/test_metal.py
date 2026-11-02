@@ -142,4 +142,4 @@ def test_ligand_coordinating_metal_is_stopped_after_assembly():
     assert ligand_metal_contacts(atoms, {3, 4}) == [] and ligand_metal_gate([]) is None
     from md20.gui.actions import gate_actions                      # the remove option is one click in the GUI
     acts, manual = gate_actions(g.to_dict(), step="md_cases")
-    assert [a["patch"][0]["value"] for a in acts] == ["remove"] and len(manual) == 2
+    assert sorted(str(a["patch"][0]["value"]) for a in acts) == ["remove", "restrain"] and len(manual) == 2   # D-53 adds restrain

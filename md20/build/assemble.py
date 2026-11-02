@@ -215,7 +215,8 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                     water_model: str = "tip3p", decisions: DecisionLog | None = None,
                     nonbonded_cutoff_nm: float = 1.0, forcefield_files: tuple[str, ...] = AMBER_PROTEIN,
                     flat_bottom: bool | None = None, metal_policy: dict | None = None, ph: float = 7.4,
-                    metal_params: dict | None = None, solvent: str = "explicit", ions: dict | None = None) -> BuildResult:
+                    metal_params: dict | None = None, solvent: str = "explicit", ions: dict | None = None,
+                    ligand_metal: str | None = None) -> BuildResult:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     report = GateReport()
@@ -276,12 +277,15 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
         from .metal import _atoms_of, ligand_metal_contacts, ligand_metal_gate
         import numpy as _np2
         lig_set = {i for _, a, b in lig_atom_ranges for i in range(a, b)}
-        g = ligand_metal_gate(ligand_metal_contacts(
-            _atoms_of(modeller.topology, _np2.asarray(modeller.positions.value_in_unit(unit.nanometer))), lig_set))
+        lm_contacts = ligand_metal_contacts(
+            _atoms_of(modeller.topology, _np2.asarray(modeller.positions.value_in_unit(unit.nanometer))), lig_set)
+        g = ligand_metal_gate(lm_contacts, ligand_metal)
         if g is not None:
             report.add(g)
             if decisions:
-                decisions.record("build.metal", g.name, "NEEDS_HUMAN", g.explanation, kind="human")
+                decisions.record("build.metal", g.name, g.status, g.explanation, kind="human")
+    else:
+        lm_contacts = []
     if not report.ok:
         res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict())
         atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")
@@ -370,6 +374,10 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                         options=["metal_params 改為不套用電荷（charges: false）", "確認 MCPB 模型的質子化狀態"]))
     restr = add_position_restraints(system, modeller.topology, modeller.positions, ligand_resnames=lig_names,
                                     ligand_atom_indices=lig_index_set)
+    if lm_contacts and ligand_metal == "restrain":
+        # atom indices are stable: solvent and ions are appended after the contacts were measured (D-53)
+        from .metal import add_ligand_metal_restraints
+        restr["ligand_metal"] = add_ligand_metal_restraints(system, lm_contacts, periodic=not implicit)
     if flat_bottom is None:
         flat_bottom = len(lig_atom_ranges) > 1
     if flat_bottom and lig_atom_ranges:
