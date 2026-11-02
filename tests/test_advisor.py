@@ -89,3 +89,11 @@ def test_features_and_estimate():
     r = next(x for x in rows if x["key"] == "temperature_k")
     assert r["changed"] and r["value_text"] == "310 K" and r["recommended_text"] == "300 K"
     assert format_value("binding", True, "zh") == "是"
+
+
+def test_default_pull_velocity_is_0_005_everywhere():   # D-63
+    from md20.sampling.binding import BindingConfig
+    assert BindingConfig().pull_velocity_nm_per_ps == 0.005
+    for f, goal in [(CaseFeatures(), "teaching"), (CaseFeatures(ligand_kind="peptide", peptide_length=7), "screening"),
+                    (CaseFeatures(), "publication")]:
+        assert recommended_values(f, goal)["pull_velocity_nm_per_ps"] == 0.005

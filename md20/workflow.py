@@ -22,7 +22,7 @@ Config (JSON):
          "box_shape": "dodecahedron",         # 71 % of a cube's water for the same image distance
          "ions": {"positive": "Na+", "negative": "Cl-",        # Na+ K+ Li+ Rb+ Cs+ ; Cl- Br- F- I- (monovalent only)
                   "concentration_molar": 0.15, "neutralize": true}},  # 0 M = counter-ions only
-  "binding": {"enabled": true, "ligands": ["BEN"], "config": {"pull_velocity_nm_per_ps": 0.01}},
+  "binding": {"enabled": true, "ligands": ["BEN"], "config": {"pull_velocity_nm_per_ps": 0.005}},
   "screen": {"library": "compounds.xlsx", "exhaustiveness": 8, "n_poses": 3, "top_n": 20, "select": [], "next_mode": "independent"}
                                             # optional HTS pre-screen (docs/specs/hts_screen.md): selected compounds are
                                             # appended to `ligands` and docked for real with `docking` settings

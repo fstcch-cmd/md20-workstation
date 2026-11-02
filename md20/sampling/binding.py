@@ -30,7 +30,7 @@ V0_NM3 = 1.66053906660  # standard-state volume per molecule (1 M) in nm³
 @dataclass
 class BindingConfig:
     pull_distance_nm: float = 1.5          # how far beyond the bound distance to pull
-    pull_velocity_nm_per_ps: float = 0.01  # 10 m/s — fast teaching default; research: 0.001–0.005
+    pull_velocity_nm_per_ps: float = 0.005  # D-63: 0.01 dissipated ~100 kT on 3PTB (laptop); SMD cost is minor
     k_pull: float = 1000.0                 # kJ/mol/nm² SMD spring
     k_umbrella: float = 1000.0             # kJ/mol/nm² window spring
     target_overlap: float = 0.2            # neighbouring windows (and the adaptive refinement's stop criterion)

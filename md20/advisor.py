@@ -351,13 +351,14 @@ def _recommend_raw(f: CaseFeatures, goal: str) -> dict[str, dict]:
                                                        "A peptide is longer and has to be pulled further to leave the protein surface.") if pep else
                                                       ("1.5 nm 讓配體完全脫離口袋，剖面末端應趨於平坦。",
                                                        "1.5 nm takes the ligand fully out of the pocket; the profile should flatten at the end.")))
-    slow = pep or goal == "publication"
-    o["pull_velocity_nm_per_ps"] = _r(0.005 if slow else 0.01, *(("較慢的拉速減少彈簧振盪與非平衡功；胜肽與發表等級使用 0.005。",
-                                                                  "A slower pull reduces spring ringing and non-equilibrium work; "
-                                                                  "peptides and publication grade use 0.005.") if slow else
-                                                                 ("教學預設 0.01 nm ps⁻¹；SMD 只用來產生窗口起點，自由能由傘狀採樣決定。",
-                                                                  "Teaching default 0.01 nm ps⁻¹; SMD only provides window "
-                                                                  "starting points, the free energy comes from umbrella sampling.")))
+    # D-63: 0.005 for every goal.  At 0.01 nm/ps the 3PTB pull did ~355 kJ/mol of work against a ~100 kJ/mol free-energy
+    # change (~100 kT dissipated), so the window starting structures carried a disturbed pocket; SMD is a small part of
+    # the cost (1.5 nm at 0.005 nm/ps = 300 ps against tens of ns of windows).
+    o["pull_velocity_nm_per_ps"] = _r(0.005, "0.005 nm ps⁻¹：拉太快時大部分功變成耗散，窗口起點帶著被擾動的口袋；"
+                                             "SMD 只占總時間的一小部分，放慢的代價很小。自由能仍由傘狀採樣決定。",
+                                      "0.005 nm ps⁻¹: a faster pull turns most of the work into dissipation and the window "
+                                      "starting points carry a disturbed pocket; SMD is a small part of the total time, so "
+                                      "slowing it costs little. The free energy still comes from umbrella sampling.")
     o["k_pull"] = _r(1000.0, "1000 kJ mol⁻¹ nm⁻² 讓配體跟隨彈簧又不至於過硬。",
                      "1000 kJ mol⁻¹ nm⁻² makes the ligand follow the spring without being too stiff.")
     o["k_umbrella"] = _r(1000.0, "窗口間距 0.05 到 0.1 nm 時，1000 可得到足夠重疊；陡峭區段系統會自動加硬。",
