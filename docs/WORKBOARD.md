@@ -6,6 +6,7 @@
 ## 進行中
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **Windows 安裝程式發行（使用者要求 11/02 11:00 前）**：GitHub Release `v0.1.0a1`（ZIP＋根目錄雙擊 `Install-MD20.cmd`）、release workflow 在 Windows 解壓實裝驗證後才發行；install.ps1 非 git 目錄時把程式複製到 %LOCALAPPDATA%\MD20\app、原生指令失敗即停 | 使用者 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-02 08:05 | 請其他 session 暫勿改 installer/ 與 release workflow |
 | 巡檢 #3（07:45）：**bb36a4b 全綠且 Windows 不再假綠**（367 passed、5 skipped 全為「在別的 job 跑」或 playwright；對接與 HTS 整合測試在 Windows PASSED）。里程碑 CI 端達成；真機（CUDA、驅動查詢、ns/day）等使用者筆電 | — | session_016gcJzBDnGh3heY9HLWnva3 | 2026-11-02 07:50 | 交付狀態已發給使用者 |
 | 巡檢 #2（04:30）：99c8b64 全綠屬實，但 Windows 的 meeko 因缺 gemmi 而 import 失敗 → 對接／HTS 整合測試在 Windows 全被 SKIPPED（D-30 已修：gemmi + MD20_STACK 守門）；等這輪確認 | — | session_016gcJzBDnGh3heY9HLWnva3 | 2026-11-02 04:45 | 下一次 07:45 |
 | 巡檢 #1（01:00）：`installer-windows` **綠**（PS 5.1 真跑：環境、Vina、doctor、demo、範本）；pure-python 6/6 綠；heavy(metal) 紅＝測試不穩定（D-29 已修）；openmm-stack 三 OS 與 heavy(workflow) 仍在跑 | — | session_016gcJzBDnGh3heY9HLWnva3 | 2026-11-02 01:10 | 下一次 04:30 |
