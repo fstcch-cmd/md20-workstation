@@ -6,6 +6,7 @@
 ## 進行中
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| 鋅鍵結模型平均鍵長偏 0.3 Å（D-32/D-34）：先診斷（heavy metal 測試輸出 3 Å 內非鍵原子）→ 依證據選修法（配位水入鍵結／元素×配位原子力常數／Li–Merz IOD LJ） | D-32、會診 §3 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-02 08:55 | 不擋 Windows（只在 Ubuntu heavy） |
 | 巡檢 #3（07:45）：**bb36a4b 全綠且 Windows 不再假綠**（367 passed、5 skipped 全為「在別的 job 跑」或 playwright；對接與 HTS 整合測試在 Windows PASSED）。里程碑 CI 端達成；真機（CUDA、驅動查詢、ns/day）等使用者筆電 | — | session_016gcJzBDnGh3heY9HLWnva3 | 2026-11-02 07:50 | 交付狀態已發給使用者 |
 | 巡檢 #2（04:30）：99c8b64 全綠屬實，但 Windows 的 meeko 因缺 gemmi 而 import 失敗 → 對接／HTS 整合測試在 Windows 全被 SKIPPED（D-30 已修：gemmi + MD20_STACK 守門）；等這輪確認 | — | session_016gcJzBDnGh3heY9HLWnva3 | 2026-11-02 04:45 | 下一次 07:45 |
 | 巡檢 #1（01:00）：`installer-windows` **綠**（PS 5.1 真跑：環境、Vina、doctor、demo、範本）；pure-python 6/6 綠；heavy(metal) 紅＝測試不穩定（D-29 已修）；openmm-stack 三 OS 與 heavy(workflow) 仍在跑 | — | session_016gcJzBDnGh3heY9HLWnva3 | 2026-11-02 01:10 | 下一次 04:30 |
@@ -15,7 +16,7 @@
 ## 待認領（依重要性）
 | 項目 | 來源 |
 |---|---|
-| **（優先）鋅鍵結模型平均鍵長偏 0.31 Å（D-32，heavy metal 紅）**；金屬：力常數依元素×配位原子表、配位水納入鍵結、配體配位金屬的距離約束後備 | 同上 §3 |
+| 金屬：力常數依元素×配位原子表（鋅偏移部分已認領，見進行中）、配位水納入鍵結、配體配位金屬的距離約束後備 | 同上 §3 |
 | umbrella：MBAR overlap matrix 門檻、OpenMM 內建 metadynamics 後備、funnel 約束（研究 tier ΔG°） | 同上 §2 |
 | 約束策略智慧建議 `recommend_restraint_strategy`；凍結／口袋截斷／資源估算（分組分階段已完成 D-23；其餘依會診 §1 Q2–Q6） | `docs/specs/restraints_freeze_truncation.md` |
 | 對接盒子過大防呆閘門（任一邊 > 40 Å 或盒內殘基 > 300，提示格點數 ×0.375） | DECISIONS D-14、REVIEW_QUESTIONS #6 |

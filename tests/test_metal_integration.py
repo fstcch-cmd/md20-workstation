@@ -54,15 +54,29 @@ def test_bonded_zinc_ca2(pdb_ca2, tmp_path):
     ctx.setVelocitiesToTemperature(300 * unit.kelvin, 2026)
     integ.step(1000)                                    # 2 ps transient, discarded
     traces = {b["label"]: [] for b in p["bonds"]}
+    # D-34 diagnosis: which non-bonded atoms crowd the metal (a water/hydroxide moving into the 4th site, or a
+    # backbone O) — the 0.3 Å mean stretch must be explained before the model is changed
+    zn = p["bonds"][0]["metal"]
+    donors = {b["donor"] for b in p["bonds"]}
+    heavy = np.array([a.index for a in atoms if a.element is not None and a.element.symbol != "H"
+                      and a.index != zn and a.index not in donors])
+    crowd: dict[str, list[float]] = {}
     for _ in range(20):                                 # 2 ps sampled every 0.1 ps
         integ.step(50)
         xyz = ctx.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
         for b in p["bonds"]:
             traces[b["label"]].append(float(np.linalg.norm(xyz[b["metal"]] - xyz[b["donor"]])))
+        d = np.linalg.norm(xyz[heavy] - xyz[zn], axis=1)
+        for i in heavy[d < 0.30]:
+            a = atoms[int(i)]
+            crowd.setdefault(f"{a.residue.name}{a.residue.id}:{a.name}", []).append(float(np.linalg.norm(xyz[int(i)] - xyz[zn])))
+    diag = {"bonds_mean_A": {k: round(float(np.mean(v)) * 10, 3) for k, v in traces.items()},
+            "r0_A": {b["label"]: round(b["r0_nm"] * 10, 3) for b in p["bonds"]},
+            "nonbonded_within_3A": {k: [len(v), round(float(np.mean(v)) * 10, 2)] for k, v in sorted(crowd.items())}}
     for b in p["bonds"]:
         tr = np.array(traces[b["label"]])
-        assert abs(tr.mean() - b["r0_nm"]) < 0.03, (b["label"], tr.mean(), tr.std(), b["r0_nm"])
-        assert tr.max() - b["r0_nm"] < 0.08, (b["label"], tr.max(), b["r0_nm"])
+        assert abs(tr.mean() - b["r0_nm"]) < 0.03, (b["label"], tr.mean(), tr.std(), b["r0_nm"], diag)
+        assert tr.max() - b["r0_nm"] < 0.08, (b["label"], tr.max(), b["r0_nm"], diag)
 
 
 def test_fitted_zinc_params_json_ca2(pdb_ca2, tmp_path):
