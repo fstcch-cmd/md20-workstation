@@ -158,6 +158,10 @@ def teaching_rows(vals: dict, paper_vals: dict, f, L: str) -> list[dict]:
     for r in advisor.parameter_table(vals, f, "teaching", L):
         if r["group_key"] == "binding" and r["key"] != "binding" and not vals.get("binding"):
             continue
+        if r["key"] == "exhaustiveness" and vals.get("docking_mode", vals.get("mode")) != "independent" and r["value"] == 8:
+            r = {**r, "why": _("課堂時間內可完成的搜尋強度；論文使用 32（六個配體同時對接在 RTX 4060 筆電上超過 2 小時），研究等級可改回。",
+                               "A search effort that finishes within a class; the paper used 32 (over 2 h on an RTX 4060 laptop for six ligands docked together); research tier restores it.")}
+            rows.append(r); continue
         if r["key"] in paper_vals and r["value"] != r["recommended"]:
             r = {**r, "why": _(f"依論文設定（系統對一般個案的建議為 {r['recommended_text']}：{r['why']}）",
                                f"Taken from the paper (for a general case the recommendation is {r['recommended_text']}: {r['why']})")}

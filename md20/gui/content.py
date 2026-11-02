@@ -146,7 +146,8 @@ TEACHING = {
         ],
         "stages": [
             (("取得與檢查結構", "Fetch and check the structure"), ("比對物種、解析度與搜尋區殘基。", "Species, resolution and residues in the box.")),
-            (("同時對接六個代謝物", "Dock the six metabolites together"), ("搜尋強度 32；每個姿勢檢查配體間碰撞。", "Exhaustiveness 32; every pose is checked for clashes between ligands.")),
+            (("同時對接六個代謝物", "Dock the six metabolites together"), ("課堂預設搜尋強度 8（論文為 32：六個配體同時對接在 RTX 4060 筆電上 2 小時以上仍未完成；研究等級或專業模式可改回 32）；每個姿勢檢查配體間碰撞。",
+              "Exhaustiveness 8 in class (the paper used 32: six ligands docked together did not finish in over 2 h on an RTX 4060 laptop; research tier or professional mode restores 32); every pose is checked for clashes between ligands.")),
             (("選擇姿勢並確認", "Choose and confirm the pose"), ("看分數、叢集大小與接觸殘基，再決定是否進入模擬。", "Score, cluster size and contact residues; then decide whether to simulate.")),
             (("建模與平衡", "Build and equilibrate"), ("加水、加鹽、能量最小化、加熱、定壓平衡；每階段有驗收標準。", "Water, salt, minimisation, heating and pressure equilibration, each with acceptance criteria.")),
             (("正式模擬與分析", "Production and analysis"), ("比較蛋白單獨與複合物；觀察是否有配體離開口袋。", "Protein alone versus complex; does any ligand leave the pocket?")),

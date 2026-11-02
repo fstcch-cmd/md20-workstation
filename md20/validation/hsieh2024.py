@@ -53,6 +53,10 @@ LIGANDS = [
 ]
 
 
+CLASSROOM_EXHAUSTIVENESS = 8      # D-71
+PAPER_SEARCH_EXHAUSTIVENESS = 32
+
+
 def workflow_config(pdb_id: str = "1VKX", *, tier: str = "classroom") -> dict:
     """MD20 workflow reproducing the paper, with MD20's additions (apo vs holo MD, SMD/umbrella)."""
     return {
@@ -61,7 +65,10 @@ def workflow_config(pdb_id: str = "1VKX", *, tier: str = "classroom") -> dict:
         "ph": 7.4,
         "box": {"center": list(PAPER["box_center"]), "size": list(PAPER["box_size"])},
         "ligands": [{"name": l["name"], "smiles": l["smiles"]} for l in LIGANDS],
-        "docking": {"mode": "simultaneous", "exhaustiveness": 32, "n_poses": 9, "seed": 2026},
+        # D-71: the paper's exhaustiveness 32 for six ligands docked together did not finish in 2 h 16 min on an RTX 4060
+        # laptop (i7-13620H); 8 is what CI reproduces the binding site with in minutes.  Research tier keeps 32.
+        "docking": {"mode": "simultaneous", "exhaustiveness": 32 if tier == "research" else CLASSROOM_EXHAUSTIVENESS,
+                    "n_poses": 9, "seed": 2026},
         "pose_choices": {},
         "md": {"systems": ["apo", "docked_multi"], "tier": tier, "replicas": 1, "padding_nm": 1.0},
         # the most abundant metabolite; a weak, polar binder — expect a shallow PMF

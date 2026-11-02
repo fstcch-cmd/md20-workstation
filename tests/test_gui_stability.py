@@ -53,3 +53,10 @@ def test_runner_runs_one_calculation_at_a_time(monkeypatch):
 def test_teaching_project_name_does_not_depend_on_language():
     src = Path(__file__).resolve().parents[1].joinpath("md20", "gui", "pages_v2.py").read_text(encoding="utf-8")
     assert '_project("Teaching")' in src and '"教學")' not in src
+
+
+def test_teaching_one_docks_at_classroom_effort_and_research_keeps_the_paper():   # D-71
+    from md20.validation import hsieh2024
+    assert hsieh2024.workflow_config(tier="classroom")["docking"]["exhaustiveness"] == 8
+    assert hsieh2024.workflow_config(tier="teaching")["docking"]["exhaustiveness"] == 8
+    assert hsieh2024.workflow_config(tier="research")["docking"]["exhaustiveness"] == 32
