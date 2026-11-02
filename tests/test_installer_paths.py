@@ -53,3 +53,24 @@ def test_shell_scripts_never_follow_a_variable_with_non_ascii():
     for p in ["installer/install.sh", "Install-MD20.command"]:
         s = (ROOT / p).read_text(encoding="utf-8")
         assert not re.search(r"\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]", s), p
+
+
+def test_vina_executable_always_gets_cpu(monkeypatch, tmp_path):   # D-68
+    import subprocess, os
+    from md20.docking import vina_cli
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        out = cmd[cmd.index("--out") + 1]
+        open(out, "w").write("MODEL 1\nREMARK VINA RESULT:    -6.100      0.000      0.000\nENDMDL\n")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(vina_cli.subprocess, "run", fake_run)
+    from md20.env.resources import plan
+    for mode in ("background", "balanced", "full"):
+        monkeypatch.setenv("MD20_RESOURCE_MODE", mode)
+        vina_cli.run_vina_cli("vina", "rec.pdbqt", ["L1", "L2"], (0, 0, 0), (20, 20, 20))
+        c = seen["cmd"]
+        assert int(c[c.index("--cpu") + 1]) == plan(mode).threads          # the user's choice reaches Vina
+    n = os.cpu_count() or 1
+    assert plan("background").threads <= max(1, round(n / 4)) and plan("full").threads == n

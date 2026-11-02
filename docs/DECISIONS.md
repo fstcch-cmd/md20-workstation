@@ -7,6 +7,20 @@
 
 ## 2026-11-02
 
+### D-68　Windows vina.exe：一律傳 `--cpu`；多配體同時對接的時限依配體數放寬
+- 事實（筆電 2026-11-02 23:05–23:50，a3 候選版，教學一 hsieh2024 六個代謝物 simultaneous、exhaustiveness 32）：對接 45 分鐘仍無輸出；
+  工作管理員 vina.exe **CPU 23.7%**（16 個邏輯 CPU 中約 4 個），總 CPU 26%，沒有其他負載。CI（Linux、Python bindings）兩篇論文對接重現共 25 分鐘。
+- 判斷：MD20 呼叫 vina.exe 時 `cpu=0` 就不傳 `--cpu`，由 vina.exe 自行決定；資源模式 balanced 只降優先權、不限核心數，不是原因。
+  **未確認**是否就是 vina.exe 預設的執行緒數不足（也可能是多配體演算法某階段只用少數執行緒）——以下一次筆電實跑的工作管理員 CPU% 驗證。
+- 決定（使用者 23:52：「讓使用者自己調配資源，學生只有一台電腦，CPU 全開不利於做報告」）：
+  - **資源用量由使用者選**：GUI 頁首「資源用量」三選一並記住（`gui_settings.json`）——省資源（¼ 個 CPU、最低優先權、GPU 50%，可同時寫報告）／
+    平衡（預設，留 2 個 CPU、較低優先權、GPU 85%）／全速（全部、電腦閒置時）；命令列沿用 `md20 --mode`。設定經環境變數 `MD20_RESOURCE_MODE`
+    傳到 Vina 等深層呼叫，下一個計算步驟起生效。
+  - `run_vina_cli` 一律傳 `--cpu`＝所選模式的執行緒數（平衡：16 個邏輯 CPU 的筆電為 14）；
+  時限由固定 2 小時改為 2 小時＋每多一個配體 1 小時（六配體 7 小時），避免慢但正常的同時對接被逾時中斷而整個流程報錯。
+- 證據：`tests/test_installer_paths.py::test_vina_executable_always_gets_cpu`。待筆電驗證。
+- 未決：若傳 `--cpu 16` 後 CPU 仍約 25%，教學一的預設對接強度（exhaustiveness 32、同時對接）對筆電可能太重，考慮教學層級改 16 或先 independent 再 simultaneous。
+
 ### 觀察（未改程式）：CI f558059 `heavy (pose-screen)` 紅
 - 短 MD 篩選的 NPT 延長兩次後 `density_drift` 仍未通過 → 閘門擋下（行為正確：不以其他 pose 代替），但測試預期的是「都不穩定」訊息。
   前兩輪（617658e、5021a3a）同一程式路徑通過；今晚的改動（D-62–D-67）未觸及 MD 或驗收。判斷為短 MD 的隨機性（CPU Reference、短 NPT）。

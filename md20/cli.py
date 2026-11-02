@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import sys
 from pathlib import Path
@@ -436,6 +437,7 @@ def main(argv=None) -> int:
     rp.add_argument("--run"); rp.add_argument("--bundle", action="store_true"); rp.set_defaults(fn=cmd_report)
     m = sub.add_parser("demo"); m.add_argument("--dir"); m.set_defaults(fn=cmd_demo)
     a = ap.parse_args(argv)
+    os.environ["MD20_RESOURCE_MODE"] = a.mode          # D-68: Vina and other helpers follow the chosen mode
     return int(a.fn(a) or 0)
 
 

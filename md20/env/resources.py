@@ -132,3 +132,17 @@ class CachedGuard:
         if now - self._t >= self.every_s:
             self._t, self._last = now, guard_reason(**self.kw)
         return self._last
+
+
+ENV_MODE = "MD20_RESOURCE_MODE"
+
+
+def current_mode() -> str:
+    """Resource mode chosen by the user (GUI setting or `md20 --mode`), carried in the environment so that helpers
+    started deep inside the workflow (Vina, analysis) follow it too (D-68)."""
+    m = os.environ.get(ENV_MODE, "balanced")
+    return m if m in MODES else "balanced"
+
+
+def cpu_threads(mode: str | None = None) -> int:
+    return plan(mode or current_mode()).threads

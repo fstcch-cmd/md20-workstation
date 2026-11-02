@@ -1,6 +1,8 @@
 """NiceGUI pages.  Thin layer over md20.gui.logic; run with `md20 gui`."""
 from __future__ import annotations
 
+import os
+
 from pathlib import Path
 
 from nicegui import app, ui
@@ -75,6 +77,28 @@ def card_badge(c: dict) -> str:
     return c["label"] if lang() == "zh" else BADGE_EN.get(c["label"], c["label"])
 
 
+RESOURCE_MODES = {"background": ("省資源：可同時寫報告", "Light: keep using the computer"),
+                  "balanced": ("平衡（預設）", "Balanced (default)"),
+                  "full": ("全速：電腦閒置時", "Full speed: computer idle")}
+
+
+def resource_mode() -> str:
+    m = load_json(Path(STATE["projects_dir"]) / "gui_settings.json", {}).get("resource_mode", "balanced")
+    return m if m in RESOURCE_MODES else "balanced"
+
+
+def set_resource_mode(mode: str) -> None:
+    """D-68: the user decides how much of the computer a calculation may take; applies to the next start (and to
+    Vina calls of the running one, which read it from the environment)."""
+    from ..util import atomic_write_json
+    path = Path(STATE["projects_dir"]) / "gui_settings.json"
+    d = load_json(path, {})
+    d["resource_mode"] = mode if mode in RESOURCE_MODES else "balanced"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(d, path)
+    os.environ["MD20_RESOURCE_MODE"] = d["resource_mode"]
+
+
 def set_lang(code: str) -> None:
     from ..util import atomic_write_json
     STATE["lang"] = code if code in LANG_NAMES else "en"
@@ -125,6 +149,10 @@ def _header():
             def change(e):
                 set_lang(e.value)
                 ui.navigate.reload()
+            ui.select({k: (v[0] if L == "zh" else v[1]) for k, v in RESOURCE_MODES.items()}, value=resource_mode(),
+                      on_change=lambda e: (set_resource_mode(e.value), ui.notify(_("資源用量已更新；下一個計算步驟起生效。",
+                                                                                    "Resource use updated; applies from the next step.")))
+                      ).props("dense dark borderless options-dense").classes("w-56").tooltip(_("計算可以使用多少電腦資源", "How much of this computer a calculation may use"))
             ui.select(LANG_NAMES, value=L, on_change=change).props("dense dark borderless options-dense").classes("w-28")
     # D-67: wherever the user goes (home, system page, another language), the running calculation is one click away
     job = RUNNER.running()
@@ -207,7 +235,10 @@ def _start(wf: Workflow):
                          power_probe=__import__("md20.env.hardware", fromlist=["_power_state"])._power_state,
                          resource_guard=__import__("md20.env.resources", fromlist=["CachedGuard"]).CachedGuard())
     (wf.project.dir / "PAUSE").unlink(missing_ok=True)
-    return RUNNER.start(wf, lambda case, proto: make_backend_factory(case, proto, platform=platform, resource_mode="balanced"), platform, should_pause=policy)
+    mode = resource_mode()
+    os.environ["MD20_RESOURCE_MODE"] = mode
+    return RUNNER.start(wf, lambda case, proto: make_backend_factory(case, proto, platform=platform, resource_mode=resource_mode()),
+                        platform, should_pause=policy)
 
 
 def _gate_buttons(wf: Workflow, card: dict):
