@@ -123,6 +123,13 @@ OPTIONS: dict[str, str] = {
     "改用 pose SDF（Meeko/Vina --out sdf）": "Use the pose SDF", "重新匯出 docking pose": "Export the docking pose again",
     "重新以 pH 質子化（Dimorphite-DL）": "Re-protonate for the pH", "檢查 chain ID 與殘基編號": "Check chain identifiers and residue numbers",
 }
+OPTIONS.update({   # free-text hints of the decision inputs
+    "文獻（DOI）或自有實驗數據的簡述": "Literature (DOI) or a short description of your own data",
+    "為什麼在未驗證穿膜性的情況下仍要繼續（報告會標註）": "Why continue without verified cell penetration (labelled in the report)",
+    "為什麼它是擬肽小分子而不是胜肽": "Why it is a peptidomimetic small molecule rather than a peptide",
+    "為什麼這個結構仍可用（會寫進決策日誌與報告）": "Why this structure is still usable (recorded in the decision log and the report)",
+    "備註（為什麼選這些）": "Note (why these compounds)",
+})
 PREFIX: list[tuple[str, str]] = [
     ("仍要使用", "Use anyway"), ("ligand_metal: restrain", "Hold the coordination with a distance restraint (no binding free energy for this ligand)"),
     ("box.from_residue:", "Define the box from residue"), ("box.allow_blind", "Allow blind docking (labelled in the report)"),

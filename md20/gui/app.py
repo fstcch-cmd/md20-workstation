@@ -207,7 +207,7 @@ def _gate_buttons(wf: Workflow, card: dict):
         return
     for a in card.get("actions", []):
         with ui.row().classes("items-center gap-2 w-full"):
-            note = ui.input(a["text_hint"]).classes("w-96") if a["needs_text"] else None
+            note = ui.input(option_text(a["text_hint"], lang())).classes("w-96") if a["needs_text"] else None
 
             def do(a=a, note=note):
                 job = RUNNER.get(wf)
