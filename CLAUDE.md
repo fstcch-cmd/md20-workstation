@@ -1,6 +1,6 @@
 # CLAUDE.md — MD20 單機教學版工作站
 
-**接手前先讀 `docs/HANDOFF.md`(完整交接),再讀 `docs/STATUS.md`(誠實現況)。** 以下是每次都要遵守的重點。
+**接手前先讀 `docs/HANDOFF_2026-11-02.md`(最新交接:現況、未完成、下一步),再讀 `docs/HANDOFF.md`(一般說明)與 `docs/STATUS.md`(誠實現況)。** 以下是每次都要遵守的重點。
 
 ## 這個 repo 是什麼
 Docking → 建模 → OpenMM MD → SMD/傘狀採樣的單機教學版,給博士生在自己筆電上跑(Windows 優先)。擁有者 HCC Lab, NKUST。所有成果在本 repo + GitHub Actions CI 上。

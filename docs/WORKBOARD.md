@@ -4,6 +4,9 @@
 不要動別人認領中的檔案／主題；需要時在該列下方留言。決策理由寫在 `docs/DECISIONS.md`，規格寫在 `docs/specs/`。
 
 ## 進行中
+> 2026-11-02 20:40：session_016gcJz8q2F6515MWPncJEZu 關閉，以下由它認領的項目**全部釋出**，下一個 session 可直接接手（見 `docs/HANDOFF_2026-11-02.md` §6）。
+> 新增待辦：MBAR bootstrap 加速（承諾使用者，未開始）；發行 v0.1.0a3（等 617658e CI）。
+
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
 | **待判斷：預設拉離速度 0.01 → 0.005 nm ps⁻¹？**（使用者 11/02 14:58 指示：等筆電 teaching 重跑結果出來後由本 session 判斷並記錄）判斷依據：重跑的 SMD 振盪指標（D-45 smd_ringing）、窗口起始幀是否仍落在反彈點、PMF 井深是否回到合理範圍；降速代價為 SMD 時間加倍 | 使用者 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-02 14:58 | 結論寫入 DECISIONS（新條目）並更新 BindingConfig 預設 |
