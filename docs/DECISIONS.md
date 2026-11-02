@@ -7,6 +7,16 @@
 
 ## 2026-11-02
 
+### D-65　ΔPMF 只有在 PMF 末端持平時才是「井深」；報告寫出 MBAR 截斷改用 WHAM
+- 事實：筆電兩次 3PTB 的報告值 80.3／80.6 kJ/mol 都是曲線在約 0.5 nm 被截斷時、仍在上升的邊緣值（D-62）。
+  截斷只是原因之一；拉離距離不夠、盒子太小也會讓曲線末端未持平，同樣不能稱為井深。
+- 決定（通則）：`radial_pmf` 以「最外側 window 平均」以內的尾段 10% 做直線擬合，尾段變化 > 1 kT → `plateau=False`，
+  ΔG° 不輸出並寫明理由（建議加長 `pull_distance_nm` 或檢查盒子）；只到最外側 window 平均是因為更外側的 bin 只被單一 window 的尾巴取樣（邊緣假象）。
+  `quality["sampled_nm"]` 記錄取樣範圍。D-62 的 MBAR→WHAM 替換在報告注意事項中明列（範圍、改用的估計器）。
+- 證據：筆電真實樣本——classroom／teaching 全範圍：尾段變化 0.58／0.005 kJ/mol（持平）；截斷到 0.54 nm：8.1／7.5 kJ/mol（擋下）。
+  `tests/test_pmf_plateau.py`（持平、截斷、邊緣假象）。
+- 被否決：用整條曲線最大值當平台（截斷或上升時同樣錯）；1 kT 以外的固定 kJ/mol 門檻（與溫度無關不合理）。
+
 ### D-64　軟核修復（D-61）的平底保持半徑 0.3 → 0.2 nm：自由漂移必須小於接受上限
 - 事實：CI 617658e，`test_softcore_unthreads_and_keeps_the_ligand_near` 三個 OS 同樣失敗——**穿環已解開**，但配體移動 RMSD 3.38 Å > `ACCEPT_RMSD_A` 3.0 Å。
 - 原因判斷：配體質心的平底保持在 `hold_nm`＝0.3 nm（3 Å）內**完全無力**，6 段 × 1 ps、300 K Langevin 期間質心在區內隨機漂移；

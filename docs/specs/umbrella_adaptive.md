@@ -94,3 +94,4 @@ WHAM 與 MBAR 改為接受**每個 window 各自的 k**（`_mdh_legacy._k_column
 - PMF 有限值必須涵蓋最低到最高 window 平均（±1 bin）；MBAR 沒涵蓋改用 WHAM（記 `quality["pmf_truncated"]`），都沒涵蓋則 `converged=False`。
 - 未決：自適應停止 bootstrap（σ 收斂即停）是否採用。
 - 預設拉離速度 0.005 nm ps⁻¹（D-63）：依據是 SMD 耗散功（做功 − 全範圍 PMF 平台）；0.01 時 3PTB 耗散約 100 kT。
+- ΔPMF 井深需 PMF 末端持平（尾段至最外側 window 平均，變化 ≤ 1 kT），否則不輸出 ΔG°（D-65）。

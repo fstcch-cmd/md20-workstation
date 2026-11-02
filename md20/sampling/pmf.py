@@ -115,6 +115,7 @@ def pmf_from_windows(samples_by_center: dict[float, np.ndarray], *, force_consta
             converged = bool(w.get("converged")) and np.isfinite(diff) and diff <= 2.0
         except Exception as exc:  # noqa: BLE001
             quality["solver_cross_check"] = {"mbar_note": base.get("solver_note", ""), "error": f"{type(exc).__name__}: {exc}"}
+    quality["sampled_nm"] = [round(need_lo, 4), round(need_hi, 4)]   # lowest/highest window mean (D-65 plateau check)
     quality["solver"] = {k: base.get(k) for k in ("timing_s", "bootstrap_warm_start", "bootstrap_solver_protocol",
                                                   "solver_fallback", "bootstrap_success", "bootstrap_requested")}
     res = PMFResult(grid_nm=grid, pmf_kj_mol=pmf, err_kj_mol=err, method=str(base.get("method", "")),

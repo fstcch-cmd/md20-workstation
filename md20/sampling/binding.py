@@ -205,6 +205,15 @@ def radial_pmf(pres, temperature_k: float) -> dict:
     err = np.asarray(pres.err_kj_mol)[ok] if pres.err_kj_mol is not None else None
     tail = max(3, len(Wv) // 10)
     w_bulk = float(np.mean(Wv[-tail:]))
+    # D-65: the well depth is only defined if the profile is flat at the far end.  Rise across the tail window, from a
+    # straight-line fit, compared with 1 kT (a curve still climbing there makes "ΔPMF" an edge value, not a depth)
+    # bins past the outermost window's mean are sampled only by that window's tail (edge artefact): stop the check there
+    hi = (getattr(pres, "quality", None) or {}).get("sampled_nm", [None, None])[1]
+    inner = g <= hi + 1e-9 if hi is not None else np.ones_like(g, dtype=bool)
+    gi, wi = (g[inner], Wv[inner]) if inner.sum() >= tail else (g, Wv)
+    gt, wt = gi[-tail:], wi[-tail:]
+    slope = float(np.polyfit(gt, wt, 1)[0]) if len(gt) >= 3 and np.ptp(gt) > 0 else 0.0
+    tail_rise = float(slope * (gt[-1] - gt[0])) if len(gt) >= 2 else 0.0
     i_min = int(np.argmin(Wv))
     dpmf = round(w_bulk - float(Wv[i_min]), 3)
     beyond = np.where(Wv[i_min:] >= w_bulk - 0.5 * kT)[0]
@@ -215,7 +224,8 @@ def radial_pmf(pres, temperature_k: float) -> dict:
     dG = round(-kT * math.log(k_eq / V0_NM3), 3) if k_eq > 0 else None
     from .multi import delta_pmf_error
     return {"grid": g, "W": Wv, "W_raw": W_raw - np.min(W_raw), "err": err, "w_bulk": w_bulk, "r_min": float(g[i_min]),
-            "r_cut": r_cut, "delta_pmf": dpmf, "delta_pmf_err": delta_pmf_error(g, err, i_min, tail), "dG": dG}
+            "r_cut": r_cut, "delta_pmf": dpmf, "delta_pmf_err": delta_pmf_error(g, err, i_min, tail), "dG": dG,
+            "tail_rise_kj_mol": round(tail_rise, 3), "plateau": bool(abs(tail_rise) <= kT), "r_max": float(gt[-1])}
 
 
 def bootstrap_binding_sigma(grid_nm, boot_pmfs, temperature_k: float, *, min_ok: int = 10) -> dict:
@@ -789,6 +799,17 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             reasons.append("WHAM 自洽迭代未收斂")
     elif (q.get("solver_cross_check") or {}).get("abs_diff_kj_mol") is not None:
         res.caveats.append(f"MBAR 求解未達容差，但與 WHAM 的 ΔPMF 一致（差 {q['solver_cross_check']['abs_diff_kj_mol']:.1f} kJ/mol），採用。")
+    tr = q.get("pmf_truncated")
+    if tr:
+        if tr.get("replaced_by"):
+            res.caveats.append(f"MBAR 的 PMF 只涵蓋 {tr['finite_nm'][0]:.2f}–{tr['finite_nm'][1]:.2f} nm（window 取樣到 {tr['sampled_nm'][1]:.2f} nm），"
+                               f"已改用 {tr['replaced_by']} 以同一批樣本計算全範圍（D-62）。")
+        else:
+            reasons.append(f"PMF 只涵蓋 {tr['finite_nm']} nm，未涵蓋 window 取樣範圍 {tr['sampled_nm']} nm（MBAR 與 WHAM 皆是）")
+    if not rp.get("plateau", True):
+        reasons.append(f"PMF 末端（{rp['r_max']:.2f} nm）仍未持平（尾段變化 {rp['tail_rise_kj_mol']:.1f} kJ/mol > 1 kT）：ΔPMF 是邊緣值不是井深；"
+                       "可加長 pull_distance_nm 或檢查盒子大小")
+        res.pmf["plateau"] = False
     if reasons:
         res.caveats.insert(1, "ΔG° 不輸出：" + "；".join(reasons) + "。只保留 ΔPMF 作定性參考。")
         res.dG_standard_kj_mol = res.dG_standard_kcal_mol = None
