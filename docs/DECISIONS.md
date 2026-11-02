@@ -7,6 +7,20 @@
 
 ## 2026-11-02
 
+### D-47　主鏈斷裂截斷：中性 ACE／NME 端帽，斷點後片段改為獨立 chain；長 loop「補建並接受風險」可執行
+- 使用者（14:5x）問對接後 PDB 斷鏈怎麼處理，隨後「全部修正」。事實：選項「截斷（加 ACE/NME 端帽）」早已出現在閘門上，但程式不執行（D-17 後一律維持擋關）。
+- 決定：
+  - `md20/build/caps.py`：只用斷點兩側的主鏈原子以理想反式胜肽幾何放置重原子（C–N 1.33 Å、N–CH3 1.46 Å、C=O 1.23 Å、C–N–CA 121.7°、N–C–O 122.7°、
+    N–C–CH3 116°；甲基與前一個 Cα 反式、羰基 O 與 Cα 順式）。斷點前殘基後接 NME（resSeq＋1）＋TER，斷點後殘基前接 ACE（resSeq−1），
+    後段改用未使用的 chain ID——OpenMM `createStandardBonds()` 只在同一 chain 內連鍵，這是避免假鍵的關鍵。重原子之外的氫由第二次 PDBFixer（不補殘基）加上。
+  - `receptor_choice_action`：三個斷鏈閘門（短缺口無 SEQRES、長缺口、補建後仍斷）選「截斷」→ cap；長缺口選「以 PDBFixer 補建並接受風險」→ fill（只有 SEQRES 涵蓋時才真的補得出來，
+    否則補建後檢查會再擋下並說明）。截斷後仍以 `inspect_pdb_text` 驗證每條 chain 內沒有斷點；閘門「chain breaks capped」列出每個斷點與新 chain。
+  - GUI：這些選項成為一鍵按鈕（docking 受體與 MD 建模兩處的卡片都可按，寫回 `human_choices.receptor`）。
+  - 修正既有錯誤：`build_case` 沒有把 `human_choices` 傳給 MD 建模的 `prepare_receptor`，閘門上的受體決定只套用到對接受體。
+- 為什麼用中性端帽而不是帶電末端：斷點在蛋白內部，人為的 NH3⁺／COO⁻ 會在原本是中性主鏈的位置產生錯誤的靜電作用（Amber 與 CHARMM 的標準做法）。
+- 證據：`tests/test_caps.py`（幾何、chain 分割、序號重編、無殘留斷點；3PTB 刪除 70–73 且無 SEQRES 的真實流程在 CI）、`tests/test_gate_actions.py`。
+- 未決：缺失殘基若在結合位附近，截斷後的口袋形狀仍不完整；目前在閘門說明中提醒，尚未自動計算缺口到結合位的距離。
+
 ### D-52　報告改為專案報告等級：每節「這一步是什麼 → 科學意義 → 使用的參數 → 圖表 → 結果解釋」，雙語，結果解釋由數據產生
 - 使用者（15:09）：報告每項先有文字敘述這項目是什麼、科學意義，接著使用者選擇的參數，最後圖片或表格及報告解釋；要專業、可直接用於專案報告、要夠聰明。
 - 決定：`md20/report/workflow_report.py` 重寫；新增 `md20/report/interpret.py`（純 Python，結果解釋）。

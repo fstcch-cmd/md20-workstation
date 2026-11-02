@@ -896,7 +896,8 @@ class Workflow:
                        metal_params=self._metal_params(), solvent=self._solvent(screen),
                        box_shape=self.cfg.get("md", {}).get("box_shape", "dodecahedron"),
                        ionic_strength_molar=float(self.cfg.get("md", {}).get("ionic_strength_molar", 0.15)),
-                       ions=self.cfg.get("md", {}).get("ions") or None)
+                       ions=self.cfg.get("md", {}).get("ions") or None,
+                       human_choices=self.cfg.get("human_choices") or None)   # receptor gate choices apply to the MD build too
         lmap = {n: f"L{i:02d}" for i, n in enumerate(small, 1)} | {p["name"]: p["name"] for p in peps}
         return s, lmap
 

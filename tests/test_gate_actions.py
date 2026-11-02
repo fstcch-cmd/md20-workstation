@@ -31,8 +31,10 @@ def test_receptor_choices_only_implemented_ones():
     assert receptor_choice_action("hetero groups", "全部移除（預設）") == "remove"
     assert receptor_choice_action("hetero groups", "保留為參考配體（僅用於 box 定義）") == "remove"   # not kept in the MD receptor
     assert receptor_choice_action("hetero groups", "保留並參數化") == "keep"
-    assert receptor_choice_action("missing loops (long)", "以 PDBFixer 補建並接受風險") is None
-    assert receptor_choice_action("missing loops (long)", "截斷（加 ACE/NME 端帽）") is None
+    assert receptor_choice_action("missing loops (long)", "以 PDBFixer 補建並接受風險") == "fill"      # D-47
+    assert receptor_choice_action("missing loops (long)", "截斷（加 ACE/NME 端帽）") == "cap"
+    assert receptor_choice_action("unfilled chain breaks", "截斷（加 ACE/NME 端帽）") == "cap"
+    assert receptor_choice_action("missing loops (long)", "改用 AlphaFold 模型") is None
     assert receptor_choice_action("unknown residues", "移除並記錄") is None
 
 
@@ -40,7 +42,7 @@ def test_gate_actions_split_clickable_and_manual():
     loop = {"name": "missing loops (long)", "status": "NEEDS_HUMAN",
             "options": ["截斷（加 ACE/NME 端帽）", "以 PDBFixer 補建並接受風險", "改用 AlphaFold 模型"]}
     acts, manual = gate_actions(loop, step="receptor_docking")
-    assert acts == [] and len(manual) == 3                       # nothing here is executed by the program
+    assert len(acts) == 2 and manual == ["改用 AlphaFold 模型"]    # cap and fill are executed (D-47); AlphaFold is outside
     het = {"name": "hetero groups", "status": "NEEDS_HUMAN",
            "options": ["全部移除（預設）", "保留並參數化", "保留為參考配體（僅用於 box 定義）"]}
     acts, manual = gate_actions(het, step="receptor_docking")
@@ -158,7 +160,7 @@ def test_receptor_unimplemented_choice_keeps_blocking(tmp_path):
     lines, _ = _protein(6, gap_after=2, gap_len=12)
     src = tmp_path / "loop.pdb"; src.write_text("\n".join(lines) + "\nEND\n")
     man = prepare_receptor(src, tmp_path / "out", keep_hetero=set(),
-                           human_choices={"missing loops (long)": "以 PDBFixer 補建並接受風險"})
+                           human_choices={"missing loops (long)": "改用 AlphaFold 模型"})
     g = {x["name"]: x for x in man["gates"]["gates"]}["missing loops (long)"]
     assert man["status"] == "NEEDS_HUMAN" and g["status"] == "NEEDS_HUMAN" and "不會由程式自動執行" in g["explanation"]
 

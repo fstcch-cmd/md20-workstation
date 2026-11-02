@@ -14,7 +14,7 @@ from __future__ import annotations
 import copy
 import re
 
-from ..build.receptor import receptor_choice_action
+from ..build.receptor import receptor_choice_action, CHAIN_BREAK_GATES
 from ..util import atomic_write_json, load_json
 
 # workflow step keys in execution order; a decision at step X invalidates X and everything after it
@@ -70,10 +70,11 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
             return _act(option, [{"path": ["metal_params", key], "value": None}], "md_cases")
         return None
     # receptor cleanup gates: only choices prepare_receptor executes
-    if step == "receptor_docking":
+    if step == "receptor_docking" or (step == "md_cases" and name in CHAIN_BREAK_GATES + ("hetero groups",)):
         if receptor_choice_action(name, option) is None:
             return None
-        return _act(option, [{"path": ["human_choices", "receptor", name], "value": option}], step)
+        # the same receptor choice applies to the docking receptor and the MD build, so both are redone
+        return _act(option, [{"path": ["human_choices", "receptor", name], "value": option}], "receptor_docking")
     # blind docking / redocking
     if name == "blind docking":
         if option.startswith("box.from_residue:"):

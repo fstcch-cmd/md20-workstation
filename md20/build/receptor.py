@@ -219,8 +219,15 @@ def gate_inspection(insp: PDBInspection, *, keep_hetero: set[str], max_auto_gap:
 
 # Receptor gate choices that prepare_receptor actually executes.  Anything else (truncate a loop, model with
 # AlphaFold, parameterise an unknown residue …) needs work outside the program, so the gate stays NEEDS_HUMAN.
+CHAIN_BREAK_GATES = ("missing loops (short)", "missing loops (long)", "unfilled chain breaks")
+
+
 def receptor_choice_action(gate_name: str, choice: str) -> str | None:
     c = str(choice or "")
+    if gate_name in CHAIN_BREAK_GATES and "截斷" in c:
+        return "cap"                   # D-47: neutral ACE/NME caps, the segment after the break becomes its own chain
+    if gate_name == "missing loops (long)" and c.startswith("以 PDBFixer 補建"):
+        return "fill"                  # rebuild the long loop from SEQRES and accept the risk (reported)
     if gate_name == "hetero groups":
         if "參考配體" in c or "移除" in c:
             return "remove"            # reference-only ligands leave the receptor; the box still reads the raw file
@@ -317,11 +324,15 @@ def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4
     # drop terminal "missing residues" (PDBFixer would build floppy tails); keep internal gaps ≤ max_auto_gap
     chains = list(fixer.topology.chains())
     kept_missing = {}
+    fill_long = resolved.get("missing loops (long)") == "fill"
+    cap_breaks = any(receptor_choice_action(n, human_choices.get(n, "")) == "cap" for n in CHAIN_BREAK_GATES)
     for (ci, ridx), residues in list(fixer.missingResidues.items()):
         chain = chains[ci]
         n_res = len(list(chain.residues()))
-        if ridx == 0 or ridx == n_res or len(residues) > max_auto_gap:
+        if ridx == 0 or ridx == n_res:
             continue
+        if len(residues) > max_auto_gap and not fill_long:
+            continue                   # long loops are capped (if chosen) or reported below, never silently rebuilt
         kept_missing[(ci, ridx)] = residues
     fixer.missingResidues = kept_missing
     fixer.findNonstandardResidues()
@@ -341,6 +352,11 @@ def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4
     # verify, never assume: every internal gap must be gone from the cleaned receptor (a leftover break becomes a
     # bogus C–N bond in OpenMM, which the force-field template matching does not catch)
     left = inspect_pdb_text(out_pdb.read_text(encoding="utf-8", errors="ignore")).gaps
+    capped = []
+    if left and cap_breaks:
+        capped, left = _cap_and_protonate(out_pdb, out_cif, left, ph, decisions)
+        n_atoms = sum(1 for l in out_pdb.read_text(encoding="utf-8", errors="ignore").splitlines() if l.startswith(("ATOM", "HETATM")))
+    manifest["capped_breaks"] = capped
     if left:
         g = Gate("unfilled chain breaks", NEEDS_HUMAN,
                  f"PDBFixer 補建後仍有 {len(left)} 處主鏈斷裂（CA–CA > 4.2 Å）；SEQRES 未涵蓋這些缺口或補建失敗。"
@@ -354,6 +370,12 @@ def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4
             decisions.record("build.receptor", "chain breaks", [list(x) for x in left], g.explanation, kind="human")
         atomic_write_json(manifest, out_dir / "receptor_manifest.json")
         return manifest
+    if capped:
+        report.add(Gate("chain breaks capped", AUTO_FIXED,
+                        f"{len(capped)} 處主鏈斷裂依使用者選擇截斷：斷點前加 NME、斷點後加 ACE（中性端帽），斷點後的片段改為獨立 chain，"
+                        "兩段之間不會被連成假鍵。缺失的殘基不在模型中；若它們靠近結合位，結合模式的可信度會下降。",
+                        diff=[f"chain {c['chain']}: {c['before']}+NME | ACE+{c['after']} → chain {c['new_chain']}" for c in capped]))
+        manifest.update({"gates": report.to_dict(), "status": report.status})
     manifest.update({"receptor_pdb": str(out_pdb), "receptor_cif": str(out_cif), "n_atoms_clean": n_atoms,
                      "missing_residues_added": {str(k): v for k, v in kept_missing.items()},
                      "missing_atoms_added": {str(r): [a.name for a in atoms] for r, atoms in fixer.missingAtoms.items()}})
@@ -365,3 +387,34 @@ def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4
                              f"補建 ≤{max_auto_gap} 殘基的內部缺口；末端缺失不補（避免無支撐的尾巴）。", kind="auto_fixed")
     atomic_write_json(manifest, out_dir / "receptor_manifest.json")
     return manifest
+
+
+def _cap_and_protonate(out_pdb: Path, out_cif: Path, gaps: list, ph: float, decisions) -> tuple[list[dict], list]:
+    """D-47: cap every remaining break with ACE/NME, add the caps' hydrogens with a second PDBFixer pass (no residue
+    rebuilding), rewrite the cleaned receptor, and verify that no break is left inside any chain."""
+    from pdbfixer import PDBFixer
+    from openmm.app import PDBFile, PDBxFile
+    from .caps import cap_chain_breaks
+    text = out_pdb.read_text(encoding="utf-8", errors="ignore")
+    new_text, records = cap_chain_breaks(text, [(c, a) for c, a, b in gaps])
+    ok = [r for r in records if "error" not in r]
+    if not ok:
+        return [], gaps
+    tmp = out_pdb.with_name("receptor_capped_heavy.pdb")
+    tmp.write_text(new_text, encoding="utf-8")
+    fx = PDBFixer(filename=str(tmp))
+    fx.missingResidues = {}
+    fx.findMissingAtoms()
+    fx.addMissingAtoms()
+    fx.addMissingHydrogens(pH=ph)
+    with open(out_pdb, "w", encoding="utf-8") as fh:
+        PDBFile.writeFile(fx.topology, fx.positions, fh, keepIds=True)
+    from ..util.stamp import stamp_pdb_file
+    stamp_pdb_file(out_pdb)
+    with open(out_cif, "w", encoding="utf-8") as fh:
+        PDBxFile.writeFile(fx.topology, fx.positions, fh, keepIds=True)
+    left = inspect_pdb_text(out_pdb.read_text(encoding="utf-8", errors="ignore")).gaps
+    if decisions:
+        decisions.record("build.receptor", "chain breaks capped", [f"{r['chain']}{r['before']}|{r['after']}→{r['new_chain']}" for r in ok],
+                         "使用者選擇截斷：斷點兩側加中性 ACE／NME 端帽，後段改為獨立 chain，避免 OpenMM 把斷點兩端連成假鍵。")
+    return ok, left
