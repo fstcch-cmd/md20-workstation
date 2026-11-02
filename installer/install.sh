@@ -65,36 +65,73 @@ if [ "$IS_WIN" = 1 ]; then
   exit 0
 fi
 
-ROOT="${MD20_ROOT:-${HOME}/.local/share/MD20}"; mkdir -p "$ROOT"
+# ---------------------------------------------------------------------------- macOS / Linux (D-66)
+# Same layout as Windows: program copied to $ROOT/app (a release ZIP is usually in Downloads and may be deleted),
+# environment in $ROOT/envs/md20, launchers $ROOT/md20 (command line) and MD20-GUI.command on the Desktop.
+# Nothing is deleted: a previous $ROOT/app is moved to $ROOT/_to_delete/app-<time> (user rule, D-37).
+ROOT="${MD20_ROOT:-${HOME}/MD20}"; mkdir -p "$ROOT"
 export MAMBA_ROOT_PREFIX="$ROOT"
 MAMBA="$ROOT/bin/micromamba"
 FREE_GB=$(df -k "$ROOT" | awk 'NR==2{printf "%d", $4/1048576}')
-echo "安裝位置：$ROOT（可用空間 ${FREE_GB} GB；環境約需 6 GB）"
-if [ "${FREE_GB:-0}" -lt 8 ]; then echo "!! 可用空間不足 8 GB；可用 MD20_ROOT=/path 指定其他磁碟。"; exit 2; fi
+echo "安裝位置 Install location: $ROOT（可用空間 free ${FREE_GB} GB；環境約需 6 GB / needs about 6 GB）"
+if [ "${FREE_GB:-0}" -lt 8 ]; then echo "!! 可用空間不足 8 GB / less than 8 GB free；可用 MD20_ROOT=/path 指定其他磁碟。"; exit 2; fi
+SRC="$(cd "$HERE/.." && pwd)"
+if [ ! -d "$SRC/.git" ]; then
+  APP="$ROOT/app"
+  if [ "$SRC" != "$APP" ]; then
+    if [ -d "$APP" ]; then
+      OLD="$ROOT/_to_delete/app-$(date +%Y%m%d-%H%M%S)"; mkdir -p "$ROOT/_to_delete"; mv "$APP" "$OLD"
+      echo "舊版程式已移到 previous version moved to: $OLD（確認新版可用後可自行刪除 / delete it yourself later）"
+    fi
+    echo "複製程式到 Copying the program to $APP ..."
+    mkdir -p "$APP"; cp -R "$SRC/." "$APP/"
+  fi
+  SRC="$APP"
+fi
 if [ ! -x "$MAMBA" ]; then
-  echo "[1/4] 下載 micromamba ..."
+  echo "[1/4] 下載 micromamba / downloading micromamba ..."
   case "$OS-$(uname -m)" in
     Darwin-arm64) URL=https://micro.mamba.pm/api/micromamba/osx-arm64/latest ;;
     Darwin-*)     URL=https://micro.mamba.pm/api/micromamba/osx-64/latest ;;
     Linux-aarch64) URL=https://micro.mamba.pm/api/micromamba/linux-aarch64/latest ;;
     *)            URL=https://micro.mamba.pm/api/micromamba/linux-64/latest ;;
   esac
-  curl -Ls "$URL" | tar -xj -C "$ROOT" bin/micromamba
+  curl -fLs "$URL" | tar -xj -C "$ROOT" bin/micromamba
 fi
 if [ "$GPU" = auto ]; then
   if command -v nvidia-smi >/dev/null 2>&1; then GPU=cuda; else GPU=opencl; fi
 fi
 case "$OS" in
-  Darwin) GPUYML="$HERE/../environment/macos.yml" ;;
-  *) if [ "$GPU" = cuda ]; then GPUYML="$HERE/../environment/linux-cuda.yml"; else GPUYML="$HERE/../environment/windows-opencl.yml"; fi ;;
+  Darwin) GPUYML="$SRC/environment/macos.yml" ;;
+  *) if [ "$GPU" = cuda ]; then GPUYML="$SRC/environment/linux-cuda.yml"; else GPUYML="$SRC/environment/windows-opencl.yml"; export CONDA_OVERRIDE_CUDA=12.4; fi ;;
 esac
 PREFIX="$ROOT/envs/md20"
 mkdir -p "$ROOT/tmp"; export TMPDIR="$ROOT/tmp"; export PIP_CACHE_DIR="$ROOT/pipcache"
 if [ -d "$PREFIX/conda-meta" ]; then
-  echo "[2/4] 環境已存在，補齊套件 ($GPU) ..."; "$MAMBA" install -y -p "$PREFIX" -f "$HERE/../environment/base.yml" -f "$GPUYML"
+  echo "[2/4] 環境已存在，補齊套件 / updating the environment ($GPU) ..."; "$MAMBA" install -y -p "$PREFIX" -f "$SRC/environment/base.yml" -f "$GPUYML"
 else
-  echo "[2/4] 建立環境 ($GPU) ..."; "$MAMBA" create -y -p "$PREFIX" -f "$HERE/../environment/base.yml" -f "$GPUYML"
+  echo "[2/4] 建立環境 / creating the environment ($GPU) ..."; "$MAMBA" create -y -p "$PREFIX" -f "$SRC/environment/base.yml" -f "$GPUYML"
 fi
-echo "[3/4] 安裝 md20 ..."; "$MAMBA" run -p "$PREFIX" pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" gemmi -e "$HERE/.."
-echo "[4/4] Doctor ..."; "$MAMBA" run -p "$PREFIX" md20 doctor
-echo; echo "完成。之後執行：  $MAMBA run -p $PREFIX md20 <command>"
+echo "[3/4] 安裝 md20 / installing md20 ..."
+"$MAMBA" run -p "$PREFIX" python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" gemmi -e "$SRC"
+"$MAMBA" run -p "$PREFIX" md20 setup-vina || echo "!! Vina 下載失敗 / Vina download failed：稍後執行 run later: $ROOT/md20 setup-vina"
+# launchers
+cat > "$ROOT/md20" <<EOS
+#!/usr/bin/env bash
+export MAMBA_ROOT_PREFIX="$ROOT"
+exec "$MAMBA" run -p "$PREFIX" md20 "\$@"
+EOS
+chmod +x "$ROOT/md20"
+GUI="$ROOT/MD20-GUI.command"
+cat > "$GUI" <<EOS
+#!/usr/bin/env bash
+echo "MD20 GUI: http://127.0.0.1:8020  （關閉此視窗即停止 / close this window to stop）"
+"$ROOT/md20" gui
+EOS
+chmod +x "$GUI"
+if [ -d "$HOME/Desktop" ]; then cp "$GUI" "$HOME/Desktop/MD20-GUI.command"; chmod +x "$HOME/Desktop/MD20-GUI.command"; fi
+echo "[4/4] Doctor ..."; "$ROOT/md20" doctor
+echo
+echo "完成 Done."
+echo "  圖形介面 GUI：雙擊桌面的 MD20-GUI.command（或 or: $GUI）"
+echo "  命令列 Command line：$ROOT/md20 doctor | demo | pipeline ..."

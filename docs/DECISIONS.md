@@ -7,6 +7,19 @@
 
 ## 2026-11-02
 
+### D-66　macOS 版：與 Windows 相同的安裝版面、`Install-MD20.command`、CI 與發行時在 Mac 實裝驗證（使用者：週二 09:00 要 Windows＋Mac 兩版與學生說明）
+- 事實：`install.sh` 的 macOS 分支只建環境，從解壓資料夾 editable 安裝（刪掉資料夾就壞）、沒有啟動器、沒有任何 CI 走過這條路；發行只有 Windows ZIP。
+- 決定：
+  - `install.sh`（macOS／Linux）：安裝位置預設 `~/MD20`（學生找得到；原 `~/.local/share/MD20` 為隱藏資料夾），非 git 副本時程式複製到 `~/MD20/app`，
+    舊版移到 `_to_delete/app-<時間>`（不刪，D-37）；啟動器 `~/MD20/md20`（命令列）與 `MD20-GUI.command`（複製到桌面）；`md20 setup-vina`；訊息中英並列。
+  - repo 根目錄 `Install-MD20.command`（Finder 雙擊或 `bash Install-MD20.command`）；`.gitattributes` 讓 `*.command`／`*.sh` 保持 LF、git 記錄可執行權限。
+  - CI 新增 `installer-macos`：以 `git archive` 匯出（無 .git，等同發行 ZIP）→ 執行 `Install-MD20.command` → 刪除匯出資料夾 → doctor／demo／pipeline example／GUI 啟動器存在。
+  - 發行 workflow：同一個 ZIP 另存 `MD20-macOS-<tag>.zip`；新增 `verify-macos`（`ditto` 如 Finder 解壓、安裝、刪除解壓資料夾後仍可用），兩個平台都通過才發行。
+  - 學生說明：`docs/students/WINDOWS.md`、`docs/students/MAC.md`（指令可直接複製）。
+- 取捨（時間限制下）：Mac 不做 .app／簽章（Gatekeeper：說明改用 `bash` 執行安裝檔；桌面啟動器由安裝程式在本機產生，不帶隔離屬性）；
+  Mac 只在 CI runner（Apple Silicon、無 GPU 實測）驗證，**沒有真機**；Mac 學生預設建議 classroom 等級。
+- 證據：待 CI `installer-macos` 與發行 `verify-macos`。
+
 ### D-65　ΔPMF 只有在 PMF 末端持平時才是「井深」；報告寫出 MBAR 截斷改用 WHAM
 - 事實：筆電兩次 3PTB 的報告值 80.3／80.6 kJ/mol 都是曲線在約 0.5 nm 被截斷時、仍在上升的邊緣值（D-62）。
   截斷只是原因之一；拉離距離不夠、盒子太小也會讓曲線末端未持平，同樣不能稱為井深。

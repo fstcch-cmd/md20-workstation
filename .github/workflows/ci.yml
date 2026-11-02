@@ -227,6 +227,34 @@ jobs:
           for f in validation_results/*_docking.json; do [ -f "$f" ] && body+=$'\n<details><summary>'"$(basename $f)"$'</summary>\n\n```json\n'"$(head -c 12000 $f)"$'\n```\n</details>'; done
           gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$body" >/dev/null || true
 
+  installer-macos:
+    # The student's Mac path (D-66): an exported copy without .git (like the release ZIP), Install-MD20.command, the
+    # unpacked folder removed, then the launchers it wrote.  CPU/OpenCL only on the runner.
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install from an exported copy (no .git) with Install-MD20.command
+        run: |
+          git archive --format=tar --prefix=MD20-ci/ HEAD | tar -x -C "${RUNNER_TEMP}"
+          MD20_ROOT="${RUNNER_TEMP}/MD20" bash "${RUNNER_TEMP}/MD20-ci/Install-MD20.command" 2>&1 | tee "${RUNNER_TEMP}/install.log"
+          test "${PIPESTATUS[0]}" -eq 0
+          rm -r "${RUNNER_TEMP}/MD20-ci"
+      - name: Launchers work without the unpacked folder (doctor, demo, pipeline example, GUI launcher)
+        run: |
+          M="${RUNNER_TEMP}/MD20/md20"
+          "$M" doctor --no-benchmark
+          "$M" demo --dir "${RUNNER_TEMP}/md20demo"
+          "$M" pipeline example > "${RUNNER_TEMP}/example.json"
+          test -x "${RUNNER_TEMP}/MD20/MD20-GUI.command"
+          test -f "${RUNNER_TEMP}/MD20/app/pyproject.toml"
+      - name: Post result as commit comment
+        if: always()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          body="### macOS installer — ${{ job.status }}"$'\n```\n'"$(tail -c 20000 "${RUNNER_TEMP}/install.log" 2>/dev/null)"$'\n```'
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -f body="$body" >/dev/null || true
+
   installer-windows:
     # The student's path: the real installer under Windows PowerShell 5.1 (`shell: powershell`, not pwsh), then the
     # launchers it writes.  CPU only (no GPU on the runner); ~15–25 min.  This is what the laptop will run tomorrow.

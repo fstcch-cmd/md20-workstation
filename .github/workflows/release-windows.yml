@@ -1,4 +1,4 @@
-name: Release (Windows installer)
+name: Release (Windows and macOS installers)
 
 # A release is published only after the exact ZIP students will download has been unzipped and installed on a clean
 # Windows runner with Windows PowerShell 5.1, and the installed program still works after the unzipped folder is
@@ -32,11 +32,12 @@ jobs:
         run: |
           tag="${{ steps.v.outputs.tag }}"
           git archive --format=zip --prefix="MD20-$tag/" -o "MD20-Windows-$tag.zip" HEAD
-          sha256sum "MD20-Windows-$tag.zip" > SHA256SUMS.txt
+          cp "MD20-Windows-$tag.zip" "MD20-macOS-$tag.zip"     # same files; both installers are inside (D-66)
+          sha256sum "MD20-Windows-$tag.zip" "MD20-macOS-$tag.zip" > SHA256SUMS.txt
           unzip -l "MD20-Windows-$tag.zip" | grep -E "Install-MD20.cmd|installer/install.ps1|environment/base.yml"
           cat SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
-        with: { name: md20-windows-zip, path: "MD20-Windows-*.zip\nSHA256SUMS.txt" }
+        with: { name: md20-windows-zip, path: "MD20-*.zip\nSHA256SUMS.txt" }
 
   verify-windows:
     needs: package
@@ -51,7 +52,7 @@ jobs:
           MD20_NOPAUSE: "1"
         run: |
           set MD20_ROOT=%RUNNER_TEMP%\MD20
-          powershell -NoProfile -Command "Expand-Archive -Path (Get-ChildItem dl\*.zip).FullName -DestinationPath '%RUNNER_TEMP%\unz' -Force" || exit /b 1
+          powershell -NoProfile -Command "Expand-Archive -Path (Get-ChildItem dl\MD20-Windows-*.zip).FullName -DestinationPath '%RUNNER_TEMP%\unz' -Force" || exit /b 1
           for /d %%D in ("%RUNNER_TEMP%\unz\MD20-*") do set SRC=%%D
           call "%SRC%\Install-MD20.cmd" -Gpu cpu || exit /b 1
           if not exist "%MD20_ROOT%\app\pyproject.toml" (echo program was not copied to %MD20_ROOT%\app & exit /b 1)
@@ -76,8 +77,30 @@ jobs:
           call "%MD20%\md20.cmd" pipeline example > "%RUNNER_TEMP%\example.json" || exit /b 1
           dir "%MD20%\MD20-GUI.cmd" || exit /b 1
 
+  verify-macos:
+    needs: package
+    runs-on: macos-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: md20-windows-zip, path: dl }
+      - name: Unzip like Finder and run Install-MD20.command
+        run: |
+          ditto -x -k dl/MD20-macOS-*.zip "${RUNNER_TEMP}/unz"
+          SRC=$(ls -d "${RUNNER_TEMP}"/unz/MD20-*)
+          test -x "$SRC/Install-MD20.command"
+          MD20_ROOT="${RUNNER_TEMP}/MD20" bash "$SRC/Install-MD20.command"
+          rm -r "${RUNNER_TEMP}/unz"
+      - name: Installed program works without the unzipped folder
+        run: |
+          M="${RUNNER_TEMP}/MD20/md20"
+          "$M" doctor --no-benchmark
+          "$M" demo --dir "${RUNNER_TEMP}/md20demo"
+          "$M" pipeline example > "${RUNNER_TEMP}/example.json"
+          test -x "${RUNNER_TEMP}/MD20/MD20-GUI.command"
+
   publish:
-    needs: [package, verify-windows]
+    needs: [package, verify-windows, verify-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,5 +111,5 @@ jobs:
         run: |
           tag="${{ needs.package.outputs.tag }}"
           notes="docs/releases/$tag.md"; [ -f "$notes" ] || notes="docs/WINDOWS_QUICKSTART.md"
-          gh release create "$tag" dl/MD20-Windows-*.zip dl/SHA256SUMS.txt --target "${{ github.sha }}" \
-            --title "MD20 $tag（Windows 安裝程式）" --notes-file "$notes" --prerelease
+          gh release create "$tag" dl/MD20-Windows-*.zip dl/MD20-macOS-*.zip dl/SHA256SUMS.txt --target "${{ github.sha }}" \
+            --title "MD20 $tag（Windows／macOS 安裝程式）" --notes-file "$notes" --prerelease
