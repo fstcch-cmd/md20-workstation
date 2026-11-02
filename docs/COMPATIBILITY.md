@@ -4,6 +4,7 @@
 
 | 日期 | 機器 | OS | GPU / 驅動 | 選用平台 | ns/day | 備註 |
 |---|---|---|---|---|---|---|
+| 2026-11-02 | MSI Cyborg 14 A13VF（i7-13620H 10C/16T、15.7 GB RAM） | Windows 11 家用版 26200 | RTX 4060 Laptop 8 GB／566.14（CUDA 12.7）+ Intel UHD | — | — | **v0.1.0a1 安裝失敗**：`ocl-icd-system =* * does not exist` → `Could not solve for environment specs`（CUDA 路徑；D-36 已修，a2）。修補後重測中 |
 | 2026-10-31 | 教師筆電 | Windows 10 | GTX 1060 4 GB（舊驅動）+ UHD 630 | OpenCL（GTX 1060） | 200 | CUDA 失敗 `INVALID_PTX`（驅動過舊）；殘留 `nvopencl.dll` 觸發 DLL 錯誤視窗（已改為靜默失敗） |
 | CI | GitHub windows-latest | Windows Server | 無 | CPU | 見 Actions artifact | 安裝路徑驗證 |
 | CI | GitHub macos-latest | macOS (arm64) | 無 | CPU | 見 Actions artifact | |
