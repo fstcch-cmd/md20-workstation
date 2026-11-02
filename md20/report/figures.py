@@ -168,3 +168,175 @@ def pmf(grid, W, err, path: Path) -> str | None:
     ax.set_xlabel("Ligand–pocket distance (nm)")
     ax.set_ylabel("PMF (kJ mol$^{-1}$)")
     return _save(fig, path)
+
+
+# ============================================================================================ D-58: extended figures
+def bars(items: list, xlabel: str, path: Path, *, top_n: int = 15, thresholds=(0.5, 0.2)) -> str | None:
+    """Horizontal bars of [label, fraction] (occupancies)."""
+    items = list(items)[:top_n]
+    if not items:
+        return None
+    plt = _plt()
+    items = items[::-1]
+    fig, ax = plt.subplots(figsize=(6.4, 0.24 * len(items) + 0.9))
+    vals = [float(v) for _, v in items]
+    ax.barh(range(len(items)), vals, color=["#2f7d5b" if v >= thresholds[0] else ("#2f6f9f" if v >= thresholds[1] else "#9aa5b1")
+                                             for v in vals], height=0.7)
+    for t in thresholds:
+        ax.axvline(t, color="#9aa5b1", ls="--", lw=0.8)
+    ax.set_yticks(range(len(items)), [str(k) for k, _ in items], fontsize=7)
+    ax.set_xlim(0, 1)
+    ax.set_xlabel(xlabel)
+    return _save(fig, path)
+
+
+def two_panel(t, y1, y2, l1: str, l2: str, path: Path) -> str | None:
+    if t is None or len(y1) < 2:
+        return None
+    plt = _plt()
+    fig, axes = plt.subplots(2, 1, figsize=(6.4, 3.6), sharex=True)
+    t = np.asarray(t, float)
+    axes[0].plot(t[:len(y1)], y1, color=PALETTE[0], lw=0.9)
+    axes[0].set_ylabel(l1)
+    if y2 is not None and len(y2):
+        axes[1].plot(t[:len(y2)], y2, color=PALETTE[1], lw=0.9)
+    axes[1].set_ylabel(l2)
+    axes[1].set_xlabel("Time (ns)")
+    return _save(fig, path)
+
+
+def dssp_area(t, frac: dict, path: Path) -> str | None:
+    if not frac or not frac.get("C"):
+        return None
+    plt = _plt()
+    t = np.asarray(t, float)[:len(frac["C"])]
+    fig, ax = plt.subplots(figsize=(6.4, 2.4))
+    ax.stackplot(t, frac["H"], frac["E"], frac["C"], labels=["α-helix", "β-strand", "other"],
+                 colors=["#c0612b", "#2f6f9f", "#d9dee3"])
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("Time (ns)")
+    ax.set_ylabel("Fraction of residues")
+    ax.legend(fontsize=7, ncol=3, loc="lower right")
+    return _save(fig, path)
+
+
+def landscape(land: dict, explained, path: Path) -> str | None:
+    if not land or not land.get("G"):
+        return None
+    plt = _plt()
+    G = np.array([[np.nan if v is None else v for v in row] for row in land["G"]], float)
+    xe, ye = np.asarray(land["xedges"]), np.asarray(land["yedges"])
+    fig, ax = plt.subplots(figsize=(5.2, 4.2))
+    im = ax.pcolormesh(xe, ye, G.T, cmap="viridis", shading="auto")
+    fig.colorbar(im, ax=ax, label="ΔG (kJ mol$^{-1}$)")
+    for b in land.get("basins") or []:
+        ax.plot(b[0], b[1], "w+", ms=8)
+    ex = list(explained or [0, 0]) + [0, 0]
+    ax.set_xlabel(f"PC1 ({ex[0]:.0%})")
+    ax.set_ylabel(f"PC2 ({ex[1]:.0%})")
+    return _save(fig, path)
+
+
+def clusters_plot(c: dict, t, path: Path) -> str | None:
+    pops = c.get("populations") or []
+    if not pops:
+        return None
+    plt = _plt()
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 2.4), gridspec_kw={"width_ratios": [1, 2]})
+    k = min(len(pops), 8)
+    axes[0].bar(range(1, k + 1), pops[:k], color=PALETTE[:k])
+    axes[0].set_xlabel("Cluster")
+    axes[0].set_ylabel("Population")
+    axes[0].set_ylim(0, 1)
+    axes[0].set_xticks(range(1, k + 1))
+    lab = np.asarray(c.get("labels") or [], int)
+    t = np.asarray(t, float)[:len(lab)]
+    axes[1].scatter(t, lab + 1, c=[PALETTE[i % len(PALETTE)] for i in lab], s=6)
+    axes[1].set_xlabel("Time (ns)")
+    axes[1].set_ylabel("Cluster")
+    axes[1].set_yticks(range(1, int(lab.max()) + 2) if len(lab) else [1])
+    return _save(fig, path)
+
+
+def heatmap(M, path: Path, *, cmap: str = "RdBu_r", vmin=-1, vmax=1, label: str = "", ticks=None, xlabel="", ylabel="") -> str | None:
+    M = np.asarray(M, float)
+    if M.size == 0:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(5.2, 4.4))
+    im = ax.imshow(M, cmap=cmap, vmin=vmin, vmax=vmax, origin="lower", aspect="auto")
+    fig.colorbar(im, ax=ax, label=label)
+    if ticks:
+        idx = np.linspace(0, len(ticks) - 1, min(8, len(ticks))).astype(int)
+        ax.set_xticks(idx, [ticks[i] for i in idx], fontsize=6, rotation=90)
+        ax.set_yticks(idx, [ticks[i] for i in idx], fontsize=6)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    return _save(fig, path)
+
+
+def fingerprint_plot(fp: dict, t, path: Path, top_n: int = 25) -> str | None:
+    res, mat = fp.get("residues") or [], fp.get("matrix") or []
+    if not res:
+        return None
+    from matplotlib.colors import ListedColormap
+    plt = _plt()
+    M = np.asarray(mat, float)
+    order = np.argsort(-(M > 0).mean(1))[:top_n]
+    M = M[order]
+    fig, ax = plt.subplots(figsize=(7.2, 0.22 * len(order) + 1.0))
+    t = np.asarray(t, float)
+    ax.imshow(M, aspect="auto", interpolation="nearest", cmap=ListedColormap(["#ffffff", "#c9a227", "#2f6f9f", "#b8433f"]),
+              vmin=0, vmax=3, extent=[t[0] if len(t) else 0, t[-1] if len(t) else M.shape[1], len(order) - 0.5, -0.5])
+    ax.set_yticks(range(len(order)), [res[i] for i in order], fontsize=7)
+    ax.set_xlabel("Time (ns)")
+    handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in ("#c9a227", "#2f6f9f", "#b8433f")]
+    ax.legend(handles, ["hydrophobic", "polar", "ionic"], fontsize=7, ncol=3, loc="upper left", bbox_to_anchor=(0, -0.12))
+    return _save(fig, path)
+
+
+def pmf_convergence(conv: dict, path: Path) -> str | None:
+    curves = [(k, v) for k, v in sorted(conv.items()) if isinstance(v, dict) and v.get("grid_nm")]
+    if len(curves) < 2:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(6.4, 2.6))
+    for (k, v), c in zip(curves, ["#c9d3dc", "#9aa5b1", "#4d6170", PALETTE[0]]):
+        ax.plot(v["grid_nm"], v["pmf_kj_mol"], color=c, lw=1.3 if k == "1.00" else 1.0, label=f"{float(k):.0%} of samples")
+    ax.set_xlabel("Ligand–pocket distance (nm)")
+    ax.set_ylabel("PMF (kJ mol$^{-1}$)")
+    ax.legend(fontsize=7)
+    return _save(fig, path)
+
+
+def properties_plot(props: list[dict], path: Path) -> str | None:
+    if not props:
+        return None
+    from .chem import LIMITS
+    plt = _plt()
+    keys = ["mw", "logp", "tpsa", "hbd", "hba", "rotb"]
+    labels = {"mw": "Molecular weight (Da)", "logp": "logP", "tpsa": "Polar surface area (Å²)", "hbd": "H-bond donors",
+              "hba": "H-bond acceptors", "rotb": "Rotatable bonds"}
+    fig, axes = plt.subplots(2, 3, figsize=(7.2, 4.0))
+    for ax, k in zip(axes.ravel(), keys):
+        v = [p[k] for p in props if p.get(k) is not None]
+        ax.hist(v, bins=12, color=PALETTE[0], alpha=0.85)
+        ax.axvline(LIMITS[k], color="#b8433f", ls="--", lw=0.9)
+        ax.set_xlabel(labels[k], fontsize=8)
+    fig.tight_layout()
+    return _save(fig, path)
+
+
+def chem_space_plot(xy, scores, names, path: Path) -> str | None:
+    xy = np.asarray(xy, float)
+    if len(xy) < 3:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(5.6, 4.2))
+    sc = ax.scatter(xy[:, 0], xy[:, 1], c=scores, cmap="viridis_r", s=22, edgecolor="none")
+    fig.colorbar(sc, ax=ax, label="Vina score (kcal mol$^{-1}$)")
+    for i in np.argsort(scores)[:5]:
+        ax.annotate(names[i], xy[i], fontsize=6, xytext=(3, 3), textcoords="offset points")
+    ax.set_xlabel("Fingerprint PC1")
+    ax.set_ylabel("Fingerprint PC2")
+    return _save(fig, path)

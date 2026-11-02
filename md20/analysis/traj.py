@@ -258,6 +258,21 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
                "rmsd_backbone_mean_A": float(np.mean(m["rmsd_backbone_A"])) if "rmsd_backbone_A" in m else None,
                "ligands": {rn: {"stays_bound": d["stays_bound"], "rmsd_last20_A": float(np.mean(d["rmsd_in_pocket_A"][-max(1, len(d["rmsd_in_pocket_A"]) // 5):])),
                                 "top_contacts": list(d["contact_frequency"].items())[:5]} for rn, d in m["ligands"].items()}}
+    # D-58: extended analyses (hydrogen bonds, SASA, secondary structure, PCA, clustering, correlations, fingerprint,
+    # water bridges) — independent of the metrics above; a failure is recorded, never fatal
+    try:
+        from .extended import extended_metrics
+        groups = ligand_groups
+        if groups is None:
+            top = traj.topology
+            groups = {rn: top.select(f"resname {rn} and not element H").tolist() for rn in _ligand_resnames(top)}
+        ext = extended_metrics(traj, groups)
+        atomic_write_json(ext, adir / "extended.json", backup=False)
+        summary["extended_file"] = str(adir / "extended.json")
+        summary["extended_errors"] = {**ext.get("errors", {}), **{f"{k}:{n}": e for k, l in (ext.get("ligands") or {}).items()
+                                                                   for n, e in (l.get("errors") or {}).items()}}
+    except Exception as exc:  # noqa: BLE001
+        summary["extended_errors"] = {"all": f"{type(exc).__name__}: {exc}"}
     atomic_write_json(m, adir / "metrics.json", backup=False)
     atomic_write_json(summary, adir / "analysis_manifest.json")
     return summary

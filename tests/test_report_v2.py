@@ -1,6 +1,7 @@
 """D-52: project-grade workflow report — section order, numbered figures and tables, data-driven interpretation, both languages."""
 import copy
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -37,8 +38,32 @@ def make_wf(tmp_path, lang="en"):
              "rmsf_ca_A": (base_rmsf - (0.45 * (np.abs(np.arange(len(res)) - 173) < 5) if key != "apo" else 0)).tolist()}
         if key != "apo":
             m["ligands"] = {"L01": {"rmsd_in_pocket_A": (0.8 + 0.4 * (1 - np.exp(-t * 4)) + rng.normal(0, 0.1, t.size)).tolist(),
+                                    "com_distance_to_pocket_A": (2.0 + rng.normal(0, 0.2, t.size)).tolist(),
+                                    "polar_contacts": (3 + rng.integers(0, 2, t.size)).tolist(),
                                     "contact_frequency": {"ASP189": 0.92, "SER190": 0.71, "GLY219": 0.66, "SER195": 0.41, "TRP215": 0.22}}}
         atomic_write_json(m, wf.dir / f"m_{key}.json")
+    # D-58 extended analyses (synthetic, shapes as written by analysis.extended)
+    from md20.analysis.extended import pca, free_energy_landscape, cluster_from_rmsd, cross_correlation, histogram_overlap_matrix
+    te = t[::2]
+    xyz = rng.normal(0, 0.3, (te.size, 30, 3)); xyz[te.size // 2:, :, 0] += 1.5
+    pc = pca(xyz); pr = np.asarray(pc["projection"]); pc["landscape"] = free_energy_landscape(pr[:, 0], pr[:, 1])
+    D = np.abs(np.subtract.outer(np.arange(te.size), np.arange(te.size))) * 0.05
+    for key in ("apo", "docked_BEN"):
+        e = {"time_ns": te.tolist(), "errors": {},
+             "dssp": {"fraction": {"H": (0.35 + 0 * te).tolist(), "E": (0.2 + 0 * te).tolist(), "C": (0.45 + 0 * te).tolist()}},
+             "pca": pc, "clusters": cluster_from_rmsd(D, 2.0), "dccm": {"matrix": cross_correlation(xyz).round(3).tolist(),
+                                                                         "residues": [f"R{i}" for i in range(30)]},
+             "sasa_protein": {"total_A2": (11000 + rng.normal(0, 50, te.size)).tolist()},
+             "hbonds_protein": {"count": (180 + rng.normal(0, 3, te.size)).tolist(), "time_ns": te.tolist()}, "ligands": {}}
+        if key != "apo":
+            e["ligands"]["L01"] = {"errors": {}, "hbonds": {"count": (2 + (rng.random(te.size) > 0.5)).tolist(),
+                                                           "occupancy": [["ASP189:OD1 ← L01:N1", 0.83], ["SER190:OG → L01:N2", 0.41]]},
+                                   "fingerprint": {"residues": ["ASP189", "SER190", "TRP215"],
+                                                   "matrix": [[3] * te.size, [2, 0] * (te.size // 2) + [2] * (te.size % 2), [1] * te.size],
+                                                   "occupancy": {"ionic": {"ASP189": 0.95}, "polar": {"SER190": 0.5}, "hydrophobic": {"TRP215": 0.9}}},
+                                   "water_bridges": {"count": (rng.random(te.size) * 2).round().tolist(), "residues": [["GLY219", 0.4]]},
+                                   "sasa": {"buried_fraction": (0.82 + rng.normal(0, 0.02, te.size)).tolist()}}
+        atomic_write_json(e, wf.dir / f"x_{key}.json")
     bdir = wf.dir / "binding_BEN"; bdir.mkdir()
     pos = np.linspace(0.4, 1.9, 300)
     force = 600 * np.exp(-((pos - 0.7) / 0.12) ** 2) + rng.normal(0, 30, pos.size)
@@ -46,10 +71,14 @@ def make_wf(tmp_path, lang="en"):
     np.savetxt(bdir / "smd.tsv", np.c_[pos * 100, pos, pos, force, work], delimiter="\t")
     g = np.linspace(0.4, 1.9, 60)
     W = -24.3 * np.exp(-((g - 0.45) / 0.35) ** 2)
+    win = {round(c, 3): rng.normal(c, 0.04, 400) for c in np.arange(0.45, 1.9, 0.08)}
+    conv = {f"{fr:.2f}": {"grid_nm": g.tolist(), "pmf_kj_mol": ((W - W.min()) * (0.9 + 0.1 * fr)).tolist(), "delta_pmf": 24.3 * (0.9 + 0.1 * fr)}
+            for fr in (0.25, 0.5, 0.75, 1.0)}
     atomic_write_json({"result": {"pmf": {"grid_nm": g.tolist(), "pmf_radial_kj_mol": (W - W.min()).tolist(),
-                                          "coverage": {"continuous": True, "breaks": [], "n_windows": 24}}}}, bdir / "binding_manifest.json")
-    sums = {"apo": {"rmsd_backbone_mean_A": 1.45, "metrics_file": str(wf.dir / "m_apo.json"), "ligands": {}},
-            "docked_BEN": {"rmsd_backbone_mean_A": 1.21, "metrics_file": str(wf.dir / "m_docked_BEN.json"),
+                                          "coverage": {"continuous": True, "breaks": [], "n_windows": 24},
+                                          "overlap_matrix": histogram_overlap_matrix(win), "convergence": conv}}}, bdir / "binding_manifest.json")
+    sums = {"apo": {"rmsd_backbone_mean_A": 1.45, "metrics_file": str(wf.dir / "m_apo.json"), "extended_file": str(wf.dir / "x_apo.json"), "ligands": {}},
+            "docked_BEN": {"rmsd_backbone_mean_A": 1.21, "metrics_file": str(wf.dir / "m_docked_BEN.json"), "extended_file": str(wf.dir / "x_docked_BEN.json"),
                            "ligands": {"L01": {"stays_bound": True, "rmsd_last20_A": 1.3, "top_contacts": [["ASP189", 0.92], ["SER190", 0.71]]}}}}
     wf._mark("md_cases", cases={"apo": {"case_id": "c0", "mode": "apo", "ligands": []},
                                 "docked_BEN": {"case_id": "c1", "mode": "docked_single", "ligands": ["BEN"]}})
@@ -81,7 +110,15 @@ def test_report_structure_and_interpretation(tmp_path, lang):
         assert "24.3 ± 1.8" in html and "has converged" in html
         assert "ASP189 (92%)" in html and "Recommended for this case" in html
         # every figure carries the general reading guide and the project-specific result (D-54)
-        assert html.count("How to read") >= 8 and html.count("In this project") >= 8
+        assert html.count("How to read") >= 20 and html.count("In this project") >= 20         # D-58: extended figures
+        for kind in ("Secondary structure", "Conformational free-energy landscape", "Conformational clusters", "Dynamic cross-correlation",
+                     "Ligand burial", "Ligand–protein hydrogen bonds", "Hydrogen-bond occupancy", "Interaction fingerprint", "Water bridges",
+                     "Window overlap matrix", "Convergence of the free-energy profile", "Protein solvent-accessible surface area",
+                     "Protein internal hydrogen bonds", "Ligand–pocket centre-of-mass distance"):
+            assert kind in html, kind
+        assert "ASP189:OD1 ← L01:N1 (83%)" in html and "deeply buried" in html and "has converged" in html
+        idx = json.loads((wf.dir / "report_figures" / "index_en.json").read_text(encoding="utf-8"))
+        assert len(idx["figures"]) >= 20 and all(f["read"] and Path(f["path"]).is_file() for f in idx["figures"])
         for kind in ("Docking pose scores", "Backbone RMSD", "Radius of gyration", "Ligand displacement in the pocket",
                      "Residue flexibility", "Contact frequency", "Steered molecular dynamics", "Free-energy profile"):
             assert kind in html, kind

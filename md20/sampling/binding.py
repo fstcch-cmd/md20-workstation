@@ -672,9 +672,27 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                 "diff_kj_mol": round(abs(a["delta_pmf"] - b["delta_pmf"]), 3)}
     except Exception as exc:  # noqa: BLE001
         half = {"error": str(exc)}
+    # D-58: PMF convergence (cumulative 25/50/75 % of every window) and the window-overlap matrix, for the report
+    conv = {}
+    for fr in (0.25, 0.5, 0.75):
+        try:
+            part = {c: v[: max(5, int(len(v) * fr))] for c, v in samples.items()}
+            q = radial_pmf(pmf_from_windows(part, force_constant_kj_mol_nm2=dict(ks), temperature_k=cfg.temperature_k,
+                                            n_bootstrap=0), cfg.temperature_k)
+            conv[f"{fr:.2f}"] = {"grid_nm": np.asarray(q["grid"]).tolist(), "pmf_kj_mol": np.asarray(q["W"]).tolist(),
+                                 "delta_pmf": q["delta_pmf"]}
+        except Exception as exc:  # noqa: BLE001
+            conv[f"{fr:.2f}"] = {"error": str(exc)}
+    conv["1.00"] = {"grid_nm": g.tolist(), "pmf_kj_mol": Wv.tolist(), "delta_pmf": rp["delta_pmf"]}
+    try:
+        from ..analysis.extended import histogram_overlap_matrix
+        overlap = histogram_overlap_matrix(samples)
+    except Exception as exc:  # noqa: BLE001
+        overlap = {"error": str(exc)}
     res.pmf = {"method": pres.method, "converged": pres.converged, "quality": pres.quality,
                "bound_cutoff_nm": rp["r_cut"], "w_bulk_kj_mol": rp["w_bulk"], "r_min_nm": rp["r_min"],
-               "jacobian_corrected": True, "half_split": half,
+               "jacobian_corrected": True, "half_split": half, "convergence": conv, "overlap_matrix": overlap,
+               "err_kj_mol": (np.asarray(err).tolist() if err is not None else None),
                "grid_nm": g.tolist(), "pmf_radial_kj_mol": Wv.tolist(), "pmf_raw_kj_mol": rp["W_raw"].tolist()}
     res.figures = dict(pres.figures)
     from ..analysis.plots import plot_pmf

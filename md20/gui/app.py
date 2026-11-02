@@ -281,6 +281,48 @@ def _manual_upload_panel(wf: Workflow):
         ui.upload(on_upload=got, multiple=True, auto_upload=True, label=_("選擇 .sdf 檔", "Choose .sdf files")).props("accept=.sdf flat bordered color=blue-grey-7").classes("w-full")
 
 
+def _figure_gallery(wf: Workflow):
+    """D-58: every figure of the project report, with its caption, reading guide and project-specific result."""
+    from nicegui import run as nrun
+    from ..report.workflow_report import build_workflow_report
+    top = ui.row().classes("items-center gap-3")
+    box = ui.column().classes("w-full gap-3")
+    with top:
+        info = ui.label("").classes("text-sm md20-muted")
+
+    def render():
+        idx = load_json(wf.dir / "report_figures" / f"index_{lang()}.json", {})
+        box.clear()
+        figs = idx.get("figures") or []
+        info.set_text(_(f"共 {len(figs)} 張圖（產生於 {idx.get('created_at', '—')[:19]}）", f"{len(figs)} figures (generated {idx.get('created_at', '—')[:19]})")
+                      if figs else _("尚未產生圖表；流程有結果後按「產生或更新圖表」。", "No figures yet; press Build or refresh figures once the workflow has results."))
+        sec = None
+        with box:
+            for f in figs:
+                if f.get("section") != sec:
+                    sec = f.get("section")
+                    ui.label(sec or "").classes("md20-section")
+                with ui.card().classes("w-full md20-card p-3"):
+                    ui.image(f"/file?path={f['path']}").classes("w-full max-w-3xl")
+                    ui.label(f"{_('圖', 'Figure')} {f['n']}. {f['title']}" + (f" — {f['subject']}" if f.get("subject") else "")).classes("font-semibold text-sm")
+                    ui.label(f["caption"]).classes("md20-why")
+                    ui.label(_("如何判讀：", "How to read: ") + f["read"]).classes("text-sm")
+                    for x in f.get("findings") or []:
+                        ui.label(("⚠ " if x["level"] == "caution" else "• ") + x["text"]).classes(
+                            "text-sm " + ("text-negative" if x["level"] == "caution" else ""))
+
+    async def rebuild():
+        info.set_text(_("產生中…", "Building…"))
+        try:
+            await nrun.io_bound(build_workflow_report, wf, wf.dir / f"workflow_report_{lang()}.html", lang=lang())
+        except Exception as exc:  # noqa: BLE001
+            ui.notify(f"{type(exc).__name__}: {exc}", type="negative")
+        render()
+    with top:
+        ui.button(_("產生或更新圖表", "Build or refresh figures"), on_click=rebuild).props("outline no-caps")
+    render()
+
+
 @ui.page("/wf/{project}/{name}")
 def workflow_page(project: str, name: str):
     _header()
@@ -360,6 +402,7 @@ def workflow_page(project: str, name: str):
         with ui.tabs().classes("w-full") as tabs:
             t_gate, t_screen, t_live, t_umb, t_time, t_3d = (ui.tab(_("閘門", "Gates")), ui.tab(_("篩選", "Screening")), ui.tab(_("即時曲線", "Live curves")),
                                                              ui.tab(_("傘狀採樣覆蓋", "Umbrella coverage")), ui.tab(_("時間軸", "Timeline")), ui.tab(_("3D 檢視", "3D view")))
+            t_fig = ui.tab(_("圖表", "Figures"))
         with ui.tab_panels(tabs, value=t_gate).classes("w-full"):
             with ui.tab_panel(t_gate):
                 cards_box = ui.column().classes("w-full gap-2")
@@ -447,6 +490,8 @@ def workflow_page(project: str, name: str):
                         ui.notify(f"{target}：在此區間新增 {len(out['windows'])} 個 window（k {out['k']:.0f}、間距 "
                                   f"{out['spacing_nm']:.3f} nm）；按「開始／繼續」執行，已完成的 window 不重跑。", type="positive")
                     ui.button(_("補採樣", "Add windows"), on_click=do_resample).props("color=primary")
+            with ui.tab_panel(t_fig):
+                _figure_gallery(wf)
             with ui.tab_panel(t_time):
                 time_box = ui.column().classes("w-full gap-1")
             with ui.tab_panel(t_3d):

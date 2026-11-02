@@ -164,6 +164,8 @@ class Doc:
         self.lang, self.nf, self.nt = lang, 0, 0
         self.figdir = figdir or Path(".")
         self.collected: list[dict] = []
+        self.index: list[dict] = []          # every figure with its texts, for the interface gallery (D-58)
+        self.section = ""
 
     def t(self, pair) -> str:
         return tx(pair, self.lang)
@@ -186,6 +188,9 @@ class Doc:
         f = FIG[kind]
         title = self.t(f["title"]) + (f"：{subject}" if subject and self.lang == "zh" else (f": {subject}" if subject else ""))
         items = "".join(f"<li class={x['level']}>{_esc(self.t(x['text']))}</li>" for x in findings)
+        self.index.append({"n": self.nf, "kind": kind, "section": self.section, "subject": subject, "path": str(path),
+                           "title": self.t(f["title"]), "caption": self.t(f["caption"]), "read": self.t(f["read"]),
+                           "findings": [{"level": x["level"], "text": self.t(x["text"])} for x in findings]})
         sep = "。" if self.lang == "zh" else ". "
         return (f"<div class=figblock><figure>{img}<div class=caption><b>{self.t(H['figure'])} {self.nf}.</b> {_esc(title)}{sep}"
                 f"{_esc(self.t(f['caption']))}</div></figure><div class=figtext>"
@@ -345,6 +350,7 @@ def _structure(doc: Doc, wf) -> str:
 
 
 def _screen(doc: Doc, wf) -> str:
+    doc.section = tx(SECTION["screen"]["title"], doc.lang)
     st = wf.state()["steps"]
     d = st.get("screen_docking") or {}
     if not (wf.cfg.get("screen") or d):
@@ -364,7 +370,10 @@ def _screen(doc: Doc, wf) -> str:
     out = ""
     start = len(doc.collected)
     if rows:
-        out += doc.figure_block(FG.screen_ranking(rows, doc.figdir / "screen_ranking.png"), "screen_ranking", FT.classify_screen(rows))
+        sc_f = FT.classify_screen(rows)
+        out += doc.figure_block(FG.screen_ranking(rows, doc.figdir / "screen_ranking.png"), "screen_ranking",
+                                [x for x in sc_f if "molecular size" not in x["text"][1]])
+        out += _screen_extra(doc, d, rows, man, [x for x in sc_f if "molecular size" in x["text"][1]])
     if rows:
         out += doc.table([tx(("名次", "Rank"), L), tx(("化合物", "Compound"), L), "Score (kcal mol⁻¹)", tx(("與最佳差距", "Δ to best"), L),
                           tx(("重原子", "Heavy atoms"), L), tx(("配體效率", "Ligand efficiency"), L), tx(("選入", "Selected"), L)],
@@ -380,7 +389,44 @@ def _screen(doc: Doc, wf) -> str:
     return _section(doc, doc.next(), "screen", params, out, doc.collected[start:] + extra)
 
 
+def _screen_extra(doc: Doc, d: dict, rows: list[dict], man: dict, size_findings: list) -> str:
+    """Score distribution, score against size, compound properties and chemical space (RDKit when available)."""
+    from . import chem as CH
+    out = ""
+    sc = np.asarray([r["score"] for r in rows], float)
+    hist = ((d.get("plots") or {}).get("histogram") or {}).get("png")
+    if hist and len(sc) >= 5:
+        thr = float(sc.mean() - sc.std())
+        tail = [r["name"] for r in rows if r["score"] <= thr]
+        out += doc.figure_block(hist, "screen_hist", [FT.S("note", f"平均 {sc.mean():.2f} ± {sc.std():.2f} kcal mol⁻¹；{len(tail)} 個化合物比平均好一個標準差以上（{'、'.join(tail[:6])}）。",
+                                                            f"Mean {sc.mean():.2f} ± {sc.std():.2f} kcal mol⁻¹; {len(tail)} compounds score more than one standard deviation better than the mean ({', '.join(tail[:6])}).")])
+    scat = ((d.get("plots") or {}).get("scatter") or {}).get("png")
+    if scat:
+        out += doc.figure_block(scat, "screen_scatter", size_findings or [FT.S("note", "分數與分子大小沒有強相關，排名不是由分子大小主導。",
+                                                                                 "Score and size are not strongly correlated; the ranking is not driven by molecular size.")])
+    entries = (man or {}).get("entries") or {}
+    props, bits, names, scores = [], [], [], []
+    for r in rows:
+        path = (entries.get(r["name"]) or {}).get("path")
+        if not path:
+            continue
+        pr = CH.properties_from_sdf(path)
+        if pr:
+            props.append(pr)
+            fb = CH.fingerprint_bits(path)
+            if fb is not None:
+                bits.append(fb); names.append(r["name"]); scores.append(r["score"])
+    if props:
+        out += doc.figure_block(FG.properties_plot(props, doc.figdir / "screen_properties.png"), "properties", FT.classify_properties(props))
+    if len(bits) >= 6:
+        xy = CH.chem_space_xy(np.array(bits))
+        out += doc.figure_block(FG.chem_space_plot(xy, scores, names, doc.figdir / "screen_chemspace.png"), "chem_space",
+                                FT.classify_chem_space(xy, scores, names))
+    return out
+
+
 def _docking(doc: Doc, wf, vals, f, goal) -> str:
+    doc.section = tx(SECTION["docking"]["title"], doc.lang)
     L = doc.lang
     d = wf.state()["steps"].get("docking") or {}
     rows = [r for r in advisor.parameter_table(vals, f, goal, L) if r["group_key"] == "docking"]
@@ -400,6 +446,13 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
         rank_used = min(chosen.get(e["name"], {e.get("recommended_rank") or 1}))
         out += doc.figure_block(FG.docking_scores(e["poses"], rank_used, e["name"], doc.figdir / f"docking_{e['name']}.png"),
                                 "docking_scores", FT.classify_docking_scores(e["name"], e["poses"], rank_used), e["name"])
+        rec_pdb = (wf.state()["steps"].get("receptor_docking") or {}).get("path")
+        for lig, info in (sel.get("ligands") or {}).items():
+            if info.get("entry") == e["name"] and info.get("sdf") and rec_pdb and Path(info["sdf"]).is_file():
+                from .chem import interaction_diagram
+                png, cons = interaction_diagram(info["sdf"], rec_pdb, doc.figdir / f"docking_2d_{lig}.png")
+                if png:
+                    out += doc.figure_block(png, "interaction_2d", FT.classify_interaction_2d(lig, cons), lig)
         trs = []
         for p in e["poses"]:
             tag = ("✔ " + tx(("選用", "used"), L) if p["rank"] in chosen.get(e["name"], set()) else "") + \
@@ -455,6 +508,7 @@ def _peptide(doc: Doc, wf) -> str:
 
 
 def _md(doc: Doc, wf, vals, f, goal) -> str:
+    doc.section = tx(SECTION["md"]["title"], doc.lang)
     L = doc.lang
     rows = [r for r in advisor.parameter_table(vals, f, goal, L) if r["group_key"] in ("system", "equil", "prod")]
     params = _param_table(doc, rows, ("模擬參數", "Simulation parameters"))
@@ -512,8 +566,12 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
                          ("平衡與正式模擬的驗收檢查（溫度、密度）", "Acceptance checks of equilibration and production (temperature, density)"))
     comp = ana.get("comparison") or {}
     start = len(doc.collected)
+    ext = {key: load_json(s_.get("extended_file"), {}) for key, s_ in sums.items() if s_.get("extended_file")}
+    eq = _equil_figures(doc, wf, cases, runs)
+    if eq:
+        out += _sub(doc, "平衡過程品質", "Equilibration quality") + eq
     if metrics:
-        out += _md_figures(doc, sums, metrics)
+        out += _md_figures(doc, sums, metrics, ext)
     else:                                              # older runs without metrics.json: the analysis images as drawn
         for key, s_ in sums.items():
             figs = s_.get("figures") or {}
@@ -529,41 +587,149 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
     return _section(doc, doc.next(), "md", params, out, findings)
 
 
-def _md_figures(doc: Doc, sums: dict, metrics: dict) -> str:
-    """F3–F7 drawn from metrics.json of each system, each with its general reading guide and scenario sentences."""
-    order = sorted(metrics, key=lambda k: (not k.lower().startswith("apo"), k))
+def _sub(doc: Doc, zh: str, en: str) -> str:
+    return f"<h3>{_esc(doc.t((zh, en)))}</h3>"
+
+
+def _equil_figures(doc: Doc, wf, cases: dict, runs: dict) -> str:
+    """Equilibration quality of every system: minimisation ladder, stage logs with their acceptance checks, overview,
+    replica overlay (the same figures as the per-run reports, now in the project report)."""
+    from ..project import Run
     out = ""
+    for key, c in cases.items():
+        r = runs.get(key, {})
+        if not r.get("run_ids"):
+            continue
+        try:
+            case = wf.project.case(c["case_id"])
+            rdir = Run(case, r["run_ids"][0]).dir
+        except Exception:  # noqa: BLE001
+            continue
+        mn = load_json(rdir / "stages" / "minimize" / "minimize_complete.json", {})
+        png = ((mn.get("figures") or {}).get("png"))
+        if png:
+            out += doc.figure_block(png, "minimization", FT.classify_minimization(mn.get("energies_kj_mol") or [], key), key)
+        for stg in ("nvt", "npt", "production"):
+            comp = load_json(rdir / "stages" / stg / f"{stg}_complete.json", {})
+            png = (comp.get("figures") or {}).get("png")
+            rows = [{"stage": stg.upper(), **x} for x in ((comp.get("acceptance") or {}).get("checks") or [])]
+            if png:
+                out += doc.figure_block(png, "equil_quality", FT.classify_equil(rows, f"{key} {stg.upper()}"), f"{key} {stg.upper()}")
+        ov = rdir / "figures" / "run_overview.png"
+        if ov.is_file():
+            out += doc.figure_block(ov, "equil_quality", [], f"{key} overview")
+        rep = next(iter(sorted(case.dir.rglob("production_replicas.png"))), None) if hasattr(case, "dir") else None
+        if rep:
+            out += doc.figure_block(rep, "replicas", [], key)
+    return out
+
+
+def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None) -> str:
+    """Protein stability and dynamics, then ligand binding in dynamics — every analysis that exists for the run."""
+    ext = ext or {}
+    order = sorted(metrics, key=lambda k: (not k.lower().startswith("apo"), k))
+    ref = order[0] if order and order[0].lower().startswith("apo") else None
+    out = _sub(doc, "蛋白的穩定性與動態", "Protein stability and dynamics")
     rmsd = {k: (metrics[k].get("time_ns") or [], metrics[k].get("rmsd_backbone_A") or []) for k in order if metrics[k].get("rmsd_backbone_A")}
     if rmsd:
         out += doc.figure_block(FG.timeseries(rmsd, "Backbone RMSD (Å)", doc.figdir / "md_rmsd.png"), "rmsd", FT.classify_rmsd(rmsd))
     rg = {k: (metrics[k].get("time_ns") or [], metrics[k].get("rg_protein_A") or []) for k in order if metrics[k].get("rg_protein_A")}
     if rg:
         out += doc.figure_block(FG.timeseries(rg, "Radius of gyration (Å)", doc.figdir / "md_rg.png"), "rg", FT.classify_rg(rg))
-    lig, lf = {}, []
+    sasa = {k: (ext[k].get("time_ns") or [], (ext[k].get("sasa_protein") or {}).get("total_A2") or []) for k in order if (ext.get(k) or {}).get("sasa_protein")}
+    if sasa:
+        ff = [x for k, (t, y) in sasa.items() for x in FT.classify_growth(k, y, ("溶劑可及面積", "solvent-accessible area"))]
+        out += doc.figure_block(FG.timeseries(sasa, "Protein SASA (Å²)", doc.figdir / "md_sasa.png"), "protein_sasa", ff)
+    hbp = {k: ((ext[k].get("hbonds_protein") or {}).get("time_ns") or [], (ext[k].get("hbonds_protein") or {}).get("count") or [])
+           for k in order if (ext.get(k) or {}).get("hbonds_protein")}
+    if hbp:
+        ff = [x for k, (t, y) in hbp.items() for x in FT.classify_growth(k, y, ("內部氫鍵數", "internal hydrogen bonds"))]
+        out += doc.figure_block(FG.timeseries(hbp, "Protein hydrogen bonds", doc.figdir / "md_hbond_protein.png"), "hbond_protein", ff)
     for k in order:
-        for rn, d in (metrics[k].get("ligands") or {}).items():
-            if d.get("rmsd_in_pocket_A"):
-                lig[f"{k} {rn}"] = (metrics[k].get("time_ns") or [], d["rmsd_in_pocket_A"])
-                lf += FT.classify_ligand_rmsd(k, rn, metrics[k].get("time_ns") or np.arange(len(d["rmsd_in_pocket_A"])), d["rmsd_in_pocket_A"])
-    if lig:
-        out += doc.figure_block(FG.timeseries(lig, "Ligand RMSD in pocket (Å)", doc.figdir / "md_ligand_rmsd.png", threshold=3.0), "ligand_rmsd", lf)
+        d = (ext.get(k) or {}).get("dssp")
+        if d and d.get("fraction"):
+            out += doc.figure_block(FG.dssp_area(ext[k].get("time_ns") or [], d["fraction"], doc.figdir / f"md_dssp_{k}.png"),
+                                    "dssp", FT.classify_dssp(k, d["fraction"]), k)
     rf = {k: (metrics[k].get("rmsf_residues") or [], metrics[k].get("rmsf_ca_A") or []) for k in order if metrics[k].get("rmsf_ca_A")}
     if rf:
         keys = list(rf)
-        ff = []
-        for k in keys[1:]:
-            ff += FT.classify_rmsf(rf[k][0], rf[keys[0]][1], rf[k][1], k)
+        ff = [x for k in keys[1:] for x in FT.classify_rmsf(rf[k][0], rf[keys[0]][1], rf[k][1], k)]
         out += doc.figure_block(FG.rmsf(rf, doc.figdir / "md_rmsf.png"), "rmsf", ff)
     for k in order:
-        for rn, d in (metrics[k].get("ligands") or {}).items():
-            fq = d.get("contact_frequency") or {}
-            if fq:
-                out += doc.figure_block(FG.contacts(fq, doc.figdir / f"md_contacts_{k}_{rn}.png"), "contacts",
-                                        FT.classify_contacts(k, rn, fq), f"{k} {rn}")
+        d = (ext.get(k) or {}).get("dccm")
+        if d and d.get("matrix"):
+            refm = ((ext.get(ref) or {}).get("dccm") or {}).get("matrix") if ref and k != ref else None
+            out += doc.figure_block(FG.heatmap(d["matrix"], doc.figdir / f"md_dccm_{k}.png", label="Correlation", ticks=d.get("residues"),
+                                               xlabel="Residue", ylabel="Residue"), "dccm", FT.classify_dccm(k, d["matrix"], refm), k)
+    for k in order:
+        pc = (ext.get(k) or {}).get("pca")
+        if pc and pc.get("landscape"):
+            out += doc.figure_block(FG.landscape(pc["landscape"], pc.get("explained"), doc.figdir / f"md_pca_{k}.png"),
+                                    "pca_landscape", FT.classify_pca(k, pc), k)
+    for k in order:
+        cl = (ext.get(k) or {}).get("clusters")
+        if cl and cl.get("populations"):
+            out += doc.figure_block(FG.clusters_plot(cl, ext[k].get("time_ns") or [], doc.figdir / f"md_clusters_{k}.png"),
+                                    "clusters", FT.classify_clusters(k, cl), k)
+    # ---- ligand binding in dynamics
+    lig_keys = [(k, rn) for k in order for rn in (metrics[k].get("ligands") or {})]
+    if not lig_keys:
+        return out
+    out += _sub(doc, "配體在模擬中的結合", "Ligand binding during the simulation")
+    lig, lf = {}, []
+    for k, rn in lig_keys:
+        d = metrics[k]["ligands"][rn]
+        if d.get("rmsd_in_pocket_A"):
+            lig[f"{k} {rn}"] = (metrics[k].get("time_ns") or [], d["rmsd_in_pocket_A"])
+            lf += FT.classify_ligand_rmsd(k, rn, metrics[k].get("time_ns") or np.arange(len(d["rmsd_in_pocket_A"])), d["rmsd_in_pocket_A"])
+    if lig:
+        out += doc.figure_block(FG.timeseries(lig, "Ligand RMSD in pocket (Å)", doc.figdir / "md_ligand_rmsd.png", threshold=3.0), "ligand_rmsd", lf)
+    for k, rn in lig_keys:
+        d = metrics[k]["ligands"][rn]
+        if d.get("com_distance_to_pocket_A"):
+            out += doc.figure_block(FG.two_panel(metrics[k].get("time_ns") or [], d["com_distance_to_pocket_A"], d.get("polar_contacts") or [],
+                                                 "COM distance (Å)", "Polar contacts", doc.figdir / f"md_com_{k}_{rn}.png"),
+                                    "com_distance", FT.classify_com(f"{k} {rn}", metrics[k].get("time_ns"), d["com_distance_to_pocket_A"]), f"{k} {rn}")
+    bur, bf = {}, []
+    for k, rn in lig_keys:
+        L = ((ext.get(k) or {}).get("ligands") or {}).get(rn) or {}
+        if (L.get("sasa") or {}).get("buried_fraction"):
+            bur[f"{k} {rn}"] = (ext[k].get("time_ns") or [], L["sasa"]["buried_fraction"])
+            bf += FT.classify_burial(f"{k} {rn}", L["sasa"]["buried_fraction"])
+    if bur:
+        out += doc.figure_block(FG.timeseries(bur, "Buried fraction of ligand surface", doc.figdir / "md_burial.png"), "ligand_burial", bf)
+    for k, rn in lig_keys:
+        fq = metrics[k]["ligands"][rn].get("contact_frequency") or {}
+        if fq:
+            out += doc.figure_block(FG.contacts(fq, doc.figdir / f"md_contacts_{k}_{rn}.png"), "contacts", FT.classify_contacts(k, rn, fq), f"{k} {rn}")
+    hb, hf = {}, []
+    for k, rn in lig_keys:
+        L = ((ext.get(k) or {}).get("ligands") or {}).get(rn) or {}
+        if (L.get("hbonds") or {}).get("count") is not None:
+            hb[f"{k} {rn}"] = (ext[k].get("time_ns") or [], L["hbonds"]["count"])
+    if hb:
+        out += doc.figure_block(FG.timeseries(hb, "Ligand–protein hydrogen bonds", doc.figdir / "md_hbond_count.png"), "hbond_count", FT.classify_hbond_count(hb))
+    for k, rn in lig_keys:
+        L = ((ext.get(k) or {}).get("ligands") or {}).get(rn) or {}
+        if L.get("hbonds"):
+            out += doc.figure_block(FG.bars(L["hbonds"].get("occupancy") or [], "Occupancy", doc.figdir / f"md_hbond_occ_{k}_{rn}.png"),
+                                    "hbond_occupancy", FT.classify_hbond_occupancy(f"{k} {rn}", L["hbonds"].get("occupancy") or []), f"{k} {rn}")
+        if (L.get("fingerprint") or {}).get("residues"):
+            out += doc.figure_block(FG.fingerprint_plot(L["fingerprint"], ext[k].get("time_ns") or [], doc.figdir / f"md_fp_{k}_{rn}.png"),
+                                    "fingerprint", FT.classify_fingerprint(f"{k} {rn}", L["fingerprint"].get("occupancy") or {}), f"{k} {rn}")
+    wb, wf_ = {}, []
+    for k, rn in lig_keys:
+        L = ((ext.get(k) or {}).get("ligands") or {}).get(rn) or {}
+        if (L.get("water_bridges") or {}).get("count") is not None:
+            wb[f"{k} {rn}"] = (ext[k].get("time_ns") or [], L["water_bridges"]["count"])
+            wf_ += FT.classify_water(f"{k} {rn}", L["water_bridges"])
+    if wb:
+        out += doc.figure_block(FG.timeseries(wb, "Water bridges", doc.figdir / "md_water.png"), "water_bridges", wf_)
     return out
 
 
 def _binding(doc: Doc, wf, vals, f, goal) -> str:
+    doc.section = tx(SECTION["binding"]["title"], doc.lang)
     L = doc.lang
     b = (wf.state()["steps"].get("binding") or {}).get("results", {})
     if not wf.cfg.get("binding", {}).get("enabled") and not b:
@@ -616,6 +782,14 @@ def _binding_figures(doc: Doc, name: str, r: dict) -> str:
     pm = ((load_json(bdir / "binding_manifest.json", {}) if bdir else {}).get("result") or {}).get("pmf") or {}
     if figs.get("histograms"):
         out += doc.figure_block(figs["histograms"]["png"], "umbrella", FT.classify_umbrella(pm.get("coverage") or {}, name), name)
+    if (pm.get("overlap_matrix") or {}).get("matrix"):
+        o = pm["overlap_matrix"]
+        out += doc.figure_block(FG.heatmap(o["matrix"], doc.figdir / f"overlap_{name}.png", cmap="Blues", vmin=0, vmax=1, label="Overlap",
+                                           ticks=[f"{c:.2f}" for c in o.get("centers") or []], xlabel="Window centre (nm)", ylabel="Window centre (nm)"),
+                                "overlap_matrix", FT.classify_overlap(name, o), name)
+    if pm.get("convergence"):
+        out += doc.figure_block(FG.pmf_convergence(pm["convergence"], doc.figdir / f"pmf_conv_{name}.png"), "pmf_convergence",
+                                FT.classify_convergence(name, pm["convergence"]), name)
     if pm.get("grid_nm") and pm.get("pmf_radial_kj_mol"):
         g, W = pm["grid_nm"], pm["pmf_radial_kj_mol"]
         err = pm.get("err_kj_mol")
@@ -796,6 +970,13 @@ def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None 
             f"<h2>{_esc(tx(H['appendix_cfg'], L))}</h2><details><summary>config.json</summary><pre>{_esc(json.dumps(cfg, ensure_ascii=False, indent=1))}</pre></details>",
             __import__("md20.util.stamp", fromlist=["html_footer"]).html_footer(), "</body></html>"]
     out_path.write_text("".join(html), encoding="utf-8")
+    try:
+        from ..util import atomic_write_json
+        doc.figdir.mkdir(parents=True, exist_ok=True)
+        atomic_write_json({"lang": L, "report": str(out_path), "created_at": now_iso(), "figures": doc.index},
+                          doc.figdir / f"index_{L}.json", backup=False)
+    except Exception:  # noqa: BLE001
+        pass
     return out_path
 
 
