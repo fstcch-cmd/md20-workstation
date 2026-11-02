@@ -26,3 +26,15 @@
 - CI runner 沒有 GPU：CUDA／OpenCL on GPU 的路徑**從未被驗證**，這台筆電是第一次。
 - GBn2 只在 GPU 上較快；鋅鍵結模型仍在修（D-34），金屬案例先不要當驗收。
 - 雲端開發 session（session_016gcJz8q2F6515MWPncJEZu）持續巡檢 CI 與 MD 檔；看到你的回報會協助修正。
+
+## v0.1.0a3 介面實測清單（GUI v2，使用者週二要用）
+CI 只能確認每頁渲染（HTTP 200 與截圖），**互動要在筆電上確認**。安裝 a3 後依序做，結果寫進 `docs/COMPATIBILITY.md`：
+1. 首頁四張模式卡片可點；右上角語言切換（English、繁體中文）後頁面立即改變，重開 GUI 仍記得。
+2. 教學模式二（胜肽）→「Start this teaching case」→ 流程頁：CPP 與活性位可及性的「科學限制」卡片出現但**不阻擋**；
+   對接完成後頂端出現「Proceed to molecular dynamics?」卡片，按下後進入建模與模擬。
+3. 教學模式一（六個代謝物同時對接，1VKX）：同上；確認同時對接的姿勢表與配體碰撞檢查。
+4. 專業模式：改步長為 5 fs → 右側出現「Error」且「Create and start」停用；按「Apply suggestion」恢復。研究目標改「Binding strength」→ 未改過的參數跟著更新。
+   先在「Computer status」做一次效能測試，再回專業模式看時間估計是否合理。
+5. 快速模式：上傳一個 PDB 檔、貼兩行配體（其中一行 `PEP peptide:GGGGGKP`）、建立並開始。
+6. 篩選：下載範例表格 → 上傳 → 排名長條圖點選長條會勾選化合物；手動上傳一個命名錯誤的 SDF 應被拒絕並說明原因。
+7. 流程完成後「Open report」：英文與中文各開一次，確認每節五段（是什麼、科學意義、參數、圖表、解釋）與圖表編號。
