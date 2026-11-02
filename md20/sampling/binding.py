@@ -229,6 +229,22 @@ def _state_xyz_box(ctx):
     return xyz, box
 
 
+def well_depth_hint(delta_pmf_kj_mol, n_ligand_heavy: int) -> str | None:
+    """Flag a 1D PMF well that is implausibly deep for the ligand size (D-43).  Empirical ceiling: about 1.5 kcal/mol
+    (≈ 6.3 kJ/mol) of binding free energy per heavy atom for the most efficient fragments, at least 40 kJ/mol."""
+    try:
+        d = float(delta_pmf_kj_mol)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(d) or n_ligand_heavy <= 0:
+        return None
+    ceiling = max(40.0, 6.3 * n_ligand_heavy)
+    if d <= ceiling:
+        return None
+    return (f"ΔPMF 井深 {d:.0f} kJ/mol 高於 {n_ligand_heavy} 個重原子配體的經驗上限（約 {ceiling:.0f} kJ/mol）。常見原因：window 太短、"
+            "配體離開口袋時周圍（水、側鏈、鹽橋）來不及鬆弛造成的取樣滯後。數值未修改；建議改用 teaching 等級或延長 window 後重跑比較。")
+
+
 def finished_result(out_dir: Path | str, cfg: "BindingConfig") -> "BindingResult | None":
     """Finished is finished: a second call with the same config returns the stored result instead of re-planning
     the refinement on the (now larger) sample set — that re-ran extend_window and shifted ΔPMF (CI Windows:
@@ -620,11 +636,31 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         res.dG_standard_kj_mol = res.dG_standard_kcal_mol = None
         res.dG_err_kj_mol = None
         res.pmf["dG_withheld"] = "sampling discontinuous"
-    if not res.pmf["quality"].get("graph_connected", True) or not pres.converged:
-        res.caveats.insert(1, "PMF 未收斂或 window overlap 不足（見直方圖）；不輸出 ΔG°，只保留 ΔPMF 作定性參考。")
+    # D-43: say WHICH condition failed (students and reviewers could not tell from "not converged")
+    reasons = []
+    q = res.pmf["quality"]
+    if not q.get("graph_connected", True):
+        reasons.append("window 重疊圖不連通：有一段距離沒有任何兩個 window 的取樣互相重疊（見直方圖）")
+    if not pres.converged:
+        xc = q.get("solver_cross_check") or {}
+        if xc.get("abs_diff_kj_mol") is not None:
+            reasons.append(f"MBAR 求解未達容差，且與 WHAM 的 ΔPMF 相差 {xc['abs_diff_kj_mol']:.1f} kJ/mol（> 2）")
+        elif xc.get("mbar_note"):
+            reasons.append("MBAR 求解未達容差，WHAM 交叉驗證失敗")
+        else:
+            reasons.append("WHAM 自洽迭代未收斂")
+    elif (q.get("solver_cross_check") or {}).get("abs_diff_kj_mol") is not None:
+        res.caveats.append(f"MBAR 求解未達容差，但與 WHAM 的 ΔPMF 一致（差 {q['solver_cross_check']['abs_diff_kj_mol']:.1f} kJ/mol），採用。")
+    if reasons:
+        res.caveats.insert(1, "ΔG° 不輸出：" + "；".join(reasons) + "。只保留 ΔPMF 作定性參考。")
         res.dG_standard_kj_mol = res.dG_standard_kcal_mol = None
         res.dG_err_kj_mol = None
-        res.pmf["dG_withheld"] = "not converged"
+        res.pmf["dG_withheld"] = "；".join(reasons)
+    # D-43: plausibility of the well depth — flag, never change the number
+    hint = well_depth_hint(res.delta_pmf_kj_mol, len(ligand))
+    if hint:
+        res.caveats.insert(1, hint)
+        res.pmf["well_depth_flag"] = True
     manifest.update({"status": "PASS", "result": res.to_dict()})
     atomic_write_json(json.loads(json.dumps(manifest, default=_np_default)), out / "binding_manifest.json")
     if decisions:

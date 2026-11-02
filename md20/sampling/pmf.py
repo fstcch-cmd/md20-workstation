@@ -66,8 +66,22 @@ def pmf_from_windows(samples_by_center: dict[float, np.ndarray], *, force_consta
     err = (hi - lo) / (2 * 1.96) if base.get("bootstrap_success", 0) > 1 else None
     finite = np.isfinite(pmf)
     delta = float(np.nanmax(pmf[finite]) - np.nanmin(pmf[finite])) if finite.any() else float("nan")
+    converged = bool(base.get("converged", True))
+    # D-43: an MBAR solve that did not reach tolerance is cross-checked with WHAM on the same samples; it is accepted
+    # only when the two ΔPMF agree within 2 kJ/mol (the reason is kept for the report either way)
+    if not converged and str(base.get("method", "")).startswith("PyMBAR"):
+        try:
+            w = mdh.stable_wham_1d(eq_lists, centers, k, temperature_k, bins=bins)
+            wp = np.asarray(w["pmf_kj_mol"], dtype=float); wf = np.isfinite(wp)
+            w_delta = float(np.nanmax(wp[wf]) - np.nanmin(wp[wf])) if wf.any() else float("nan")
+            diff = abs(w_delta - (float(np.nanmax(pmf[finite]) - np.nanmin(pmf[finite])) if finite.any() else float("nan")))
+            quality["solver_cross_check"] = {"mbar_note": base.get("solver_note", ""), "wham_converged": bool(w.get("converged")),
+                                             "wham_delta_kj_mol": w_delta, "abs_diff_kj_mol": diff}
+            converged = bool(w.get("converged")) and np.isfinite(diff) and diff <= 2.0
+        except Exception as exc:  # noqa: BLE001
+            quality["solver_cross_check"] = {"mbar_note": base.get("solver_note", ""), "error": f"{type(exc).__name__}: {exc}"}
     res = PMFResult(grid_nm=grid, pmf_kj_mol=pmf, err_kj_mol=err, method=str(base.get("method", "")),
-                    converged=bool(base.get("converged", True)), delta_pmf_kj_mol=delta, quality=quality,
+                    converged=converged, delta_pmf_kj_mol=delta, quality=quality,
                     boot_pmfs=base.get("bootstrap_pmfs"))
     if out_dir is not None:
         out = Path(out_dir)

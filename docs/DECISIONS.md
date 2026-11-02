@@ -7,6 +7,19 @@
 
 ## 2026-11-02
 
+### D-43　ΔG° 擋下的理由要具體；overlap 圖依實際取樣而非名目中心；pymbar 求解訊息收進報告；井深合理性提示
+- 事實（D-40 筆電報告）：只寫「not converged」。追查後：MBAR 路徑永遠回報 converged=True，真正擋下的是 `graph_connected=False`——
+  而它只檢查**名目中心相鄰**的 window 對；補窗後 k = 5000 的 window 會停在離中心很遠的位置（0.604 nm 取樣在 0.27 nm），相鄰中心的分佈不重疊，
+  但所有取樣的聯集是連續的（自動補窗的連續性判定也是這樣說）。等於 overlap 判準與補窗判準互相矛盾。
+- 決定：
+  1. `assess_umbrella_samples`：連通性改為**所有 window 對**（取樣範圍有交集才算 overlap）建圖；名目相鄰的 pair_stats 仍保留給補窗建議。
+  2. `mbar_pmf_1d`：pymbar 的 logger／stdout 訊息收集起來，不再印到學生的命令列；出現 "No solution found" → converged=False 並附 `solver_note`。
+     `pmf_from_windows` 此時用 WHAM 對同一組樣本交叉驗證，ΔPMF 差 ≤ 2 kJ/mol 才接受（報告註明）。
+  3. 報告的 ΔG° 擋下理由逐條寫出（重疊圖不連通／MBAR 未達容差且與 WHAM 差 X／WHAM 未收斂）。
+  4. `well_depth_hint`：ΔPMF > max(40, 6.3 × 配體重原子數) kJ/mol 時加 caveat（取樣滯後等常見原因、建議 teaching 或延長 window）；不改數值、不擋流程。
+- 證據：`tests/test_pmf_diagnostics.py`（滑動的硬彈簧 window 不破壞連通、真斷點仍被擋、井深提示門檻）；pymbar 路徑待 CI。
+- 被否決：放寬 overlap 門檻（會放過真斷點）；用井深上限自動「修正」數值（沒有物理根據）。
+
 ### D-42　GUI 設計審查：CI 自動截圖每個頁面
 - 決定：`tools/gui_preview.py` 建一個示範專案（含一個被擋下的閘門與決策），啟動 `md20 gui`，用 Playwright 截圖儀表板／新流程／流程頁／3D 檢視器；
   `.github/workflows/gui-preview.yml`（手動或 `md20/gui/**` 變更時觸發）上傳 PNG artifact，開發 session 下載後交給使用者審查。

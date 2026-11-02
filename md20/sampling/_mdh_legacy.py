@@ -817,6 +817,27 @@ def _connected_from_pair_overlaps(
     return len(visited) == len(centers)
 
 
+def _connected_all_pairs(centers: Sequence[float], samples: Mapping[float, np.ndarray], minimum_overlap: float) -> bool:
+    """Overlap graph over all window pairs (only pairs whose sample ranges intersect are evaluated)."""
+    cs = [float(c) for c in centers]
+    if len(cs) <= 1:
+        return True
+    rng = {c: (float(np.min(samples[c])), float(np.max(samples[c]))) for c in cs}
+    adjacency = {c: set() for c in cs}
+    for i, a in enumerate(cs):
+        for b in cs[i + 1:]:
+            if rng[a][1] < rng[b][0] or rng[b][1] < rng[a][0]:
+                continue
+            if overlap_coefficient(samples[a], samples[b]) >= minimum_overlap:
+                adjacency[a].add(b); adjacency[b].add(a)
+    seen, stack = {cs[0]}, [cs[0]]
+    while stack:
+        for nxt in adjacency[stack.pop()]:
+            if nxt not in seen:
+                seen.add(nxt); stack.append(nxt)
+    return len(seen) == len(cs)
+
+
 def assess_umbrella_samples(
     samples_by_center: Mapping[float, Sequence[float]],
     *,
@@ -893,7 +914,10 @@ def assess_umbrella_samples(
             )
         )
 
-    connected = _connected_from_pair_overlaps(centers, pair_stats, minimum_overlap)
+    # D-43: connectivity is a property of the *sampled distributions*, not of the nominal centres.  After adaptive
+    # refinement a stiff window can sit far from its centre (k = 5000, centre 0.604 nm sampled at 0.27 nm), so two
+    # windows adjacent by centre may not overlap while the union is continuous.  Build the graph over every pair.
+    connected = _connected_all_pairs(centers, equilibrated, minimum_overlap)
     if not connected:
         failures.append("The umbrella overlap graph is disconnected")
 
@@ -1053,13 +1077,33 @@ def mbar_pmf_1d(
         * _k_column(force_constant_kj_mol_nm2, len(centers))
         * (x_n[None, :] - centers[:, None]) ** 2
     )
-    mbar = MBAR(
-        u_kn,
-        N_k,
-        maximum_iterations=20000,
-        relative_tolerance=1e-10,
-        verbose=False,
-    )
+    import logging as _logging
+    import contextlib as _ctx
+    import io as _io
+    msgs: list[str] = []
+
+    class _Grab(_logging.Handler):
+        def emit(self, record):
+            msgs.append(record.getMessage())
+    grab = _Grab(level=_logging.WARNING)
+    plog = _logging.getLogger("pymbar")
+    plog.addHandler(grab)
+    buf = _io.StringIO()
+    try:
+        # pymbar prints solver chatter to stdout/stderr and its logger; keep it out of the student's console and
+        # record it instead (D-43)
+        with _ctx.redirect_stdout(buf), _ctx.redirect_stderr(buf):
+            mbar = MBAR(
+                u_kn,
+                N_k,
+                maximum_iterations=20000,
+                relative_tolerance=1e-10,
+                verbose=False,
+            )
+    finally:
+        plog.removeHandler(grab)
+    chatter = "\n".join(msgs) + "\n" + buf.getvalue()
+    solver_ok = "No solution found" not in chatter
 
     f_k = np.asarray(mbar.f_k, dtype=float)
     logN = np.full(len(N_k), -np.inf, dtype=float)
@@ -1094,7 +1138,8 @@ def mbar_pmf_1d(
         "histogram_matrix": hist,
         "edges_nm": edges,
         "f_k_dimensionless": f_k,
-        "converged": True,
+        "converged": bool(solver_ok),
+        "solver_note": "" if solver_ok else "pymbar: no solver reached the tolerance; the smallest-gradient solution was used",
         "iterations": None,
         "method": "PyMBAR-MBAR",
         "overlap_matrix": overlap_matrix,
