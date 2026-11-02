@@ -7,6 +7,20 @@
 
 ## 2026-11-02
 
+### D-38　Windows 260 字元路徑：套件快取太深 → 安裝路徑過長時改放 `<磁碟>:\MD20pkgs`；並更正 D-36 的修正其實沒進 commit
+- 事實（MSI Cyborg 14，2026-11-02 11:39）：CUDA 環境已解出（cuda-version 12.4、openmm 8.2.0），但解壓 pytorch 時
+  `remove_all: The directory is not empty` 失敗。最深的檔案在
+  `<root>\pkgs\https\conda.anaconda.org\conda-forge\win-64\pytorch-2.14.1-…\…\composable_kernel\docs\LICENSE.rst`，
+  以 `C:\Users\user\AppData\Local\MD20` 為 root 共 263 字元（> 260）。pytorch 是 openff-nagl 的相依。
+  安裝好的環境路徑（`envs\md20\Lib\…`）只有 182 字元，不受影響；問題只在 micromamba 的套件快取。
+- 為什麼 CI 沒抓到：runner 的 root 是 `D:\a\_temp\MD20`（246 字元，剛好過）。快取版面下 root 最多只能 28 字元——**幾乎所有學生的 `%LOCALAPPDATA%` 都超過**。
+- 決定：`install.ps1` 計算 `<root>\pkgs` + 226 字元，≥ 260 就把 `CONDA_PKGS_DIRS` 設成 `<root 所在磁碟>:\MD20pkgs`（建不出來就停並建議 `-Root C:\MD20`）。
+  測試 `tests/test_installer_paths.py` 以已知最深檔案驗證規則。
+- 被否決：開啟 `LongPathsEnabled`（改系統設定、需要系統管理員權限，且 micromamba 是否支援長路徑不確定）；預設 root 改為 `C:\MD20`（改變已發行的安裝位置與文件，留待使用者決定）；拿掉 openff-nagl（預設電荷模型依賴它）。
+- 未決：`C:\MD20pkgs` 約數 GB，裝完可刪；是否由安裝器在成功後 `micromamba clean` 交給使用者決定。
+- **更正 D-36**：09be59f 其實**沒有**刪掉 `windows-cuda.yml` 的 `ocl-icd-system`（那行 `sed` 接在一個失敗的指令後面而沒有執行）；所以 1440c02 的
+  CI「CUDA dry-run solve」紅燈是**正確的**。筆電能解出是因為本機副本是另外手動修補的。本 commit 才真正移除，並加測試防止再發生。
+
 ### D-36　Windows CUDA 安裝路徑壞掉：`windows-cuda.yml` 列了 Windows 不存在的 `ocl-icd-system`；發行 v0.1.0a2
 - 事實：使用者 MSI Cyborg 14（RTX 4060 Laptop，驅動 566.14／CUDA 12.7，Windows 11 26200）以 v0.1.0a1 自測，`[2/4] 建立環境 (cuda)` 失敗：
   `ocl-icd-system =* * does not exist (perhaps a typo or a missing channel)` → `Could not solve for environment specs`。

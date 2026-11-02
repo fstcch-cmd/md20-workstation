@@ -65,6 +65,18 @@ if ($Gpu -eq "cuda") {
 if ($Gpu -ne "cuda") { $env:CONDA_OVERRIDE_CUDA = "12.4" }   # win-64 openmm builds are CUDA-linked; override the virtual package
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "tmp") | Out-Null
 $env:TMP = Join-Path $Root "tmp"; $env:TEMP = $env:TMP; $env:PIP_CACHE_DIR = Join-Path $Root "pipcache"
+# Package cache vs. Windows 260-character paths (D-38).  micromamba caches as <pkgs>\https\conda.anaconda.org\conda-forge\
+# win-64\<pkg>\...; the deepest file in pytorch (pulled by openff-nagl) adds 226 characters, so <Root>\pkgs only fits
+# when Root is <= 28 characters.  %LOCALAPPDATA%\MD20 is longer for every real user name -> use <drive>:\MD20pkgs.
+$PkgTail = 226
+$Pkgs = Join-Path $Root "pkgs"
+if (($Pkgs.Length + $PkgTail) -ge 260) {
+  $Pkgs = $Root.Substring(0, 2) + "\MD20pkgs"
+  try { New-Item -ItemType Directory -Force -Path $Pkgs -ErrorAction Stop | Out-Null }
+  catch { Write-Host "!! 安裝路徑太長（$Root），套件快取需要放在 $Pkgs，但無法建立：$_"; Write-Host "   請改用較短的位置重跑：Install-MD20.cmd -Root C:\MD20"; exit 3 }
+  Write-Host "套件快取改放 $Pkgs（安裝路徑 $Root 太長，會超過 Windows 260 字元路徑限制；安裝完成後可刪除此資料夾）"
+}
+$env:CONDA_PKGS_DIRS = $Pkgs
 $env:PYTHONUTF8 = "1"   # Traditional-Chinese consoles default to cp950; every md20 text file is UTF-8
 if (Test-Path (Join-Path $Prefix "conda-meta")) {
   Write-Host "[2/4] 環境已存在，補齊套件 ($Gpu) ..."; & $Mamba install -y -p $Prefix -f $Base -f $GpuYml; Assert-Ok "補齊環境"
