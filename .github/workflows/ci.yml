@@ -240,6 +240,16 @@ jobs:
           $env:MD20_ROOT = "$env:RUNNER_TEMP\MD20"
           powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Gpu cpu
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: CUDA environment solves (dry run; the runner has no NVIDIA GPU, so the installer above took the CPU path)
+        shell: powershell
+        run: |
+          $mm = "$env:RUNNER_TEMP\MD20\micromamba.exe"; $env:MAMBA_ROOT_PREFIX = "$env:RUNNER_TEMP\MD20"; $env:CONDA_OVERRIDE_CUDA = "12.7"
+          foreach ($cv in "12.4", "11.8") {
+            $y = "$env:RUNNER_TEMP\cuda-$cv.yml"
+            (Get-Content environment\windows-cuda.yml) -replace "cuda-version=[0-9.]+", "cuda-version=$cv" | Set-Content $y
+            & $mm create --dry-run -y -p "$env:RUNNER_TEMP\cudatest" -f environment\base.yml -f $y
+            if ($LASTEXITCODE -ne 0) { Write-Host "CUDA $cv environment does not solve (D-36)"; exit 1 }
+          }
       - name: Launchers work (doctor, demo, pipeline example, screen template)
         shell: cmd
         run: |

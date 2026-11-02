@@ -7,10 +7,20 @@
 
 ## 2026-11-02
 
+### D-36　Windows CUDA 安裝路徑壞掉：`windows-cuda.yml` 列了 Windows 不存在的 `ocl-icd-system`；發行 v0.1.0a2
+- 事實：使用者 MSI Cyborg 14（RTX 4060 Laptop，驅動 566.14／CUDA 12.7，Windows 11 26200）以 v0.1.0a1 自測，`[2/4] 建立環境 (cuda)` 失敗：
+  `ocl-icd-system =* * does not exist (perhaps a typo or a missing channel)` → `Could not solve for environment specs`。
+  該行註解寫「harmless if solver drops it」——錯的：micromamba 不會略過不存在的套件，而是整個解不出來。
+- 為什麼 CI 沒抓到：runner 沒有 `nvidia-smi`，安裝器一律走 OpenCL／CPU；`windows-cuda.yml` 從未被解過。v0.1.0a1 等於「所有 NVIDIA 學生機都裝不起來」。
+- 決定：移除該行；CI `installer-windows` 與 `release-windows` 驗證都加上 **CUDA 環境 dry-run solve（cuda-version 12.4 與 11.8，`CONDA_OVERRIDE_CUDA=12.7`）**，解不出來就紅、不發行；版本 0.1.0a2。
+- 實機：筆電上已解壓的 a1 副本同樣移除該行後重跑安裝（`MD20_test\local_src.txt` 指向它），結果記入 `docs/COMPATIBILITY.md`。
+- 被否決：在 install.ps1 失敗時自動退回 OpenCL——會把真正的設定錯誤藏起來，RTX 卡卻跑 OpenCL（寧可擋也不要猜）。
+
 ### D-35　筆電實機測試：一鍵自測腳本 `installer/MD20-SelfTest.cmd`
 - 決定：新增雙擊即跑的自測腳本（cmd/PowerShell 5.1 polyglot、純 ASCII、CRLF）：系統資訊（OS、CPU、RAM、GPU/驅動、`nvidia-smi`、各磁碟剩餘）→ 下載最新 Release ZIP 並比對 SHA256 → `Install-MD20.cmd` → `doctor` → `drivers plan` → `demo` → 啟動 GUI 並以 HTTP 200 判定 → `pipeline example` 改 `tier: classroom` 後 `pipeline run --project laptop_test`。全程 `Start-Transcript` 寫到 `桌面\MD20_test\selftest_<時間>.log`，最後印每步 rc 與耗時。
 - 理由：筆電 session 的遠端工具是 Linux VM（不能執行 Windows 程式、量不到 Windows 的 GPU），電腦操作對終端機只允許點擊、不允許輸入；所以由使用者雙擊一次、Claude 讀 log 是唯一可稽核且不繞過權限的做法。
-- 安全：**不刪任何東西**。若 `%LOCALAPPDATA%\MD20`（或 `MD20_ROOT`）已有 `app`／`envs\md20`／`md20.cmd`，安裝步驟跳過並列出路徑（安裝器會 `Remove-Item` 取代 `app`，須先問使用者），改用既有安裝繼續測。
+- 安全（初版）：**不刪任何東西**。若 `%LOCALAPPDATA%\MD20`（或 `MD20_ROOT`）已有 `app`／`envs\md20`／`md20.cmd`，安裝步驟跳過並列出路徑（安裝器會 `Remove-Item` 取代 `app`，須先問使用者），改用既有安裝繼續測。
+- 更正（2026-11-02 09:50）：使用者授權 Claude 在本專案範圍內自行新增／刪除檔案。自測腳本改為一律執行安裝（安裝器取代 `app`、沿用並補齊環境），log 會列出被取代的路徑；另加 `MD20_test\local_src.txt`（一行：含 `Install-MD20.cmd` 的資料夾）供開發時用修補過的本機副本安裝。
 - 未決：電池模式下 pipeline 會依 PausePolicy 暫停（測試時請接電源）；中文使用者名稱路徑由本次實機驗證。
 
 ### D-34　鋅鍵結模型偏移：先診斷再改物理

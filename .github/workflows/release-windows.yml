@@ -56,6 +56,16 @@ jobs:
           call "%SRC%\Install-MD20.cmd" -Gpu cpu || exit /b 1
           if not exist "%MD20_ROOT%\app\pyproject.toml" (echo program was not copied to %MD20_ROOT%\app & exit /b 1)
           rmdir /s /q "%RUNNER_TEMP%\unz"
+      - name: CUDA environment solves (dry run; the runner has no NVIDIA GPU, so the installer above took the CPU path)
+        shell: powershell
+        run: |
+          $mm = "$env:RUNNER_TEMP\MD20\micromamba.exe"; $env:MAMBA_ROOT_PREFIX = "$env:RUNNER_TEMP\MD20"; $env:CONDA_OVERRIDE_CUDA = "12.7"
+          foreach ($cv in "12.4", "11.8") {
+            $y = "$env:RUNNER_TEMP\cuda-$cv.yml"
+            (Get-Content $env:RUNNER_TEMP\MD20\app\environment\windows-cuda.yml) -replace "cuda-version=[0-9.]+", "cuda-version=$cv" | Set-Content $y
+            & $mm create --dry-run -y -p "$env:RUNNER_TEMP\cudatest" -f $env:RUNNER_TEMP\MD20\app\environment\base.yml -f $y
+            if ($LASTEXITCODE -ne 0) { Write-Host "CUDA $cv environment does not solve (D-36)"; exit 1 }
+          }
       - name: Installed program works without the unzipped folder
         shell: cmd
         run: |

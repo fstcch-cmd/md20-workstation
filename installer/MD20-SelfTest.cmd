@@ -1,7 +1,7 @@
 <# : batch part (cmd sees this; PowerShell treats it as a comment)
 @echo off
 rem MD20 laptop self-test: download latest release -> install -> doctor -> demo -> GUI check -> classroom 3PTB case.
-rem Double-click.  Everything is logged to Desktop\MD20_test\selftest_<time>.log.  Nothing is deleted.
+rem Double-click.  Everything is logged to Desktop\MD20_test\selftest_<time>.log.  Only <install root>\app is replaced.
 set "MD20_SELF=%~f0"
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
@@ -45,13 +45,17 @@ $root = if ($env:MD20_ROOT -and ($env:MD20_ROOT -match '^[A-Za-z]:')) { $env:MD2
 Write-Host "install root: $root"
 $md20 = Join-Path $root 'md20.cmd'
 
-# Rule: never delete anything without asking.  The installer replaces <root>\app, so stop if an install already exists.
+# The installer replaces <root>\app (D-33).  The user allowed MD20-project files to be replaced/deleted (2026-11-02 09:50);
+# list what will be replaced so the log shows it.
 $existing = @('app', 'envs\md20', 'md20.cmd') | ForEach-Object { Join-Path $root $_ } | Where-Object { Test-Path $_ }
-if ($existing) {
-  Write-Host "EXISTING INSTALL FOUND (installer would replace $root\app):"
-  $existing | ForEach-Object { Write-Host "  $_" }
-  Write-Host 'Install step SKIPPED - ask the user before replacing it. Continuing with the existing install.'
-  $results['1 install'] = 'skipped (existing install)'
+if ($existing) { Write-Host 'Existing MD20 install (app folder will be replaced, environment reused/updated):'; $existing | ForEach-Object { Write-Host "  $_" } }
+$inst = $null
+$localSrc = Join-Path $base 'local_src.txt'   # developer override: one line = folder that contains Install-MD20.cmd
+if (Test-Path $localSrc) {
+  $src = (Get-Content $localSrc -Raw).Trim()
+  $inst = Get-Item (Join-Path $src 'Install-MD20.cmd') -ErrorAction SilentlyContinue
+  Write-Host "local_src.txt -> installing from $src"
+  $results['1 download'] = "local source $src"
 } else {
   Step '1 download latest release'
   try {
@@ -73,9 +77,9 @@ if ($existing) {
     Expand-Archive -Path $zip -DestinationPath $dst
     $inst = Get-ChildItem -Path $dst -Recurse -Filter 'Install-MD20.cmd' | Select-Object -First 1
     $results['1 download'] = "ok $($rel.tag_name)"
-  } catch { Write-Host "!! download failed: $_"; $results['1 download'] = "FAILED: $_"; $inst = $null }
-  if ($inst) { Run '1 install' { & cmd /c "`"$($inst.FullName)`"" } | Out-Null }
+  } catch { Write-Host "!! download failed: $_"; $results['1 download'] = "FAILED: $_" }
 }
+if ($inst) { Run '1 install' { & cmd /c "`"$($inst.FullName)`"" } | Out-Null }
 
 if (-not (Test-Path $md20)) {
   Write-Host "!! $md20 not found - cannot continue."

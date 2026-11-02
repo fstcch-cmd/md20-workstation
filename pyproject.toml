@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "md20"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "MD20 teaching workstation: docking → MD → enhanced sampling on a single machine (Windows-first)."
 readme = "README.md"
 requires-python = ">=3.10"
