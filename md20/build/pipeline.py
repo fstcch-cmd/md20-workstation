@@ -15,7 +15,7 @@ from .gates import Gate
 
 def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str | Path],
                ligand_poses: list[Path | str | None] | None = None, ph: float = 7.4, padding_nm: float = 1.0,
-               ionic_strength_molar: float = 0.15, human_choices: dict | None = None, run_smoke_test: bool = True,
+               ionic_strength_molar: float = 0.15, ions: dict | None = None, human_choices: dict | None = None, run_smoke_test: bool = True,
                cocrystal_resnames: list[str] | None = None, keep_hetero: set[str] | None = None,
                extra_ligand_resnames: set[str] | None = None, peptides: list[dict] | None = None,
                ligand_names: list[str] | None = None, peptide_policy: dict | None = None,
@@ -119,7 +119,7 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
             return summary
         ligs.append(prec)
     res = assemble_system(rman["receptor_pdb"], ligs, bdir, padding_nm=padding_nm, box_shape=box_shape,
-                          ionic_strength_molar=ionic_strength_molar, decisions=decisions, metal_policy=metal_policy, ph=ph,
+                          ionic_strength_molar=ionic_strength_molar, ions=ions, decisions=decisions, metal_policy=metal_policy, ph=ph,
                           metal_params=metal_params, solvent=solvent)
     if res.status == NEEDS_HUMAN:
         summary["blocking"] = "assembly"

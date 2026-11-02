@@ -40,6 +40,10 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
     # implicit solvent gates (GBn2): back to explicit water, or no binding step
     if option.startswith("md.solvent: explicit"):
         return _act(option, [{"path": ["md", "solvent"], "value": "explicit"}], "md_cases")
+    # salt (D-46): "md.ions.positive: Na+（或 …）" → first ion named
+    m = re.match(r"md\.ions\.(positive|negative):\s*([A-Za-z]{1,2}[+-])", option)
+    if m:
+        return _act(option, [{"path": ["md", "ions", m.group(1)], "value": m.group(2)}], "md_cases")
     # restraint strategy (D-23): "md.restraints: gentle"
     m = re.match(r"md\.restraints:\s*(standard|gentle|hold_backbone)\b", option)
     if m:

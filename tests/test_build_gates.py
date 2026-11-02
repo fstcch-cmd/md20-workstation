@@ -143,3 +143,22 @@ def test_altloc_pairs_are_not_duplicate_atom_names():
     lines.append(_atom(serial, "CB", "SER", "A", 4, x=13.5)); serial += 1       # a real duplicate (no altloc)
     insp = inspect_pdb_text("\n".join(lines))
     assert [d["atoms"] for d in insp.duplicate_atom_names] == [["CB"]]
+
+
+def test_ion_spec_resolution():
+    """D-46: salt is explicit (cation, anion, concentration, neutralise), not an implicit NaCl."""
+    from md20.build.assemble import resolve_ions
+    spec, prob = resolve_ions(None, 0.15)
+    assert prob is None and spec == {"positive": "Na+", "negative": "Cl-", "concentration_molar": 0.15, "neutralize": True}
+    spec, prob = resolve_ions({"positive": "K+", "negative": "Br-", "concentration_molar": 0.1, "neutralize": False})
+    assert prob is None and spec["positive"] == "K+" and spec["neutralize"] is False
+    assert "二價" in resolve_ions({"positive": "Mg2+"})[1]
+    assert resolve_ions({"negative": "SO4--"})[1] and resolve_ions({"concentration_molar": 5})[1]
+
+
+def test_ion_gate_options_are_one_click():
+    from md20.gui.actions import gate_actions
+    gate = {"name": "ions", "status": "NEEDS_HUMAN", "options": ["md.ions.positive: Na+（或 K+、Li+、Rb+、Cs+）", "md.ions.negative: Cl-（或 Br-、F-、I-）"]}
+    acts, manual = gate_actions(gate, step="md_cases")
+    assert not manual and acts[0]["patch"][0] == {"path": ["md", "ions", "positive"], "value": "Na+"}
+    assert acts[1]["patch"][0]["value"] == "Cl-"

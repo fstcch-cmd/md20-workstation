@@ -185,12 +185,37 @@ def add_flat_bottom_restraints(system, topology, positions, lig_atom_ranges, *, 
     return out
 
 
+# Monovalent ions OpenMM's Modeller.addSolvent can place; amber14/tip3p.xml carries Joung–Cheatham parameters for
+# all of them.  Divalent salts (MgCl2, CaCl2) need a different placement and are not supported yet (gate).
+POSITIVE_IONS = {"Na+": "NA", "K+": "K", "Li+": "LI", "Rb+": "RB", "Cs+": "CS"}
+NEGATIVE_IONS = {"Cl-": "CL", "Br-": "BR", "F-": "F", "I-": "I"}
+ION_RESNAMES = {"NA", "K", "LI", "RB", "CS", "CL", "BR", "F", "I", "MG", "CA", "ZN"}
+
+
+def resolve_ions(ions: dict | None, ionic_strength_molar: float = 0.15) -> tuple[dict, str | None]:
+    """md.ions → {"positive","negative","concentration_molar","neutralize"}; returns (spec, problem).  D-46."""
+    spec = {"positive": "Na+", "negative": "Cl-", "concentration_molar": float(ionic_strength_molar), "neutralize": True}
+    for k, v in (ions or {}).items():
+        if k in spec:
+            spec[k] = v
+    spec["concentration_molar"] = float(spec["concentration_molar"])
+    spec["neutralize"] = bool(spec["neutralize"])
+    if spec["positive"] not in POSITIVE_IONS:
+        return spec, (f"陽離子 {spec['positive']} 無法自動放置：目前支援 {', '.join(POSITIVE_IONS)}（一價）。"
+                      "二價離子（Mg2+、Ca2+）需另外放置與參數化，尚未支援。")
+    if spec["negative"] not in NEGATIVE_IONS:
+        return spec, f"陰離子 {spec['negative']} 無法自動放置：目前支援 {', '.join(NEGATIVE_IONS)}（一價）。"
+    if not 0.0 <= spec["concentration_molar"] <= 2.0:
+        return spec, f"鹽濃度 {spec['concentration_molar']} M 超出 0 至 2 M 的合理範圍。"
+    return spec, None
+
+
 def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_dir: Path | str, *,
                     padding_nm: float = 1.0, ionic_strength_molar: float = 0.15, box_shape: str = "dodecahedron",
                     water_model: str = "tip3p", decisions: DecisionLog | None = None,
                     nonbonded_cutoff_nm: float = 1.0, forcefield_files: tuple[str, ...] = AMBER_PROTEIN,
                     flat_bottom: bool | None = None, metal_policy: dict | None = None, ph: float = 7.4,
-                    metal_params: dict | None = None, solvent: str = "explicit") -> BuildResult:
+                    metal_params: dict | None = None, solvent: str = "explicit", ions: dict | None = None) -> BuildResult:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     report = GateReport()
@@ -290,9 +315,18 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
             res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict(), solvent=solvent)
             atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")
             return res
+        ion_spec, ion_problem = resolve_ions(ions, ionic_strength_molar)
+        if ion_problem:
+            report.add(Gate("ions", NEEDS_HUMAN, ion_problem,
+                            options=["md.ions.positive: Na+（或 K+、Li+、Rb+、Cs+）", "md.ions.negative: Cl-（或 Br-、F-、I-）"]))
+            res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict(), solvent=solvent)
+            atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")
+            return res
         shape = {"cube": "cube", "dodecahedron": "dodecahedron", "octahedron": "octahedron"}[box_shape]
         modeller.addSolvent(ff, model=water_model, padding=padding_nm * unit.nanometer, boxShape=shape,
-                            ionicStrength=ionic_strength_molar * unit.molar, neutralize=True)
+                            positiveIon=ion_spec["positive"], negativeIon=ion_spec["negative"],
+                            ionicStrength=ion_spec["concentration_molar"] * unit.molar, neutralize=ion_spec["neutralize"])
+        ionic_strength_molar = ion_spec["concentration_molar"]
         if decisions:
             vecs = modeller.topology.getPeriodicBoxVectors()
             vol = abs(float(np.linalg.det(np.array([[v.x, v.y, v.z] for v in vecs])))) if vecs else 0.0
@@ -303,14 +337,16 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                               "n_water": n_w},
                              f"{shape}、padding {padding_nm} nm、{n_w} 個水、體積 {vol:.0f} nm³"
                              + (f"（同樣影像距離的立方盒要多 {100 * (cube_equiv - 1):.0f}% 水）" if shape != "cube" else "")
-                             + f"；離子強度 {ionic_strength_molar} M 並中和（鹽只佔原子數 < 1%，算力在水）。"
+                             + f"；{ion_spec['positive']}{ion_spec['negative']} 鹽濃度 {ion_spec['concentration_molar']} M"
+                             + ("，並以同種離子中和溶質淨電荷" if ion_spec["neutralize"] else "，不中和淨電荷（PME 會加均勻背景電荷）")
+                             + "（離子數見 build_manifest 的 n_ions；鹽只佔原子數 < 1%，算力在水）。"
                              "padding 是蛋白到盒邊的最小距離：0.8 nm 已含完整溶劑化殼層，再小會碰到自己的週期影像。")
     counts = {}
     n_water = 0
     for res_ in modeller.topology.residues():
         if res_.name in {"HOH", "WAT"}:
             n_water += 1
-        elif res_.name in {"NA", "CL", "K", "MG", "CA", "ZN"}:
+        elif res_.name in ION_RESNAMES:
             counts[res_.name] = counts.get(res_.name, 0) + 1
     try:
         if implicit:

@@ -7,6 +7,16 @@
 
 ## 2026-11-02
 
+### D-46　鹽的種類與濃度要明確：md.ions（陽離子、陰離子、濃度、是否中和）
+- 使用者（14:53）：離子濃度與種類標示不清，不一定只有 NaCl。
+- 事實：原本只有 `ionic_strength_molar`，`addSolvent` 用預設 Na⁺／Cl⁻，報告寫「離子強度」——對 1:1 鹽其實就是鹽濃度，種類完全沒寫。
+- 決定：`md.ions = {positive, negative, concentration_molar, neutralize}`；一價陽離子 Na⁺、K⁺、Li⁺、Rb⁺、Cs⁺，陰離子 Cl⁻、Br⁻、F⁻、I⁻
+  （amber14/tip3p.xml 的 Joung–Cheatham 參數都有）。二價（Mg²⁺、Ca²⁺）、多原子陰離子與 > 2 M → NEEDS_HUMAN，選項可一鍵寫回。
+  決策紀錄寫明鹽的種類、濃度與是否中和，實際離子數在 build_manifest `n_ions`（離子殘基名單擴充到 K、LI、RB、CS、BR、F、I）。
+  舊設定 `ionic_strength_molar` 仍可用（等同 NaCl 該濃度）。
+- 證據：`test_ion_spec_resolution`、`test_ion_gate_options_are_one_click`；實際放置待 CI。
+- 未決：二價鹽的放置與參數（12-6-4 或 Li–Merz）。
+
 ### D-45　SMD「幀數倒退」：是黏滑與彈簧振盪，不是幀亂序；但窗口起始幀因此可能取在反彈點，已修
 - 事實（使用者 14:42 提出，附筆電的 `smd_force_work.svg`）：力與功對「配體實際距離」作圖時，曲線沿距離來回折返，看起來像幀數倒退。
 - 判讀：紀錄每 0.2 ps 一筆、時間單調，幀沒有亂序。折返段斜率 ≈ −k（1000 kJ mol⁻¹ nm⁻²），代表彈簧位置幾乎不動而配體距離跳動：
