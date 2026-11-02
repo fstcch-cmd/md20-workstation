@@ -12,7 +12,8 @@ Published setup:
 
 Teaching points MD20 makes explicit:
   * Keap1 is cytosolic → the peptide must reach the cytosol.  MD20's CPP gate runs before docking; GGGGGKP
-    (net +1, one Lys) is not predicted to be cell-penetrating, so the gate asks for evidence or an explicit override.
+    (net +1, one Lys) is not predicted to be cell-penetrating; the gate states this scientific limitation and the run
+    continues (D-48).  The 36 × 51 × 45 Å box is also flagged by the peptide pocket-access check (blind box).
     The cell/C. elegans activity in the paper is functional evidence, not a measured uptake.
   * The paper calls the non-H-bond contacts "covalent bonding"; docking (and MD with Amber ff14SB) has no covalent
     chemistry — they are van der Waals / hydrophobic contacts.  CDDO's own binding at Cys151 *is* covalent.

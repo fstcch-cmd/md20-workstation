@@ -23,6 +23,8 @@ class Gate:
     diff: list[str] = field(default_factory=list)
     options: list[str] = field(default_factory=list)
     evidence: dict = field(default_factory=dict)
+    # advisory = scientific-limitation notice (D-48): never blocks, but the GUI shows it as a card with its options
+    advisory: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)

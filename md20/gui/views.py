@@ -30,7 +30,8 @@ def _card(source: str, g: dict, *, step: str | None = None, ligand: str | None =
     actions, manual = gate_actions(g, step=step, ligand=ligand) if step else ([], list(g.get("options") or []))
     return {"source": source, "title": g.get("name", ""), "status": st, "label": label, "color": color,
             "explanation": g.get("explanation") or g.get("message") or "", "options": list(g.get("options") or []),
-            "actions": actions, "manual": manual if st == "NEEDS_HUMAN" else []}
+            "actions": actions, "manual": manual if (st == "NEEDS_HUMAN" or g.get("advisory")) else [],
+            "advisory": bool(g.get("advisory"))}
 
 
 def gate_cards(wf, *, include_pass: bool = False) -> list[dict]:
@@ -74,8 +75,22 @@ def gate_cards(wf, *, include_pass: bool = False) -> list[dict]:
             for g in rep.get("gates", []):
                 if include_pass or g.get("status") != "PASS":
                     cards.append(_card(f"{key} · {src}", g, step="md_cases"))
+    # scientific-limitation notices (D-48): never blocking, shown with their options
+    st_all = wf.state()
+    for name, r in (st_all.get("cpp") or {}).items():
+        if r.get("advisory") and not r.get("override"):
+            cards.append(_card(f"科學限制 · 胜肽 {name}", {"name": "CPP", "status": "AUTO_FIXED", "advisory": True,
+                                                         "explanation": r.get("explanation", ""), "options": r.get("options") or []},
+                               step="docking_preflight", ligand=name))
+    for name, r in (st_all.get("peptide_access") or {}).items():
+        for part in ("precheck", "pose"):
+            g = r.get(part) or {}
+            if g.get("advisory"):
+                cards.append(_card(f"科學限制 · 胜肽 {name}", {"name": "peptide pocket access", "status": "AUTO_FIXED",
+                                                             "advisory": True, "explanation": g.get("explanation", ""),
+                                                             "options": g.get("options") or []}))
     order = {"NEEDS_HUMAN": 0, "AUTO_FIXED": 1, "PASS": 2}
-    return sorted(cards, key=lambda c: order.get(c["status"], 3))
+    return sorted(cards, key=lambda c: (order.get(c["status"], 3), not c.get("advisory")))
 
 
 # --------------------------------------------------------------------------------------------- timeline

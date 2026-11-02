@@ -7,6 +7,24 @@
 
 ## 2026-11-02
 
+### D-48　胜肽科學閘門改為「科學限制提醒」：CPP 不擋流程；新增活性位可及性檢查（對接前、pose 選定後）
+- 使用者（15:04）：胜肽對接常有「根本進不去目標蛋白」的問題，要先過類似 CPP 的科學閘門；**即使沒通過也不影響後續操作**
+  （使用者可能不是做酵素科學），但要告知科學限制。
+- 決定：
+  1. `cpp_gate` 不再回 NEEDS_HUMAN。標靶位置未指定或預測不穿膜 → AUTO_FIXED＋`advisory=True`，說明開頭「科學限制提醒（流程照常進行）」，
+     `record["limitation"]` 寫入 state，GUI 以「科學限制」卡片顯示（位置選項仍可一鍵寫回），報告列出。`cpp_override` 保留但不再必要。
+  2. 新增 `peptide_access_precheck`（對接前）：胜肽緊縮直徑（Rg ≈ 2.2·N^0.38 Å，+3 Å）大於搜尋區最短邊 → 可能放不進；
+     搜尋區不是由共晶配體或指定殘基定義 → 等同盲對接，無法判斷是否在活性位；最長邊 ≥ 30 Å → 偏向表面結合位。
+  3. 新增 `peptide_pose_access`（pose 選定後）：埋藏比例（6 Å 內 ≥ 30 個蛋白重原子的胜肽原子比例；平面表面約 20–25、完全埋藏約 50）、
+     接觸比例、距活性位（共晶配體原子）最近距離。埋藏 < 25 % 或距活性位 > 4 Å → 提醒「表面貼附／沒到活性位」，附「改選 pose」「縮小搜尋區」。
+- 理由：Vina 對任何胜肽都會給出 pose 與分數；大而柔軟的胜肽最常見的失敗是停在活性位旁的表面。這是科學假設問題，
+  不是計算錯誤，所以用數字說清楚、交給使用者判斷，而不是擋下（表面結合本身也可能是研究目的）。
+- 被否決：沿用 NEEDS_HUMAN＋override（使用者明確要求不影響後續）；用口袋體積計算（需 fpocket 等外部工具，容器與 Windows 都無法保證）。
+- 門檻 25 %、4 Å、30 個鄰居是依原子密度估算的初值（蛋白重原子密度約 0.055 Å⁻³），尚未以實際胜肽–酵素共晶校正 → 未決。
+- 證據：`tests/test_peptide.py`（提醒不擋、預檢三情境、口袋內與表面 pose 的合成幾何）、`tests/test_gate_actions.py::test_cpp_advisory_card_from_workflow`、
+  `tests/test_validation_papers.py::test_cpp_gate_flags_grp`（GRP 被標註但不擋）。檔案：`md20/build/peptide.py`、`md20/build/gates.py`（`advisory` 欄位）、
+  `md20/workflow.py`、`md20/gui/views.py`、`md20/gui/app.py`。
+
 ### D-46　鹽的種類與濃度要明確：md.ions（陽離子、陰離子、濃度、是否中和）
 - 使用者（14:53）：離子濃度與種類標示不清，不一定只有 NaCl。
 - 事實：原本只有 `ionic_strength_molar`，`addSolvent` 用預設 Na⁺／Cl⁻，報告寫「離子強度」——對 1:1 鹽其實就是鹽濃度，種類完全沒寫。

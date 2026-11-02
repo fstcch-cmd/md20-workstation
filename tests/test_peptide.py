@@ -15,8 +15,8 @@ def test_sequence_validation():
 
 
 def test_cpp_gate_layers():
-    g, r = cpp_gate("GRKKRRQRRRPPQ", target_location=None)
-    assert g.status == NEEDS_HUMAN and r["status"] == "未評估"
+    g, r = cpp_gate("GRKKRRQRRRPPQ", target_location=None)                 # D-48: advisory, never blocking
+    assert g.status == AUTO_FIXED and g.advisory and r["status"] == "未評估"
     g, r = cpp_gate("GAGAG", target_location="extracellular")
     assert g.status == PASS and r["status"] == "不適用"
     g, r = cpp_gate("GAGAG", target_location="intracellular", experimental_evidence="Doe 2024 J Pept Sci")
@@ -24,7 +24,7 @@ def test_cpp_gate_layers():
     g, r = cpp_gate("GRKKRRQRRRPPQ", target_location="intracellular")      # TAT
     assert g.status == AUTO_FIXED and r["status"] == "計算預測" and "預測" in g.explanation and "驗證" in g.explanation
     g, r = cpp_gate("GDGSGEGA", target_location="intracellular")           # anionic, short, no R/K
-    assert g.status == NEEDS_HUMAN and r["prediction"] == "不太可能穿膜"
+    assert g.status == AUTO_FIXED and g.advisory and r["prediction"] == "不太可能穿膜"
     assert cpp_features("RRRRRRRR")["closest_known_cpp"] == "R8"
     assert hydrophobic_moment("KLALKLALKALKAALKLA") > 0.3
 
@@ -77,7 +77,9 @@ def test_cpp_gate_suggests_redesign_for_non_penetrating():
     """A G-rich, low-charge peptide fails the gate AND must come back with concrete fixes + external predictors."""
     from md20.build.peptide import cpp_gate, cpp_redesign_suggestions, CPP_PREDICTORS
     g, rec = cpp_gate("GGGGGKP", target_location="胞內")
-    assert g.status == "NEEDS_HUMAN" and rec["prediction"] == "不太可能穿膜"
+    # D-48: advisory, never blocking — the limitation is stated instead
+    assert g.status == "AUTO_FIXED" and g.advisory and rec["prediction"] == "不太可能穿膜"
+    assert "不阻擋" in g.explanation and "limitation" in rec
     sug = rec["redesign_suggestions"]
     # the user's own ideas (shorter charged core) and cationic enrichment and a CPP conjugate
     assert sug["submotifs"] and sug["cationic"] and sug["conjugates"]
@@ -98,3 +100,43 @@ def test_cpp_suggestions_empty_when_already_penetrating():
     g, rec = cpp_gate("RRRRRRRR", target_location="胞內")
     assert g.status in ("PASS", "AUTO_FIXED")
     assert "redesign_suggestions" not in rec
+
+
+def test_cpp_unassessed_location_does_not_block():
+    from md20.build.peptide import cpp_gate
+    g, rec = cpp_gate("GGGGGKP", target_location=None)
+    assert g.status == "AUTO_FIXED" and g.advisory and rec["status"] == "未評估"
+    assert any("intracellular" in o for o in g.options)
+
+
+def test_peptide_access_precheck():
+    from md20.build.peptide import peptide_access_precheck, peptide_dimensions
+    d = peptide_dimensions("GGGGGKP")
+    assert 10 < d["compact_diameter_A"] < 15 and d["extended_length_A"] > 20
+    g, rec = peptide_access_precheck("GGGGGKP", (22, 22, 22), site_defined=True)
+    assert g.status == "PASS"
+    g, rec = peptide_access_precheck("GGGGGKP", (36, 51, 45), site_defined=False)       # the paper's blind box
+    assert g.status == "AUTO_FIXED" and g.advisory and "盲對接" in g.explanation
+    g, rec = peptide_access_precheck("WWRRWWRRWW", (10, 10, 10), site_defined=True)     # box smaller than the peptide
+    assert g.status == "AUTO_FIXED" and "放不進" in g.explanation
+
+
+def test_peptide_pose_access_surface_vs_pocket():
+    """A slab of protein atoms with a pocket: a pose inside the pocket is buried and reaches the site; a pose floating
+    above the slab is flagged as surface binding / off site (advisory only)."""
+    import numpy as np
+    from md20.build.peptide import peptide_pose_access, peptide_access_gate
+    g = np.arange(-12, 12.1, 1.6)
+    X, Y, Z = np.meshgrid(g, g, np.arange(-12, 0.1, 1.6), indexing="ij")
+    slab = np.c_[X.ravel(), Y.ravel(), Z.ravel()]
+    pocket = np.linalg.norm(slab - [0, 0, -4], axis=1) < 4.5
+    prot = slab[~pocket]
+    site = np.array([[0, 0, -4.0]])
+    inside = np.array([[0, 0, -4], [1, 0, -4], [0, 1, -5], [-1, 0, -3]], float)
+    above = inside + [8, 8, 9]
+    mi = peptide_pose_access(inside, prot, site_xyz=site)
+    ma = peptide_pose_access(above, prot, site_xyz=site)
+    assert mi["burial_fraction"] > ma["burial_fraction"] and mi["site_min_distance_A"] < 1.0
+    assert peptide_access_gate("P", mi).status == "PASS"
+    ga = peptide_access_gate("P", ma)
+    assert ga.status == "AUTO_FIXED" and ga.advisory and "活性位" in ga.explanation

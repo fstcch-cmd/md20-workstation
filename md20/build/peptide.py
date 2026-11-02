@@ -345,11 +345,17 @@ def _predictor_lines() -> list[str]:
 
 
 def cpp_gate(seq: str, *, target_location: str | None, experimental_evidence: str | None = None) -> tuple[Gate, dict]:
-    """Returns (gate, record).  record['status'] ∈ 實驗證實 / 計算預測 / 未評估 / 不適用."""
+    """Returns (gate, record).  record['status'] ∈ 實驗證實 / 計算預測 / 未評估 / 不適用.
+
+    D-48: this gate never blocks.  An unassessed or failed prediction is AUTO_FIXED with `advisory=True` and
+    `record["limitation"]` (shown in GUI and report); the run continues, since the user may not study an
+    intracellular target at all.
+    """
     if not target_location:
-        g = Gate("CPP", NEEDS_HUMAN, "胜肽的作用標靶位置未指定。請選擇：胞內（需要穿膜）、膜外側、分泌／胞外。",
-                 options=["胞內 intracellular", "膜外側 extracellular-membrane", "分泌／胞外 secreted"])
-        return g, {"status": "未評估", "reason": "標靶位置未指定"}
+        lim = "標靶位置未指定，未評估穿膜性。若標靶在細胞內，胜肽必須先穿過細胞膜，對接結果才有生物學意義。" + CPP_LIMIT_NOTE
+        g = Gate("CPP", AUTO_FIXED, "科學限制提醒：" + lim,
+                 options=["胞內 intracellular", "膜外側 extracellular-membrane", "分泌／胞外 secreted"], advisory=True)
+        return g,{"status": "未評估", "reason": "標靶位置未指定", "limitation": lim}
     loc = target_location.lower()
     if not loc.startswith("intra") and "胞內" not in target_location:
         return Gate("CPP", PASS, f"標靶位於 {target_location}，不需穿膜；不評估 CPP。"), {"status": "不適用", "target": target_location}
@@ -374,11 +380,99 @@ def cpp_gate(seq: str, *, target_location: str | None, experimental_evidence: st
             for bucket in suggestions.values() for c in bucket]
     sug_txt = ("建議的替代排列（以相同啟發式評分，僅供假設，需實驗或外部工具確認）：" + "；".join(flat[:6]) + "。") if flat else ""
     pred_txt = "可用外部 CPP 預測工具交叉確認：" + "；".join(_predictor_lines()) + "。"
-    g = Gate("CPP", NEEDS_HUMAN,
-             "依序列特徵預測此胜肽不太可能進入細胞（分數 %d/8；%s）。標靶在胞內，若胜肽無法穿膜，"
-             "後續 docking/MD 在生物學上可能沒有意義——這是科學假設層面的問題，不只是計算設定問題。%s%s"
-             % (score, "；".join(reasons), sug_txt, pred_txt),
+    lim = ("依序列特徵預測此胜肽不太可能進入細胞（分數 %d/8；%s）。標靶在胞內，若胜肽無法穿膜，"
+           "對接與 MD 只描述「胜肽到得了標靶時」的結合，不能推論細胞內的作用。" % (score, "；".join(reasons)))
+    rec["limitation"] = lim + CPP_LIMIT_NOTE
+    g = Gate("CPP", AUTO_FIXED, "科學限制提醒（流程照常進行）：" + lim + CPP_LIMIT_NOTE + sug_txt + pred_txt,
              options=["提供實驗證據（文獻或自有數據）", "改設計：縮短為帶電核心（如 GKP、KP）或富集 Arg/Lys",
-                      "改設計：N 端接 TAT／R8／penetratin 等穿膜載體", "仍要繼續（報告標註為未驗證穿膜性）"],
-             evidence={"redesign_suggestions": suggestions, "predictors": _predictor_lines()})
+                      "改設計：N 端接 TAT／R8／penetratin 等穿膜載體"],
+             evidence={"redesign_suggestions": suggestions, "predictors": _predictor_lines()}, advisory=True)
     return g, rec
+
+
+CPP_LIMIT_NOTE = ("此為科學限制提醒，不阻擋後續流程：若研究不涉及細胞內作用（例如胞外酵素、純化蛋白的體外試驗、"
+                  "膜外側受體），可以忽略。")
+
+
+# --------------------------------------------------------------------------- pocket access (D-48)
+# A peptide is far larger and floppier than a drug-like molecule: Vina will always return *some* pose, often lying on
+# the protein surface next to a buried active site it cannot enter.  This check never blocks (the user may study a
+# surface interaction on purpose); it states the limitation in numbers.
+ACCESS_NOTE = ("此為科學限制提醒，不阻擋後續流程：對酵素抑制或活性位結合的研究，胜肽停在表面代表「沒有進到活性位」，"
+               "抑制機制的推論不成立；若研究的是表面結合（蛋白–蛋白介面、受體外側），可以忽略。")
+
+
+def peptide_dimensions(seq: str) -> dict:
+    """Rough size of a peptide: compact radius of gyration (Rg ≈ 2.2·N^0.38 Å, globular scaling) and the
+    fully extended length (≈ 3.4 Å per residue)."""
+    n = len(seq)
+    rg = 2.2 * n ** 0.38
+    return {"residues": n, "rg_compact_A": round(rg, 1), "compact_diameter_A": round(2 * rg + 3.0, 1),
+            "extended_length_A": round(3.4 * n, 1)}
+
+
+def peptide_access_precheck(seq: str, box_size, *, site_defined: bool) -> tuple[Gate, dict]:
+    """Before docking: is the search region large enough for the peptide, and is there a defined site at all?"""
+    dim = peptide_dimensions(seq)
+    size = [float(x) for x in box_size]
+    rec = {**dim, "box_size_A": size, "site_defined": bool(site_defined)}
+    notes = []
+    if min(size) < dim["compact_diameter_A"]:
+        notes.append(f"搜尋區最短邊 {min(size):.1f} Å 小於胜肽緊縮時的直徑約 {dim['compact_diameter_A']:.1f} Å，"
+                     "胜肽可能根本放不進這個區域，對接會被迫給出擠壓或伸出區外的 pose。")
+    if not site_defined:
+        notes.append("搜尋區不是由共結晶配體或指定殘基定義（等同盲對接），無法判斷 pose 是否落在活性位。")
+    if max(size) >= 30.0:
+        notes.append(f"搜尋區最長邊 {max(size):.1f} Å，大於典型活性位（10 到 20 Å），結果偏向表面結合位。")
+    rec["notes"] = notes
+    if not notes:
+        return Gate("peptide pocket access", PASS,
+                    f"胜肽 {dim['residues']} 個殘基，緊縮直徑約 {dim['compact_diameter_A']} Å，可放入搜尋區。"), rec
+    lim = "".join(notes)
+    rec["limitation"] = lim + ACCESS_NOTE
+    return Gate("peptide pocket access", AUTO_FIXED, "科學限制提醒（流程照常進行）：" + lim + ACCESS_NOTE,
+                options=["以共結晶配體或活性位殘基重新定義搜尋區", "接受並在報告中標註"], advisory=True,
+                evidence=rec), rec
+
+
+def peptide_pose_access(pep_xyz, prot_xyz, *, site_xyz=None, contact_A: float = 4.0, shell_A: float = 6.0,
+                        buried_neighbors: int = 30) -> dict:
+    """After docking: how deep the chosen peptide pose sits, and whether it reaches the site.
+
+    burial: fraction of peptide heavy atoms with ≥ `buried_neighbors` protein heavy atoms within `shell_A`
+    (an atom on a flat surface has ≈ 20–25, a fully buried one ≈ 50).  site: minimum distance from any peptide
+    atom to the site atoms (co-crystal ligand) or point.
+    """
+    import numpy as np
+    P = np.asarray(pep_xyz, float).reshape(-1, 3)
+    R = np.asarray(prot_xyz, float).reshape(-1, 3)
+    d = np.linalg.norm(P[:, None, :] - R[None, :, :], axis=-1)
+    neigh = (d <= shell_A).sum(1)
+    out = {"n_atoms": int(len(P)), "burial_fraction": round(float((neigh >= buried_neighbors).mean()), 3),
+           "contact_fraction": round(float((d.min(1) <= contact_A).mean()), 3),
+           "median_neighbors": float(np.median(neigh))}
+    if site_xyz is not None:
+        S = np.asarray(site_xyz, float).reshape(-1, 3)
+        ds = np.linalg.norm(P[:, None, :] - S[None, :, :], axis=-1)
+        out["site_min_distance_A"] = round(float(ds.min()), 2)
+        out["fraction_within_4A_of_site"] = round(float((ds.min(1) <= 4.0).mean()), 3)
+    return out
+
+
+def peptide_access_gate(name: str, m: dict) -> Gate:
+    reached = m.get("site_min_distance_A")
+    surface = m["burial_fraction"] < 0.25
+    off_site = reached is not None and reached > 4.0
+    facts = (f"埋藏比例 {m['burial_fraction']:.0%}（周圍 6 Å 內有 ≥ 30 個蛋白重原子的胜肽原子比例）、"
+             f"接觸比例 {m['contact_fraction']:.0%}" + (f"、距離活性位最近 {reached:.1f} Å" if reached is not None else ""))
+    if not surface and not off_site:
+        return Gate("peptide pocket access", PASS, f"{name} 的 pose 進入結合區：{facts}。", evidence=m)
+    why = []
+    if off_site:
+        why.append("pose 沒有到達活性位（最近距離 > 4 Å）")
+    if surface:
+        why.append("pose 大部分暴露在溶劑中，屬於表面貼附而非嵌入口袋")
+    return Gate("peptide pocket access", AUTO_FIXED,
+                f"科學限制提醒（流程照常進行）：{name} " + "，".join(why) + f"（{facts}）。" + ACCESS_NOTE,
+                options=["改選其他 pose（pose 表）", "縮小搜尋區到活性位後重新對接", "接受並在報告中標註"],
+                advisory=True, evidence=m)

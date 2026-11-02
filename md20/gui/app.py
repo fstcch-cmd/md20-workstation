@@ -161,7 +161,7 @@ def _start(wf: Workflow):
 
 def _gate_buttons(wf: Workflow, card: dict):
     """One-click decisions on a NEEDS_HUMAN card; options the program cannot carry out stay as text."""
-    if card["status"] != "NEEDS_HUMAN":
+    if card["status"] != "NEEDS_HUMAN" and not card.get("advisory"):
         return
     for a in card.get("actions", []):
         with ui.row().classes("items-center gap-2 w-full"):
@@ -359,7 +359,7 @@ def workflow_page(project: str, name: str):
                                 ui.badge(c["label"], color=c["color"])
                                 ui.label(f"{c['source']} · {c['title']}").classes("font-semibold")
                             ui.label(c["explanation"]).classes("text-sm whitespace-pre-wrap")
-                            if c["status"] != "NEEDS_HUMAN":
+                            if c["status"] != "NEEDS_HUMAN" and not c.get("advisory"):
                                 for o in c["options"]:
                                     ui.label(f"→ {o}").classes("text-sm text-primary")
                             _gate_buttons(wf, c)

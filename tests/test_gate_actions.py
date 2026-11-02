@@ -139,22 +139,19 @@ def test_redock_card_skip(tmp_path):
     assert any(d.get("choice") == "skipped" for d in wf.dec.read())
 
 
-def test_cpp_block_card_from_workflow(tmp_path):
+def test_cpp_advisory_card_from_workflow(tmp_path):
+    """D-48: the CPP check never blocks; it leaves an advisory card whose location options are still one click."""
+    pytest.importorskip("rdkit")
     wf = _wf(tmp_path, ligands=[{"name": "PEP", "sequence": "GGGGGKP"}])
-    with pytest.raises(WorkflowBlocked):
-        wf._peptide_preflight(wf.cfg["ligands"][0])
+    wf._peptide_preflight(wf.cfg["ligands"][0])                    # no WorkflowBlocked
     card = next(c for c in gate_cards(wf) if c["title"] == "CPP")
+    assert card["advisory"] and card["status"] == "AUTO_FIXED"
     act = next(a for a in card["actions"] if a["label"].startswith("胞內"))
     apply_gate_action(wf, act)
     assert wf.cfg["ligands"][0]["target_location"] == "intracellular"
-    with pytest.raises(WorkflowBlocked):                          # +1 net charge: still predicted not to enter cells
-        wf._peptide_preflight(wf.cfg["ligands"][0])
+    wf._peptide_preflight(wf.cfg["ligands"][0])                    # +1 net charge: predicted not to enter, still runs
     card = next(c for c in gate_cards(wf) if c["title"] == "CPP")
-    assert any(m.startswith("改設計") for m in card["manual"])
-    go = next(a for a in card["actions"] if a["label"].startswith("仍要繼續"))
-    apply_gate_action(wf, go, "課堂示範：觀察閘門行為")
-    pytest.importorskip("rdkit")
-    wf._peptide_preflight(wf.cfg["ligands"][0])
+    assert "不阻擋" in card["explanation"] and any(m.startswith("改設計") for m in card["manual"])
 
 
 def test_receptor_unimplemented_choice_keeps_blocking(tmp_path):

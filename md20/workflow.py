@@ -169,6 +169,40 @@ def merge_human_decisions(new: dict, existing: dict) -> tuple[dict, list[str]]:
     return out, carried
 
 
+def _heavy_xyz_pdb(text: str, *, atom_only: bool = False, resname: str | None = None) -> list:
+    out = []
+    for l in text.splitlines():
+        if not l.startswith(("ATOM", "HETATM")) or (atom_only and not l.startswith("ATOM")):
+            continue
+        if resname and l[17:20].strip() != resname:
+            continue
+        el = (l[76:78].strip() or l[12:16].strip()[:1]).upper()
+        if el == "H":
+            continue
+        try:
+            out.append([float(l[30:38]), float(l[38:46]), float(l[46:54])])
+        except ValueError:
+            continue
+    return out
+
+
+def _heavy_xyz_sdf(text: str) -> list:
+    """Heavy-atom coordinates of the first molecule in a V2000 SDF/MOL block."""
+    lines = text.splitlines()
+    if len(lines) < 4:
+        return []
+    try:
+        n = int(lines[3][:3])
+    except ValueError:
+        return []
+    out = []
+    for l in lines[4:4 + n]:
+        parts = l.split()
+        if len(parts) >= 4 and parts[3] != "H":
+            out.append([float(parts[0]), float(parts[1]), float(parts[2])])
+    return out
+
+
 class Workflow:
     def __init__(self, project: Project, config: dict, *, create: bool = True):
         self.project = project
@@ -359,22 +393,57 @@ class Workflow:
                 self.dec.record("docking.box", "blind", "allowed", "使用者明確允許盲對接；盲對接分數與口袋排名可信度較低。",
                                 kind="human" if b.get("allow_blind") else "auto")
 
-    def _peptide_preflight(self, l: dict) -> str:
-        """Peptide ligand: CPP gate before docking, docking SMILES from the sequence."""
-        from .build.peptide import clean_sequence, peptide_smiles, cpp_gate
-        from .build.gates import NEEDS_HUMAN
+    def _peptide_preflight(self, l: dict, box=None) -> str:
+        """Peptide ligand: CPP and pocket-access checks before docking (advisory, never blocking: D-48), docking
+        SMILES from the sequence."""
+        from .build.peptide import clean_sequence, peptide_smiles, cpp_gate, peptide_access_precheck
         seq = clean_sequence(l["sequence"])
         gate, rec = cpp_gate(seq, target_location=l.get("target_location"), experimental_evidence=l.get("cpp_evidence"))
-        # record the CPP result (incl. redesign suggestions) first, so a blocked run still surfaces them in state/report
         self.dec.record("peptide.cpp", l["name"], rec.get("status"), gate.explanation,
                         kind="human" if l.get("cpp_override") else "auto")
-        st = self.state(); st.setdefault("cpp", {})[l["name"]] = {**rec, "gate": gate.status, "explanation": gate.explanation,
-                                                                  "override": bool(l.get("cpp_override"))}
+        st = self.state()
+        st.setdefault("cpp", {})[l["name"]] = {**rec, "gate": gate.status, "explanation": gate.explanation,
+                                               "options": gate.options, "advisory": gate.advisory,
+                                               "override": bool(l.get("cpp_override")), "override_note": l.get("cpp_override")}
+        if box is not None:
+            b = self.cfg.get("box") or {}
+            site = bool(b.get("from_residue") or b.get("site_residues"))
+            g2, rec2 = peptide_access_precheck(seq, box.size, site_defined=site)
+            st.setdefault("peptide_access", {}).setdefault(l["name"], {})["precheck"] = {
+                **rec2, "gate": g2.status, "explanation": g2.explanation, "options": g2.options, "advisory": g2.advisory}
+            self.dec.record("peptide.access", l["name"], g2.status, g2.explanation)
         atomic_write_json(st, self.state_path)
-        if gate.status == NEEDS_HUMAN and not l.get("cpp_override"):
-            self._block("docking_preflight", f"胜肽 {l['name']}：{gate.explanation}（確認要繼續請在該配體設定 cpp_override 並說明理由）",
-                        gates=[gate.to_dict()], ligand=l["name"])
         return peptide_smiles(seq, l.get("termini", "charged"))
+
+    def _peptide_pose_access(self, sel: dict) -> None:
+        """After pose selection: does each peptide pose reach the site or lie on the surface? (advisory, D-48)"""
+        from .build.peptide import peptide_pose_access, peptide_access_gate
+        peps = {l["name"] for l in self.cfg.get("ligands") or [] if l.get("sequence")}
+        if not peps:
+            return
+        rec_path = (self._done("receptor_docking") or {}).get("path")
+        raw_path = (self._done("receptor_input") or {}).get("path")
+        if not rec_path or not Path(rec_path).is_file():
+            return
+        prot = _heavy_xyz_pdb(Path(rec_path).read_text(encoding="utf-8", errors="ignore"), atom_only=True)
+        site = None
+        res = str((self.cfg.get("box") or {}).get("from_residue") or "").split(":")[0].split()[:1]
+        if res and raw_path and Path(raw_path).is_file():
+            site = _heavy_xyz_pdb(Path(raw_path).read_text(encoding="utf-8", errors="ignore"), resname=res[0]) or None
+        st = self.state()
+        for name, info in (sel.get("ligands") or {}).items():
+            if name not in peps or not info.get("sdf") or not Path(info["sdf"]).is_file():
+                continue
+            pep = _heavy_xyz_sdf(Path(info["sdf"]).read_text(encoding="utf-8", errors="ignore"))
+            if not pep or not prot:
+                continue
+            m = peptide_pose_access(pep, prot, site_xyz=site)
+            g = peptide_access_gate(name, m)
+            st.setdefault("peptide_access", {}).setdefault(name, {})["pose"] = {
+                **m, "rank": info.get("rank"), "gate": g.status, "explanation": g.explanation, "options": g.options,
+                "advisory": g.advisory}
+            self.dec.record("peptide.access", name, f"pose rank {info.get('rank')}: {g.status}", g.explanation)
+        atomic_write_json(st, self.state_path)
 
     # ------------------------------------------------------------------ HTS pre-screen (docs/specs/hts_screen.md)
     def _screen_config(self):
@@ -532,6 +601,7 @@ class Workflow:
             return DockingResult.load(d["result"])
         self.docking_preflight(raw)
         dcfg = self.cfg.get("docking", {})
+        box = self.make_box(raw, clean)
         ligs = []
         for l in self.cfg["ligands"]:
             ref = ""
@@ -544,7 +614,7 @@ class Workflow:
                     ref = ""
             smi = l.get("smiles", "")
             if l.get("sequence"):
-                smi = self._peptide_preflight(l)
+                smi = self._peptide_preflight(l, box)
             ligs.append(LigandInput(name=l["name"], smiles=smi, sdf=l.get("sdf", ""), reference_pose=ref,
                                     protonation=l.get("protonation") or dcfg.get("protonation", "auto"),
                                     ph=float(self.cfg.get("ph", 7.4))))
@@ -552,7 +622,7 @@ class Workflow:
         if any(l.get("sequence") for l in self.cfg["ligands"]) and exh < 32:
             self.dec.record("docking.setup", "exhaustiveness", 32, f"胜肽配體自由度高，exhaustiveness 由 {exh} 自動提高到 32。")
             exh = 32
-        res = dock(clean, ligs, self.make_box(raw, clean), out, mode=dcfg.get("mode", "independent"),
+        res = dock(clean, ligs, box, out, mode=dcfg.get("mode", "independent"),
                    scoring=dcfg.get("scoring", "vina"), exhaustiveness=exh,
                    n_poses=dcfg.get("n_poses", 9), seed=dcfg.get("seed", 2026), decisions=self.dec, progress_cb=progress_cb)
         self._mark("docking", result=str(out / "docking_results.json"), mode=res.mode)
@@ -628,6 +698,10 @@ class Workflow:
                                        "md_screen": screen_info}
             self.dec.record("workflow.pose", e["name"], f"rank {rank}", why, kind="human" if e["name"] in user else "auto")
         self._mark("pose_selection", selection=sel, choices_cfg=key)
+        try:
+            self._peptide_pose_access(sel)
+        except Exception as exc:  # noqa: BLE001  (advisory check must never break pose selection)
+            self.dec.record("peptide.access", "pose", "skipped", f"胜肽 pose 可及性檢查未完成：{type(exc).__name__}: {exc}")
         return sel
 
     def _docking_signature(self) -> str | None:

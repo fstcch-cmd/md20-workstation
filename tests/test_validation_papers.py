@@ -142,7 +142,7 @@ def test_hsieh2025_reported_residues_are_in_keap1(rcsb):
 def test_cpp_gate_flags_grp():
     from md20.build.peptide import cpp_gate
     g, rec = cpp_gate(hsieh2025.PAPER["sequence"], target_location="胞內")
-    assert g.status == "NEEDS_HUMAN" and rec["prediction"] == "不太可能穿膜"
+    assert g.status == "AUTO_FIXED" and g.advisory and rec["prediction"] == "不太可能穿膜"   # D-48: flagged, not blocked
 
 
 def test_structure_gates_on_paper_structures(rcsb):
