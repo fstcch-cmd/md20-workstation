@@ -6,7 +6,7 @@ bash installer/install.sh "$@"
 rc=$?
 echo
 if [ "$rc" -ne 0 ]; then
-  echo "安裝中止（exit $rc）。請把上面的訊息傳給老師。 / Installation stopped (exit $rc). Send the messages above to your instructor."
+  echo "安裝中止（exit ${rc}）。請把上面的訊息傳給老師。 / Installation stopped (exit $rc). Send the messages above to your instructor."
 else
   echo "完成。雙擊桌面的 MD20-GUI.command 開啟介面。 / Done. Double-click MD20-GUI.command on the Desktop."
 fi

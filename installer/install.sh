@@ -16,7 +16,7 @@ if [ "$IS_WIN" = 1 ]; then
   mkdir -p "$ROOT"
   export MAMBA_ROOT_PREFIX="$(cygpath -w "$ROOT")"   # keep the package cache under the same root (not AppData\Roaming)
   FREE_GB=$(df -k "$ROOT" | awk 'NR==2{printf "%d", $4/1048576}')
-  echo "安裝位置：$ROOT（可用空間 ${FREE_GB} GB；環境約需 6 GB）"
+  echo "安裝位置：${ROOT}（可用空間 ${FREE_GB} GB；環境約需 6 GB）"
   if [ "${FREE_GB:-0}" -lt 8 ]; then
     echo "!! 可用空間不足 8 GB。請清出空間，或改裝到其他磁碟：  MD20_ROOT=/d/MD20 bash installer/install.sh"
     exit 2
@@ -39,7 +39,7 @@ if [ "$IS_WIN" = 1 ]; then
     if [ -n "$DRV" ]; then
       MAJ=${DRV%%.*}; MIN=${DRV#*.}
       if [ "$MAJ" -lt 11 ] || { [ "$MAJ" -eq 11 ] && [ "$MIN" -lt 8 ]; }; then
-        echo "!! 驅動只支援 CUDA $DRV（< 11.8）：改用 OpenCL；更新驅動後可重跑。"; GPU=opencl
+        echo "!! 驅動只支援 CUDA ${DRV}（< 11.8）：改用 OpenCL；更新驅動後可重跑。"; GPU=opencl
         GPUYML="$HERE/../environment/windows-opencl.yml"; export CONDA_OVERRIDE_CUDA=12.4
       else
         if [ "$MAJ" -lt 12 ]; then CV=11.8; elif [ "$MAJ" -gt 12 ] || [ "$MIN" -ge 4 ]; then CV=12.4; else CV=$DRV; fi
@@ -73,7 +73,7 @@ ROOT="${MD20_ROOT:-${HOME}/MD20}"; mkdir -p "$ROOT"
 export MAMBA_ROOT_PREFIX="$ROOT"
 MAMBA="$ROOT/bin/micromamba"
 FREE_GB=$(df -k "$ROOT" | awk 'NR==2{printf "%d", $4/1048576}')
-echo "安裝位置 Install location: $ROOT（可用空間 free ${FREE_GB} GB；環境約需 6 GB / needs about 6 GB）"
+echo "安裝位置 Install location: ${ROOT}（可用空間 free ${FREE_GB} GB；環境約需 6 GB / needs about 6 GB）"
 if [ "${FREE_GB:-0}" -lt 8 ]; then echo "!! 可用空間不足 8 GB / less than 8 GB free；可用 MD20_ROOT=/path 指定其他磁碟。"; exit 2; fi
 SRC="$(cd "$HERE/.." && pwd)"
 if [ ! -d "$SRC/.git" ]; then
@@ -81,7 +81,7 @@ if [ ! -d "$SRC/.git" ]; then
   if [ "$SRC" != "$APP" ]; then
     if [ -d "$APP" ]; then
       OLD="$ROOT/_to_delete/app-$(date +%Y%m%d-%H%M%S)"; mkdir -p "$ROOT/_to_delete"; mv "$APP" "$OLD"
-      echo "舊版程式已移到 previous version moved to: $OLD（確認新版可用後可自行刪除 / delete it yourself later）"
+      echo "舊版程式已移到 previous version moved to: ${OLD}（確認新版可用後可自行刪除 / delete it yourself later）"
     fi
     echo "複製程式到 Copying the program to $APP ..."
     mkdir -p "$APP"; cp -R "$SRC/." "$APP/"
@@ -133,5 +133,5 @@ if [ -d "$HOME/Desktop" ]; then cp "$GUI" "$HOME/Desktop/MD20-GUI.command"; chmo
 echo "[4/4] Doctor ..."; "$ROOT/md20" doctor
 echo
 echo "完成 Done."
-echo "  圖形介面 GUI：雙擊桌面的 MD20-GUI.command（或 or: $GUI）"
+echo "  圖形介面 GUI：雙擊桌面的 MD20-GUI.command（或 or: ${GUI}）"
 echo "  命令列 Command line：$ROOT/md20 doctor | demo | pipeline ..."

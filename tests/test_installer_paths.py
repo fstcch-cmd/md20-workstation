@@ -46,3 +46,10 @@ def test_windows_11_and_gpu_label_seen_on_the_msi_laptop():
     assert gpu_label("NVIDIA", "NVIDIA GeForce RTX 4060 Laptop GPU") == "NVIDIA GeForce RTX 4060 Laptop GPU"
     assert gpu_label("AMD", "Radeon RX 7600") == "AMD Radeon RX 7600"
     assert gpu_label(None, "Intel(R) UHD Graphics") == "Intel(R) UHD Graphics"
+
+
+def test_shell_scripts_never_follow_a_variable_with_non_ascii():
+    """macOS bash 3.2 reads `$ROOT（` as one unbound name (CI installer-macos, D-66)."""
+    for p in ["installer/install.sh", "Install-MD20.command"]:
+        s = (ROOT / p).read_text(encoding="utf-8")
+        assert not re.search(r"\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]", s), p

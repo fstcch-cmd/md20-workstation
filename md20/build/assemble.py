@@ -581,11 +581,16 @@ def _softcore_repair(modeller, ff, lig_atom_ranges, ligs, prot, r, decisions) ->
         x = new[a:b] * 10.0
         hv = by[bad].heavy
         rmsd = float(np.sqrt(((x[hv] - base[hv]) ** 2).sum(1).mean()))
+        shift = float(np.linalg.norm(x[hv].mean(0) - base[hv].mean(0)))
         trial = ML.Mol(bad, by[bad].elements, x, by[bad].bonds, False, by[bad].rings)
-        if rmsd > SC.ACCEPT_RMSD_A or (prot is not None and ML.protein_contacts(trial, x, prot) < ML.KEEP_CONTACTS * base_contacts):
+        # D-64 更正: pulling a threaded bond out moves that end by about a ring radius plus a contact distance, so the
+        # binding mode is judged by the centroid and the protein contacts; the all-atom RMSD only catches a relocation
+        if (shift > SC.ACCEPT_CENTROID_A or rmsd > SC.ACCEPT_RMSD_A
+                or (prot is not None and ML.protein_contacts(trial, x, prot) < ML.KEEP_CONTACTS * base_contacts)):
             if decisions:
                 decisions.record("build.geometry", f"soft-core {bad}", "rejected",
-                                 f"軟核修復後 {bad} 移動 {rmsd:.1f} Å（上限 {SC.ACCEPT_RMSD_A} Å）或失去過多接觸：已是不同姿勢，交由使用者決定。")
+                                 f"軟核修復後 {bad} 質心移動 {shift:.1f} Å（上限 {SC.ACCEPT_CENTROID_A} Å）、RMSD {rmsd:.1f} Å（上限 {SC.ACCEPT_RMSD_A} Å）"
+                                 "或失去過多接觸：已是不同姿勢，交由使用者決定。")
             return None
         by[bad].xyz = x
         for i in range(len(ligs)):
@@ -593,7 +598,7 @@ def _softcore_repair(modeller, ff, lig_atom_ranges, ligs, prot, r, decisions) ->
                 ligs[i] = by[bad] = ML.Mol(bad, by[bad].elements, x, by[bad].bonds, False, by[bad].rings)
         pos[a:b] = new[a:b]
         done.append(bad)
-        notes_zh.append(f"{bad} 以軟核鬆弛（λ 0.05→1，配體可暫時穿過鄰近原子，其餘原子固定）解開，重原子 RMSD {rmsd:.1f} Å")
+        notes_zh.append(f"{bad} 以軟核鬆弛（λ 0.05→1，配體可暫時穿過鄰近原子，其餘原子固定）解開，質心移動 {shift:.1f} Å、重原子 RMSD {rmsd:.1f} Å")
     if ML.culprit(ML.check(ligs, prot)) is not None or not done:
         return None
     from openmm import Vec3

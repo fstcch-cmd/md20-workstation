@@ -52,7 +52,9 @@ def test_softcore_unthreads_and_keeps_the_ligand_near():
             break
     assert not ML.piercings(ring, ring.xyz, chain, chain.xyz)
     rmsd = float(np.sqrt(((new[6:] - pos[6:]) ** 2).sum(1).mean())) * 10
-    assert rmsd <= SC.ACCEPT_RMSD_A and np.allclose(new[:6], pos[:6], atol=0.02)
+    shift = float(np.linalg.norm(new[6:].mean(0) - pos[6:].mean(0))) * 10
+    print(f"soft-core unthreading: centroid shift {shift:.2f} A, RMSD {rmsd:.2f} A")
+    assert shift <= SC.ACCEPT_CENTROID_A and rmsd <= SC.ACCEPT_RMSD_A and np.allclose(new[:6], pos[:6], atol=0.02)
 
 
 def test_spectator_hold_force_is_flat_inside_the_band():
@@ -72,5 +74,5 @@ def test_spectator_hold_force_is_flat_inside_the_band():
 
 def test_free_drift_radius_is_inside_the_acceptance_limit():   # D-64
     import inspect
-    assert SC.HOLD_NM * 10 <= SC.ACCEPT_RMSD_A - 0.5
+    assert SC.HOLD_NM * 10 <= SC.ACCEPT_CENTROID_A - 0.5
     assert inspect.signature(SC.softcore_system).parameters["hold_nm"].default == SC.HOLD_NM

@@ -23,7 +23,8 @@ import numpy as np
 
 LAMBDAS = (0.05, 0.2, 0.4, 0.6, 0.8, 1.0)
 ALPHA, BETA_NM2 = 0.5, 0.01
-ACCEPT_RMSD_A = 3.0
+ACCEPT_RMSD_A = 4.0        # D-64 更正: sanity cap only (a flipped or relocated ligand); see ACCEPT_CENTROID_A
+ACCEPT_CENTROID_A = 2.5    # binding mode kept = heavy-atom centroid moved ≤ 2.5 Å (plus protein contacts, checked by the caller)
 HOLD_NM = 0.2      # D-64: free drift (2 Å) must stay well inside the acceptance limit (3 Å), see below
 COULOMB = 138.935456
 
