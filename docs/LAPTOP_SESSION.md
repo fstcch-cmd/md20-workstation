@@ -38,3 +38,14 @@ CI 只能確認每頁渲染（HTTP 200 與截圖），**互動要在筆電上確
 5. 快速模式：上傳一個 PDB 檔、貼兩行配體（其中一行 `PEP peptide:GGGGGKP`）、建立並開始。
 6. 篩選：下載範例表格 → 上傳 → 排名長條圖點選長條會勾選化合物；手動上傳一個命名錯誤的 SDF 應被拒絕並說明原因。
 7. 流程完成後「Open report」：英文與中文各開一次，確認每節五段（是什麼、科學意義、參數、圖表、解釋）與圖表編號。
+
+## 監看執行中的 cmd 並回傳結果（使用者 11/02 16:45：雲端 session 要自行解讀並修正）
+雲端開發 session 看不到筆電螢幕，所以由筆電 session 負責監看、回傳原始數據；解讀與修正由雲端 session 做。
+1. 每 20 到 30 分鐘看一次 teaching 重跑的 cmd 視窗（不要用 sleep 迴圈；只讀，不要中斷它）。記下目前步驟與最後 30 行。
+2. 出現錯誤、Traceback、NEEDS_HUMAN 或流程結束時，立刻建立 `docs/runs/2026-11-02_teaching_rerun.md`，內容：
+   - 指令與設定（config.json 的 md、binding 區塊）、開始與結束時間、rc、最後 80 行輸出（原文）。
+   - 若已結束：`workflows/<名稱>/state.json` 中 binding 的 results（ΔPMF、ΔG°、half_split、caveats）、
+     `binding_*/smd.json` 的 `diagnostics`（D-45 振盪指標）、`binding_manifest.json` 的 `result.pmf.coverage` 與 `quality`。
+   - 只放文字與小型 JSON（不要放 DCD、PNG 或整份 HTML）。
+3. `git add docs/runs/… && git commit && git push`（commit 尾端加 Co-Authored-By 與筆電 session 連結）。不刪任何檔案。
+雲端 session 會讀這個檔案，判斷預設拉離速度（0.01 或 0.005 nm ps⁻¹，看板待判斷項）並修正發現的問題。
