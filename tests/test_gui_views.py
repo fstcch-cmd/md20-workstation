@@ -187,3 +187,14 @@ def test_scene_carries_interactions_and_viewer_shows_table():
     assert any(o["type"] == "c" for o in sc["interactions"]["occupancy"])      # ligand C next to an Ala CB
     h = viewer_html(sc)
     assert "疏水接觸" in h and "不是溶劑可及表面" in h
+
+
+def test_live_series_stage_eta_and_speed():
+    """Remaining time of the current stage from the heartbeat rate (robust to a resumed stage)."""
+    from md20.gui.views import live_series
+    hb = lambda done, el: {"stage": "production", "case_id": "c", "absolute_step": done, "temperature_k": 300.0,  # noqa: E731
+                           "completed_local_steps": done, "total_steps": 10000, "elapsed_s": el, "timestep_fs": 4.0}
+    pg = live_series([hb(1000, 10), hb(3000, 30)])["progress"]
+    assert pg["pct"] == 30.0 and pg["eta_s"] == 70 and pg["ns_per_day"] == pytest.approx(100 * 4e-6 * 86400, abs=0.1)
+    pg = live_series([hb(1000, 10), hb(3000, 30), hb(5000, 5), hb(6000, 15)])["progress"]   # resumed: clock restarted
+    assert pg["eta_s"] == 40

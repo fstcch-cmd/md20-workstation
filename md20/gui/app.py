@@ -489,8 +489,16 @@ def workflow_page(project: str, name: str):
                 ch.update()
             pg = ls["progress"]
             if pg:
-                prog.set_text(f"{pg['stage']}：{pg['pct']}%" + (f"（傘狀採樣 window {ls['umbrella']['window']}/{ls['umbrella']['n']}）"
-                                                               if ls.get("umbrella") else ""))
+                eta = ""
+                if pg.get("eta_s") is not None:
+                    m = int(pg["eta_s"] // 60)
+                    eta = _(f"，此階段約剩 {m // 60} 小時 {m % 60} 分" if m >= 60 else f"，此階段約剩 {m} 分",
+                            f"; about {m // 60} h {m % 60} min left in this stage" if m >= 60 else f"; about {m} min left in this stage")
+                    if pg.get("ns_per_day"):
+                        eta += _(f"（本機 {pg['ns_per_day']} ns 每天）", f" ({pg['ns_per_day']} ns per day here)")
+                prog.set_text(f"{pg['stage']}：{pg['pct']}%" + eta + (_(f"（傘狀採樣窗口 {ls['umbrella']['window']} 之 {ls['umbrella']['n']}）",
+                                                                      f" (umbrella window {ls['umbrella']['window']} of {ls['umbrella']['n']})")
+                                                                    if ls.get("umbrella") else ""))
                 bar.set_value((pg["pct"] or 0) / 100.0)
             tg = coverage_targets(wf)
             opts = {f"{t['target']}|{t['dir']}": t["label"] for t in tg}

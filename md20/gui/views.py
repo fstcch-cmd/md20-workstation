@@ -117,6 +117,7 @@ def timeline(wf, *, limit: int = 200) -> list[dict]:
 def live_series(history: list[dict], *, max_points: int = 600) -> dict:
     """Progress events → chart series.  MD heartbeats carry T/E per chunk; SMD/umbrella events their own."""
     out = {"temperature": [], "potential": [], "smd_force": [], "smd_work": [], "progress": None, "umbrella": None}
+    first: dict = {}
     for h in history:
         st = h.get("stage")
         if "temperature_k" in h and "absolute_step" in h:
@@ -125,8 +126,18 @@ def live_series(history: list[dict], *, max_points: int = 600) -> dict:
             if h.get("potential_kj_mol") is not None:
                 out["potential"].append([x, round(float(h["potential_kj_mol"]), 1)])
             if h.get("total_steps"):
+                key = (h.get("case_id"), st)
+                if first.get("key") != key or h.get("elapsed_s", 0) < first.get("elapsed", 0):   # new stage or resumed
+                    first.update(key=key, steps=h["completed_local_steps"], elapsed=h.get("elapsed_s") or 0.0)
                 out["progress"] = {"stage": st, "pct": round(100.0 * h["completed_local_steps"] / h["total_steps"], 1),
                                    "case": h.get("case_id", ""), "elapsed_s": h.get("elapsed_s")}
+                d_steps = h["completed_local_steps"] - first["steps"]
+                d_t = (h.get("elapsed_s") or 0.0) - first["elapsed"]
+                if d_steps > 0 and d_t > 0:
+                    rate = d_steps / d_t                                  # steps per second in this stage
+                    out["progress"]["eta_s"] = round((h["total_steps"] - h["completed_local_steps"]) / rate)
+                    if h.get("timestep_fs"):
+                        out["progress"]["ns_per_day"] = round(rate * float(h["timestep_fs"]) * 1e-6 * 86400, 1)
         elif st == "smd":
             r = h.get("r_nm", h.get("r0"))
             if r is not None and h.get("force") is not None:
