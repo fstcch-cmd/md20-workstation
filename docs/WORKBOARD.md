@@ -6,7 +6,6 @@
 ## 進行中
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
-| **發行 v0.1.0a2**（使用者 13:03 要求：取消進行中的 CI 5f0945e，從最新 main 重新出一版）：release-windows dispatch，verify 含 CUDA dry-run | 使用者 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-02 13:05 | 筆電 session 請勿同時 dispatch |
 | **筆電實機測試（Windows 獨顯筆電 "msi"）**：安裝 → doctor（須 CUDA/OpenCL）→ demo → GUI → classroom 3PTB；結果寫 `docs/COMPATIBILITY.md`，失敗就修／發行新版（`docs/LAPTOP_SESSION.md`） | 使用者 | session_016gcJzhwPAMieHsNEctkzL | 2026-11-02 09:35 | 刪除前一律先問使用者 |
 | 鋅鍵結模型平均鍵長偏 0.3 Å（D-32/D-34）：先診斷（heavy metal 測試輸出 3 Å 內非鍵原子）→ 依證據選修法（配位水入鍵結／元素×配位原子力常數／Li–Merz IOD LJ） | D-32、會診 §3 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-02 08:55 | 不擋 Windows（只在 Ubuntu heavy） |
 | 巡檢 #3（07:45）：**bb36a4b 全綠且 Windows 不再假綠**（367 passed、5 skipped 全為「在別的 job 跑」或 playwright；對接與 HTS 整合測試在 Windows PASSED）。里程碑 CI 端達成；真機（CUDA、驅動查詢、ns/day）等使用者筆電 | — | session_016gcJzBDnGh3heY9HLWnva3 | 2026-11-02 07:50 | 交付狀態已發給使用者 |
@@ -29,6 +28,7 @@
 ## 完成
 | 項目 | session | commit |
 |---|---|---|
+| 發行 **v0.1.0a2**（D-36／37／38／39；verify-windows 含 CUDA dry-run） | session_016gcJz8q2F6515MWPncJEZu | release run 41391866636（5f0945e） |
 | Windows 安裝程式發行 **v0.1.0a1**（GitHub Release，prerelease：`MD20-Windows-v0.1.0a1.zip`＋SHA256SUMS；雙擊 `Install-MD20.cmd`；D-33） | session_016gcJz8q2F6515MWPncJEZu | 0bf6954；release run 41365326632（Windows PS 5.1 解壓實裝、刪除解壓資料夾後 doctor/demo 通過才發行） |
 | 約束策略修正：分組約束（backbone/sidechain/ligand 單一力 grp 參數）、主要釋放移到 NPT、配體 k 1000、`md.restraints` standard/gentle/hold_backbone、受約束 RMSD 標註（D-23、specs/restraints_freeze_truncation.md §3.1） | session_016gcJz8q2F6515MWPncJEZu | 5cc9295（CI：81b72d9／99c8b64 heavy workflow 與 openmm-stack 三 OS 綠） |
 | 驅動偵測→判定→一鍵下載（`md20 drivers`、Doctor、GUI 卡片、安裝器 `-Cuda`；D-27、specs/drivers.md） | session_016gcJzBDnGh3heY9HLWnva3 | 本 commit（NVIDIA 查詢待真機） |
