@@ -147,3 +147,16 @@ def test_gbn2_protocol_and_binding_gate(tmp_path):
     from md20.gui.views import gate_cards
     card = next(c for c in gate_cards(wf) if c["title"] == "implicit solvent + binding")
     assert {a["patch"][0]["path"][0] for a in card["actions"]} == {"md", "binding"}
+
+
+def test_teaching_tier_runs_the_windows_it_requires(tmp_path):
+    """D-41: teaching/research default to the window length their ΔG° rule requires; classroom and explicit values
+    are left alone."""
+    wf = _wf(tmp_path / "t")
+    wf.cfg["md"]["tier"] = "teaching"
+    assert wf._binding_config({}).window_prod_ps == 500.0 and wf._binding_config({}).window_equil_ps == 50.0
+    assert wf._binding_config({"config": {"window_prod_ps": 80}}).window_prod_ps == 80
+    wf.cfg["md"]["tier"] = "research"
+    assert wf._binding_config({}).window_prod_ps == 2000.0
+    wf.cfg["md"]["tier"] = "classroom"
+    assert wf._binding_config({}).window_prod_ps == 50.0

@@ -915,6 +915,24 @@ class Workflow:
                     "teaching": {"dG": True, "min_window_ps": 500.0},
                     "research": {"dG": True, "min_window_ps": 2000.0, "min_replicas": 3, "max_half_split_kj": 2.0}}
 
+    def _binding_config(self, b: dict):
+        from .sampling.binding import BindingConfig
+        from dataclasses import fields
+        valid = {f.name for f in fields(BindingConfig)}
+        user_cfg = {k: v for k, v in (b.get("config") or {}).items() if k in valid}
+        # D-41: a tier that requires long windows for ΔG° must also *run* them by default — otherwise teaching/research
+        # always withhold ΔG° with the 50 ps library default.  An explicit binding.config value wins (and is judged).
+        tier = self.cfg.get("md", {}).get("tier", "teaching")
+        min_w = self.TIER_BINDING.get(tier, {}).get("min_window_ps")
+        if min_w and "window_prod_ps" not in user_cfg:
+            user_cfg["window_prod_ps"] = float(min_w)
+            user_cfg.setdefault("window_equil_ps", max(BindingConfig.window_equil_ps, float(min_w) / 10.0))
+            self.dec.record("workflow.binding", "window length", f"{min_w:.0f} ps（equil {user_cfg['window_equil_ps']:.0f} ps）",
+                            f"{tier} 等級要輸出 ΔG° 需每個 window ≥ {min_w:.0f} ps；未在 binding.config 指定時自動採用此長度"
+                            "（每個 window 的算力約為 classroom 的 10 倍以上）。", kind="auto")
+        cfg = BindingConfig(**user_cfg)
+        return cfg
+
     def _tier_withholds_dG(self, cfg, res, n_done: int = 1) -> str | None:
         tier = self.cfg.get("md", {}).get("tier", "teaching")
         rule = self.TIER_BINDING.get(tier, self.TIER_BINDING["teaching"])
@@ -969,8 +987,7 @@ class Workflow:
         # target must not recompute the others)
         results = {k: v for k, v in ((self.state()["steps"].get("binding") or {}).get("results") or {}).items()
                    if v.get("status") == "PASS"}
-        valid = {f.name for f in fields(BindingConfig)}
-        cfg = BindingConfig(**{k: v for k, v in (b.get("config") or {}).items() if k in valid})
+        cfg = self._binding_config(b)
         targets, contexts = self._binding_targets(runs, built)
         for t in targets:
             name, key = t["key"], t["run_key"]

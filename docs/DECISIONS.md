@@ -7,6 +7,12 @@
 
 ## 2026-11-02
 
+### D-41　teaching／research 預設跑足它們要求的 window 長度
+- 事實：`TIER_BINDING` 要求 teaching ≥ 500 ps、research ≥ 2000 ps 才輸出 ΔG°，但 `BindingConfig` 預設 window 只有 50 ps，`binding.config` 沒寫就照 50 ps 跑——teaching／research 永遠被自己的規則擋下，等於白跑。D-40 的重跑實驗會撞上這個坑。
+- 決定：`Workflow._binding_config`：tier 有 `min_window_ps` 且使用者沒指定 `window_prod_ps` 時，自動採用該長度（equil = 長度 / 10，至少 10 ps），記 DecisionLog；使用者明確指定的值照用（仍由 tier 規則判定）。classroom 不變。
+- 代價：每個 window 算力約為 classroom 的 10 倍（teaching）／40 倍（research）；報告與決策日誌寫明。
+- 證據：`test_teaching_tier_runs_the_windows_it_requires`。
+
 ### D-40　筆電第一次真跑結果判讀：流程正確，但 ΔPMF 80 kJ/mol 不可信；閘門擋下 ΔG° 是對的
 - 事實（RTX 4060 筆電，classroom 3PTB，workflow_report 05:06Z）：redocking RMSD 0.38 Å；MD 穩定（backbone 0.8–0.9 Å、BEN 全程在 S1 口袋，Asp189／Ser190／Gly219 接觸 100%）；
   SMD 最大力 524 kJ/mol/nm、功 251 kJ/mol；umbrella 自動補窗 6 輪 13 → 40 個 window，連續性通過；**ΔPMF 井深 80.3 ± 1.0 kJ/mol（≈ 19 kcal/mol），ΔG° 不輸出（`not converged`：MBAR 求解未達容差，pymbar 退回梯度 2.1e-4 的解）**；前／後半 85.0／82.1。
