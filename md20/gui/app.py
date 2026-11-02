@@ -40,6 +40,17 @@ def _(zh: str, en: str) -> str:
     return zh if lang() == "zh" else en
 
 
+STEP_TEXT = {"receptor_input": ("受體來源", "Receptor source"), "receptor_docking": ("受體整理", "Receptor preparation"),
+             "screen_library": ("篩選：化合物庫", "Screening: compound library"), "screen_docking": ("篩選：快速對接", "Screening: fast docking"),
+             "screen_selection": ("篩選：選擇化合物", "Screening: compound selection"), "docking": ("分子對接", "Molecular docking"),
+             "pose_selection": ("姿勢選擇", "Pose selection"), "md_confirm": ("確認進入分子動力學", "Confirm molecular dynamics"),
+             "md_cases": ("建模", "System building"), "md_runs": ("分子動力學", "Molecular dynamics"),
+             "analysis": ("軌跡分析", "Trajectory analysis"), "binding": ("結合自由能", "Binding free energy"), "report": ("報告", "Report")}
+STATUS_TEXT = {"PASS": ("完成", "Done"), "COMPLETE": ("完成", "Done"), "RUNNING": ("執行中", "Running"), "PAUSED": ("已暫停", "Paused"),
+               "NEEDS_HUMAN": ("需要你決定", "Needs your decision"), "ERROR": ("錯誤", "Error"), "IDLE": ("未執行", "Idle"),
+               "AUTO_FIXED": ("已自動修正", "Corrected automatically"), "—": ("—", "—")}
+
+
 def set_lang(code: str) -> None:
     from ..util import atomic_write_json
     STATE["lang"] = code if code in LANG_NAMES else "en"
@@ -241,7 +252,7 @@ def _manual_upload_panel(wf: Workflow):
                 st["steps"].pop(k, None)
             from ..util import atomic_write_json
             atomic_write_json(st, wf.state_path)
-        ui.upload(on_upload=got, multiple=True, auto_upload=True, label=_("選擇 .sdf 檔", "Choose .sdf files")).props("accept=.sdf").classes("w-full")
+        ui.upload(on_upload=got, multiple=True, auto_upload=True, label=_("選擇 .sdf 檔", "Choose .sdf files")).props("accept=.sdf flat bordered color=blue-grey-7").classes("w-full")
 
 
 @ui.page("/wf/{project}/{name}")
@@ -297,12 +308,17 @@ def workflow_page(project: str, name: str):
             ui.button(_("開始或繼續", "Start or continue"), on_click=lambda: _start(wf))
             ui.button(_("暫停（在下一個區段結束時）", "Pause (at the end of the next segment)"), on_click=lambda: (wf.project.dir / "PAUSE").touch()).props("outline")
             report_btn = ui.button(_("開啟報告", "Open report"), on_click=lambda: ui.navigate.to(f"/file?path={wf.dir / 'workflow_report.html'}", new_tab=True)).props("outline")
-        steps = ui.table(columns=[{"name": k, "label": l, "field": k} for k, l in (("step", "步驟"), ("status", "狀態"), ("at", "時間"), ("message", "訊息"))],
-                         rows=[], row_key="key").classes("w-full")
+        steps = ui.table(columns=[{"name": k, "label": l, "field": k, "align": "left",
+                                   **({"style": "white-space: normal; max-width: 560px"} if k == "message" else {})}
+                                  for k, l in (("step", _("步驟", "Step")), ("status", _("狀態", "Status")), ("at", _("時間", "Time")),
+                                               ("message", _("訊息", "Message")))],
+                         rows=[], row_key="key").props("dense flat").classes("w-full md20-card")
         ui.label(_("對接姿勢（★ 推薦、✔ 已選；點選一列改用該姿勢，系統會從姿勢選擇之後重新執行）", "Docking poses (★ recommended, ✔ selected; click a row to use that pose, the run restarts from pose selection)")).classes("font-semibold")
-        poses = ui.table(columns=[{"name": k, "label": l, "field": k} for k, l in
-                                  (("entry", "配體"), ("rank", "rank"), ("score", "score"), ("cluster", "cluster"), ("contacts", "接觸"),
-                                   ("rmsd_ref", "RMSD 晶體"), ("md_screen", "短 MD"), ("tag", ""))], rows=[], row_key="key").classes("w-full")
+        poses = ui.table(columns=[{"name": k, "label": l, "field": k, "align": "left"} for k, l in
+                                  (("entry", _("配體", "Ligand")), ("rank", _("名次", "Rank")), ("score", _("分數（kcal mol⁻¹）", "Score (kcal mol⁻¹)")),
+                                   ("cluster", _("叢集（大小）", "Cluster (size)")), ("contacts", _("接觸殘基數", "Contacts")),
+                                   ("rmsd_ref", _("與晶體 RMSD（Å）", "RMSD to crystal (Å)")), ("md_screen", _("短模擬篩選", "Short-MD screen")),
+                                   ("tag", ""))], rows=[], row_key="key").props("dense flat").classes("w-full md20-card")
         reason = ui.markdown("")
 
         def pick(e):
@@ -427,10 +443,13 @@ def workflow_page(project: str, name: str):
         def refresh():
             job = RUNNER.get(wf)
             snap = job.snapshot() if job else {"status": "IDLE", "message": "", "steps": __import__("md20.gui.logic", fromlist=["step_rows"]).step_rows(wf.state()), "history": []}
-            status.set_text(_("狀態：", "Status: ") + str(snap['status']))
+            status.set_text(_("狀態：", "Status: ") + STATUS_TEXT.get(str(snap['status']), (str(snap['status']),) * 2)[0 if lang() == "zh" else 1])
             render_confirm()
             msg.set_content(f"```\n{snap['message']}\n```" if snap["message"] else "")
-            steps.rows = snap["steps"]
+            L = lang()
+            steps.rows = [{**r, "step": (STEP_TEXT.get(r.get("key"), (r["step"], r["step"]))[0 if L == "zh" else 1]),
+                           "status": STATUS_TEXT.get(r["status"], (r["status"], r["status"]))[0 if L == "zh" else 1],
+                           "at": (r.get("at") or "").replace("T", " ")[:19]} for r in snap["steps"]]
             rows = pose_table(wf)
             for r in rows:
                 r["key"] = f"{r['entry']}-{r['rank']}"

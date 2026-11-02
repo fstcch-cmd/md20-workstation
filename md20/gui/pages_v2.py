@@ -113,7 +113,9 @@ def teach(case: str):
         with ui.card().classes("w-full md20-card p-4"):
             ui.label(t("teach_params", L)).classes("md20-section")
             vals = advisor.values_from_config(cfg)
-            rows = advisor.parameter_table(vals, f, "teaching", L, keys=[k for k in PARAMS if k in vals or k in QUICK_KEYS])
+            from ..validation import CASES as _C
+            paper_vals = advisor.values_from_config(_C[case].workflow_config(tier="classroom"))
+            rows = teaching_rows(vals, paper_vals, f, L)
             ui.table(columns=[{"name": "label", "label": t("parameters", L), "field": "label", "align": "left"},
                               {"name": "value_text", "label": t("value", L), "field": "value_text", "align": "left"},
                               {"name": "why", "label": t("reason", L), "field": "why", "align": "left",
@@ -130,6 +132,20 @@ def teach(case: str):
             _start(wf)
             ui.navigate.to(f"/wf/{proj.dir.name}/{wf.name}")
         ui.button(t("start_lesson", L), on_click=start).props("color=primary no-caps size=lg")
+
+
+def teaching_rows(vals: dict, paper_vals: dict, f, L: str) -> list[dict]:
+    """Parameter table of a teaching case: values the paper fixed are labelled as such (with the recommendation next to
+    them), and binding parameters are left out when the lesson does not compute binding."""
+    rows = []
+    for r in advisor.parameter_table(vals, f, "teaching", L):
+        if r["group_key"] == "binding" and r["key"] != "binding" and not vals.get("binding"):
+            continue
+        if r["key"] in paper_vals and r["value"] != r["recommended"]:
+            r = {**r, "why": _(f"依論文設定（系統對一般個案的建議為 {r['recommended_text']}：{r['why']}）",
+                               f"Taken from the paper (for a general case the recommendation is {r['recommended_text']}: {r['why']})")}
+        rows.append(r)
+    return rows
 
 
 # --------------------------------------------------------------------------------------------- quick and pro forms
@@ -199,7 +215,7 @@ def _form(mode: str):
                 state["receptor_text"] = data.decode("utf-8", errors="ignore") if dst.suffix in (".pdb", ".ent") else None
                 rec_info.set_text(_("已上傳：", "Uploaded: ") + fname)
                 refresh()
-            ui.upload(on_upload=got_receptor, auto_upload=True, max_files=1, label=t("or_upload", L)).props("accept=.pdb,.ent,.cif,.mmcif flat bordered").classes("w-full")
+            ui.upload(on_upload=got_receptor, auto_upload=True, max_files=1, label=t("or_upload", L)).props("accept=.pdb,.ent,.cif,.mmcif flat bordered color=blue-grey-7").classes("w-full")
         with ui.card().classes("w-full md20-card p-4"):
             ui.label(t("ligands", L)).classes("md20-section")
             ui.label(t("ligand_help", L)).classes("md20-why")
@@ -237,7 +253,7 @@ def _form(mode: str):
                     state["library_file"] = str(dst)
                     lib_info.set_text(_(f"已上傳 {fname}：{len(entries)} 個化合物", f"Uploaded {fname}: {len(entries)} compounds")
                                       + (f"；{len(warns)} " + _("則提醒", "notes") if warns else ""))
-                ui.upload(on_upload=got_library, auto_upload=True, max_files=1, label=t("hts_upload", L)).props("accept=.xlsx,.xls,.csv flat bordered")
+                ui.upload(on_upload=got_library, auto_upload=True, max_files=1, label=t("hts_upload", L)).props("accept=.xlsx,.xls,.csv flat bordered color=blue-grey-7")
 
         # ------------------------------------------------------------------ parameters
         ui.label(t("parameters", L)).classes("md20-section")

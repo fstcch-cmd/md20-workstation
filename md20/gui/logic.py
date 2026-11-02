@@ -75,14 +75,16 @@ def config_from_form(*, name: str, pdb_id: str = "", receptor_file: str = "", li
 
 def step_rows(state: dict) -> list[dict]:
     order = ["receptor_input", "receptor_docking", "screen_library", "screen_docking", "screen_selection", "docking", "pose_selection",
-             "md_cases", "md_runs", "analysis", "binding", "report"]
+             "md_confirm", "md_cases", "md_runs", "analysis", "binding", "report"]
     labels = {"receptor_input": "受體來源", "receptor_docking": "受體整理", "screen_library": "篩選：化合物庫", "screen_docking": "篩選：快速對接",
-              "screen_selection": "篩選：選擇化合物", "docking": "分子對接", "pose_selection": "pose 選擇",
-              "md_cases": "MD 建模", "md_runs": "MD 執行", "analysis": "軌跡分析", "binding": "SMD＋傘狀採樣", "report": "報告"}
+              "screen_selection": "篩選：選擇化合物", "docking": "分子對接", "pose_selection": "姿勢選擇",
+              "md_confirm": "確認進入分子動力學", "md_cases": "MD 建模", "md_runs": "MD 執行", "analysis": "軌跡分析", "binding": "SMD＋傘狀採樣", "report": "報告"}
     steps = state.get("steps", {})
     screen_keys = {"screen_library", "screen_docking", "screen_selection"}
     if not any(k in steps for k in screen_keys):
         order = [k for k in order if k not in screen_keys]      # no screen configured: keep the table short
+    if "md_confirm" not in steps:
+        order = [k for k in order if k != "md_confirm"]
     return [{"step": labels[k], "key": k, "status": steps.get(k, {}).get("status", "—"), "at": steps.get(k, {}).get("at", ""),
              "message": steps.get(k, {}).get("message", "")} for k in order]
 
