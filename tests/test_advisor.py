@@ -10,7 +10,7 @@ def _keys(issues, level=None):
 
 def test_every_parameter_has_bilingual_recommendation():
     for goal in ("teaching", "screening", "binding", "publication"):
-        for f in (CaseFeatures(), CaseFeatures(ligand_kind="peptide", peptide_length=7), CaseFeatures(metals=["ZN"], n_residues=800)):
+        for f in (CaseFeatures(), CaseFeatures(ligand_kind="peptide", peptide_length=7), CaseFeatures(metals=["ZN"], bonded_metals=["ZN:A1"], n_residues=800)):
             en, zh = recommend(f, goal, "en"), recommend(f, goal, "zh")
             assert set(en) == set(PARAMS) == set(zh)
             for k in PARAMS:
@@ -21,7 +21,9 @@ def test_every_parameter_has_bilingual_recommendation():
 def test_recommendations_follow_the_case():
     small = recommended_values(CaseFeatures(), "teaching")
     pep = recommended_values(CaseFeatures(ligand_kind="peptide", peptide_length=7), "screening")
-    metal = recommended_values(CaseFeatures(metals=["ZN"]), "screening")
+    metal = recommended_values(CaseFeatures(metals=["ZN"], bonded_metals=["ZN:A1"]), "screening")
+    ion = recommended_values(CaseFeatures(metals=["CA"]), "screening")      # kept calcium is a non-bonded ion
+    assert ion["timestep_fs"] == 4.0 and ion["restraints"] == "standard"
     pub = recommended_values(CaseFeatures(), "publication")
     assert small["tier"] == "classroom" and small["restraints"] == "standard" and small["exhaustiveness"] == 16
     assert pep["exhaustiveness"] == 32 and pep["restraints"] == "gentle" and pep["production_ns"] == 20.0
@@ -32,7 +34,7 @@ def test_recommendations_follow_the_case():
     assert blind["exhaustiveness"] == 32
     # the recommendation itself passes its own checks (no error, no warning)
     for f, g in ((CaseFeatures(), "teaching"), (CaseFeatures(ligand_kind="peptide"), "screening"),
-                 (CaseFeatures(metals=["ZN"]), "binding"), (CaseFeatures(), "publication")):
+                 (CaseFeatures(metals=["ZN"], bonded_metals=["ZN:A1"]), "binding"), (CaseFeatures(), "publication")):
         bad = [i for i in check({}, f, goal=g) if i["level"] in ("error", "warning")]
         assert not bad, (g, bad)
 
@@ -75,10 +77,10 @@ def test_apply_round_trip_and_workflow_keys():
 def test_features_and_estimate():
     pdb = "".join(f"ATOM  {i:5d}  CA  ALA A{i:4d}    {3.8 * i:8.3f}{0:8.3f}{0:8.3f}  1.00  0.00           C\n" for i in range(1, 101))
     pdb += "HETATM 9999 ZN    ZN A 900       0.000   5.000   0.000  1.00  0.00          ZN\n"
-    cfg = {**example_config(), "keep_hetero": ["ZN"]}
+    cfg = {**example_config(), "keep_hetero": ["ZN"], "metal_policy": {"ZN:A900": "bonded"}}
     f = features_from_config(cfg, receptor_text=pdb, doctor={"benchmark": {"ns_per_day": 600, "n_atoms": 24000, "timestep_fs": 4},
                                                              "platform": {"name": "CUDA"}})
-    assert f.n_residues == 100 and f.metals == ["ZN"] and f.gpu and f.ns_per_day == 600
+    assert f.n_residues == 100 and f.metals == ["ZN"] and f.bonded_metals == ["ZN:A900"] and f.gpu and f.ns_per_day == 600
     assert 5000 < system_atoms(f) < 15000
     est = estimate_hours({}, f, "screening")
     assert est["total_hours"] > 0 and est["md_hours"] > 0

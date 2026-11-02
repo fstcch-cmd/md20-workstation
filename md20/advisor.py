@@ -48,7 +48,8 @@ class CaseFeatures:
     ligand_kind: str = "small"             # small | peptide | mixed
     peptide_length: int | None = None
     docking_mode: str = "independent"
-    metals: list = field(default_factory=list)
+    metals: list = field(default_factory=list)          # metals kept in the receptor (non-bonded ions by default)
+    bonded_metals: list = field(default_factory=list)   # sites with metal_policy "bonded" (stiff bonded model)
     structure_source: str = "crystal"      # crystal | model
     has_gaps: bool = False
     box_from_site: bool = True
@@ -171,6 +172,8 @@ def features_from_config(cfg: dict, *, receptor_text: str | None = None, doctor:
                      peptide_length=max((len(str(l["sequence"]).replace(" ", "")) for l in peps), default=None),
                      docking_mode=(cfg.get("docking") or {}).get("mode", "independent"),
                      metals=sorted(keep & METALS), binding=bool((cfg.get("binding") or {}).get("enabled")))
+    pol = cfg.get("metal_policy") or {}
+    f.bonded_metals = sorted(k for k, v in pol.items() if str(v).lower() == "bonded") if isinstance(pol, dict) else []
     b = cfg.get("box") or {}
     f.box_from_site = bool(b.get("from_residue") or b.get("site_residues"))
     f.box_size = list(b["size"]) if b.get("size") else None
@@ -204,7 +207,7 @@ def _recommend_raw(f: CaseFeatures, goal: str) -> dict[str, dict]:
     goal = goal if goal in GOALS else "teaching"
     pep = f.ligand_kind in ("peptide", "mixed")
     multi_sim = f.n_ligands > 1 and f.docking_mode == "simultaneous"
-    rough_reasons = [r for r, c in ((("含金屬鍵結模型", "a bonded metal site"), bool(f.metals)),
+    rough_reasons = [r for r, c in ((("含金屬鍵結模型", "a bonded metal site"), bool(f.bonded_metals)),
                                     (("受體為預測模型", "a predicted receptor model"), f.structure_source == "model"),
                                     (("受體有補建或截斷的缺口", "rebuilt or capped chain breaks"), f.has_gaps),
                                     (("配體為胜肽", "a peptide ligand"), pep),
@@ -295,10 +298,10 @@ def _recommend_raw(f: CaseFeatures, goal: str) -> dict[str, dict]:
                                  "A maximum force below 10 kJ mol⁻¹ nm⁻¹ is enough to start heating; tighter only costs time.")
     o["heat_start_k"] = _r(50.0, "從 50 K 線性升溫，避免最小化後殘留的高能接觸在第一步就失穩。",
                            "Linear heating from 50 K keeps residual high-energy contacts from blowing up in the first steps.")
-    nvt = float(t["nvt_ps"]) * (1.5 if f.metals else 1.0)
-    o["nvt_ps"] = _r(nvt, f"{tier} 等級的加熱長度" + ("；含金屬鍵結模型再延長 50 %，讓配位幾何先穩定。" if f.metals else "。"),
+    nvt = float(t["nvt_ps"]) * (1.5 if f.bonded_metals else 1.0)
+    o["nvt_ps"] = _r(nvt, f"{tier} 等級的加熱長度" + ("；含金屬鍵結模型再延長 50 %，讓配位幾何先穩定。" if f.bonded_metals else "。"),
                      f"Heating length of the {tier} tier" + ("; extended by 50 % for the bonded metal site so the "
-                                                             "coordination geometry settles first." if f.metals else "."))
+                                                             "coordination geometry settles first." if f.bonded_metals else "."))
     npt = float(t["npt_ps"])
     big = bool(f.n_residues and f.n_residues > 600)
     if big:
@@ -315,7 +318,7 @@ def _recommend_raw(f: CaseFeatures, goal: str) -> dict[str, dict]:
     o["pressure_bar"] = _r(1.0, "常壓。", "Ambient pressure.")
     o["friction_per_ps"] = _r(1.0, "Langevin 1 ps⁻¹ 足以控溫，又不會明顯拖慢構形動態。",
                               "A Langevin friction of 1 ps⁻¹ controls temperature without noticeably slowing conformational dynamics.")
-    if f.metals and t["dt"] > 2:
+    if f.bonded_metals and t["dt"] > 2:
         o["timestep_fs"] = _r(2.0, "含金屬鍵結模型：金屬與配位原子間的鍵力常數高、振動快，4 fs 有失穩風險，改用 2 fs。",
                               "Bonded metal site: metal–ligand bonds are stiff and vibrate fast, so 4 fs risks instability; 2 fs is used.")
     elif t["hmr"]:
@@ -478,7 +481,7 @@ def check(values: dict, f: CaseFeatures, *, goal: str = "teaching", budget_hours
     elif dt > 2.0 and not hmr:
         out.append(_i("error", "timestep_fs", f"{tier} 等級不使用氫質量重分配，{dt:g} fs 會讓含氫鍵振動失穩。",
                       f"The {tier} tier does not repartition hydrogen mass; {dt:g} fs makes bonds to hydrogen unstable.", 2.0))
-    elif dt > 2.0 and f.metals:
+    elif dt > 2.0 and f.bonded_metals:
         out.append(_i("warning", "timestep_fs", "含金屬鍵結模型時 4 fs 有失穩風險（金屬與配位原子間的鍵振動快）。",
                       "With a bonded metal site 4 fs risks instability (metal–ligand bonds vibrate fast).", 2.0))
     T = float(v["temperature_k"])
@@ -497,7 +500,7 @@ def check(values: dict, f: CaseFeatures, *, goal: str = "teaching", budget_hours
     if explicit and float(v["npt_ps"]) < 100:
         out.append(_i("warning", "npt_ps", f"定壓平衡只有 {float(v['npt_ps']):g} ps，水盒密度尚未收斂。",
                       f"Only {float(v['npt_ps']):g} ps of NPT; the box density has not converged.", rec["npt_ps"]))
-    if (pep or f.metals or f.structure_source == "model" or f.has_gaps) and v["restraints"] == "standard":
+    if (pep or f.bonded_metals or f.structure_source == "model" or f.has_gaps) and v["restraints"] == "standard":
         out.append(_i("warning", "restraints", "起始結構較粗糙（胜肽、金屬、預測模型或補建缺口），標準釋放可能讓結構在升溫時變形。",
                       "The starting structure is rough (peptide, metal, model or rebuilt gaps); the standard release may "
                       "distort it during heating.", "gentle"))

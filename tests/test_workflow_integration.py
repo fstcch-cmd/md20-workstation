@@ -28,6 +28,7 @@ def test_full_workflow_3ptb(pdb_3ptb, tmp_path):
     cfg["binding"] = {"enabled": True, "ligands": ["BEN"],
                       "config": {"pull_distance_nm": 0.6, "pull_velocity_nm_per_ps": 0.05, "k_umbrella": 1500.0,
                                  "window_equil_ps": 1.0, "window_prod_ps": 5.0, "sample_every_steps": 25, "max_windows": 12}}
+    cfg["language"] = "zh"                         # the assertions below read the Chinese report
     proj = Project.create(tmp_path, "wf")
     wf = Workflow(proj, cfg)
     platform = choose_platform(probe_steps=20)

@@ -81,6 +81,9 @@ def test_gui_pages_render(gui_project):
             assert st == 200, path
         st, body = _get(base + "/teach/hsieh2025")
         assert "GGGGGKP" in body and "Keap1" in body
+        for code, word in (("en", "Molecular Simulation Project Report"), ("zh", "分子模擬專案報告")):
+            st, body = _get(f"{base}/report/{project}/{name}?lang={code}", timeout=120)
+            assert st == 200 and word in body, body[:500]
         with urllib.request.urlopen(base + "/template/compound_library.xlsx", timeout=30) as r:
             assert r.status == 200 and r.read(2) == b"PK"            # an xlsx is a zip file
         st, body = _get(f"{base}/wf/{project}/{name}")

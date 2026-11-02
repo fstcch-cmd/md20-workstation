@@ -307,7 +307,8 @@ def workflow_page(project: str, name: str):
         with ui.row():
             ui.button(_("開始或繼續", "Start or continue"), on_click=lambda: _start(wf))
             ui.button(_("暫停（在下一個區段結束時）", "Pause (at the end of the next segment)"), on_click=lambda: (wf.project.dir / "PAUSE").touch()).props("outline")
-            report_btn = ui.button(_("開啟報告", "Open report"), on_click=lambda: ui.navigate.to(f"/file?path={wf.dir / 'workflow_report.html'}", new_tab=True)).props("outline")
+            report_btn = ui.button(_("開啟報告", "Open report"),
+                                   on_click=lambda: ui.navigate.to(f"/report/{project}/{name}?lang={lang()}", new_tab=True)).props("outline")
         steps = ui.table(columns=[{"name": k, "label": l, "field": k, "align": "left",
                                    **({"style": "white-space: normal; max-width: 560px"} if k == "message" else {})}
                                   for k, l in (("step", _("步驟", "Step")), ("status", _("狀態", "Status")), ("at", _("時間", "Time")),
@@ -516,7 +517,7 @@ def workflow_page(project: str, name: str):
                                 ui.label(e["title"]).classes("text-sm font-semibold")
                                 if e["text"]:
                                     ui.label(e["text"]).classes("text-xs whitespace-pre-wrap")
-            report_btn.set_visibility((wf.dir / "workflow_report.html").is_file())
+            report_btn.set_visibility(bool(wf.state()["steps"].get("docking") or wf.state()["steps"].get("md_cases")))
         ui.timer(2.0, refresh)
         refresh()
 
@@ -539,6 +540,25 @@ def serve_viewer(project: str, name: str, i: int = 0):
         return HTMLResponse(viewer_html(scene_for(targets[i]), title=targets[i]["label"]))
     except Exception as exc:  # noqa: BLE001
         return HTMLResponse(f"無法產生 3D 場景：{type(exc).__name__}: {exc}", status_code=500)
+
+
+@app.get("/report/{project}/{name}")
+def serve_report(project: str, name: str, lang: str = "en"):
+    """Workflow report in the requested language (D-52); rebuilt from the workflow files on every request."""
+    from fastapi.responses import HTMLResponse
+    if safe_name(project) != project or safe_name(name) != name:
+        return HTMLResponse("not allowed", status_code=403)
+    try:
+        wf = Workflow.open(Project(Path(STATE["projects_dir"]) / project), name)
+    except FileNotFoundError:
+        return HTMLResponse("not found", status_code=404)
+    from ..report.workflow_report import build_workflow_report
+    code = lang if lang in ("en", "zh") else "en"
+    try:
+        p = build_workflow_report(wf, wf.dir / f"workflow_report_{code}.html", lang=code)
+    except Exception as exc:  # noqa: BLE001
+        return HTMLResponse(f"report failed: {type(exc).__name__}: {exc}", status_code=500)
+    return HTMLResponse(p.read_text(encoding="utf-8"))
 
 
 @app.get("/file")
