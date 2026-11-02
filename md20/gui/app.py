@@ -17,6 +17,7 @@ from ..docking.screen import echart_screen, echart_ranking
 from .views import (gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html,
                     coverage_targets, coverage_chart, coverage_summary)
 from .content import t, LANG_NAMES
+from .gate_text import gate_title, gate_general, option_text
 
 RUNNER = Runner()
 STATE: dict = {"projects_dir": default_projects_dir(), "platform": None, "doctor": None, "lang": None}
@@ -49,6 +50,28 @@ STEP_TEXT = {"receptor_input": ("受體來源", "Receptor source"), "receptor_do
 STATUS_TEXT = {"PASS": ("完成", "Done"), "COMPLETE": ("完成", "Done"), "RUNNING": ("執行中", "Running"), "PAUSED": ("已暫停", "Paused"),
                "NEEDS_HUMAN": ("需要你決定", "Needs your decision"), "ERROR": ("錯誤", "Error"), "IDLE": ("未執行", "Idle"),
                "AUTO_FIXED": ("已自動修正", "Corrected automatically"), "—": ("—", "—")}
+
+
+SOURCE_EN = [("科學限制 · 胜肽", "Scientific limitation · peptide"), ("結構可信度", "Structure validity"), ("受體整理", "Receptor preparation"),
+             ("受體來源", "Receptor source"), ("對接前檢查", "Docking pre-checks"), ("分子對接", "Molecular docking"),
+             ("pose 選擇", "Pose selection"), ("確認進入 MD", "Confirm molecular dynamics"), ("MD 建模", "System building"),
+             ("MD 執行", "Molecular dynamics"), ("軌跡分析", "Trajectory analysis"), ("SMD＋傘狀採樣", "Binding free energy"),
+             ("報告", "Report"), ("組裝", "assembly"), ("受體", "receptor"), ("配體", "ligand")]
+BADGE_EN = {"需要你決定": "Needs your decision", "已自動修正": "Corrected automatically", "通過": "Passed", "已暫停": "Paused", "執行中": "Running"}
+
+
+def card_source(src: str) -> str:
+    if lang() == "zh":
+        return src
+    for zh, en in SOURCE_EN:
+        src = src.replace(zh, en)
+    return src
+
+
+def card_badge(c: dict) -> str:
+    if c.get("advisory"):
+        return _("科學限制提醒", "Scientific notice")
+    return c["label"] if lang() == "zh" else BADGE_EN.get(c["label"], c["label"])
 
 
 def set_lang(code: str) -> None:
@@ -196,11 +219,11 @@ def _gate_buttons(wf: Workflow, card: dict):
                     ui.notify(str(exc), type="negative"); return
                 ui.notify(f"已寫回設定：{a['label']}；自 {a['from_step']} 起重跑（{len(out['invalidated'])} 個步驟）。"
                           "按「開始／繼續」執行。", type="positive")
-            ui.button(a["label"], on_click=do).props("outline color=primary no-caps")
+            ui.button(option_text(a["label"], lang()), on_click=do).props("outline color=primary no-caps")
     if card.get("manual"):
         ui.label(_("需要在程式外處理（處理後重新提供輸入）：", "Needs work outside the program (then provide the new input):")).classes("text-xs text-gray-500")
         for o in card["manual"]:
-            ui.label(f"→ {o}").classes("text-sm text-gray-700")
+            ui.label(f"→ {option_text(o, lang())}").classes("text-sm text-gray-700")
 
 
 async def _upload_payload(e) -> tuple[str, bytes]:
@@ -498,12 +521,19 @@ def workflow_page(project: str, name: str):
                     for c in cards:
                         with ui.card().classes("w-full"):
                             with ui.row().classes("items-center gap-2"):
-                                ui.badge(c["label"], color=c["color"])
-                                ui.label(f"{c['source']} · {c['title']}").classes("font-semibold")
-                            ui.label(c["explanation"]).classes("text-sm whitespace-pre-wrap")
+                                ui.badge(card_badge(c), color="blue-grey-6" if c.get("advisory") else c["color"])
+                                ui.label(f"{card_source(c['source'])} · {gate_title(c['title'], lang())}").classes("font-semibold")
+                            if lang() == "en" and gate_general(c["title"]):
+                                # D-55: general English explanation; the recorded detail (Chinese, with this run's numbers) below
+                                ui.label(gate_general(c["title"])).classes("text-sm")
+                                if c["explanation"]:
+                                    with ui.expansion("Details (recorded in Chinese)").classes("w-full text-xs"):
+                                        ui.label(c["explanation"]).classes("text-xs whitespace-pre-wrap")
+                            else:
+                                ui.label(c["explanation"]).classes("text-sm whitespace-pre-wrap")
                             if c["status"] != "NEEDS_HUMAN" and not c.get("advisory"):
                                 for o in c["options"]:
-                                    ui.label(f"→ {o}").classes("text-sm text-primary")
+                                    ui.label(f"→ {option_text(o, lang())}").classes("text-sm text-primary")
                             _gate_buttons(wf, c)
             tl = timeline(wf, limit=120)
             if len(tl) != time_sig["v"]:
