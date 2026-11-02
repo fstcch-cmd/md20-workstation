@@ -1,0 +1,81 @@
+name: Release (Windows installer)
+
+# A release is published only after the exact ZIP students will download has been unzipped and installed on a clean
+# Windows runner with Windows PowerShell 5.1, and the installed program still works after the unzipped folder is
+# deleted (D-33).  Trigger: push a tag v*  (or run manually with a tag name).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag: { description: "release tag, e.g. v0.1.0a1", required: true }
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          tag="${{ github.event.inputs.tag }}"; [ -n "$tag" ] || tag="${GITHUB_REF_NAME}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: "Build ZIP (git archive applies .gitattributes, *.cmd keep CRLF)"
+        run: |
+          tag="${{ steps.v.outputs.tag }}"
+          git archive --format=zip --prefix="MD20-$tag/" -o "MD20-Windows-$tag.zip" HEAD
+          sha256sum "MD20-Windows-$tag.zip" > SHA256SUMS.txt
+          unzip -l "MD20-Windows-$tag.zip" | grep -E "Install-MD20.cmd|installer/install.ps1|environment/base.yml"
+          cat SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with: { name: md20-windows-zip, path: "MD20-Windows-*.zip\nSHA256SUMS.txt" }
+
+  verify-windows:
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: md20-windows-zip, path: dl }
+      - name: Unzip and run Install-MD20.cmd (double-click entry point; Windows PowerShell 5.1 inside)
+        shell: cmd
+        env:
+          MD20_NOPAUSE: "1"
+        run: |
+          set MD20_ROOT=%RUNNER_TEMP%\MD20
+          powershell -NoProfile -Command "Expand-Archive -Path (Get-ChildItem dl\*.zip).FullName -DestinationPath '%RUNNER_TEMP%\unz' -Force" || exit /b 1
+          for /d %%D in ("%RUNNER_TEMP%\unz\MD20-*") do set SRC=%%D
+          call "%SRC%\Install-MD20.cmd" -Gpu cpu || exit /b 1
+          if not exist "%MD20_ROOT%\app\pyproject.toml" (echo program was not copied to %MD20_ROOT%\app & exit /b 1)
+          rmdir /s /q "%RUNNER_TEMP%\unz"
+      - name: Installed program works without the unzipped folder
+        shell: cmd
+        run: |
+          set MD20=%RUNNER_TEMP%\MD20
+          call "%MD20%\md20.cmd" doctor --no-benchmark || exit /b 1
+          call "%MD20%\md20.cmd" demo --dir "%RUNNER_TEMP%\md20demo" || exit /b 1
+          call "%MD20%\md20.cmd" pipeline example > "%RUNNER_TEMP%\example.json" || exit /b 1
+          dir "%MD20%\MD20-GUI.cmd" || exit /b 1
+
+  publish:
+    needs: [package, verify-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: md20-windows-zip, path: dl }
+      - name: Create GitHub Release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          tag="${{ needs.package.outputs.tag }}"
+          notes="docs/releases/$tag.md"; [ -f "$notes" ] || notes="docs/WINDOWS_QUICKSTART.md"
+          gh release create "$tag" dl/MD20-Windows-*.zip dl/SHA256SUMS.txt --target "${{ github.sha }}" \
+            --title "MD20 $tag（Windows 安裝程式）" --notes-file "$notes" --prerelease

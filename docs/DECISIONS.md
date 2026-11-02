@@ -7,6 +7,19 @@
 
 ## 2026-11-01（第一個 session，續）
 
+### D-33　Windows 安裝程式發行：GitHub Release ZIP＋雙擊 `Install-MD20.cmd`，發行前在 Windows 實裝驗證（使用者要求 11/02 11:00）
+- 決定：
+  - 發行物＝`MD20-Windows-<tag>.zip`（`git archive`，`*.cmd` 以 `.gitattributes` 保持 CRLF）＋`SHA256SUMS.txt`，GitHub Release（prerelease）。
+  - 入口＝repo 根目錄 `Install-MD20.cmd`：雙擊即以 `-ExecutionPolicy Bypass` 執行 `installer\install.ps1`，參數透傳（`-Gpu`、`-Root`、`-Cuda`），結束時顯示成功／失敗並暫停。
+  - `install.ps1`：不是 git checkout（ZIP）時，先把程式**複製到 `%LOCALAPPDATA%\MD20\app`** 再從那裡安裝（解壓資料夾通常在「下載」且會被刪）；git checkout 維持原地 editable。
+    原生指令（micromamba create/install、pip）失敗即停並說明（PS 5.1 的 `$ErrorActionPreference=Stop` 不攔原生指令的 exit code，之前會「看似完成」）；Vina 下載失敗只警告。
+  - `.github/workflows/release-windows.yml`：tag `v*` 觸發 → 打包 → **在乾淨 Windows runner 解壓、雙擊入口安裝（PS 5.1、CPU）、刪除解壓資料夾後 doctor／demo／pipeline example 仍可執行** → 才建立 Release。
+  - 版本 0.1.0a1（教學預覽版）；發行說明 `docs/releases/v0.1.0a1.md` 誠實列出已知限制。
+- 理由：學生不一定會 git；交付物必須是「下載→解壓→雙擊」。只發行 CI 證明可裝、可在原資料夾刪除後運作的那一個 ZIP。
+- 被否決（這次）：Inno Setup／NSIS 的 `setup.exe`（未簽章的 exe 一樣會被 SmartScreen 擋，且 3 小時內無法在真機驗證；可作下一版）；
+  把整個 conda 環境打包離線安裝（約 3–4 GB，且 CUDA／OpenCL 變體要分開打包）。
+- 未決：程式碼簽章（SmartScreen 警告）；離線安裝包；`Install-MD20.cmd` 在中文使用者名稱路徑下的實機驗證。
+
 ### D-32　1634916：Windows 真全綠；macOS GBn2 最小化 NaN、heavy workflow umbrella window NaN、鋅模型平均偏 0.31 Å
 - 事實（run 41347336927）：**Windows OpenCL 366 passed、5 skipped**（skip 全是設計內：MD20_HEAVY／MD20_PAPERS／playwright），
   `test_docking_integration`、`test_screen_integration` 這次真跑通過（D-31 有效）；Ubuntu 366 passed；installer-windows、pose-screen、paper-docking 綠。紅三項：

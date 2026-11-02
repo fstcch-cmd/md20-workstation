@@ -20,6 +20,23 @@ if (-not (Test-Path $Mamba)) {
 }
 if ($Gpu -eq "auto") { $Gpu = if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { "cuda" } else { "opencl" } }
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Src = (Resolve-Path (Join-Path $Here "..")).Path
+# Release ZIP (no .git): the unzipped folder is usually in Downloads and may be deleted later, so the program is copied
+# to $Root\app and installed from there.  A git checkout stays where it is (developers keep editing it).  D-33
+if (-not (Test-Path (Join-Path $Src ".git"))) {
+  $App = Join-Path $Root "app"
+  if ($Src.TrimEnd("\") -ne $App.TrimEnd("\")) {
+    Write-Host "複製程式到 $App ..."
+    if (Test-Path $App) { Remove-Item -Recurse -Force $App }
+    New-Item -ItemType Directory -Force -Path $App | Out-Null
+    Copy-Item -Recurse -Force (Join-Path $Src "*") $App
+  }
+  $Src = $App
+  $Here = Join-Path $App "installer"
+}
+function Assert-Ok([string]$what) {
+  if ($LASTEXITCODE -ne 0) { Write-Host "!! $what 失敗（exit $LASTEXITCODE）。請把上面的訊息貼給開發者；修正後重跑安裝器會續裝。"; exit $LASTEXITCODE }
+}
 $Base = Join-Path $Here "..\environment\base.yml"
 $GpuYml = Join-Path $Here ("..\environment\windows-" + ($(if ($Gpu -eq "cpu") {"opencl"} else {$Gpu})) + ".yml")
 $Prefix = Join-Path $Root "envs\md20"
@@ -44,13 +61,15 @@ New-Item -ItemType Directory -Force -Path (Join-Path $Root "tmp") | Out-Null
 $env:TMP = Join-Path $Root "tmp"; $env:TEMP = $env:TMP; $env:PIP_CACHE_DIR = Join-Path $Root "pipcache"
 $env:PYTHONUTF8 = "1"   # Traditional-Chinese consoles default to cp950; every md20 text file is UTF-8
 if (Test-Path (Join-Path $Prefix "conda-meta")) {
-  Write-Host "[2/4] 環境已存在，補齊套件 ($Gpu) ..."; & $Mamba install -y -p $Prefix -f $Base -f $GpuYml
+  Write-Host "[2/4] 環境已存在，補齊套件 ($Gpu) ..."; & $Mamba install -y -p $Prefix -f $Base -f $GpuYml; Assert-Ok "補齊環境"
 } else {
-  Write-Host "[2/4] 建立環境 ($Gpu) ..."; & $Mamba create -y -p $Prefix -f $Base -f $GpuYml
+  Write-Host "[2/4] 建立環境 ($Gpu) ..."; & $Mamba create -y -p $Prefix -f $Base -f $GpuYml; Assert-Ok "建立環境"
 }
 Write-Host "[3/4] 安裝 md20 ..."
-& $Mamba run -p $Prefix pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" gemmi -e (Join-Path $Here "..")
+& $Mamba run -p $Prefix pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" gemmi -e $Src
+Assert-Ok "安裝 md20"
 & $Mamba run -p $Prefix md20 setup-vina
+if ($LASTEXITCODE -ne 0) { Write-Host "!! Vina 下載失敗（多半是 GitHub 限流）；稍後執行 md20.cmd setup-vina 即可，其餘安裝繼續。" }
 # launchers: md20.cmd (command line) and MD20-GUI.cmd (double-click → browser GUI), both next to micromamba.exe
 $Cmd = Join-Path $Root "md20.cmd"
 Set-Content -Encoding ASCII -Path $Cmd -Value @(

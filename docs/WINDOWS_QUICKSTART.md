@@ -9,6 +9,10 @@
 - 安裝 [Git for Windows](https://git-scm.com/download/win)（或直接下載 repo ZIP 解壓）。
 
 ## 1. 安裝（10–20 分鐘，多半在下載）
+**最簡單（不需要 git）**：到 GitHub 的 Releases 頁下載最新的 `MD20-Windows-<版本>.zip` → 解壓縮 → **雙擊 `Install-MD20.cmd`**。
+程式會複製到 `%LOCALAPPDATA%\MD20\app`，解壓的資料夾之後可刪。其餘預期畫面同下。
+
+**開發者（git）**：
 開「Windows PowerShell」（內建的 5.1 即可，不需要 PowerShell 7）：
 ```powershell
 git clone https://github.com/fstcch-cmd/md20-workstation.git

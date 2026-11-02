@@ -17,4 +17,4 @@ Design rules (from the project spec):
 4. Small before big: cheap smoke tests precede expensive steps.
 """
 
-__version__ = "0.1.0a0"
+__version__ = "0.1.0a1"
