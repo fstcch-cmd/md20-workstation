@@ -57,3 +57,51 @@ def diagnose_nvidia_files(files: dict) -> str | None:
     if has_cuda and has_smi and not has_ocl:
         return "NVIDIA 驅動存在但缺少 nvopencl.dll；CUDA 可用、OpenCL 不可用，屬正常組合。"
     return None
+
+
+_JOB = None   # kept for the life of the process: closing it (on exit, crash or a closed console) ends the children
+
+
+def kill_children_on_exit() -> bool:
+    """Windows: put this process into a Job Object with KILL_ON_JOB_CLOSE (D-69).
+
+    Closing the console window that runs MD20 killed Python but not the vina.exe it had started: the orphan kept
+    docking (and the next run competed with it for the CPU).  Children inherit the job, so when this process ends
+    for any reason the system ends them too.  Returns True when the job is in place; no-op elsewhere."""
+    global _JOB
+    if sys.platform != "win32" or _JOB is not None:
+        return _JOB is not None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+
+        class IO_COUNTERS(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_ulonglong) for n in ("Read", "Write", "Other", "ReadT", "WriteT", "OtherT")]
+
+        class BASIC(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD)]
+
+        class EXTENDED(ctypes.Structure):
+            _fields_ = [("Basic", BASIC), ("Io", IO_COUNTERS), ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            return False
+        info = EXTENDED()
+        info.Basic.LimitFlags = 0x2000          # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):   # ExtendedLimitInformation
+            return False
+        if not k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()):
+            return False
+        _JOB = job
+        return True
+    except Exception:  # noqa: BLE001 — never stop MD20 from starting because of this
+        return False

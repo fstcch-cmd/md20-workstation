@@ -383,8 +383,9 @@ def _utf8_console() -> None:
 
 
 def main(argv=None) -> int:
-    from .env.winfix import suppress_windows_error_dialogs
+    from .env.winfix import suppress_windows_error_dialogs, kill_children_on_exit
     suppress_windows_error_dialogs()
+    kill_children_on_exit()          # D-69: a closed window must not leave vina.exe running
     _utf8_console()
     ap = argparse.ArgumentParser(prog="md20", description=f"MD20 teaching workstation {__version__}")
     ap.add_argument("--dir", default=str(default_projects_dir()), help="projects root directory")

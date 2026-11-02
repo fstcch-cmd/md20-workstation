@@ -7,6 +7,15 @@
 
 ## 2026-11-02
 
+### D-69　Windows：關掉 MD20 視窗時，子程式（vina.exe）必須一起結束
+- 事實（使用者 2026-11-03 00:08）：關掉 GUI 黑色視窗後，舊的 vina.exe 仍在跑（Windows 不會連帶結束子程式）；重開 GUI 後新舊兩個對接同時搶 CPU，
+  無法測「全速」的真實狀態。稍早工作管理員看到的 23.7% 很可能就是孤兒程序。
+- 決定：`md20` 一啟動（CLI 與 GUI 共用入口）就以 `winfix.kill_children_on_exit()` 把自己放進 Windows Job Object（KILL_ON_JOB_CLOSE）；
+  子程式繼承這個 job，主程式因任何原因結束（含關閉命令視窗、當機）時，系統一併結束子程式。失敗時不擋啟動（回傳 False）。
+- 證據：`tests/test_winjob.py`（Windows CI：父程序綁 job 後啟動 ping，`os._exit` 突然結束，子程序必須在 10 秒內消失）。
+- 被否決：atexit／signal 清理（關閉命令視窗時常常來不及執行）；啟動時掃描並結束「看起來是孤兒」的 vina.exe（可能誤殺使用者自己開的 Vina）。
+- 未決：GUI 啟動時偵測到既有孤兒 vina.exe 時是否提示使用者（目前只在說明文件寫明手動結束）。
+
 ### D-68　Windows vina.exe：一律傳 `--cpu`；多配體同時對接的時限依配體數放寬
 - 事實（筆電 2026-11-02 23:05–23:50，a3 候選版，教學一 hsieh2024 六個代謝物 simultaneous、exhaustiveness 32）：對接 45 分鐘仍無輸出；
   工作管理員 vina.exe **CPU 23.7%**（16 個邏輯 CPU 中約 4 個），總 CPU 26%，沒有其他負載。CI（Linux、Python bindings）兩篇論文對接重現共 25 分鐘。
