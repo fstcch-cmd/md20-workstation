@@ -7,6 +7,12 @@
 
 ## 2026-11-02
 
+### D-42　GUI 設計審查：CI 自動截圖每個頁面
+- 決定：`tools/gui_preview.py` 建一個示範專案（含一個被擋下的閘門與決策），啟動 `md20 gui`，用 Playwright 截圖儀表板／新流程／流程頁／3D 檢視器；
+  `.github/workflows/gui-preview.yml`（手動或 `md20/gui/**` 變更時觸發）上傳 PNG artifact，開發 session 下載後交給使用者審查。
+- 理由：使用者要在週二前調整互動介面；開發容器裝不了 NiceGUI，筆電又正在跑 teaching 重跑。截圖讓介面修改可以「改→看→再改」而不佔用筆電。
+- 未決：示範專案只有一個閘門狀態；需要時再加「跑完」「傘狀採樣中」等狀態的截圖。
+
 ### D-41　teaching／research 預設跑足它們要求的 window 長度
 - 事實：`TIER_BINDING` 要求 teaching ≥ 500 ps、research ≥ 2000 ps 才輸出 ΔG°，但 `BindingConfig` 預設 window 只有 50 ps，`binding.config` 沒寫就照 50 ps 跑——teaching／research 永遠被自己的規則擋下，等於白跑。D-40 的重跑實驗會撞上這個坑。
 - 決定：`Workflow._binding_config`：tier 有 `min_window_ps` 且使用者沒指定 `window_prod_ps` 時，自動採用該長度（equil = 長度 / 10，至少 10 ps），記 DecisionLog；使用者明確指定的值照用（仍由 tier 規則判定）。classroom 不變。
