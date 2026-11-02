@@ -441,14 +441,46 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
     out = doc.table([tx(("系統", "System"), L), tx(("配體", "Ligands"), L), tx(("狀態", "Status"), L),
                      tx(("主鏈 RMSD 平均（Å）", "Mean backbone RMSD (Å)"), L), tx(("配體（最後 20 % 的口袋 RMSD）", "Ligand (pocket RMSD, last 20 %)"), L), ""],
                     trs, ("各系統的模擬結果摘要", "Summary of the simulated systems"), {3})
+    # equilibration acceptance per system and stage (from the stage records of the first replica)
+    acc_rows = []
+    for key, c in cases.items():
+        r = runs.get(key, {})
+        if not r.get("run_ids"):
+            continue
+        try:
+            from ..project import Run
+            rdir = Run(wf.project.case(c["case_id"]), r["run_ids"][0]).dir
+        except Exception:  # noqa: BLE001
+            continue
+        for stg in ("nvt", "npt", "production"):
+            acc = (load_json(rdir / "stages" / stg / f"{stg}_complete.json", {}) or {}).get("acceptance") or {}
+            for chk in acc.get("checks") or []:
+                vals = ", ".join(f"{k} {v}" for k, v in chk.items() if k not in {"check", "ok"})
+                acc_rows.append([_esc(key), _esc(stg.upper() if stg != "production" else tx(("正式模擬", "production"), L)),
+                                 _esc(chk.get("check")), (tx(("通過", "pass"), L) if chk.get("ok") else
+                                                          f"<b class=warn>{_esc(tx(('未通過', 'fail'), L))}</b>"), _esc(vals)])
+    if acc_rows:
+        out += doc.table([tx(("系統", "System"), L), tx(("階段", "Stage"), L), tx(("驗收項目", "Check"), L), tx(("結果", "Result"), L),
+                          tx(("數值", "Values"), L)], acc_rows,
+                         ("平衡與正式模擬的驗收檢查（溫度、密度）", "Acceptance checks of equilibration and production (temperature, density)"))
     comp = ana.get("comparison") or {}
     if (comp.get("figures") or {}).get("compare"):
         out += doc.figure(comp["figures"]["compare"]["png"], ("蛋白單獨與複合物的主鏈 RMSD（上）與 Cα RMSF（下）。",
                                                              "Backbone RMSD (top) and Cα RMSF (bottom) of the protein alone and the complexes."))
+    caps = {"timeseries": ("主鏈 RMSD、蛋白迴轉半徑與配體口袋 RMSD 隨時間的變化；平台代表結構已平衡。",
+                           "Backbone RMSD, protein radius of gyration and ligand pocket RMSD over time; a plateau means the structure has equilibrated."),
+            "rmsf": ("每個殘基 Cα 的均方根擾動（RMSF）；峰值通常是 loop 與末端。",
+                     "Cα root-mean-square fluctuation (RMSF) per residue; peaks are usually loops and termini."),
+            "ligand_ligand": ("配體之間的距離隨時間的變化（多配體系統）。", "Distances between ligands over time (multi-ligand systems).")}
     for key, s in sums.items():
-        for k, fig in (s.get("figures") or {}).items():
+        figs = s.get("figures") or {}
+        for k in ("timeseries", "rmsf", "ligand_ligand"):
+            if figs.get(k):
+                out += doc.figure(figs[k]["png"], (f"{key}：{caps[k][0]}", f"{key}: {caps[k][1]}"))
+        for k, fig in figs.items():
             if k.startswith("contacts_"):
-                out += doc.figure(fig["png"], (f"{key}：口袋殘基與配體的接觸頻率。", f"{key}: contact frequency between pocket residues and the ligand."))
+                out += doc.figure(fig["png"], (f"{key}：口袋殘基與配體的接觸頻率（模擬時間中距離 < 4 Å 的比例）。",
+                                               f"{key}: contact frequency between pocket residues and the ligand (fraction of time within 4 Å)."))
     findings = I.md(sums, metrics, restrained) + I.rigidified(comp.get("most_rigidified_on_binding") or [])
     return _section(doc, doc.next(), "md", params, out, findings)
 
