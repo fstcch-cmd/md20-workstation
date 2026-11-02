@@ -7,6 +7,16 @@
 
 ## 2026-11-02
 
+### D-70　Windows 混合架構 CPU：Vina 的優先權依資源模式設定（低優先權被排到節能核心）
+- 事實（筆電 2026-11-03 00:12，D-68 的 `--cpu` 已生效、資源模式「全速」）：vina.exe 仍是 **24.5%**、記憶體 1,445 MB，與 23:50 幾乎相同。
+- 判斷（**推測，待驗證**）：i7-13620H 為 6 P-core（12 執行緒）＋ 4 E-core，16 執行緒的 25% 恰為 4 個執行緒＝4 個 E-core。
+  Windows 11 的排程（Thread Director／EcoQoS）把低於一般優先權的程序排到 E-core；MD20 自己降為 below normal，vina.exe 繼承，
+  因此 `--cpu` 再大也只用到 E-core。資源模式只在 MD 後端建立時套用 `apply_priority`，對接階段沒有依模式設定。
+- 決定：`resources.child_creationflags()`——平衡與全速以 **NORMAL_PRIORITY_CLASS** 啟動 vina.exe（平衡仍只給 n−2 個執行緒，電腦可用）；
+  省資源為 IDLE（刻意留在節能核心）。其他作業系統沿用繼承。
+- 驗證計畫：下一次筆電對接時，工作管理員 vina.exe CPU% 應明顯高於 25%（全速接近 100%、平衡約 85%）。若仍約 25%，推測錯誤，改查 Vina 多配體演算法的平行度並在此更正。
+- 證據：`tests/test_installer_paths.py::test_vina_priority_follows_mode_on_windows`（Windows CI）。
+
 ### D-69　Windows：關掉 MD20 視窗時，子程式（vina.exe）必須一起結束
 - 事實（使用者 2026-11-03 00:08）：關掉 GUI 黑色視窗後，舊的 vina.exe 仍在跑（Windows 不會連帶結束子程式）；重開 GUI 後新舊兩個對接同時搶 CPU，
   無法測「全速」的真實狀態。稍早工作管理員看到的 23.7% 很可能就是孤兒程序。

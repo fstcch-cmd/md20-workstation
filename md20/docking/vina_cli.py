@@ -129,10 +129,11 @@ def run_vina_cli(exe: str, receptor_pdbqt: str, ligand_pdbqts: list[str], center
         # D-68: always pass --cpu, from the resource mode the user chose (background ¼ of the CPUs so a report can be
         # written meanwhile, balanced all but two, full all).  Left to itself the Windows vina.exe used about 4 of 16
         # logical CPUs on the laptop during a six-ligand simultaneous docking.
-        from ..env.resources import cpu_threads
+        from ..env.resources import cpu_threads, child_creationflags
         cmd += ["--cpu", str(int(cpu) if cpu else cpu_threads())]
         # simultaneous docking of several ligands is much slower than one ligand: 2 h + 1 h per extra ligand (D-68)
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=7200 + 3600 * max(0, len(lig_files) - 1))
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=7200 + 3600 * max(0, len(lig_files) - 1),
+                           **({"creationflags": child_creationflags()} if os.name == "nt" else {}))
         if p.returncode != 0 or not out.is_file():
             raise RuntimeError("Vina 執行失敗：" + (p.stderr or p.stdout)[-2000:])
         text = out.read_text(encoding="utf-8")

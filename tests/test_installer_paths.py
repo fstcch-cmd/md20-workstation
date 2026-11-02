@@ -74,3 +74,14 @@ def test_vina_executable_always_gets_cpu(monkeypatch, tmp_path):   # D-68
         assert int(c[c.index("--cpu") + 1]) == plan(mode).threads          # the user's choice reaches Vina
     n = os.cpu_count() or 1
     assert plan("background").threads <= max(1, round(n / 4)) and plan("full").threads == n
+
+
+def test_vina_priority_follows_mode_on_windows(monkeypatch):   # D-70
+    from md20.env import resources
+    if resources.os.name != "nt":
+        assert resources.child_creationflags("full") == 0
+        return
+    import subprocess
+    assert resources.child_creationflags("full") == subprocess.NORMAL_PRIORITY_CLASS
+    assert resources.child_creationflags("balanced") == subprocess.NORMAL_PRIORITY_CLASS
+    assert resources.child_creationflags("background") == subprocess.IDLE_PRIORITY_CLASS

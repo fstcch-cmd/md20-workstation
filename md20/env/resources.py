@@ -146,3 +146,17 @@ def current_mode() -> str:
 
 def cpu_threads(mode: str | None = None) -> int:
     return plan(mode or current_mode()).threads
+
+
+def child_creationflags(mode: str | None = None) -> int:
+    """Windows priority class for CPU-heavy helper programs (Vina), from the chosen mode (D-70).
+
+    Windows 11 on hybrid CPUs (P- and E-cores) schedules processes below normal priority onto the efficiency cores:
+    on an i7-13620H (6 P + 4 E cores, 16 threads) vina.exe inherited MD20's below-normal priority and ran at 25 % —
+    the four E-cores — whatever --cpu said.  Balanced and full therefore run Vina at normal priority (balanced still
+    leaves two threads free); only background stays low.  Other systems: 0 (inherit)."""
+    if os.name != "nt":
+        return 0
+    import subprocess
+    m = mode or current_mode()
+    return subprocess.IDLE_PRIORITY_CLASS if m == "background" else subprocess.NORMAL_PRIORITY_CLASS
