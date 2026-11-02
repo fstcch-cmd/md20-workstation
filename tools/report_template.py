@@ -194,6 +194,20 @@ def build(root: Path, lang: str):
                                                             "metrics_file": str(wf.dir / "m_docked_multi.json")}
     cases["docked_multi"] = {**cases["docked_BEN"], "mode": "docked_multi", "ligands": ["BEN", "PGA"]}
     runs["docked_multi"] = dict(runs["docked_BEN"])
+    # ---- cooperativity cycle (D-61): BEN and PGA pulled alone and from the shared pocket
+    from md20.sampling.multi import cooperativity, compare_binding
+    b = st["steps"]["binding"]["results"]
+    base = {k: v for k, v in b["BEN"].items() if k not in ("figures",)}
+    b["PGA"] = {**base, "ligand": "PGA", "delta_pmf_kj_mol": 15.2, "delta_pmf_err_kj_mol": 1.6, "figures": {}}
+    b["BEN"].update(ligand="BEN", status="PASS")
+    b["multi:BEN"] = {**base, "ligand": "BEN", "context": "multi:docked_multi", "delta_pmf_kj_mol": 28.9, "delta_pmf_err_kj_mol": 1.9, "figures": {}}
+    b["multi:PGA"] = {**base, "ligand": "PGA", "context": "multi:docked_multi", "delta_pmf_kj_mol": 19.0, "delta_pmf_err_kj_mol": 1.7, "figures": {}}
+    for v in b.values():
+        v["status"] = "PASS"
+    ctx = {"single": ["BEN", "PGA"], "multi:docked_multi": ["multi:BEN", "multi:PGA"]}
+    comp = compare_binding(b, contexts=ctx)
+    comp["cooperativity"] = cooperativity(b, ctx)
+    st["steps"]["binding"]["comparison"] = comp
     st["steps"]["md_cases"]["cases"] = cases
     st["steps"]["md_runs"] = {"status": "PASS", "runs": runs}
     atomic_write_json(st, wf.state_path)

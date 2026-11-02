@@ -115,7 +115,7 @@ def compare_binding(results: dict, *, contexts: dict[str, list[str]]) -> dict:
                 "why": (f"{name} 從共同口袋拉離的 ΔPMF 比單獨結合 {'深' if d > 0 else '淺'} {abs(d):.1f} kJ/mol"
                         + (f"（≥ 2σ {2 * s:.1f}：可能有協同／互斥效應）" if sig else
                            "（在誤差內，不判定協同或互斥）" if s is not None else "（缺誤差，不判定）")
-                        + "；注意兩者起始構形不同，這是趨勢不是熱力學循環。")})
+                        + "；這是單一路徑，是否有協同以下方的熱力學循環（兩路徑閉合後平均）判定。")})
     out["notes"] = ["比較只在同一情境內有效（同一受體、同一 protocol）；單獨與共同情境不可直接排名。",
                     "誤差為 bootstrap 估計的 ΔPMF/ΔG° 標準差，不含 replica 間變異；research 等級需 ≥3 replica。"]
     return out
@@ -171,4 +171,97 @@ def aggregate_binding_replicas(reps: list) -> dict:
                       f"（各 replica：{', '.join(str(round(x, 1)) for x in dp)}）；σ 取 replica 標準誤與 bootstrap 合成中較大者。")
     else:
         out["why"] = "單一 replica；σ 只含 bootstrap 抽樣誤差。"
+    return out
+
+
+# ------------------------------------------------------------------------------------------- D-61 cooperativity
+CLOSURE_FALLBACK_KJ = 4.0      # without error bars, a cycle that misses by more than this is called not closed
+
+
+def cooperativity(results: dict, contexts: dict[str, list[str]]) -> list[dict]:
+    """Thermodynamic cycle for ligand pairs that were pulled both alone and from the shared complex.
+
+        P + A + B  ──ΔG(A)──▶  PA  ──ΔG(B|A)──▶  PAB
+             └──ΔG(B)──▶  PB  ──ΔG(A|B)──┘
+    Path independence: ΔG(A|B) − ΔG(A) = ΔG(B|A) − ΔG(B) ≡ ΔΔG_coop (negative = positive cooperativity: each ligand binds
+    more strongly when the other is present).  Both legs are measured independently, so their disagreement — the cycle
+    closure error — is a direct test of convergence: it must be within 2σ (σ from the four bootstrap/replica errors;
+    4 kJ/mol when errors are missing) before any cooperativity is claimed.
+
+    Uses ΔG° when all four values have one (tier allowed it), otherwise −ΔPMF well depths (qualitative, labelled).
+    Contexts with more than two ligands: each ligand's shift is "all others present", so a pairwise cycle does not
+    exist; the per-ligand shifts are reported without a closure test."""
+    singles = {results[k].get("ligand", k): k for k in contexts.get("single", []) if k in results}
+    out = []
+    for ctx, keys in contexts.items():
+        if not ctx.startswith("multi"):
+            continue
+        legs = {}
+        for k in keys:
+            r, name = results.get(k) or {}, (results.get(k) or {}).get("ligand")
+            rs = results.get(singles.get(name, ""), {})
+            if r.get("status") == "PASS" and rs.get("status") == "PASS":
+                legs[name] = (r, rs)
+        names = sorted(legs)
+        missing = sorted({(results.get(k) or {}).get("ligand", k.split(":", 1)[-1]) for k in keys} - set(names))
+        if len(names) < 2:
+            out.append({"context": ctx, "status": "INSUFFICIENT", "ligands": names, "missing": missing,
+                        "why": (f"{ctx}：協同自由能需要每個配體都有「單獨」與「共同口袋」兩種拉離結果；缺 {', '.join(missing) or '—'}。"
+                                "請在 md.systems 同時包含 docked_single 與 docked_multi。",
+                                f"{ctx}: cooperativity needs every ligand pulled both alone and from the shared pocket; missing "
+                                f"{', '.join(missing) or '—'}. Include both docked_single and docked_multi in md.systems.")})
+            continue
+        use_dG = all(r.get("dG_standard_kj_mol") is not None and rs.get("dG_standard_kj_mol") is not None for r, rs in legs.values())
+
+        def leg(name):
+            r, rs = legs[name]
+            if use_dG:
+                v = float(r["dG_standard_kj_mol"]) - float(rs["dG_standard_kj_mol"])
+                e = _sig(r.get("dG_err_kj_mol"), rs.get("dG_err_kj_mol"))
+            else:   # deeper well = stronger binding → ΔG-like quantity is −ΔPMF
+                v = -(float(r["delta_pmf_kj_mol"]) - float(rs["delta_pmf_kj_mol"]))
+                e = _sig(r.get("delta_pmf_err_kj_mol"), rs.get("delta_pmf_err_kj_mol"))
+            return round(v, 3), (None if e is None else round(e, 3))
+
+        shifts = {n: leg(n) for n in names}
+        rec = {"context": ctx, "ligands": names, "quantity": "ΔΔG°" if use_dG else "−ΔΔPMF（定性）", "missing": missing,
+               "shifts": {n: {"value": v, "err": e} for n, (v, e) in shifts.items()}}
+        if len(names) != 2:
+            rec.update(status="PER_LIGAND", why=(f"{ctx}：{len(names)} 個配體；每個配體的位移是「其他配體都在」時的效果，沒有成對的熱力學循環，不做閉合檢驗。",
+                                                 f"{ctx}: {len(names)} ligands; each shift is the effect of all the others being present, "
+                                                 "so there is no pairwise cycle and no closure test."))
+            out.append(rec)
+            continue
+        (a, (va, ea)), (b, (vb, eb)) = shifts.items()
+        closure = round(va - vb, 3)
+        s_cl = _sig(ea, eb)
+        coop = round((va + vb) / 2, 3)
+        s_coop = None if s_cl is None else round(s_cl / 2, 3)
+        rec.update(coop_kj_mol=coop, coop_err_kj_mol=s_coop, closure_kj_mol=closure, closure_sigma=s_cl)
+        lim = 2 * s_cl if s_cl is not None else CLOSURE_FALLBACK_KJ
+        if abs(closure) > lim:
+            rec.update(status="NOT_CLOSED", why=(
+                f"{a}+{b}：兩條路徑的協同估計相差 {abs(closure):.1f} kJ/mol（> {'2σ ' if s_cl is not None else ''}{lim:.1f}），循環沒有閉合，"
+                "採樣未收斂或起始構形差異過大；不報告協同效應。建議增加 replica 或延長每個窗口。",
+                f"{a}+{b}: the two legs disagree by {abs(closure):.1f} kJ/mol (> {'2σ ' if s_cl is not None else ''}{lim:.1f}); the cycle "
+                "does not close, so sampling has not converged or the starting structures differ too much; no cooperativity is reported. "
+                "Add replicas or lengthen the windows."))
+        elif s_coop is not None and abs(coop) < 2 * s_coop:
+            rec.update(status="NONE", why=(f"{a}+{b}：循環閉合（差 {abs(closure):.1f} kJ/mol），協同 {coop:+.1f} ± {s_coop:.1f} kJ/mol，在 2σ 內：沒有可偵測的協同或互斥。",
+                                           f"{a}+{b}: the cycle closes (legs differ by {abs(closure):.1f} kJ/mol); cooperativity "
+                                           f"{coop:+.1f} ± {s_coop:.1f} kJ/mol is within 2σ: no detectable cooperativity or competition."))
+        elif s_coop is None:
+            rec.update(status="UNCERTAIN", why=(f"{a}+{b}：循環閉合，協同 {coop:+.1f} kJ/mol，但缺誤差估計，只給方向不判定顯著。",
+                                                f"{a}+{b}: the cycle closes and cooperativity is {coop:+.1f} kJ/mol, but without error "
+                                                "estimates only the direction is given, not significance."))
+        else:
+            kind = ("正協同：兩者同時存在時各自結合更強", "positive cooperativity: each ligand binds more strongly with the other present") \
+                if coop < 0 else ("負協同（互斥）：同時存在時各自結合較弱", "negative cooperativity (competition): each binds more weakly with the other present")
+            rec.update(status="COOPERATIVE" if coop < 0 else "ANTICOOPERATIVE",
+                       why=(f"{a}+{b}：循環閉合（差 {abs(closure):.1f} kJ/mol），ΔΔG_coop = {coop:+.1f} ± {s_coop:.1f} kJ/mol（≥ 2σ），{kind[0]}。",
+                            f"{a}+{b}: the cycle closes (legs differ by {abs(closure):.1f} kJ/mol); ΔΔG_coop = {coop:+.1f} ± {s_coop:.1f} kJ/mol "
+                            f"(≥ 2σ), {kind[1]}."))
+        if not use_dG:
+            rec["why"] = (rec["why"][0] + "（以 ΔPMF 井深計算，定性。）", rec["why"][1] + " (From ΔPMF well depths; qualitative.)")
+        out.append(rec)
     return out

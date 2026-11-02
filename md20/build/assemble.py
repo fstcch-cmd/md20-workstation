@@ -274,7 +274,7 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
             ff.registerTemplateGenerator(ladder["generator"].generator)
             generators.append(ladder["provider"])
     if len(lig_atom_ranges) >= 1:
-        _geometry_backstop(modeller, lig_atom_ranges, n_protein, report, decisions, accept_geometry)
+        _geometry_backstop(modeller, lig_atom_ranges, n_protein, report, decisions, accept_geometry, ff=ff)
     if lig_atom_ranges:
         # REVIEW #15: metal sites were planned on the receptor alone; check the assembled complex for a docked
         # ligand that coordinates a metal directly
@@ -483,7 +483,7 @@ def _consistent_ladders(small: list, decisions, report) -> dict:
     return lad
 
 
-def _geometry_backstop(modeller, lig_atom_ranges, n_protein, report, decisions, accept: bool) -> None:
+def _geometry_backstop(modeller, lig_atom_ranges, n_protein, report, decisions, accept: bool, ff=None) -> None:
     """D-60: last check on the assembled complex with every hydrogen (Vina never saw the non-polar ones): overlaps
     and ring piercing per ligand; a rigid nudge ≤ 2 Å RMSD is applied in place (AUTO_FIXED), otherwise NEEDS_HUMAN."""
     from . import multi_ligand as ML
@@ -504,17 +504,25 @@ def _geometry_backstop(modeller, lig_atom_ranges, n_protein, report, decisions, 
     r = ML.resolve(ligs, prot, accept=accept, pose_entry=(ligs[0].name if len(ligs) == 1 else "joint"))
     if r["status"] == "PASS":
         return
-    if r["auto_excluded"] and len(ligs) > 1:
-        # removing atoms here would desynchronise every index downstream: the workflow-level check does exclusions
-        r["status"] = "ACCEPTED" if accept else "NEEDS_HUMAN"
-    if r["adjusted"]:
+    if r["adjusted"]:                        # nudges first, so a soft-core repair starts from them
         from openmm import Vec3
         pos = list(modeller.positions.value_in_unit(unit.nanometer))
         for name, a, b in lig_atom_ranges:
             if name in r["adjusted"]:
                 for k, x in enumerate(r["adjusted"][name]["xyz"]):
                     pos[a + k] = Vec3(*(x / 10.0))
+                for l in ligs:
+                    if l.name == name:
+                        l.xyz = np.asarray(r["adjusted"][name]["xyz"])
         modeller.positions = unit.Quantity(pos, unit.nanometer)
+    if r["status"] == "NEEDS_HUMAN" and ff is not None and not r["auto_excluded"]:
+        sc = _softcore_repair(modeller, ff, lig_atom_ranges, ligs, prot, r, decisions)
+        if sc is not None:
+            report.add(Gate("ligand geometry (with hydrogens)", AUTO_FIXED, sc))
+            return
+    if r["auto_excluded"] and len(ligs) > 1:
+        # removing atoms here would desynchronise every index downstream: the workflow-level check does exclusions
+        r["status"] = "ACCEPTED" if accept else "NEEDS_HUMAN"
     if r["status"] == "AUTO_FIXED":
         report.add(Gate("ligand geometry (with hydrogens)", AUTO_FIXED, r["why"][0]))
     elif r["status"] == "ACCEPTED":
@@ -524,3 +532,70 @@ def _geometry_backstop(modeller, lig_atom_ranges, n_protein, report, decisions, 
     if decisions:
         decisions.record("build.geometry", "+".join(n for n, _, _ in lig_atom_ranges), r["status"], r["why"][0],
                          kind="human" if r["status"] == "NEEDS_HUMAN" else "auto_fixed")
+
+
+def _softcore_repair(modeller, ff, lig_atom_ranges, ligs, prot, r, decisions) -> str | None:
+    """D-61: second layer after the rigid nudge — λ-ramped soft-core relaxation of each unresolved ligand (it may pass
+    through its neighbours), everything else held.  Accepted only when the geometry check then passes, the ligand moved
+    ≤ 3 Å heavy-atom RMSD and kept ≥ 70 % of its protein contacts; positions are applied in place.  None = not repaired."""
+    from . import multi_ligand as ML, softcore as SC
+    from openmm import app, unit
+    try:
+        system = ff.createSystem(modeller.topology, nonbondedMethod=app.NoCutoff, constraints=None, rigidWater=False,
+                                 removeCMMotion=False)
+    except Exception as exc:  # noqa: BLE001
+        if decisions:
+            decisions.record("build.geometry", "soft-core", "unavailable", f"無法建立軟核修復用的系統（{type(exc).__name__}: {exc}），改由使用者決定。")
+        return None
+    pos = np.asarray(modeller.positions.value_in_unit(unit.nanometer))
+    atoms = list(modeller.topology.atoms())
+    heavy = np.array([a.element is not None and a.element.symbol != "H" for a in atoms])
+    rng = {n: (a, b) for n, a, b in lig_atom_ranges}
+    by = {l.name: l for l in ligs}
+    done, notes_zh = [], []
+    for _ in range(len(ligs)):
+        bad = ML.culprit(ML.check(ligs, prot))
+        if bad is None:
+            break
+        if bad in done:
+            return None
+        a, b = rng[bad]
+        moving = list(range(a, b))
+        fixed = [i for i in range(len(atoms)) if heavy[i] and not (a <= i < b)]
+        base = by[bad].xyz.copy()
+        base_contacts = ML.protein_contacts(by[bad], base, prot)
+        try:
+            new = SC.relax(system, pos, moving, fixed)
+        except Exception as exc:  # noqa: BLE001
+            if decisions:
+                decisions.record("build.geometry", f"soft-core {bad}", "failed", f"軟核修復失敗（{type(exc).__name__}: {exc}）。")
+            return None
+        x = new[a:b] * 10.0
+        hv = by[bad].heavy
+        rmsd = float(np.sqrt(((x[hv] - base[hv]) ** 2).sum(1).mean()))
+        trial = ML.Mol(bad, by[bad].elements, x, by[bad].bonds, False, by[bad].rings)
+        if rmsd > SC.ACCEPT_RMSD_A or (prot is not None and ML.protein_contacts(trial, x, prot) < ML.KEEP_CONTACTS * base_contacts):
+            if decisions:
+                decisions.record("build.geometry", f"soft-core {bad}", "rejected",
+                                 f"軟核修復後 {bad} 移動 {rmsd:.1f} Å（上限 {SC.ACCEPT_RMSD_A} Å）或失去過多接觸：已是不同姿勢，交由使用者決定。")
+            return None
+        by[bad].xyz = x
+        for i in range(len(ligs)):
+            if ligs[i].name == bad:
+                ligs[i] = by[bad] = ML.Mol(bad, by[bad].elements, x, by[bad].bonds, False, by[bad].rings)
+        pos[a:b] = new[a:b]
+        done.append(bad)
+        notes_zh.append(f"{bad} 以軟核鬆弛（λ 0.05→1，配體可暫時穿過鄰近原子，其餘原子固定）解開，重原子 RMSD {rmsd:.1f} Å")
+    if ML.culprit(ML.check(ligs, prot)) is not None or not done:
+        return None
+    from openmm import Vec3
+    cur = list(modeller.positions.value_in_unit(unit.nanometer))
+    for n in done:
+        a, b = rng[n]
+        for k in range(a, b):
+            cur[k] = Vec3(*pos[k])
+    modeller.positions = unit.Quantity(cur, unit.nanometer)
+    msg = "；".join(notes_zh) + "；剛體微調無法處理，第二層修復成功，結合模式保留。"
+    if decisions:
+        decisions.record("build.geometry", "+".join(done), "AUTO_FIXED (soft-core)", msg, kind="auto_fixed")
+    return msg

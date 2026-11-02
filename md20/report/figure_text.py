@@ -758,3 +758,22 @@ FIG.update({
                  "A steady distance means the simulation supports co-occupancy; a steadily growing one means a ligand leaves and the joint docking pose is not supported."),
     },
 })
+
+
+FIG.update({
+    "cooperativity": {
+        "title": ("協同自由能（熱力學循環）", "Binding cooperativity (thermodynamic cycle)"),
+        "caption": ("每個配體單獨結合與另一配體已結合時的結合自由能（越低越強，誤差棒為 σ）；數字為兩者之差，即循環的一條路徑。",
+                    "Binding free energy of each ligand alone and with the partner bound (lower = stronger, error bars σ); the number is "
+                    "their difference, one leg of the cycle."),
+        "read": ("熱力學上兩條路徑的差必須相同（循環閉合）；先檢查閉合，再看平均差：負值為正協同（彼此加強），正值為互斥。兩條路徑不一致時代表採樣未收斂，不下結論。",
+                 "Thermodynamics requires both legs to give the same difference (the cycle closes); check closure first, then the mean: "
+                 "negative is positive cooperativity, positive is competition. Legs that disagree mean unconverged sampling and no conclusion."),
+    },
+})
+
+
+def classify_cooperativity(rec: dict) -> list[dict]:
+    lvl = {"COOPERATIVE": "note", "ANTICOOPERATIVE": "note", "NONE": "good", "UNCERTAIN": "caution", "NOT_CLOSED": "warn",
+           "PER_LIGAND": "note", "INSUFFICIENT": "caution"}.get(rec.get("status"), "note")
+    return [S(lvl, *rec["why"])] if rec.get("why") else []

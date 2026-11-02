@@ -451,3 +451,26 @@ def positions_by_ligand(cents: dict, box: dict, path: Path) -> str | None:
         ax.set_aspect("equal"); ax.set_xlabel(li); ax.set_ylabel(lj)
     axes[1].legend(fontsize=7, frameon=False, loc="upper right")
     return _save(fig, path)
+
+
+
+def cooperativity_plot(rows: list[dict], ylabel: str, path: Path) -> str | None:
+    """D-61 thermodynamic cycle: each ligand alone vs with its partner bound (ΔG-like: lower = stronger), with errors."""
+    if not rows:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(5.6, 3.0))
+    x = np.arange(len(rows))
+    for k, (key, lab, col) in enumerate((("alone", "Alone", PALETTE[0]), ("with", "Partner bound", PALETTE[1]))):
+        v = [r[key][0] for r in rows]
+        e = [r[key][1] or 0 for r in rows]
+        ax.bar(x + (k - 0.5) * 0.36, v, width=0.36, yerr=e, capsize=3, color=col, label=lab)
+    for i, r in enumerate(rows):
+        d = r["with"][0] - r["alone"][0]
+        ax.annotate(f"{d:+.1f}", (i, min(r["with"][0], r["alone"][0])), xytext=(0, -12), textcoords="offset points",
+                    ha="center", fontsize=8)
+    ax.axhline(0, color="#4d6170", lw=0.8)
+    ax.set_xticks(x, [r["ligand"] for r in rows])
+    ax.set_ylabel(ylabel)
+    ax.legend(fontsize=7, frameon=False)
+    return _save(fig, path)

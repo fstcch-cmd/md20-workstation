@@ -121,9 +121,11 @@ def _wf(tmp_path, a_xyz, b_xyz):
     return wf, sel
 
 
-def test_workflow_blocks_names_culprit_then_honours_exclusion(tmp_path):
+def test_workflow_blocks_names_culprit_then_honours_exclusion(tmp_path, monkeypatch):
     import pytest
+    import md20.workflow as W
     from md20.workflow import WorkflowBlocked
+    monkeypatch.setattr(W, "_openmm_available", lambda: False)     # no soft-core layer → a human decides now
     threaded = np.array([[0.1, 0, -2.3], [0.1, 0, -0.77], [0.1, 0, 0.77], [0.1, 0, 2.3]])
     wf, sel = _wf(tmp_path, BENZ, threaded)
     with pytest.raises(WorkflowBlocked):
@@ -149,6 +151,19 @@ def test_workflow_nudges_and_writes_new_pose(tmp_path):
     assert pk["sdf"].endswith("_nudged.sdf") and ML.mol_from_sdf(pk["sdf"], n).xyz.shape == (6, 3)
 
 
+def test_workflow_defers_to_softcore_when_openmm_exists(tmp_path, monkeypatch):
+    import md20.workflow as W
+    monkeypatch.setattr(W, "_openmm_available", lambda: True)
+    threaded = np.array([[0.1, 0, -2.3], [0.1, 0, -0.77], [0.1, 0, 0.77], [0.1, 0, 2.3]])
+    wf, sel = _wf(tmp_path, BENZ, threaded)
+    out = wf._multi_geometry(sel, ["A", "B"])
+    assert out["record"]["status"] == "DEFERRED" and out["ligands"] == ["A", "B"] and "soft-core" in out["record"]["why"][1]
+    wf.cfg["multi_ligand"] = {"softcore": False}                          # user opts out of the soft-core layer → ask now
+    import pytest
+    with pytest.raises(W.WorkflowBlocked):
+        wf._multi_geometry(sel, ["A", "B"])
+
+
 def test_workflow_switches_to_a_clean_joint_pose_before_asking(tmp_path):
     from md20.util.jsonio import atomic_write_json
     threaded = np.array([[0.1, 0, -2.3], [0.1, 0, -0.77], [0.1, 0, 0.77], [0.1, 0, 2.3]])
@@ -165,3 +180,16 @@ def test_workflow_switches_to_a_clean_joint_pose_before_asking(tmp_path):
         sel["ligands"][n]["rank"] = 1
     out = wf._multi_geometry(sel, ["A", "B"])
     assert out["record"]["status"] in ("PASS", "AUTO_FIXED") and sel["ligands"]["A"]["rank"] == 2   # rank 3 was rejected by docking
+
+
+def test_backbone_bond_through_ligand_ring_after_minimisation(tmp_path):
+    rows = []
+    for k, (x, y, z) in enumerate(BENZ):
+        rows.append(f"HETATM{k + 1:5d}  C{k + 1:<2} L01 B   1    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           C")
+    bb = [("N", "GLY", 1, (0.1, 2.2, -2.2), "N"), ("CA", "GLY", 1, (0.1, 1.2, -1.4), "C"), ("C", "GLY", 1, (0.1, 0.1, -0.66), "C"),
+          ("N", "GLY", 2, (0.1, 0.1, 0.67), "N"), ("CA", "GLY", 2, (0.1, -0.9, 1.5), "C"), ("C", "GLY", 2, (0.1, -2.0, 2.3), "C")]
+    for k, (an, rn, ri, (x, y, z), el) in enumerate(bb):
+        rows.append(f"ATOM  {k + 10:5d}  {an:<3} {rn} A{ri:4d}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           {el}")
+    (tmp_path / "bb.pdb").write_text("\n".join(rows) + "\nEND\n")
+    hits = ML.piercings_in_pdb(tmp_path / "bb.pdb")
+    assert hits and hits[0]["bond_of"] == "protein"        # the C(1)–N(2) peptide bond threads the ring

@@ -50,6 +50,8 @@ class BindingConfig:
     max_windows: int = 40
     box_margin_nm: float = 1.0             # d_max + ligand radius + margin must fit in half the box
     seed: int = 2026
+    hold_spectators: bool = True           # D-61: other ligands of a shared pocket stay bound while one is pulled
+    spectator_hold_nm: float = 0.3         # free within ±0.3 nm of their bound distance to the pocket anchor
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -134,6 +136,30 @@ def build_pulling_system(system, positions_nm: np.ndarray, anchor: np.ndarray, l
     bias.setName("md20_cv_bias")
     system.addForce(bias)
     return system
+
+
+def add_spectator_hold(system, positions_nm, box, anchor, spectators: dict, masses, width_nm: float, k: float = 2000.0) -> dict:
+    """D-61: while ligand A is pulled from a shared pocket, every other ligand B is kept in its bound state with a
+    flat-bottom restraint on its COM distance to the pocket anchor: zero force within ±width of the bound distance.
+    Without it, B may leave during A's windows and ΔG(A|B) — one leg of the cooperativity cycle — would not refer to
+    "B bound".  Inside the band the restraint does nothing, so it adds no free energy as long as B stays (the fraction of
+    samples at the wall is recorded and reported)."""
+    import openmm as mm
+    out = {}
+    for name, idx in spectators.items():
+        d0 = float(np.linalg.norm(min_image(group_com(positions_nm, idx, masses) - group_com(positions_nm, anchor, masses), box))) \
+            if box is not None else float(np.linalg.norm(group_com(positions_nm, idx, masses) - group_com(positions_nm, anchor, masses)))
+        f = mm.CustomCentroidBondForce(2, "k_sh*step(abs(distance(g1,g2)-d0_sh)-w_sh)*(abs(distance(g1,g2)-d0_sh)-w_sh)^2")
+        for p_ in ("k_sh", "d0_sh", "w_sh"):
+            f.addPerBondParameter(p_)
+        f.addGroup([int(i) for i in anchor])
+        f.addGroup([int(i) for i in idx])
+        f.addBond([0, 1], [k, d0, width_nm])
+        f.setUsesPeriodicBoundaryConditions(box is not None)
+        f.setName(f"md20_spectator_hold_{name}")
+        system.addForce(f)
+        out[name] = {"d0_nm": round(d0, 3), "idx": idx}
+    return out
 
 
 @dataclass
@@ -307,7 +333,8 @@ def finished_result(out_dir: Path | str, cfg: "BindingConfig") -> "BindingResult
     chart) reopens the sampling."""
     manifest = load_json(Path(out_dir) / "binding_manifest.json", {})
     prev = manifest.get("result") or {}
-    if manifest.get("status") == "PASS" and prev.get("status") == "PASS" and manifest.get("config") == cfg.to_dict():
+    stored = {**BindingConfig().to_dict(), **(manifest.get("config") or {})}   # fields added later keep old results valid
+    if manifest.get("status") == "PASS" and prev.get("status") == "PASS" and manifest.get("config") and stored == cfg.to_dict():
         known = {f.name for f in fields(BindingResult)}
         return BindingResult(**{k: v for k, v in prev.items() if k in known})
     return None
@@ -343,6 +370,10 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                                        anchor_indices=anchor_indices, pocket_cutoff_nm=cfg.pocket_cutoff_nm,
                                        exclude_indices=[i for v in (other_ligand_indices or {}).values() for i in v])
     system = build_pulling_system(system, pos, anchor, ligand)
+    spect = {}
+    if other_ligand_indices and cfg.hold_spectators:
+        spect = add_spectator_hold(system, pos, np.array([[v.x, v.y, v.z] for v in box_vecs]) if box_vecs else None, anchor,
+                                   {k: np.array(v, dtype=int) for k, v in other_ligand_indices.items() if v}, masses, cfg.spectator_hold_nm)
     manifest = load_json(out / "binding_manifest.json", {})
     manifest.update({"config": cfg.to_dict(), "groups": gi, "platform": platform_name, "updated_at": now_iso()})
     if decisions:
@@ -394,7 +425,9 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             return BindingResult(status="NEEDS_HUMAN", d_bound_nm=d0, caveats=[msg + "選項：先拉外側配體／只算單獨結合（docked_single）／指定 anchor_indices 改變方向"])
         if decisions:
             decisions.record("binding.path", "multi-ligand exit path", "clear",
-                             f"其他配體（{', '.join(sorted(others))}）不在拉離圓柱內；拉離期間它們不加限制（可自由移動），結果含其重排。")
+                             f"其他配體（{', '.join(sorted(others))}）不在拉離圓柱內；" + (f"拉離期間以平底限制保持在結合距離 ±{cfg.spectator_hold_nm} nm 內（範圍內無力，D-61），"
+                             "可在口袋內重排但不會離開，確保這一腿量的是「另一配體仍結合」時的自由能。" if cfg.hold_spectators else
+                             "拉離期間它們不加限制（可自由移動），結果含其重排。"))
     plan = plan_windows(d0, d0 + cfg.pull_distance_nm, force_constant_kj_mol_nm2=cfg.k_umbrella,
                         temperature_k=cfg.temperature_k, target_overlap=cfg.target_overlap, max_windows=cfg.max_windows)
     if smd.get("status") != "PASS":
@@ -454,6 +487,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     eq_steps = int(cfg.window_equil_ps * 1000 / cfg.timestep_fs)
     pr_steps = int(cfg.window_prod_ps * 1000 / cfg.timestep_fs)
     samples: dict[float, np.ndarray] = {}
+    hold_wall: dict[float, float] = {}
     finals: dict[float, str] = {}
     k_file = wdir / "windows_k.json"
     ks: dict[float, float] = {float(c): float(v) for c, v in load_json(k_file, {}).items() if not c.startswith("_")}
@@ -505,10 +539,17 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         if equilibrate:
             integ.step(eq_steps * f)
         vals = []
+        wall = 0
         for _ in range(0, pr_steps, cfg.sample_every_steps):
             integ.step(cfg.sample_every_steps * f)
             xyz_, box_ = _state_xyz_box(ctx)
             vals.append(cv_distance(xyz_, box_, anchor, ligand, masses))
+            for sp in spect.values():
+                if abs(cv_distance(xyz_, box_, anchor, sp["idx"], masses) - sp["d0_nm"]) > cfg.spectator_hold_nm:
+                    wall += 1
+                    break
+        if spect:
+            hold_wall[float(c)] = wall / max(1, len(vals))
         arr = np.asarray(vals)
         if not np.all(np.isfinite(arr)):
             raise RuntimeError(f"window {c:.3f} nm 出現 NaN")
@@ -718,6 +759,15 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     res.pmf["coverage"] = {"continuous": cont["continuous"], "breaks": cont["breaks"], "n_windows": len(samples),
                            "n_added": len(added), "n_manual": len(manual), "k_values": sorted({round(v, 1) for v in ks.values()}),
                            "rounds": len(refine_log), "unsamplable": final_plan.unsamplable if final_plan else []}
+    if spect:
+        mx = max(hold_wall.values(), default=0.0)
+        res.pmf["spectator_hold"] = {"width_nm": cfg.spectator_hold_nm, "ligands": {k: v["d0_nm"] for k, v in spect.items()},
+                                     "wall_fraction_max": round(mx, 3), "by_window": {f"{c:.3f}": round(v, 3) for c, v in hold_wall.items()}}
+        if mx > 0.1:
+            res.caveats.append(f"共同口袋中的其他配體（{', '.join(spect)}）在某些窗口有 {mx * 100:.0f}% 的取樣碰到 ±{cfg.spectator_hold_nm} nm 的保持限制："
+                               "它們想離開，這一腿的「另一配體結合」狀態部分由限制維持，協同自由能需保守解讀。")
+    elif other_ligand_indices and not cfg.hold_spectators:
+        res.caveats.append("其他配體在拉離期間沒有保持限制（binding.hold_spectators = false），可能隨之離開；協同自由能不可解讀。")
     if not cont["continuous"]:
         res.caveats.insert(1, f"CV 取樣仍有斷點 {cont['breaks']} nm（自動補窗 {len(refine_log)} 輪後）；PMF 在斷點處不可信，"
                               "不輸出 ΔG°。可在覆蓋圖上指定該區間補採樣，或提高 k_umbrella_max。")

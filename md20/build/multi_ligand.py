@@ -437,15 +437,17 @@ def piercings_in_pdb(pdb_path) -> list[dict]:
     lig_mols = [Mol(f"{k[2]}{k[1].strip()}", [a[0] for a in v], np.array([a[1] for a in v])) for k, v in ligs.items()]
     around = np.vstack([m.xyz for m in lig_mols])
     lo, hi = around.min(0) - 8, around.max(0) + 8
-    prot_res = [v for k, v in by_res.items() if k[2] in STANDARD and k[2] not in {"HOH", "WAT", "SOL"}
-                and any(np.all((np.array(x) >= lo) & (np.array(x) <= hi)) for _, x in v)]
+    prot_atoms = [a for k, v in by_res.items() if k[2] in STANDARD and k[2] not in {"HOH", "WAT", "SOL"}
+                  and any(np.all((np.array(x) >= lo) & (np.array(x) <= hi)) for _, x in v) for a in v]
     out = []
     for m in lig_mols:
         for o in lig_mols:
             if o is not m:
                 out += piercings(m, m.xyz, o, o.xyz)
-    for v in prot_res:                     # per residue: rings and bonds stay inside one residue (aromatic side chains, Pro)
-        r = Mol("protein", [a[0] for a in v], np.array([a[1] for a in v]), is_protein=True)
+    if prot_atoms:
+        # D-60 follow-up: one molecule for every residue near the ligands, so peptide bonds (C–N across residues) and
+        # disulfides are bonds too — a backbone threaded through a ligand ring is caught, not only side-chain rings
+        r = Mol("protein", [a[0] for a in prot_atoms], np.array([a[1] for a in prot_atoms]), is_protein=True)
         for m in lig_mols:
             out += piercings(m, m.xyz, r, r.xyz) + piercings(r, r.xyz, m, m.xyz)
     return out

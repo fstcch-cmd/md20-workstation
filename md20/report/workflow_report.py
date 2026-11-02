@@ -468,6 +468,8 @@ def _geometry_table(doc: Doc, rec: dict) -> str:
             act = tx((f"剛體微調 {a['rmsd']} Å", f"nudged {a['rmsd']} Å"), L)
         elif n in (rec.get("excluded") or []):
             act = tx(("排除", "excluded"), L)
+        elif rec.get("culprit") == n and rec.get("status") == "DEFERRED":
+            act = tx(("交給建模層的軟核鬆弛", "handed to the soft-core relaxation at build time"), L)
         elif rec.get("culprit") == n:
             act = tx(("建議排除（待決定）", "exclusion recommended (pending)"), L)
         else:
@@ -863,6 +865,7 @@ def _binding(doc: Doc, wf, vals, f, goal) -> str:
             out += f"<p class=warn>{_esc(tx(('ΔG° 不輸出的原因', 'Why ΔG° is not reported'), L))}: {_esc(str(r['dG_withheld']))}</p>"
     comp = (wf.state()["steps"].get("binding") or {}).get("comparison") or {}
     out += _comparison_html(comp, L)
+    out += _cooperativity_html(doc, comp.get("cooperativity") or [], b)
     # the profile itself is described under its figure; here the reported numbers and the convergence check
     findings = doc.collected[start:] + [x for x in I.binding(b) if "ΔG°" in x["text"][1] or "halves" in x["text"][1]]
     for ctx, c in (comp.get("contexts") or {}).items():
@@ -905,6 +908,38 @@ def _binding_figures(doc: Doc, name: str, r: dict) -> str:
         out += doc.figure_block(FG.pmf(g, W, err, doc.figdir / f"pmf_{name}.png"), "pmf", FT.classify_pmf(g, W, err, name), name)
     elif figs.get("pmf"):
         out += doc.figure_block(figs["pmf"]["png"], "pmf", [], name)
+    return out
+
+
+def _cooperativity_html(doc: Doc, coop: list, b: dict) -> str:
+    """D-61: thermodynamic cycle per shared pocket — closure first, then cooperativity."""
+    L = doc.lang
+    out = ""
+    for c in coop:
+        if c.get("status") == "INSUFFICIENT":
+            out += f"<p class=muted>{_esc(c['why'][0] if L == 'zh' else c['why'][1])}</p>"
+            continue
+        use_dG = c.get("quantity", "").startswith("ΔΔG")
+        rows = []
+        for n in c.get("ligands") or []:
+            r_with, r_alone = b.get(f"multi:{n}") or {}, b.get(n) or {}
+            if use_dG:
+                w, a = (r_with.get("dG_standard_kj_mol"), r_with.get("dG_err_kj_mol")), (r_alone.get("dG_standard_kj_mol"), r_alone.get("dG_err_kj_mol"))
+            else:
+                w = (-(r_with.get("delta_pmf_kj_mol") or 0), r_with.get("delta_pmf_err_kj_mol"))
+                a = (-(r_alone.get("delta_pmf_kj_mol") or 0), r_alone.get("delta_pmf_err_kj_mol"))
+            rows.append({"ligand": n, "alone": a, "with": w})
+        out += _sub(doc, "配體之間的協同", "Cooperativity between the ligands")
+        out += doc.figure_block(FG.cooperativity_plot(rows, "ΔG° (kJ mol⁻¹)" if use_dG else "−ΔPMF (kJ mol⁻¹)",
+                                                      doc.figdir / f"cooperativity_{c['context'].replace(':', '_')}.png"),
+                                "cooperativity", FT.classify_cooperativity(c), c["context"])
+        if c.get("closure_kj_mol") is not None:
+            out += doc.table([tx(("量", "Quantity"), L), tx(("數值（kJ mol⁻¹）", "Value (kJ mol⁻¹)"), L), "σ"],
+                             [[_esc(tx(("協同 ΔΔG_coop（兩路徑平均）", "Cooperativity ΔΔG_coop (mean of the legs)"), L)), f"{c['coop_kj_mol']:+.2f}", _fmt(c.get("coop_err_kj_mol"))],
+                              [_esc(tx(("循環閉合誤差（兩路徑差）", "Cycle closure error (difference of the legs)"), L)), f"{c['closure_kj_mol']:+.2f}", _fmt(c.get("closure_sigma"))]]
+                             + [[_esc(f"{n}: " + tx(("另一配體存在時的變化", "shift with the partner bound"), L)), f"{v['value']:+.2f}", _fmt(v.get("err"))]
+                                for n, v in (c.get("shifts") or {}).items()],
+                             ("協同自由能與循環閉合", "Cooperativity and cycle closure"), {1, 2})
     return out
 
 

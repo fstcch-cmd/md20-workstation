@@ -86,6 +86,11 @@ def metal_indices_from_manifest(bm: dict) -> list[int]:
     return [int(p["metal_index"]) for p in plans if p.get("action") == "bonded" and p.get("metal_index") is not None]
 
 
+def _openmm_available() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("openmm") is not None
+
+
 class WorkflowBlocked(RuntimeError):
     """A step needs a human decision; message explains which and why."""
 
@@ -855,7 +860,7 @@ class Workflow:
         exclude = [n for n in (human.get("exclude") or []) if n in names]
         sig = {"names": list(names), "sdf": [sel["ligands"][n].get("sdf") for n in names], "human": human}
         prev = self.state().get("multi_ligand") or {}
-        if prev.get("signature") == sig and prev.get("status") in ("PASS", "AUTO_FIXED", "ACCEPTED"):
+        if prev.get("signature") == sig and prev.get("status") in ("PASS", "AUTO_FIXED", "ACCEPTED", "DEFERRED"):
             picks = {n: {**sel["ligands"][n], "sdf": a["sdf"]} for n, a in (prev.get("adjusted") or {}).items()}
             return {"ligands": prev["ligands"], "picks": picks, "record": prev}
         keep = [n for n in names if n not in exclude]
@@ -895,6 +900,16 @@ class Workflow:
             alt = self._alternative_joint_pose(sel, names, prot)
             if alt is not None:
                 return self._multi_geometry(sel, names, allow_alternatives=False)
+        if r["status"] == "NEEDS_HUMAN" and human.get("softcore", True) and _openmm_available():
+            # D-61: a rigid nudge was not enough; the build stage can still untangle the ligand with a soft-core relaxation
+            # (it may pass through its neighbours while everything else is held).  Defer instead of asking now.
+            record["status"] = "DEFERRED"
+            record["why"] = [r["why"][0] + "（剛體微調不足；交給建模層的軟核鬆弛處理，失敗才請使用者決定。）",
+                             r["why"][1] + " (A rigid nudge is not enough; deferred to the soft-core relaxation at build time, "
+                                           "and only if that fails is a decision asked for.)"]
+            st = self.state(); st["multi_ligand"] = record; atomic_write_json(st, self.state_path)
+            self.dec.record("multi_ligand.geometry", "+".join(names), "DEFERRED", record["why"][0], kind="auto")
+            return {"ligands": r["ligands"], "picks": picks, "record": record}
         if r["status"] == "NEEDS_HUMAN":
             self._block("md_cases", "多配體幾何檢查：" + r["why"][0], multi_ligand=record,
                         gates=[{"name": "multi-ligand geometry", "status": "NEEDS_HUMAN", "explanation": r["why"][0],
@@ -1267,6 +1282,10 @@ class Workflow:
                 self.dec.record("binding.compare", "ΔΔ", c.get("reference"), c["why"])
         for c in comparison["co_occupancy"]:
             self.dec.record("binding.compare", f"co-occupancy {c['ligand']}", c["shift_kj_mol"], c["why"])
+        from .sampling.multi import cooperativity
+        comparison["cooperativity"] = cooperativity(results, {k: v for k, v in contexts.items() if v})   # D-61
+        for c in comparison["cooperativity"]:
+            self.dec.record("binding.cooperativity", c["context"], c["status"], c["why"][0])
         self._mark("binding", results=results, comparison=comparison)
         return results
 
