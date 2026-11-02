@@ -946,9 +946,12 @@ class Workflow:
                 from .engine.protocol import implicit_solvent_protocol
                 proto = implicit_solvent_protocol(proto)
             if md.get("stage_overrides"):
+                from .engine.protocol import RESTRAINT_STRATEGIES
+                npt_factor = float(RESTRAINT_STRATEGIES[self._restraint_strategy()].get("npt_length_factor", 1.0))
                 for st in proto.stages:
                     for k, v in md["stage_overrides"].get(st.name, {}).items():
-                        setattr(st, k, v)
+                        # an NPT length is the *base* length; the gentle strategy still doubles it (D-49)
+                        setattr(st, k, float(v) * npt_factor if (st.name == "npt" and k == "length_ps") else v)
             group = runs.get(key, {}).get("group_id") or f"wf_{self.name}_{key}"
             summary = run_replicas(case, proto, make_factory(case, proto), n=proto.replicas, should_pause=should_pause,
                                    progress_cb=progress_cb, group_id=group)
