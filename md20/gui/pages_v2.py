@@ -35,6 +35,15 @@ def _project(name: str) -> Project:
     return Project(root) if (root / "project.json").is_file() else Project.create(STATE["projects_dir"], name)
 
 
+def unique_workflow_name(project_dir: Path, name: str) -> str:
+    """Never overwrite an existing workflow (its config.json carries the user's decisions): add _2, _3 …"""
+    base = safe_name(name or "workflow")
+    cand, i = base, 2
+    while (Path(project_dir) / "workflows" / cand).exists():
+        cand, i = f"{base}_{i}", i + 1
+    return cand
+
+
 def _doctor_dict() -> dict:
     rep = STATE.get("doctor")
     if rep is None:
@@ -128,7 +137,12 @@ def teach(case: str):
 
         def start():
             proj = _project("Teaching" if L == "en" else "教學")
-            wf = Workflow(proj, cfg)
+            if (proj.dir / "workflows" / safe_name(cfg["name"]) / "config.json").is_file():
+                # the lesson already exists: continue it instead of overwriting its decisions
+                wf = Workflow.open(proj, cfg["name"])
+                ui.notify(_("這個教學案例已經建立過，繼續原本的流程。", "This lesson already exists; continuing it."))
+            else:
+                wf = Workflow(proj, cfg)
             _start(wf)
             ui.navigate.to(f"/wf/{proj.dir.name}/{wf.name}")
         ui.button(t("start_lesson", L), on_click=start).props("color=primary no-caps size=lg")
@@ -395,6 +409,7 @@ def _form(mode: str):
         except ValueError as exc:
             err.set_text(str(exc)); return
         proj = _project(project.value or "Projects")
+        cfg["name"] = unique_workflow_name(proj.dir, cfg["name"])
         wf = Workflow(proj, cfg)
         if state["library_file"]:
             shutil.copy2(state["library_file"], wf.dir / Path(state["library_file"]).name)
