@@ -28,6 +28,8 @@
 - 決定：`md20` 一啟動（CLI 與 GUI 共用入口）就以 `winfix.kill_children_on_exit()` 把自己放進 Windows Job Object（KILL_ON_JOB_CLOSE）；
   子程式繼承這個 job，主程式因任何原因結束（含關閉命令視窗、當機）時，系統一併結束子程式。失敗時不擋啟動（回傳 False）。
 - 證據：`tests/test_winjob.py`（Windows CI：父程序綁 job 後啟動 ping，`os._exit` 突然結束，子程序必須在 10 秒內消失）。
+- **更正（2026-11-03 01:50，CI c4d7232 Windows 紅）**：`kill_children_on_exit()` 在 Windows 回傳 False——沒有宣告 `argtypes`，64 位元的
+  job／process handle 被 ctypes 當 32 位元 int 傳遞而失敗（例外被吞掉）。也就是 D-69 原版在 Windows 上**沒有作用**，是新測試抓到的。補上四個 API 的 `argtypes`／`restype`。
 - 被否決：atexit／signal 清理（關閉命令視窗時常常來不及執行）；啟動時掃描並結束「看起來是孤兒」的 vina.exe（可能誤殺使用者自己開的 Vina）。
 - 未決：GUI 啟動時偵測到既有孤兒 vina.exe 時是否提示使用者（目前只在說明文件寫明手動結束）。
 
