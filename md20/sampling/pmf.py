@@ -49,6 +49,25 @@ def umbrella_quality(samples_by_center: dict[float, np.ndarray], *, target_overl
     return mdh.quality_report_to_dict(report), eq, unc
 
 
+
+def pmf_span_needed(eq_lists, *, trim: float = 0.0) -> tuple[float, float]:
+    """CV range the windows actually sampled: from the lowest to the highest window mean (not the extreme tails,
+    whose bins are legitimately empty)."""
+    means = [float(np.mean(x)) for x in eq_lists if len(x)]
+    return (min(means) + trim, max(means) - trim) if means else (float("nan"), float("nan"))
+
+
+def pmf_coverage(result: dict, lo: float, hi: float) -> dict:
+    """Does the finite part of a PMF span [lo, hi] (within one bin)?"""
+    g = np.asarray(result.get("grid_nm"), dtype=float)
+    w = np.asarray(result.get("pmf_kj_mol"), dtype=float)
+    fin = np.isfinite(w)
+    if g.size < 2 or not fin.any() or not np.isfinite(lo):
+        return {"ok": False, "finite_nm": None}
+    dx = float(g[1] - g[0])
+    f_lo, f_hi = float(g[fin].min()), float(g[fin].max())
+    return {"ok": bool(f_lo <= lo + dx and f_hi >= hi - dx), "finite_nm": [round(f_lo, 4), round(f_hi, 4)]}
+
 def pmf_from_windows(samples_by_center: dict[float, np.ndarray], *, force_constant_kj_mol_nm2: float | dict,
                      temperature_k: float = 300.0, out_dir: Path | str | None = None, n_bootstrap: int = 100,
                      bins: int = 200, prefer_mbar: bool = True, seed: int = 2026) -> PMFResult:
@@ -60,6 +79,20 @@ def pmf_from_windows(samples_by_center: dict[float, np.ndarray], *, force_consta
          else force_constant_kj_mol_nm2)
     base = mdh.bootstrap_pmf_1d(eq_lists, centers, k, temperature_k, bins=bins,
                                 n_bootstrap=n_bootstrap, seed=seed, prefer_mbar=prefer_mbar)
+    # D-62: the PMF must span what the windows sampled.  An MBAR solve with poor f_k gives windows weights that
+    # underflow to zero, so the PMF is NaN past them and the curve silently stops (laptop 3PTB: sampled to 1.72 nm,
+    # PMF ended at 0.50 nm, "ΔPMF" was the edge value).  Then WHAM on the same samples is used if it covers the range.
+    need_lo, need_hi = pmf_span_needed(eq_lists)
+    cov = pmf_coverage(base, need_lo, need_hi)
+    if not cov["ok"] and str(base.get("method", "")).startswith("PyMBAR"):
+        wb = mdh.bootstrap_pmf_1d(eq_lists, centers, k, temperature_k, bins=bins,
+                                  n_bootstrap=n_bootstrap, seed=seed, prefer_mbar=False)
+        wcov = pmf_coverage(wb, need_lo, need_hi)
+        quality["pmf_truncated"] = {"method": str(base.get("method")), "finite_nm": cov["finite_nm"],
+                                    "sampled_nm": [round(need_lo, 4), round(need_hi, 4)],
+                                    "replaced_by": "WHAM" if wcov["ok"] else None, "wham_finite_nm": wcov["finite_nm"]}
+        if wcov["ok"]:
+            base = wb
     grid = np.asarray(base["grid_nm"], dtype=float)
     pmf = np.asarray(base["pmf_kj_mol"], dtype=float)
     lo, hi = np.asarray(base.get("ci95_low_kj_mol"), dtype=float), np.asarray(base.get("ci95_high_kj_mol"), dtype=float)
@@ -67,6 +100,8 @@ def pmf_from_windows(samples_by_center: dict[float, np.ndarray], *, force_consta
     finite = np.isfinite(pmf)
     delta = float(np.nanmax(pmf[finite]) - np.nanmin(pmf[finite])) if finite.any() else float("nan")
     converged = bool(base.get("converged", True))
+    if not pmf_coverage(base, need_lo, need_hi)["ok"]:
+        converged = False                      # neither estimator covers the sampled range: never report an edge value
     # D-43: an MBAR solve that did not reach tolerance is cross-checked with WHAM on the same samples; it is accepted
     # only when the two ΔPMF agree within 2 kJ/mol (the reason is kept for the report either way)
     if not converged and str(base.get("method", "")).startswith("PyMBAR"):
@@ -80,6 +115,8 @@ def pmf_from_windows(samples_by_center: dict[float, np.ndarray], *, force_consta
             converged = bool(w.get("converged")) and np.isfinite(diff) and diff <= 2.0
         except Exception as exc:  # noqa: BLE001
             quality["solver_cross_check"] = {"mbar_note": base.get("solver_note", ""), "error": f"{type(exc).__name__}: {exc}"}
+    quality["solver"] = {k: base.get(k) for k in ("timing_s", "bootstrap_warm_start", "bootstrap_solver_protocol",
+                                                  "solver_fallback", "bootstrap_success", "bootstrap_requested")}
     res = PMFResult(grid_nm=grid, pmf_kj_mol=pmf, err_kj_mol=err, method=str(base.get("method", "")),
                     converged=converged, delta_pmf_kj_mol=delta, quality=quality,
                     boot_pmfs=base.get("bootstrap_pmfs"))

@@ -88,3 +88,8 @@ WHAM 與 MBAR 改為接受**每個 window 各自的 k**（`_mdh_legacy._k_column
 3. 中心預偏移：自動 ≤1σ、手動 ≤3σ 的上限是經驗值；有沒有更穩的作法（例如以前一輪的 μ(c) 關係做局部線性反解）？
 4. 延長 window 時是否應重新做 equilibration detection？
 5. 是否應加入「Hamiltonian replica exchange between windows」作為補窗失敗時的後備？
+
+## PMF 估計的效能與範圍檢查（D-62）
+- bootstrap 重抽樣以基本 MBAR 解的 f_k 暖啟動；基本解需要備援求解法時，重抽樣直接用 robust protocol。計時記在 `quality["solver"]["timing_s"]`。
+- PMF 有限值必須涵蓋最低到最高 window 平均（±1 bin）；MBAR 沒涵蓋改用 WHAM（記 `quality["pmf_truncated"]`），都沒涵蓋則 `converged=False`。
+- 未決：自適應停止 bootstrap（σ 收斂即停）是否採用。

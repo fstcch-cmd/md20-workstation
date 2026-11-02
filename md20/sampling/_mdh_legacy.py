@@ -1061,7 +1061,12 @@ def mbar_pmf_1d(
     bins: int = 200,
     x_min: float | None = None,
     x_max: float | None = None,
+    initial_f_k: Sequence[float] | None = None,
+    solver_protocol: Any = None,
 ) -> dict[str, Any]:
+    """`initial_f_k`: warm start (bootstrap replicates start from the base solution; D-62).  `solver_protocol`:
+    passed to pymbar when given (e.g. "robust" after the base solve needed a fallback).  A pymbar that does not
+    accept either argument is called without it (the result is the same, only slower)."""
     from pymbar import MBAR
 
     samples = [_finite_1d(x, min_samples=4) for x in uncorrelated_sample_lists]
@@ -1093,17 +1098,24 @@ def mbar_pmf_1d(
         # pymbar prints solver chatter to stdout/stderr and its logger; keep it out of the student's console and
         # record it instead (D-43)
         with _ctx.redirect_stdout(buf), _ctx.redirect_stderr(buf):
-            mbar = MBAR(
-                u_kn,
-                N_k,
-                maximum_iterations=20000,
-                relative_tolerance=1e-10,
-                verbose=False,
-            )
+            extra: dict[str, Any] = {}
+            if initial_f_k is not None and len(initial_f_k) == len(centers):
+                extra["initial_f_k"] = np.asarray(initial_f_k, dtype=float)
+            if solver_protocol is not None:
+                extra["solver_protocol"] = solver_protocol
+            while True:
+                try:
+                    mbar = MBAR(u_kn, N_k, maximum_iterations=20000, relative_tolerance=1e-10, verbose=False, **extra)
+                    break
+                except (TypeError, ValueError):
+                    if not extra:
+                        raise
+                    extra.pop("solver_protocol" if "solver_protocol" in extra else "initial_f_k")
     finally:
         plog.removeHandler(grab)
     chatter = "\n".join(msgs) + "\n" + buf.getvalue()
     solver_ok = "No solution found" not in chatter
+    used_fallback = "trying next method" in chatter
 
     f_k = np.asarray(mbar.f_k, dtype=float)
     logN = np.full(len(N_k), -np.inf, dtype=float)
@@ -1142,6 +1154,9 @@ def mbar_pmf_1d(
         "solver_note": "" if solver_ok else "pymbar: no solver reached the tolerance; the smallest-gradient solution was used",
         "iterations": None,
         "method": "PyMBAR-MBAR",
+        "solver_fallback": bool(used_fallback),
+        "warm_start": "initial_f_k" in extra,
+        "solver_protocol_used": extra.get("solver_protocol"),
         "overlap_matrix": overlap_matrix,
         "mbar_overlap_scalar": float(overlap_result["scalar"]),
         "mbar_overlap_eigenvalues": np.asarray(
@@ -1161,6 +1176,8 @@ def estimate_pmf_1d(
     prefer_mbar: bool = True,
     x_min: float | None = None,
     x_max: float | None = None,
+    initial_f_k: Sequence[float] | None = None,
+    solver_protocol: Any = None,
 ) -> dict[str, Any]:
     if prefer_mbar:
         try:
@@ -1172,6 +1189,8 @@ def estimate_pmf_1d(
                 bins=bins,
                 x_min=x_min,
                 x_max=x_max,
+                initial_f_k=initial_f_k,
+                solver_protocol=solver_protocol,
             )
         except Exception as exc:
             result = stable_wham_1d(
@@ -1230,6 +1249,8 @@ def bootstrap_pmf_1d(
         prepared_uncorr.append(subsample_uncorrelated(x, g))
         block_lengths.append(max(1, int(math.ceil(g))))
 
+    import time as _time
+    _t0 = _time.perf_counter()
     base = estimate_pmf_1d(
         eq_lists,
         prepared_uncorr,
@@ -1239,12 +1260,19 @@ def bootstrap_pmf_1d(
         bins=bins,
         prefer_mbar=prefer_mbar,
     )
+    base_s = _time.perf_counter() - _t0
     grid = np.asarray(base["grid_nm"], dtype=float)
     if len(grid) < 2:
         raise SamplingQualityError("PMF grid has fewer than two points")
     half_dx = 0.5 * float(grid[1] - grid[0])
+    # D-62: every replicate is the same windows with resampled data, so the base f_k is an excellent starting point;
+    # a base solve that needed pymbar's fallback solver sends the replicates straight to the robust protocol instead
+    # of failing hybr 100 more times.  (Previously each replicate solved MBAR from zero: teaching tier ≈ hours.)
+    warm = base.get("f_k_dimensionless") if str(base.get("method", "")).startswith("PyMBAR") else None
+    protocol = "robust" if base.get("solver_fallback") else None
     rng = np.random.default_rng(int(seed))
     boot_pmfs: list[np.ndarray] = []
+    _t1 = _time.perf_counter()
 
     for _ in range(int(n_bootstrap)):
         resampled_eq = [
@@ -1266,6 +1294,8 @@ def bootstrap_pmf_1d(
                 prefer_mbar=prefer_mbar,
                 x_min=float(grid.min() - half_dx),
                 x_max=float(grid.max() + half_dx),
+                initial_f_k=warm,
+                solver_protocol=protocol,
             )
             pmf = np.asarray(result["pmf_kj_mol"], dtype=float)
             if len(pmf) == len(grid):
@@ -1294,6 +1324,12 @@ def bootstrap_pmf_1d(
     base["bootstrap_success"] = int(bootstrap_success)
     base["bootstrap_requested"] = int(n_bootstrap)
     base["bootstrap_method"] = "moving-block"
+    boot_s = _time.perf_counter() - _t1
+    # measured, so the speed-up is evidence rather than a claim (D-62): base solve vs mean replicate wall time
+    base["timing_s"] = {"base_solve": round(base_s, 3), "bootstrap_total": round(boot_s, 3),
+                        "per_replicate": round(boot_s / max(1, int(n_bootstrap)), 3)}
+    base["bootstrap_warm_start"] = warm is not None
+    base["bootstrap_solver_protocol"] = protocol
     base["bootstrap_pmfs"] = np.vstack(boot_pmfs) if boot_pmfs else None   # per-replicate curves (for derived σ)
     return base
 

@@ -7,6 +7,25 @@
 
 ## 2026-11-02
 
+### D-62　MBAR bootstrap 加速（暖啟動＋沿用求解法）與「PMF 必須涵蓋取樣範圍」閘門
+- 事實：
+  - 筆電 teaching 重跑時，傘狀採樣結束後的 PMF 步驟極慢：`bootstrap_pmf_1d` 的 100 次重抽樣**每次都從零解 MBAR**，
+    且基本解的 hybr 已失敗（`trying next method`），每次重抽樣再失敗一次才換法。
+  - 筆電 classroom 3PTB（v0.1.0a1）：40 個 window 取樣到 1.72 nm，`pmf.png` 只到 0.50 nm 且仍在上升，報告「ΔPMF 80 kJ/mol」是截斷邊緣值。
+    同一批樣本用 WHAM 重算涵蓋 0.16–1.83 nm（平台約 125–134 kJ/mol）。機制：f_k 不準時遠處 window 的 MBAR 權重下溢為 0 → 該處密度 0 → PMF 為 NaN，
+    `pmf[valid]` 只保留有限值，曲線就無聲地停住；D-43 的 WHAM 交叉比對只比 ΔPMF，沒有比範圍。
+- 決定：
+  1. `mbar_pmf_1d` 接受 `initial_f_k`、`solver_protocol`（pymbar 不接受就自動不傳，結果相同只是慢）；回報 `solver_fallback`。
+  2. `bootstrap_pmf_1d`：重抽樣以基本解的 f_k 暖啟動；基本解用過備援求解法時，重抽樣直接用 `solver_protocol="robust"`。
+     記錄 `timing_s`（基本解、bootstrap 總時間、每次）到 `quality["solver"]`，讓加速倍數由下一次 CI／筆電實測給出。
+  3. `pmf_from_windows`：PMF 有限值範圍必須涵蓋「最低到最高 window 平均」（±1 bin）。MBAR 沒涵蓋 → 以 WHAM（含 bootstrap）重算，
+     涵蓋就改用並記錄 `quality["pmf_truncated"]`；兩者都沒涵蓋 → `converged=False`，不輸出邊緣值當井深。
+- 證據：`tests/test_mbar_bootstrap.py`（7 項；以 numpy 版 MBAR 取代 pymbar：暖啟動傳入、備援後改 robust、舊版 pymbar 相容、暖啟動不改答案、
+  截斷→WHAM、計時欄位）。筆電 40 個 window 的真實樣本：固定點迭代的重抽樣迭代數由約 4,600 降到約 3,600（−20～30%）。
+- **誠實限制**：容器裝不了 pymbar（PyPI 不通、從 GitHub 取原始碼被拒），**真正 pymbar（hybr，類牛頓法）的加速倍數未測**；
+  預期暖啟動對牛頓法幫助比固定點大，且省掉每次重抽樣 hybr 失敗再換法的時間，但以 `timing_s` 實測為準。
+- 被否決（這次）：bootstrap 改用 WHAM（快，但誤差棒與基本解不同估計器）；自適應提早停止 bootstrap（σ 收斂就停，可確定省時間，但改變統計精度，留給使用者決定）。
+
 ### D-61　補完 D-60 的三個未決：主鏈穿環、軟核鬆弛第二層修復、協同自由能（熱力學循環）
 - 使用者（18:25）：這三項應該要一起做。（接受：D-60 把它們列為未決是我該一起完成的範圍。）
 - 主鏈穿環：最小化後檢查原本逐殘基建分子，肽鍵（跨殘基 C–N）不算鍵；改為把配體附近所有殘基當一個分子推定鍵結。測試以甘胺酸肽鍵穿過苯環驗證。
