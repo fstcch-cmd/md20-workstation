@@ -6,6 +6,7 @@
 ## 進行中
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **GUI v2：快速版／專業版、參數全開、合理性檢查、工程軟體風格**（使用者 11/02 14:30；原型審查中，`docs/specs/gui_v2.md`） | 使用者 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-02 14:35 | 其他 session 請勿動 md20/gui/ |
 | **筆電實機測試（Windows 獨顯筆電 "msi"）**：安裝 → doctor（須 CUDA/OpenCL）→ demo → GUI → classroom 3PTB；結果寫 `docs/COMPATIBILITY.md`，失敗就修／發行新版（`docs/LAPTOP_SESSION.md`） | 使用者 | session_016gcJzhwPAMieHsNEctkzL | 2026-11-02 09:35 | 刪除前一律先問使用者 |
 | 鋅鍵結模型平均鍵長偏 0.3 Å（D-32/D-34）：先診斷（heavy metal 測試輸出 3 Å 內非鍵原子）→ 依證據選修法（配位水入鍵結／元素×配位原子力常數／Li–Merz IOD LJ） | D-32、會診 §3 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-02 08:55 | 不擋 Windows（只在 Ubuntu heavy） |
 | 巡檢 #3（07:45）：**bb36a4b 全綠且 Windows 不再假綠**（367 passed、5 skipped 全為「在別的 job 跑」或 playwright；對接與 HTS 整合測試在 Windows PASSED）。里程碑 CI 端達成；真機（CUDA、驅動查詢、ns/day）等使用者筆電 | — | session_016gcJzBDnGh3heY9HLWnva3 | 2026-11-02 07:50 | 交付狀態已發給使用者 |
