@@ -99,6 +99,10 @@ if (-not (Test-Path $md20)) {
   $results['4 GUI'] = $(if ($ok) { "ok http 200 after $(3*$i) s (window left open)" } else { 'FAILED: no http 200 within 120 s' })
   Write-Host "--> 4 GUI : $($results['4 GUI'])"
 
+  if (Test-Path (Join-Path $base 'no_case.txt')) {
+    Write-Host 'no_case.txt present: classroom case skipped (the GUI is for the user''s own run).'
+    $results['5 pipeline run'] = 'skipped (no_case.txt)'
+  } else {
   Step '5 classroom case (3PTB trypsin + benzamidine)'
   Set-Location $base
   $j = (& $md20 pipeline example 2>$null | Out-String)
@@ -112,6 +116,7 @@ if (-not (Test-Path $md20)) {
   $projDir = Join-Path ([Environment]::GetFolderPath('MyDocuments')) "MD20_Projects\$proj"
   Write-Host "project dir: $projDir"
   Get-ChildItem -Path $projDir -Recurse -Filter 'report.html' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "report: $($_.FullName)" }
+  }
 }
 
 Step 'SUMMARY'
