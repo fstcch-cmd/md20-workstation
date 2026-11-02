@@ -28,11 +28,11 @@
 ```
 cd %USERPROFILE%\Desktop
 %LOCALAPPDATA%\MD20\md20.cmd pipeline example > trypsin.json
-%LOCALAPPDATA%\MD20\md20.cmd pipeline run trypsin.json --project 我的第一個案例
+%LOCALAPPDATA%\MD20\md20.cmd pipeline run trypsin.json --project first_case
 ```
 - 筆電請**接電源**（用電池時會自動暫停）。
 - 中途關掉視窗沒關係，**重打最後一行會從中斷處繼續**。
-- 結果在「文件\MD20_Projects\我的第一個案例」；打開裡面的 `report.html`。
+- 結果在「文件\MD20_Projects\first_case」；打開裡面的 `report.html`。
 
 ## 4. 出問題時
 把這一行的輸出拍照或複製給老師：
