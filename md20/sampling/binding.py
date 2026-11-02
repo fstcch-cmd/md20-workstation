@@ -245,6 +245,61 @@ def well_depth_hint(delta_pmf_kj_mol, n_ligand_heavy: int) -> str | None:
             "配體離開口袋時周圍（水、側鏈、鹽橋）來不及鬆弛造成的取樣滯後。數值未修改；建議改用 teaching 等級或延長 window 後重跑比較。")
 
 
+class WindowStartPicker:
+    """Choose the SMD frame that seeds each umbrella window (D-45).
+
+    The old rule took the *first* frame whose CV passed the window centre.  With a stiff spring and a fast pull the
+    ligand sticks, slips and then rings around the spring (period ≈ 2π·√(m/k) ≈ 2 ps for a small ligand), so the
+    first crossing is often an overshoot: the ligand is momentarily at the centre with the spring pulling it back,
+    and the window then relaxes far from its centre (laptop run: centre 0.604 nm sampled at 0.27 nm).
+    Now: after the first crossing, wait for a *relaxed* frame (|r0 − d| ≤ `relaxed_nm`, i.e. small spring force) with d
+    within `tol_nm` of the centre; if none appears before the spring is `give_up_nm` past the centre, keep the first
+    crossing and mark it."""
+
+    def __init__(self, centers, *, relaxed_nm: float = 0.05, tol_nm: float = 0.05, give_up_nm: float = 0.3):
+        self.centers = [float(c) for c in centers]
+        self.relaxed, self.tol, self.give_up = relaxed_nm, tol_nm, give_up_nm
+        self.next = 0
+        self.pending: dict | None = None
+
+    def offer(self, d: float, r0: float, snapshot) -> list:
+        out = []
+        while self.next < len(self.centers):
+            c = self.centers[self.next]
+            relaxed = abs(r0 - d) <= self.relaxed and abs(d - c) <= self.tol
+            if relaxed:
+                out.append((self.next, {"cv": d, "r0": r0, "xml": snapshot(), "pick": "relaxed"}))
+                self.next += 1; self.pending = None
+                continue
+            if self.pending is None and d >= c:
+                self.pending = {"cv": d, "r0": r0, "xml": snapshot(), "pick": "first_crossing"}
+            if self.pending is not None and r0 >= c + self.give_up:
+                out.append((self.next, self.pending))
+                self.next += 1; self.pending = None
+                continue
+            break
+        return out
+
+    def flush(self) -> list:
+        if self.pending is not None and self.next < len(self.centers):
+            rec, self.pending = (self.next, self.pending), None
+            self.next += 1
+            return [rec]
+        return []
+
+
+def smd_ringing(arr) -> dict:
+    """Largest CV jump between consecutive SMD records and how often the ligand runs ahead of the spring (D-45)."""
+    a = np.asarray(arr, dtype=float)
+    if len(a) < 3:
+        return {}
+    dd = np.abs(np.diff(a[:, 2]))
+    ahead = float(np.mean(a[:, 2] > a[:, 1] + 0.05))
+    back = float(np.mean(np.diff(a[:, 2]) < -0.05))
+    return {"max_cv_jump_nm": float(dd.max()), "fraction_ligand_ahead_of_spring": ahead, "fraction_backward_steps": back,
+            "record_interval_ps": float(a[1, 0] - a[0, 0])}
+
+
 def finished_result(out_dir: Path | str, cfg: "BindingConfig") -> "BindingResult | None":
     """Finished is finished: a second call with the same config returns the stored result instead of re-planning
     the refinement on the (now larger) sample set — that re-ran extend_window and shifted ΔPMF (CI Windows:
@@ -354,8 +409,8 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         rec_every = max(1, int(0.2 / dt_ps))  # every 0.2 ps
         rows, work = [], 0.0
         r0 = d0
-        next_w = 0
         saved = {}
+        picker = WindowStartPicker(plan.centers_nm)
         for s in range(0, n_steps, rec_every):
             nstep = min(rec_every, n_steps - s)
             dr = cfg.pull_velocity_nm_per_ps * dt_ps * nstep
@@ -364,27 +419,33 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             force = cfg.k_pull * (r0 - d)
             work += force * dr
             rows.append((s * dt_ps, r0, d, force, work))
-            while next_w < len(plan.centers_nm) and d >= plan.centers_nm[next_w]:
-                path = wdir / f"w{next_w:03d}_start.xml"
-                state = ctx.getState(getPositions=True, getVelocities=True)
-                path.write_text(XmlSerializer.serialize(state), encoding="utf-8")
-                saved[next_w] = {"path": str(path), "cv": d}
-                next_w += 1
+            for w, rec in picker.offer(d, r0, lambda: XmlSerializer.serialize(ctx.getState(getPositions=True, getVelocities=True))):
+                path = wdir / f"w{w:03d}_start.xml"
+                path.write_text(rec.pop("xml"), encoding="utf-8")
+                saved[w] = {"path": str(path), **rec}
             r0 += dr
             ctx.setParameter("r0_cv", r0)
             integ.step(nstep)
             if progress_cb and len(rows) % 50 == 0:
                 progress_cb({"stage": "smd", "r0": r0, "d": d, "force": force, "work": work})
+        for w, rec in picker.flush():
+            path = wdir / f"w{w:03d}_start.xml"
+            path.write_text(rec.pop("xml"), encoding="utf-8")
+            saved[w] = {"path": str(path), **rec}
         # windows the ligand never reached (lags behind the spring): seed from the last frame
         xyz, box = _state_xyz_box(ctx)
-        for w in range(next_w, len(plan.centers_nm)):
+        for w in range(len(plan.centers_nm)):
+            if w in saved:
+                continue
             path = wdir / f"w{w:03d}_start.xml"
             path.write_text(XmlSerializer.serialize(ctx.getState(getPositions=True, getVelocities=True)), encoding="utf-8")
             saved[w] = {"path": str(path), "cv": cv_distance(xyz, box, anchor, ligand, masses), "fallback": True}
         arr = np.array(rows)
+        smd_diag = smd_ringing(arr)
         np.savetxt(out / "smd.tsv", arr, header="time_ps\tr0_nm\td_nm\tforce_kj_mol_nm\twork_kj_mol", delimiter="\t")
         smd = {"status": "PASS", "d0_nm": d0, "n_steps": n_steps, "max_force_kj_mol_nm": float(arr[:, 3].max()),
                "final_work_kj_mol": float(arr[-1, 4]), "window_starts": {str(k): v for k, v in saved.items()},
+               "diagnostics": smd_diag,
                "plan": plan.to_dict(), "sealed_at": now_iso()}
         atomic_write_json(smd, smd_file)
     del ctx, integ
@@ -627,6 +688,15 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         "ΔG° 以徑向積分與 1 M 標準態估算，未包含方向／構形約束校正；適合比較配體間趨勢。",
         "SMD 的功與拉伸速度有關（不可逆），只有 PMF 是自由能剖面。",
     ]
+    diag = (smd or {}).get("diagnostics") or {}
+    if diag.get("max_cv_jump_nm", 0) > 0.1:
+        res.caveats.append(f"SMD 拉離時配體與彈簧之間出現明顯振盪（相鄰兩筆紀錄間距離最大跳動 {diag['max_cv_jump_nm']:.2f} nm，"
+                           f"{diag.get('fraction_backward_steps', 0) * 100:.0f}% 的紀錄距離倒退）：拉離速度偏快或彈簧偏硬。"
+                           "傘狀採樣窗口已改由彈簧接近鬆弛的幀起始；建議降低拉離速度（0.001 至 0.005 nm ps⁻¹）。")
+    starts = (smd or {}).get("window_starts") or {}
+    n_first = sum(1 for v in starts.values() if v.get("pick") == "first_crossing")
+    if n_first:
+        res.caveats.append(f"{n_first} 個窗口找不到彈簧鬆弛的起始幀，沿用第一次越過中心的幀（可能處於反彈中）。")
     res.pmf["coverage"] = {"continuous": cont["continuous"], "breaks": cont["breaks"], "n_windows": len(samples),
                            "n_added": len(added), "n_manual": len(manual), "k_values": sorted({round(v, 1) for v in ks.values()}),
                            "rounds": len(refine_log), "unsamplable": final_plan.unsamplable if final_plan else []}
@@ -680,12 +750,17 @@ def _np_default(o):
 def _plot_smd(tsv: Path, out_base: Path) -> dict:
     plt = _mpl()
     a = np.loadtxt(tsv, delimiter="\t")
-    fig, axes = plt.subplots(2, 1, figsize=(7.2, 4.4), sharex=True)
-    axes[0].plot(a[:, 2], a[:, 3], color=PALETTE[0])
-    axes[0].set_ylabel("Pulling force (kJ/mol/nm)")
-    axes[1].plot(a[:, 2], a[:, 4], color=PALETTE[1])
-    axes[1].set_ylabel("Work (kJ/mol)"); axes[1].set_xlabel("CV distance (nm)")
+    # D-45: x = spring position (monotonic in time).  Plotting against the ligand's CV made stick–slip and the
+    # ringing after each slip look like the trajectory ran backwards.
+    fig, axes = plt.subplots(3, 1, figsize=(7.2, 6.0), sharex=True)
+    axes[0].plot(a[:, 1], a[:, 1], color="#9aa4ae", lw=0.8, label="spring position")
+    axes[0].plot(a[:, 1], a[:, 2], color=PALETTE[2 % len(PALETTE)], lw=0.9, label="ligand–pocket COM distance")
+    axes[0].set_ylabel("Distance (nm)"); axes[0].legend(fontsize=7, frameon=False, loc="upper left")
+    axes[1].plot(a[:, 1], a[:, 3], color=PALETTE[0], lw=0.9)
+    axes[1].set_ylabel("Pulling force (kJ mol⁻¹ nm⁻¹)")
+    axes[2].plot(a[:, 1], a[:, 4], color=PALETTE[1], lw=0.9)
+    axes[2].set_ylabel("Work (kJ mol⁻¹)"); axes[2].set_xlabel("Spring position (nm)")
     i = int(np.argmax(a[:, 3]))
-    axes[0].text(a[i, 2], a[i, 3], f"  rupture force {a[i, 3]:.0f}", fontsize=7, color="#52514e")
-    axes[0].set_title("SMD: force and accumulated work vs. distance (irreversible, speed-dependent)", loc="left", fontsize=10)
+    axes[1].text(a[i, 1], a[i, 3], f"  maximum force {a[i, 3]:.0f}", fontsize=7, color="#52514e")
+    axes[0].set_title("SMD: distance, force and accumulated work vs. spring position (irreversible, speed-dependent)", loc="left", fontsize=10)
     return _save(fig, out_base)
