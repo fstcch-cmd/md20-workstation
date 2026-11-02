@@ -312,7 +312,7 @@ def _design(doc: Doc, wf) -> str:
     L, cfg = doc.lang, wf.cfg
     rec = cfg.get("receptor") or {}
     ligs = cfg.get("ligands") or []
-    rows = [[_esc(l.get("name")), _esc("peptide" if l.get("sequence") else "small molecule" if L == "en" else ("胜肽" if l.get("sequence") else "小分子")),
+    rows = [[_esc(l.get("name")), _esc(tx(("胜肽", "peptide") if l.get("sequence") else ("小分子", "small molecule"), L)),
              f"<code>{_esc(l.get('sequence') or l.get('smiles') or l.get('sdf') or '—')}</code>"] for l in ligs]
     systems = (cfg.get("md") or {}).get("systems") or []
     sys_txt = {"apo": ("蛋白單獨", "protein alone"), "docked_single": ("每個配體各自與蛋白", "each ligand with the protein"),
@@ -376,7 +376,7 @@ def _screen(doc: Doc, wf) -> str:
                                 [x for x in sc_f if "molecular size" not in x["text"][1]])
         out += _screen_extra(doc, d, rows, man, [x for x in sc_f if "molecular size" in x["text"][1]])
     if rows:
-        out += doc.table([tx(("名次", "Rank"), L), tx(("化合物", "Compound"), L), "Score (kcal mol⁻¹)", tx(("與最佳差距", "Δ to best"), L),
+        out += doc.table([tx(("名次", "Rank"), L), tx(("化合物", "Compound"), L), tx(("分數（kcal mol⁻¹）", "Score (kcal mol⁻¹)"), L), tx(("與最佳差距", "Δ to best"), L),
                           tx(("重原子", "Heavy atoms"), L), tx(("配體效率", "Ligand efficiency"), L), tx(("選入", "Selected"), L)],
                          [[str(r["rank"]), _esc(r["name"]), f"{r['score']:.2f}", f"{r['delta_to_best']:+.2f}", _fmt(r["heavy_atoms"], 0),
                            _fmt(r["ligand_efficiency"], 3), "✔" if r["name"] in sel else ""] for r in rows[:30]],
@@ -494,7 +494,7 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
                   (" ⚠ " + tx(("碰撞", "clash"), L) if p.get("clash") else "")
             trs.append([str(p["rank"]), f"{p['score']:.2f}", f"{p['cluster']} ({p['cluster_size']})", str(p["contacts"]),
                         _fmt(p.get("rmsd_ref")), tag])
-        out += doc.table([tx(("名次", "Rank"), L), "Score (kcal mol⁻¹)", tx(("叢集（大小）", "Cluster (size)"), L),
+        out += doc.table([tx(("名次", "Rank"), L), tx(("分數（kcal mol⁻¹）", "Score (kcal mol⁻¹)"), L), tx(("叢集（大小）", "Cluster (size)"), L),
                           tx(("接觸殘基數", "Contacts"), L), tx(("與晶體 RMSD（Å）", "RMSD to crystal (Å)"), L), ""],
                          trs, (f"{e['name']} 的對接姿勢", f"Docking poses of {e['name']}"), {0, 1, 3, 4})
         if e.get("reason"):
