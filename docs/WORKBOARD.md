@@ -22,7 +22,6 @@
 | 金屬：力常數依元素×配位原子表（鋅偏移部分已認領，見進行中）、配位水納入鍵結、配體配位金屬的距離約束後備 | 同上 §3 |
 | umbrella：MBAR overlap matrix 門檻、OpenMM 內建 metadynamics 後備、funnel 約束（研究 tier ΔG°） | 同上 §2 |
 | 約束策略智慧建議 `recommend_restraint_strategy`；凍結／口袋截斷／資源估算（分組分階段已完成 D-23；其餘依會診 §1 Q2–Q6） | `docs/specs/restraints_freeze_truncation.md` |
-| 對接盒子過大防呆閘門（任一邊 > 40 Å 或盒內殘基 > 300，提示格點數 ×0.375） | DECISIONS D-14、REVIEW_QUESTIONS #6 |
 | Vina 執行檔 sha256 表、micromamba 與環境版本鎖定 | REVIEW #19 |
 | 戳記改為私鑰簽章（目前只有公鑰加密，不能證明來源） | REVIEW #20 |
 | `sampling/runner.py`（無呼叫者）移除或修正 | REVIEW #17 |
@@ -30,6 +29,7 @@
 ## 完成
 | 項目 | session | commit |
 |---|---|---|
+| 對接盒子過大提醒（D-56；不擋流程） | session_016gcJz8q2F6515MWPncJEZu | 本 commit |
 | 發行 **v0.1.0a2**（D-36／37／38／39；verify-windows 含 CUDA dry-run） | session_016gcJz8q2F6515MWPncJEZu | release run 41391866636（5f0945e） |
 | Windows 安裝程式發行 **v0.1.0a1**（GitHub Release，prerelease：`MD20-Windows-v0.1.0a1.zip`＋SHA256SUMS；雙擊 `Install-MD20.cmd`；D-33） | session_016gcJz8q2F6515MWPncJEZu | 0bf6954；release run 41365326632（Windows PS 5.1 解壓實裝、刪除解壓資料夾後 doctor/demo 通過才發行） |
 | 約束策略修正：分組約束（backbone/sidechain/ligand 單一力 grp 參數）、主要釋放移到 NPT、配體 k 1000、`md.restraints` standard/gentle/hold_backbone、受約束 RMSD 標註（D-23、specs/restraints_freeze_truncation.md §3.1） | session_016gcJz8q2F6515MWPncJEZu | 5cc9295（CI：81b72d9／99c8b64 heavy workflow 與 openmm-stack 三 OS 綠） |

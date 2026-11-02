@@ -722,6 +722,8 @@ def _limitations(doc: Doc, wf) -> list[str]:
     for name, r in (wf.state().get("cpp") or {}).items():
         if r.get("limitation"):
             items.append(f"{name}: {r['limitation']}")
+    for name, g in (wf.state().get("advisories") or {}).items():
+        items.append(g.get("explanation", ""))
     for name, r in (wf.state().get("peptide_access") or {}).items():
         for part in ("precheck", "pose"):
             g = r.get(part) or {}

@@ -89,6 +89,8 @@ def gate_cards(wf, *, include_pass: bool = False) -> list[dict]:
                 cards.append(_card(f"科學限制 · 胜肽 {name}", {"name": "peptide pocket access", "status": "AUTO_FIXED",
                                                              "advisory": True, "explanation": g.get("explanation", ""),
                                                              "options": g.get("options") or []}))
+    for name, g in (st_all.get("advisories") or {}).items():            # D-56: generic notices (e.g. box size)
+        cards.append(_card("科學限制", g, step="docking_preflight"))
     order = {"NEEDS_HUMAN": 0, "AUTO_FIXED": 1, "PASS": 2}
     return sorted(cards, key=lambda c: (order.get(c["status"], 3), not c.get("advisory")))
 

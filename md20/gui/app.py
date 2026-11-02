@@ -52,7 +52,7 @@ STATUS_TEXT = {"PASS": ("完成", "Done"), "COMPLETE": ("完成", "Done"), "RUNN
                "AUTO_FIXED": ("已自動修正", "Corrected automatically"), "—": ("—", "—")}
 
 
-SOURCE_EN = [("科學限制 · 胜肽", "Scientific limitation · peptide"), ("結構可信度", "Structure validity"), ("受體整理", "Receptor preparation"),
+SOURCE_EN = [("科學限制 · 胜肽", "Scientific limitation · peptide"), ("科學限制", "Scientific limitation"), ("結構可信度", "Structure validity"), ("受體整理", "Receptor preparation"),
              ("受體來源", "Receptor source"), ("對接前檢查", "Docking pre-checks"), ("分子對接", "Molecular docking"),
              ("pose 選擇", "Pose selection"), ("確認進入 MD", "Confirm molecular dynamics"), ("MD 建模", "System building"),
              ("MD 執行", "Molecular dynamics"), ("軌跡分析", "Trajectory analysis"), ("SMD＋傘狀採樣", "Binding free energy"),

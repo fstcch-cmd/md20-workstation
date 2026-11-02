@@ -69,6 +69,7 @@ GATES: dict[str, tuple[str, str, str]] = {
     "assembly": ("系統組裝", "System assembly", "The system could not be assembled."),
     "openmm": ("OpenMM", "OpenMM", "OpenMM is not available in this environment."),
     "docking reliability": ("對接可信度", "Docking reliability", "Docking results for this ligand are of limited reliability."),
+    "box size": ("搜尋區大小", "Search box size", "Scientific-limitation notice: the search box is very large (longest edge over 40 Å or more than 300 residues inside), which behaves like blind docking and lowers the reliability of scores and poses. This notice does not stop the workflow."),
     "blind docking": ("盲對接", "Blind docking", "The search box covers the whole protein; confirm blind docking or define the site."),
     "redocking": ("重新對接自檢", "Redocking check", "The box comes from a co-crystal ligand, but that ligand is not redocked to check the setup."),
     "confirm MD": ("確認進入分子動力學", "Proceed to molecular dynamics?", "Docking and pose selection are complete; confirm before the long simulation starts."),

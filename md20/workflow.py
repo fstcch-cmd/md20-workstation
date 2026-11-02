@@ -392,6 +392,40 @@ class Workflow:
             if co or b.get("allow_blind"):
                 self.dec.record("docking.box", "blind", "allowed", "使用者明確允許盲對接；盲對接分數與口袋排名可信度較低。",
                                 kind="human" if b.get("allow_blind") else "auto")
+        self._box_size_notice(raw)
+
+    def _box_size_notice(self, raw: Path) -> None:
+        """REVIEW #6 / D-56: an oversized search box is flagged (never blocked): longest edge > 40 Å or > 300 residues
+        inside.  Stored as a notice in state["advisories"] and shown as a card and in the report."""
+        b = self.cfg.get("box") or {}
+        if not (b.get("center") and b.get("size")):
+            return
+        import numpy as _np
+        c, h = _np.asarray(b["center"], float), _np.asarray(b["size"], float) / 2
+        res = set()
+        for l in raw.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if l.startswith("ATOM"):
+                try:
+                    x = _np.array([float(l[30:38]), float(l[38:46]), float(l[46:54])])
+                except ValueError:
+                    continue
+                if _np.all(_np.abs(x - c) <= h):
+                    res.add((l[21], l[22:27]))
+        longest, n = float(max(b["size"])), len(res)
+        st = self.state()
+        adv = st.setdefault("advisories", {})
+        if longest > 40.0 or n > 300:
+            grid = int(_np.prod(_np.asarray(b["size"], float) / 0.375))
+            msg = (f"科學限制提醒（流程照常進行）：搜尋區 {' × '.join(f'{x:g}' for x in b['size'])} Å，最長邊 {longest:g} Å、"
+                   f"包含 {n} 個殘基（門檻：40 Å 或 300 個殘基），約 {grid:,} 個格點（間距 0.375 Å）。過大的搜尋區等同盲對接："
+                   "搜尋時間增加、同樣的搜尋強度下更難找到最佳姿勢，分數與姿勢的可信度下降。")
+            adv["box size"] = {"name": "box size", "status": "AUTO_FIXED", "advisory": True, "explanation": msg,
+                               "options": ["以共結晶配體或活性位殘基重新定義搜尋區", "接受並在報告中標註"],
+                               "evidence": {"size": b["size"], "residues": n, "grid_points": grid}}
+            self.dec.record("docking.box", "size", f"{longest:g} Å, {n} residues", msg)
+        else:
+            adv.pop("box size", None)
+        atomic_write_json(st, self.state_path)
 
     def _peptide_preflight(self, l: dict, box=None) -> str:
         """Peptide ligand: CPP and pocket-access checks before docking (advisory, never blocking: D-48), docking

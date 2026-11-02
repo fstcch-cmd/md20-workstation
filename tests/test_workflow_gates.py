@@ -160,3 +160,18 @@ def test_teaching_tier_runs_the_windows_it_requires(tmp_path):
     assert wf._binding_config({}).window_prod_ps == 2000.0
     wf.cfg["md"]["tier"] = "classroom"
     assert wf._binding_config({}).window_prod_ps == 50.0
+
+
+def test_oversized_box_is_a_notice_not_a_block(tmp_path):
+    """D-56 (REVIEW #6): a box over 40 Å is flagged in state["advisories"] and shown as a card; the run is not blocked."""
+    from md20.gui.views import gate_cards
+    cfg = copy.deepcopy(example_config()); cfg["box"] = {"center": [0, 0, 0], "size": [36, 51, 45]}
+    wf = Workflow(Project.create(tmp_path, "p"), cfg)
+    wf._box_size_notice(_raw(tmp_path))
+    adv = wf.state()["advisories"]["box size"]
+    assert adv["advisory"] and "51 Å" in adv["explanation"] and adv["evidence"]["grid_points"] > 1_000_000
+    card = next(c for c in gate_cards(wf) if c["title"] == "box size")
+    assert card["advisory"] and card["status"] == "AUTO_FIXED"
+    wf.cfg["box"] = {"center": [0, 0, 0], "size": [22, 22, 22]}
+    wf._box_size_notice(_raw(tmp_path))
+    assert "box size" not in wf.state()["advisories"]
