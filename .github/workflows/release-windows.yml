@@ -59,6 +59,7 @@ jobs:
       - name: CUDA environment solves (dry run; the runner has no NVIDIA GPU, so the installer above took the CPU path)
         shell: powershell
         run: |
+          $ErrorActionPreference = "Continue"   # native stderr must not throw (Actions prepends Stop)
           $mm = "$env:RUNNER_TEMP\MD20\micromamba.exe"; $env:MAMBA_ROOT_PREFIX = "$env:RUNNER_TEMP\MD20"; $env:CONDA_OVERRIDE_CUDA = "12.7"
           foreach ($cv in "12.4", "11.8") {
             $y = "$env:RUNNER_TEMP\cuda-$cv.yml"
