@@ -48,6 +48,13 @@ def _minimize(stage_dir: Path, spec: StageSpec, make_backend, *, identity: dict,
         state = stage_dir / "minimize_state.xml"
         backend.save_state(state)
         backend.write_pdb(stage_dir / "minimize_final.pdb")
+        pierced = _post_min_piercings(stage_dir / "minimize_final.pdb")
+        if pierced:
+            raise NeedsHuman("最小化後的結構有 " + str(len(pierced)) + " 處穿環（" +
+                             "、".join(f"{p['bond_of']} 的鍵穿過 {p['ring_of']} 的環" for p in pierced[:3]) +
+                             "）。這種構型能量最小化解不開，繼續模擬會得到不可能存在的複合物或爆掉（D-60）。"
+                             "選項：回到姿勢選擇改選其他聯合姿勢；multi_ligand.exclude 排除涉及的配體；檢查配體質子化與氫原子位置。",
+                             stage="minimize")
         figs = plot_minimization(energies, stage_dir.parent.parent / "figures" / "minimize_energy")
         data = {**identity, "status": "PASS", "stage": "minimize", "energies_kj_mol": energies,
                 "restraint_ladder": ladder, "state": str(state), "figures": figs, "sealed_at": now_iso(),
@@ -59,6 +66,17 @@ def _minimize(stage_dir: Path, spec: StageSpec, make_backend, *, identity: dict,
         return data
     finally:
         backend.close()
+
+
+def _post_min_piercings(pdb: Path) -> list[dict]:
+    """D-60 ring-piercing check on the minimised structure; never blocks when the check itself cannot run."""
+    try:
+        if not pdb.is_file():
+            return []
+        from ..build.multi_ligand import piercings_in_pdb
+        return piercings_in_pdb(pdb)
+    except Exception:  # noqa: BLE001
+        return []
 
 
 MIN_LOG_ROWS = 20

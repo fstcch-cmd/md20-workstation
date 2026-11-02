@@ -93,7 +93,23 @@ def build(root: Path, lang: str):
         entries.append({"name": lig, "ligands": [lig], "recommended_rank": 1, "reason": "rank 1, largest cluster, redocking ≤ 2 Å",
                         "smiles": smi, "poses": poses, "pose_sdfs": {lig: sdfs}})
         sel["ligands"][lig] = {"rank": 1, "entry": lig, "score": poses[0]["score"], "sdf": sdfs[0]}
-    atomic_write_json({"mode": "independent", "params": {"scoring": "vina", "exhaustiveness": 16},
+    # ---- simultaneous docking of BEN + PGA (D-60): joint poses, two subsites side by side
+    jposes, jsdf = [], {"BEN": [], "PGA": []}
+    for r in range(1, 10):
+        off = np.array([3.4, 0, 0]) if r != 6 else np.array([-3.4, 0.5, 0])          # rank 6 swaps the two ligands
+        cb = centre - off / 2 + rng.normal(0, 0.5 if r <= 5 else 2.5, 3)
+        cp = centre + off / 2 + rng.normal(0, 0.5 if r <= 5 else 2.5, 3)
+        for lig, c in (("BEN", cb), ("PGA", cp)):
+            pth = ddir / f"joint_{lig}_pose{r}.sdf"
+            pth.write_text(_sdf(c + shape @ _rot(rng, 0.3).T * 0.6, ["C", "C", "C", "N", "C", "C", "O", "C", "N"], lig))
+            jsdf[lig].append(str(pth))
+        dll = float(np.round(rng.uniform(3.4, 4.3) if r not in (3, 8) else rng.uniform(2.1, 3.0), 2))
+        jposes.append({"rank": r, "score": round(-9.4 + 0.25 * (r - 1) + rng.normal(0, 0.05), 2), "cluster": 1 if r <= 5 else r - 4,
+                       "cluster_size": 5 if r <= 5 else 1, "contacts": 20, "contacts_per_ligand": [int(14 - r // 2), int(12 - r // 2) if r != 7 else 4],
+                       "min_ll_distance": dll, "clash": dll < 3.3, "rmsd_ref": None, "recommended": r == 1})
+    entries.append({"name": "joint", "ligands": ["BEN", "PGA"], "recommended_rank": 1, "reason": "rank 1, ligands 3.3–4.5 Å, both buried",
+                    "smiles": {"BEN": "NC(=[NH2+])c1ccccc1", "PGA": "[O-]C(=O)[C@@H]1CCC(=O)N1"}, "poses": jposes, "pose_sdfs": jsdf})
+    atomic_write_json({"mode": "independent", "params": {"scoring": "vina", "exhaustiveness": 16, "ligand_charges": [1, -1]},
                        "box": {"center": centre.tolist(), "size": [22, 22, 22], "source": "co-crystal BEN"}, "entries": entries},
                       ddir / "docking_results.json")
     wf._mark("docking", result=str(ddir / "docking_results.json"), mode="independent")
@@ -163,6 +179,21 @@ def build(root: Path, lang: str):
     st["steps"]["binding"]["results"]["BEN"]["figures"]["histograms"] = hist
     wf.cfg.setdefault("md", {})["replicas"] = 3
     atomic_write_json(wf.cfg, wf.dir / "config.json")
+    # ---- multi-ligand system (D-60): geometry check record and ligand–ligand distance during MD
+    st["multi_ligand"] = {"status": "AUTO_FIXED", "ligands": ["BEN", "PGA"], "excluded": [], "auto_excluded": [], "culprit": None,
+                          "why": ["PGA 以剛體微調（旋轉 8.2°、平移 0.6 Å，RMSD 0.7 Å ≤ 2.0 Å，結合模式不變）消除重疊或穿環",
+                                  "PGA nudged as a rigid body (rotation 8.2°, shift 0.6 Å, RMSD 0.7 Å ≤ 2.0 Å, same binding mode) to clear overlaps or ring piercing"],
+                          "adjusted": {"PGA": {"rmsd": 0.7, "rotation_deg": 8.2, "shift_A": 0.6}},
+                          "per_ligand": {"BEN": {"contacts": 31, "overlaps": 0, "piercings": 0, "floating": False, "partners": []},
+                                         "PGA": {"contacts": 22, "overlaps": 0, "piercings": 0, "floating": False, "partners": []}}}
+    tm = np.linspace(0, 2, 101)
+    mm = json.loads(Path(st["steps"]["analysis"]["summaries"]["docked_BEN"]["metrics_file"]).read_text(encoding="utf-8"))
+    mm["ligand_ligand_distance_A"] = {"L01-L02": (4.6 + 0.4 * np.tanh(tm * 2) + rng.normal(0, 0.25, tm.size)).tolist()}
+    atomic_write_json(mm, wf.dir / "m_docked_multi.json")
+    st["steps"]["analysis"]["summaries"]["docked_multi"] = {**st["steps"]["analysis"]["summaries"]["docked_BEN"],
+                                                            "metrics_file": str(wf.dir / "m_docked_multi.json")}
+    cases["docked_multi"] = {**cases["docked_BEN"], "mode": "docked_multi", "ligands": ["BEN", "PGA"]}
+    runs["docked_multi"] = dict(runs["docked_BEN"])
     st["steps"]["md_cases"]["cases"] = cases
     st["steps"]["md_runs"] = {"status": "PASS", "runs": runs}
     atomic_write_json(st, wf.state_path)

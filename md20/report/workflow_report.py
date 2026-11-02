@@ -18,6 +18,7 @@ from ..advisor import tx
 from ..util import load_json, now_iso
 from . import interpret as I
 from . import figures as FG
+from . import docking_figs as DF
 from .figure_text import FIG
 from . import figure_text as FT
 from .html import _img, _esc, build_run_report
@@ -426,11 +427,69 @@ def _screen_extra(doc: Doc, d: dict, rows: list[dict], man: dict, size_findings:
     return out
 
 
-def _docking_extra(doc: Doc, e: dict, box: dict, rec_pdb, cmp_rows: list) -> str:
+def _docking_joint(doc: Doc, e: dict, box: dict, prot: list, rank_used: int, charges) -> str:
+    """D-60: simultaneous (joint) poses — figures about the arrangement of the ligands, not about one ligand."""
+    names = list(e.get("ligands") or (e.get("pose_sdfs") or {}).keys())
+    sdfs = e.get("pose_sdfs") or {}
+    per = {n: [DF.sdf_heavy(p) if p and Path(p).is_file() else None for p in sdfs.get(n, [])] for n in names}
+    n_p = min((len(v) for v in per.values()), default=0)
+    out = ""
+    scores = [p["score"] for p in e["poses"]]
+    joint = [np.vstack([per[n][k] for n in names]) if all(per[n][k] is not None for n in names) else None for k in range(n_p)]
+    if any(x is not None for x in joint):
+        D = DF.pose_rmsd_matrix(joint)
+        out += doc.figure_block(FG.heatmap(D, doc.figdir / "docking_rmsd_joint.png", cmap="viridis_r", vmin=0, vmax=max(1.0, float(np.nanmax(D))),
+                                           label="RMSD (Å)", ticks=[str(i + 1) for i in range(len(D))], xlabel="Joint pose rank", ylabel="Joint pose rank"),
+                                "pose_rmsd", DF.classify_pose_rmsd("joint", D, scores), "joint")
+    if any(p.get("rmsd_ref") is not None for p in e["poses"]):
+        out += doc.figure_block(FG.funnel(e["poses"], doc.figdir / "docking_funnel_joint.png"), "funnel", DF.classify_funnel("joint", e["poses"]), "joint")
+    out += doc.figure_block(FG.joint_poses(e["poses"], names, doc.figdir / "docking_joint_poses.png", chosen=rank_used), "joint_poses",
+                            DF.classify_joint_poses(e["poses"], names, rank_used, charges), "joint")
+    cents = {n: np.array([x.mean(0) for x in per[n] if x is not None]) for n in names if any(x is not None for x in per[n])}
+    out += doc.figure_block(FG.positions_by_ligand(cents, box, doc.figdir / "docking_joint_positions.png"), "joint_positions",
+                            DF.classify_joint_positions(cents), "joint")
+    k = (rank_used or 1) - 1
+    if prot and all(k < len(per[n]) and per[n][k] is not None for n in names):
+        rows, M = DF.subsite_map({n: per[n][k] for n in names}, prot)
+        out += doc.figure_block(FG.binary_map(rows, M, doc.figdir / "docking_subsites.png", cols=names, xlabel="Ligand"), "subsites",
+                                DF.classify_subsites(rows, M, names), f"joint #{rank_used}")
+    return out
+
+
+def _geometry_table(doc: Doc, rec: dict) -> str:
+    """D-60: what the multi-ligand geometry check found and did, per ligand."""
+    L = doc.lang
+    if not rec or not rec.get("per_ligand"):
+        return ""
+    rows = []
+    for n, v in rec["per_ligand"].items():
+        if n in (rec.get("adjusted") or {}):
+            a = rec["adjusted"][n]
+            act = tx((f"剛體微調 {a['rmsd']} Å", f"nudged {a['rmsd']} Å"), L)
+        elif n in (rec.get("excluded") or []):
+            act = tx(("排除", "excluded"), L)
+        elif rec.get("culprit") == n:
+            act = tx(("建議排除（待決定）", "exclusion recommended (pending)"), L)
+        else:
+            act = "—"
+        rows.append([_esc(n), _esc(v.get("contacts")), _esc(v.get("overlaps")), _esc(v.get("piercings")),
+                     _esc(tx(("是", "yes"), L) if v.get("floating") else "—"), _esc(act)])
+    for n in rec.get("excluded") or []:
+        if n not in rec["per_ligand"]:
+            rows.append([_esc(n), "—", "—", "—", "—", _esc(tx(("排除", "excluded"), L))])
+    tab = doc.table([tx(("配體", "Ligand"), L), tx(("蛋白接觸", "Protein contacts"), L), tx(("原子重疊", "Overlaps"), L),
+                     tx(("穿環", "Ring piercing"), L), tx(("漂浮", "Floating"), L), tx(("處置", "Action"), L)], rows,
+                    ("多配體複合物幾何檢查（進入 MD 前）", "Geometry of the multi-ligand complex (before MD)"))
+    why = rec.get("why") or ["", ""]
+    return tab + f"<p>{_esc(why[0] if L == 'zh' else why[1])}</p>"
+
+
+def _docking_extra(doc: Doc, e: dict, box: dict, rec_pdb, cmp_rows: list, rank_used: int | None = None, charges=None) -> str:
     """D-59: pose similarity, docking funnel, pose positions in the box and contact residues across poses."""
-    from . import docking_figs as DF
     out = ""
     prot = DF.receptor_atoms(rec_pdb) if rec_pdb and Path(rec_pdb).is_file() else []
+    if e["name"] == "joint" or len(e.get("ligands") or []) > 1:
+        return _docking_joint(doc, e, box, prot, rank_used or 1, charges)
     scores = [p["score"] for p in e["poses"]]
     for lig, paths in (e.get("pose_sdfs") or {}).items():
         poses = [DF.sdf_heavy(pth) if pth and Path(pth).is_file() else None for pth in paths]
@@ -480,7 +539,7 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
         out += doc.figure_block(FG.docking_scores(e["poses"], rank_used, e["name"], doc.figdir / f"docking_{e['name']}.png"),
                                 "docking_scores", FT.classify_docking_scores(e["name"], e["poses"], rank_used), e["name"])
         rec_pdb = (wf.state()["steps"].get("receptor_docking") or {}).get("path")
-        out += _docking_extra(doc, e, res.get("box") or {}, rec_pdb, cmp_rows)
+        out += _docking_extra(doc, e, res.get("box") or {}, rec_pdb, cmp_rows, rank_used, (res.get("params") or {}).get("ligand_charges"))
         for lig, info in (sel.get("ligands") or {}).items():
             if info.get("entry") == e["name"] and info.get("sdf") and rec_pdb and Path(info["sdf"]).is_file():
                 from .chem import interaction_diagram
@@ -492,15 +551,21 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
             tag = ("✔ " + tx(("選用", "used"), L) if p["rank"] in chosen.get(e["name"], set()) else "") + \
                   (" ★ " + tx(("推薦", "recommended"), L) if p.get("recommended") else "") + \
                   (" ⚠ " + tx(("碰撞", "clash"), L) if p.get("clash") else "")
-            trs.append([str(p["rank"]), f"{p['score']:.2f}", f"{p['cluster']} ({p['cluster_size']})", str(p["contacts"]),
-                        _fmt(p.get("rmsd_ref")), tag])
-        out += doc.table([tx(("名次", "Rank"), L), tx(("分數（kcal mol⁻¹）", "Score (kcal mol⁻¹)"), L), tx(("叢集（大小）", "Cluster (size)"), L),
-                          tx(("接觸殘基數", "Contacts"), L), tx(("與晶體 RMSD（Å）", "RMSD to crystal (Å)"), L), ""],
-                         trs, (f"{e['name']} 的對接姿勢", f"Docking poses of {e['name']}"), {0, 1, 3, 4})
+            joint = p.get("contacts_per_ligand") is not None
+            cont = " / ".join(str(c) for c in p["contacts_per_ligand"]) if joint else str(p["contacts"])
+            row = [str(p["rank"]), f"{p['score']:.2f}", f"{p['cluster']} ({p['cluster_size']})", cont, _fmt(p.get("rmsd_ref"))]
+            if joint:
+                row.append(_fmt(p.get("min_ll_distance")))
+            trs.append(row + [tag])
+        is_joint = bool(e["poses"]) and e["poses"][0].get("contacts_per_ligand") is not None
+        head = [tx(("名次", "Rank"), L), tx(("分數（kcal mol⁻¹）", "Score (kcal mol⁻¹)"), L), tx(("叢集（大小）", "Cluster (size)"), L),
+                tx(("接觸殘基數", "Contacts"), L) + (f" ({' / '.join(e.get('ligands') or [])})" if is_joint else ""),
+                tx(("與晶體 RMSD（Å）", "RMSD to crystal (Å)"), L)] + ([tx(("配體間最短距離（Å）", "Min. ligand–ligand (Å)"), L)] if is_joint else []) + [""]
+        out += doc.table(head, trs, (f"{e['name']} 的對接姿勢", f"Docking poses of {e['name']}"), {0, 1, 4, 5} if is_joint else {0, 1, 3, 4})
         if e.get("reason"):
             out += f"<p class=muted>{_esc(tx(('系統推薦理由', 'Reason for the recommendation'), L))}: {_esc(e['reason'])}</p>"
+    out += _geometry_table(doc, wf.state().get("multi_ligand") or {})
     if len(cmp_rows) >= 2:
-        from . import docking_figs as DF
         out += doc.figure_block(FG.ligand_compare(cmp_rows, doc.figdir / "docking_compare.png"), "ligand_compare", DF.classify_ligand_compare(cmp_rows))
     return _section(doc, doc.next(), "docking", params, out, doc.collected[start:])
 
@@ -727,6 +792,13 @@ def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None) ->
             out += doc.figure_block(FG.two_panel(metrics[k].get("time_ns") or [], d["com_distance_to_pocket_A"], d.get("polar_contacts") or [],
                                                  "COM distance (Å)", "Polar contacts", doc.figdir / f"md_com_{k}_{rn}.png"),
                                     "com_distance", FT.classify_com(f"{k} {rn}", metrics[k].get("time_ns"), d["com_distance_to_pocket_A"]), f"{k} {rn}")
+    for k in order:                                     # D-60: multi-ligand systems — does co-occupancy hold?
+        lld = metrics[k].get("ligand_ligand_distance_A") or {}
+        if lld:
+            ser = {f"{k} {pair}": (metrics[k].get("time_ns") or [], y) for pair, y in lld.items()}
+            out += doc.figure_block(FG.timeseries(ser, "Ligand–ligand distance (Å)", doc.figdir / f"md_ll_{k}.png"), "ll_distance",
+                                    DF.classify_ll_distance({pair: (metrics[k].get("time_ns") or [], y) for pair, y in lld.items()},
+                                                            restrained=k.startswith("docked_multi")), k)
     bur, bf = {}, []
     for k, rn in lig_keys:
         L = ((ext.get(k) or {}).get("ligands") or {}).get(rn) or {}
@@ -935,6 +1007,20 @@ def _limitations(doc: Doc, wf) -> list[str]:
             items.append(f"{name}: {r['limitation']}")
     for name, g in (wf.state().get("advisories") or {}).items():
         items.append(g.get("explanation", ""))
+    st_ = wf.state()
+    multi = (st_["steps"].get("pose_selection") or {}).get("selection", {}).get("mode") == "simultaneous" or bool(st_.get("multi_ligand"))
+    if multi:     # D-60: what a multi-ligand system can and cannot say
+        items.append(tx(("多配體系統：Vina 分數沒有靜電項，聯合姿勢的配體間作用只粗略估計；每個配體的部分電荷各自計算（AM1-BCC 類固定電荷，不含配體間極化），"
+                         "相鄰帶電基團的作用可能被高估或低估；模擬中的平底限制讓配體不會完全離開口袋，因此「共同佔位維持」需在無限制的重跑中確認。",
+                         "Multi-ligand system: the Vina score has no electrostatic term, so ligand–ligand interactions in joint poses are "
+                         "only roughly estimated; each ligand's partial charges are computed alone (fixed AM1-BCC-type charges without "
+                         "mutual polarisation), so neighbouring charged groups may be over- or under-stabilised; the flat-bottom restraint "
+                         "keeps every ligand from leaving the pocket, so sustained co-occupancy must be confirmed in an unrestrained rerun."), L))
+        ml = st_.get("multi_ligand") or {}
+        if ml.get("status") == "ACCEPTED":
+            items.append(tx(("使用者選擇讓有重疊或穿環的多配體構型照原樣進入 MD；最小化可能把配體推離原位，相關結果需保守看待。",
+                             "The user let a multi-ligand geometry with overlaps or ring piercing enter MD as it was; minimisation "
+                             "may have pushed a ligand away from its pose, so read the related results conservatively."), L))
     for name, r in (wf.state().get("peptide_access") or {}).items():
         for part in ("precheck", "pose"):
             g = r.get(part) or {}

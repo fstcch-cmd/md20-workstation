@@ -19,7 +19,7 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
                cocrystal_resnames: list[str] | None = None, keep_hetero: set[str] | None = None,
                extra_ligand_resnames: set[str] | None = None, peptides: list[dict] | None = None,
                ligand_names: list[str] | None = None, peptide_policy: dict | None = None,
-               exclude_chains: set[str] | None = None, metal_policy: dict | None = None, ligand_metal: str | None = None,
+               exclude_chains: set[str] | None = None, metal_policy: dict | None = None, ligand_metal: str | None = None, accept_geometry: bool = False,
                metal_params: dict | None = None, solvent: str = "explicit", box_shape: str = "dodecahedron") -> dict:
     """Build a case.
 
@@ -120,7 +120,8 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
         ligs.append(prec)
     res = assemble_system(rman["receptor_pdb"], ligs, bdir, padding_nm=padding_nm, box_shape=box_shape,
                           ionic_strength_molar=ionic_strength_molar, ions=ions, decisions=decisions, metal_policy=metal_policy, ph=ph,
-                          metal_params=metal_params, solvent=solvent, ligand_metal=ligand_metal)
+                          metal_params=metal_params, solvent=solvent, ligand_metal=ligand_metal,
+                          accept_geometry=accept_geometry)
     if res.status == NEEDS_HUMAN:
         summary["blocking"] = "assembly"
         summary["blocking_detail"] = [g for g in (res.gates or {}).get("gates", []) if g.get("status") == NEEDS_HUMAN]

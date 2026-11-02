@@ -87,6 +87,17 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
     if name in ("library partial", "screen partial") and option.startswith("screen.allow_partial"):
         return _act(option, [{"path": ["screen", "allow_partial"], "value": True}],
                     "screen_library" if name == "library partial" else "screen_docking")
+    if name in ("multi-ligand geometry", "ligand geometry (with hydrogens)"):          # D-60
+        if option.startswith("multi_ligand.exclude:"):
+            names = [x.strip() for x in option.split(":", 1)[1].split("]")[0].strip(" [").split(",") if x.strip()]
+            return _act(option, [{"path": ["multi_ligand", "exclude"], "value": names}], "md_cases")
+        if option.startswith("multi_ligand.accept_geometry"):
+            return _act(option, [{"path": ["multi_ligand", "accept_geometry"], "value": True}], "md_cases")
+        if option.startswith("pose_choices:"):
+            entry = option.split(":", 1)[1].split("=")[0].strip()
+            return _act(option, [{"path": ["pose_choices", entry], "value": "{text}"}], "pose_selection",
+                        needs_text=True, text_hint="聯合姿勢名次（數字）")
+        return None
     if name == "ligand–metal coordination" and option.startswith("ligand_metal: restrain"):
         return _act(option, [{"path": ["ligand_metal"], "value": "restrain"}], "md_cases")
     if name == "confirm MD" and option.startswith("進入分子動力學"):

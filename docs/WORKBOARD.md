@@ -29,6 +29,7 @@
 ## 完成
 | 項目 | session | commit |
 |---|---|---|
+| 多配體同時對接進 MD：穿環／重疊／漂浮檢查、自動改選與微調、指名排除、力場一致性、報告版型 F38–F41（D-60） | session_016gcJz8q2F6515MWPncJEZu | 本 commit |
 | 對接多 5 種圖（姿勢相似度、漏斗、位置、接觸殘基、配體比較）＋報告範本（所有圖種，合成資料，CI `report-template` 分支）（D-59） | session_016gcJz8q2F6515MWPncJEZu | 本 commit |
 | 圖表豐富度：延伸分析與 32 種圖進結案報告與 GUI 圖表分頁（D-58） | session_016gcJz8q2F6515MWPncJEZu | 9aa78d1 |
 | 命令列進度剩餘時間與 ns/day（D-57） | session_016gcJz8q2F6515MWPncJEZu | 04f8a9a |

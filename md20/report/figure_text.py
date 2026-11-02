@@ -728,3 +728,33 @@ FIG.update({
         "read": ("分數比較受分子大小影響，配體效率可校正大小；相差小於 1 kcal mol⁻¹ 的配體不能排序。", "Scores favour larger molecules, which ligand efficiency corrects for; ligands within 1 kcal mol⁻¹ cannot be ordered."),
     },
 })
+
+
+FIG.update({
+    "joint_poses": {
+        "title": ("聯合姿勢的共同佔位檢查", "Co-occupancy of the joint poses"),
+        "caption": ("上：每個聯合姿勢中配體間最短距離（綠帶為共同佔位且不碰撞的範圍，紅虛線以下為碰撞）；下：每個配體與蛋白接觸的重原子數；點線為採用的姿勢。",
+                    "Top: minimum ligand–ligand distance of each joint pose (green band = co-occupancy without clash, below the red line = clash); "
+                    "bottom: protein heavy atoms contacted by each ligand; the dotted line marks the pose used."),
+        "read": ("可信的聯合姿勢同時落在綠帶內、且每個配體都有足夠接觸；只有一個配體埋入、另一個靠在它身上的姿勢不可信。",
+                 "A credible joint pose sits in the green band with every ligand making enough contacts; a pose where one ligand is buried and the other only leans on it is not credible."),
+    },
+    "joint_positions": {
+        "title": ("各配體在搜尋區中的位置", "Position of each ligand in the search box"),
+        "caption": ("各聯合姿勢中每個配體中心的投影（顏色為配體，數字為名次）。", "Centre of each ligand in each joint pose (colour = ligand, number = rank)."),
+        "read": ("每種顏色各自聚集代表排列一致；顏色互相交錯代表配體在不同姿勢中互換位置，誰佔哪個子位點並不確定。",
+                 "Each colour gathered in its own place means a consistent arrangement; interleaved colours mean the ligands swap places between poses, so which ligand holds which subsite is uncertain."),
+    },
+    "subsites": {
+        "title": ("子位點地圖", "Subsite map"),
+        "caption": ("採用的聯合姿勢中，每個配體 4 Å 內的殘基（列為殘基，行為配體）。", "Residues within 4 Å of each ligand in the joint pose used (rows residues, columns ligands)."),
+        "read": ("同一列有兩格以上代表該殘基夾在配體之間（共用子位點、可能競爭）；各自獨立的區塊代表配體佔不同子位點。",
+                 "A row with two or more filled cells is a residue between ligands (shared subsite, possible competition); separate blocks mean the ligands hold different subsites."),
+    },
+    "ll_distance": {
+        "title": ("配體之間的距離", "Distance between the ligands"),
+        "caption": ("多配體系統模擬中各配體中心之間的距離。", "Distance between the ligand centroids during the multi-ligand simulation."),
+        "read": ("距離維持穩定代表共同佔位被模擬支持；距離持續增加代表其中一個配體離開，對接的聯合姿勢不被支持。",
+                 "A steady distance means the simulation supports co-occupancy; a steadily growing one means a ligand leaves and the joint docking pose is not supported."),
+    },
+})

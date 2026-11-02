@@ -36,6 +36,9 @@ GATES: dict[str, tuple[str, str, str]] = {
     "protein": ("蛋白", "Protein", "No protein Cα atoms were found: this is not a protein structure file."),
     "metal charges": ("金屬電荷", "Metal-site charges", "The fitted metal-site charges are inconsistent with the force field."),
     "metal": ("金屬位點", "Metal site", "A metal ion in or near the pocket needs a model: bonded, non-bonded with restraints, or removed."),
+    "multi-ligand geometry": ("多配體幾何", "Multi-ligand geometry", "In the chosen pose two molecules overlap or a bond threads through a ring (ring piercing); minimisation cannot repair this, so one ligand must be excluded or another joint pose chosen."),
+    "ligand geometry (with hydrogens)": ("配體幾何（含氫）", "Ligand geometry (with hydrogens)", "After all hydrogens were added, a ligand overlaps or threads through a ring of another molecule; small cases are nudged automatically."),
+    "ligand force-field consistency": ("配體力場一致性", "Ligand force-field consistency", "Ligands in one system should share one force field and charge model so that their interactions are comparable."),
     "ligand–metal coordination": ("配體配位金屬", "Ligand coordinates a metal", "The docked ligand binds a metal directly; the force field has no ligand–metal bond, so this binding mode is not reliable without a dedicated model."),
     "CPP": ("穿膜性", "Cell penetration", "Scientific-limitation notice: for an intracellular target the peptide must cross the cell membrane. This notice does not stop the workflow."),
     "peptide pocket access": ("活性位可及性", "Binding-site access", "Scientific-limitation notice: whether the peptide fits the search region and whether the chosen pose actually enters the site. This notice does not stop the workflow."),
@@ -129,8 +132,12 @@ OPTIONS.update({   # free-text hints of the decision inputs
     "為什麼它是擬肽小分子而不是胜肽": "Why it is a peptidomimetic small molecule rather than a peptide",
     "為什麼這個結構仍可用（會寫進決策日誌與報告）": "Why this structure is still usable (recorded in the decision log and the report)",
     "備註（為什麼選這些）": "Note (why these compounds)",
+    "聯合姿勢名次（數字）": "Joint pose rank (a number)",
 })
 PREFIX: list[tuple[str, str]] = [
+    ("multi_ligand.exclude:", "Exclude this ligand from the multi-ligand system (recommended):"),
+    ("multi_ligand.accept_geometry", "Keep the geometry as it is (not recommended; labelled in the report)"),
+    ("pose_choices:", "Choose another pose:"),
     ("仍要使用", "Use anyway"), ("ligand_metal: restrain", "Hold the coordination with a distance restraint (no binding free energy for this ligand)"),
     ("box.from_residue:", "Define the box from residue"), ("box.allow_blind", "Allow blind docking (labelled in the report)"),
     ("docking.skip_redock", "Skip the redocking check (labelled in the report)"), ("md.restraints:", "Restraint strategy:"),

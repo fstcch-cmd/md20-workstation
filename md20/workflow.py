@@ -126,6 +126,7 @@ DECISION_KEYS: tuple[tuple[str, ...], ...] = (
     ("pose_choices",), ("human_choices",), ("structure_override",), ("metal_policy",), ("metal_params",), ("peptide_policy",),
     ("docking", "skip_redock"), ("box", "allow_blind"), ("binding", "manual_windows"),
     ("screen", "select"), ("screen", "next_mode"), ("screen", "allow_partial"), ("md_confirmed",), ("ligand_metal",),
+    ("multi_ligand",),
 )
 LIGAND_DECISION_KEYS = ("cpp_override", "cpp_evidence", "target_location")
 
@@ -833,27 +834,113 @@ class Workflow:
             names = list(sel["ligands"])
             if len(names) < 2:
                 self._block("md_cases", "docked_multi 需要至少 2 個配體。")
-            if sel["mode"] != "simultaneous":
-                # independent picks were docked separately: allow only if they do not overlap
-                self._check_independent_overlap(sel)
-            out.append({"key": "docked_multi", "mode": "docked_multi", "ligands": names})
+            geo = self._multi_geometry(sel, names)          # both modes: hydrogens and nudges were never seen by Vina
+            if len(geo["ligands"]) < 2:
+                self.dec.record("multi_ligand.geometry", "docked_multi", "skipped",
+                                f"幾何檢查後只剩 {len(geo['ligands'])} 個配體，多配體系統等同單一配體系統，不另建 docked_multi。")
+            else:
+                if sel["mode"] != "simultaneous":
+                    self.dec.record("workflow.md", "docked_multi from independent", "allowed",
+                                    "配體分別對接，選定姿勢經幾何檢查（無重疊、無穿環）後組成多配體系統；嚴格的共同佔位請用 simultaneous 模式。")
+                out.append({"key": "docked_multi", "mode": "docked_multi", "ligands": geo["ligands"], "picks": geo["picks"]})
         return out
 
-    def _check_independent_overlap(self, sel: dict) -> None:
-        from rdkit import Chem
-        xyz = {}
-        for n, s in sel["ligands"].items():
-            m = next(Chem.SDMolSupplier(s["sdf"], removeHs=True))
-            xyz[n] = m.GetConformer().GetPositions()
-        names = list(xyz)
-        for i in range(len(names)):
-            for j in range(i + 1, len(names)):
-                d = np.sqrt(((xyz[names[i]][:, None] - xyz[names[j]][None]) ** 2).sum(-1)).min()
-                if d < 2.5:
-                    self._block("md_cases", f"{names[i]} 與 {names[j]} 是分別對接的，選定 pose 互相重疊（{d:.1f} Å）；"
-                                "請改用 simultaneous 對接，或為其中一個配體改選不重疊的 pose。")
-        self.dec.record("workflow.md", "docked_multi from independent", "allowed",
-                        "配體分別對接，但選定 pose 彼此距離 ≥ 2.5 Å，可組成多配體系統；嚴格的共同佔位請用 simultaneous 模式。")
+    def _multi_geometry(self, sel: dict, names: list[str], *, allow_alternatives: bool = True) -> dict:
+        """D-60: geometry of the multi-ligand complex before it is built — overlaps, ring piercing (穿環) and floating
+        ligands; a small rigid nudge repairs what it can (AUTO_FIXED), a floating ligand leaves the multi-ligand system,
+        anything else stops with the ligand to exclude named (NEEDS_HUMAN).  Human decisions: `multi_ligand.exclude`,
+        `multi_ligand.accept_geometry`.  Result kept in state["multi_ligand"] for the report and the GUI."""
+        from .build import multi_ligand as ML
+        human = self.cfg.get("multi_ligand") or {}
+        exclude = [n for n in (human.get("exclude") or []) if n in names]
+        sig = {"names": list(names), "sdf": [sel["ligands"][n].get("sdf") for n in names], "human": human}
+        prev = self.state().get("multi_ligand") or {}
+        if prev.get("signature") == sig and prev.get("status") in ("PASS", "AUTO_FIXED", "ACCEPTED"):
+            picks = {n: {**sel["ligands"][n], "sdf": a["sdf"]} for n, a in (prev.get("adjusted") or {}).items()}
+            return {"ligands": prev["ligands"], "picks": picks, "record": prev}
+        keep = [n for n in names if n not in exclude]
+        if len(keep) < 2:          # no co-occupancy system is left to check; single-ligand builds keep their own backstop
+            record = {"status": "PASS", "ligands": keep, "excluded": exclude, "auto_excluded": [], "culprit": None, "adjusted": {},
+                      "per_ligand": {}, "why": [f"使用者排除 {'、'.join(exclude)} 後只剩 {len(keep)} 個配體。",
+                                               f"After the user excluded {', '.join(exclude)}, {len(keep)} ligand(s) remain."],
+                      "options": [], "decision": human, "signature": sig}
+            st = self.state(); st["multi_ligand"] = record; atomic_write_json(st, self.state_path)
+            return {"ligands": keep, "picks": {}, "record": record}
+        mols = []
+        for n in names:
+            try:
+                mols.append(ML.mol_from_sdf(sel["ligands"][n]["sdf"], n))
+            except Exception as exc:  # noqa: BLE001
+                self.dec.record("multi_ligand.geometry", n, "skipped", f"無法讀取 {n} 的姿勢檔（{type(exc).__name__}）；此配體不做幾何檢查。")
+        rec = (self.state()["steps"].get("receptor_docking") or {}).get("path")
+        around = np.vstack([m.xyz for m in mols]) if mols else np.zeros((1, 3))
+        prot = ML.protein_near(rec, around) if rec and Path(rec).is_file() else None
+        r = ML.resolve(mols, prot, exclude=exclude, accept=bool(human.get("accept_geometry")))
+        outdir = self.dir / "multi_ligand"
+        outdir.mkdir(exist_ok=True)
+        picks = {}
+        for n, a in r["adjusted"].items():
+            dst = outdir / f"{safe_name(n)}_nudged.sdf"
+            ML.write_sdf_coords(sel["ligands"][n]["sdf"], dst, a["xyz"], note=f"MD20 nudged rmsd={a['rmsd']}A")
+            picks[n] = {**sel["ligands"][n], "sdf": str(dst)}
+        record = {"status": r["status"], "why": list(r["why"]), "options": r["options"], "culprit": r["culprit"],
+                  "ligands": r["ligands"], "excluded": r["excluded"], "auto_excluded": r["auto_excluded"],
+                  "adjusted": {n: {k: v for k, v in a.items() if k != "xyz"} | {"sdf": picks[n]["sdf"]} for n, a in r["adjusted"].items()},
+                  "per_ligand": {n: {"overlaps": len(v["overlaps"]), "min_overlap_A": min((o["d"] for o in v["overlaps"]), default=None),
+                                     "piercings": len(v["piercings"]), "contacts": v["contacts"], "floating": v["floating"],
+                                     "partners": v["partners"]} for n, v in r["per_ligand"].items()},
+                  "protein_checked": prot is not None, "decision": human, "signature": sig}
+        st = self.state(); st["multi_ligand"] = record; atomic_write_json(st, self.state_path)
+        if r["status"] == "NEEDS_HUMAN" and allow_alternatives:
+            alt = self._alternative_joint_pose(sel, names, prot)
+            if alt is not None:
+                return self._multi_geometry(sel, names, allow_alternatives=False)
+        if r["status"] == "NEEDS_HUMAN":
+            self._block("md_cases", "多配體幾何檢查：" + r["why"][0], multi_ligand=record,
+                        gates=[{"name": "multi-ligand geometry", "status": "NEEDS_HUMAN", "explanation": r["why"][0],
+                                "options": r["options"]}])
+        kind = {"PASS": "auto", "AUTO_FIXED": "auto_fixed", "ACCEPTED": "human"}[r["status"]]
+        self.dec.record("multi_ligand.geometry", "+".join(names), r["status"],
+                        r["why"][0] + ("；使用者選擇照原樣進入 MD（最小化可能大幅推開原子，報告會標註）。" if r["status"] == "ACCEPTED" else ""),
+                        kind=kind)
+        return {"ligands": r["ligands"], "picks": picks, "record": record}
+
+    def _alternative_joint_pose(self, sel: dict, names: list[str], prot) -> int | None:
+        """D-60: the chosen joint pose cannot enter MD; before asking a human, try the other joint poses that passed the
+        docking rules (largest cluster first, then score).  The first one whose geometry passes or can be nudged replaces
+        the selection for every system (single-ligand cases use the same joint pose).  Never overrides a human choice."""
+        from .build import multi_ligand as ML
+        if sel.get("mode") != "simultaneous" or "joint" in (self.cfg.get("pose_choices") or {}):
+            return None
+        d = self._done("docking")
+        res = load_json(d["result"], {}) if d and d.get("result") else {}
+        e = next((x for x in res.get("entries", []) if x.get("name") == "joint"), None)
+        if not e:
+            return None
+        cur = {sel["ligands"][n].get("rank") for n in names}
+        cands = sorted([p for p in e["poses"] if not p.get("rejected") and p["rank"] not in cur],
+                       key=lambda p: (-p.get("cluster_size", 1), p["score"]))
+        for p in cands:
+            k = p["rank"] - 1
+            try:
+                mols = [ML.mol_from_sdf(e["pose_sdfs"][n][k], n) for n in names]
+            except Exception:  # noqa: BLE001
+                continue
+            r = ML.resolve(mols, prot)
+            if r["status"] in ("PASS", "AUTO_FIXED") and not r["auto_excluded"]:
+                old = sorted(cur)
+                for n in names:
+                    sel["ligands"][n].update({"rank": p["rank"], "sdf": e["pose_sdfs"][n][k], "score": p["score"]})
+                st = self.state()
+                if st["steps"].get("pose_selection", {}).get("selection"):
+                    st["steps"]["pose_selection"]["selection"] = sel
+                    atomic_write_json(st, self.state_path)
+                self.dec.record("multi_ligand.geometry", "joint pose", f"rank {p['rank']}",
+                                f"原選聯合姿勢第 {old} 名有無法微調的重疊或穿環；改用同樣通過對接條件、幾何可進入 MD 的第 {p['rank']} 名"
+                                f"（{p['score']:.2f} kcal/mol，cluster {p.get('cluster_size', 1)} 個姿勢）。所有系統改用此姿勢。",
+                                kind="auto_fixed")
+                return p["rank"]
+        return None
 
     def _solvent(self, screen: bool = False) -> str:
         """`md.solvent` (explicit | gbn2); the short-MD pose screen may set its own (`docking.pose_md_screen.solvent`)."""
@@ -932,7 +1019,8 @@ class Workflow:
                        ionic_strength_molar=float(self.cfg.get("md", {}).get("ionic_strength_molar", 0.15)),
                        ions=self.cfg.get("md", {}).get("ions") or None,
                        human_choices=self.cfg.get("human_choices") or None,   # receptor gate choices apply to the MD build too
-                       ligand_metal=self.cfg.get("ligand_metal") or None)
+                       ligand_metal=self.cfg.get("ligand_metal") or None,
+                       accept_geometry=bool((self.cfg.get("multi_ligand") or {}).get("accept_geometry")))
         lmap = {n: f"L{i:02d}" for i, n in enumerate(small, 1)} | {p["name"]: p["name"] for p in peps}
         return s, lmap
 
@@ -942,7 +1030,7 @@ class Workflow:
             if spec["key"] in built and built[spec["key"]].get("status") == "PASS":
                 continue
             case = self.project.new_case(f"{self.name}_{spec['key']}")
-            s, lmap = self._build_one(case, raw, spec["ligands"], sel["ligands"])
+            s, lmap = self._build_one(case, raw, spec["ligands"], {**sel["ligands"], **(spec.get("picks") or {})})
             built[spec["key"]] = {"case_id": case.case_id, "mode": spec["mode"], "ligands": spec["ligands"], "ligand_map": lmap,
                                   "status": s["status"], "blocking": s.get("blocking"), "blocking_detail": s.get("blocking_detail")}
             self._mark("md_cases", cases=built)

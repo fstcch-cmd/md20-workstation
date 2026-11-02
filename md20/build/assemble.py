@@ -216,7 +216,7 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                     nonbonded_cutoff_nm: float = 1.0, forcefield_files: tuple[str, ...] = AMBER_PROTEIN,
                     flat_bottom: bool | None = None, metal_policy: dict | None = None, ph: float = 7.4,
                     metal_params: dict | None = None, solvent: str = "explicit", ions: dict | None = None,
-                    ligand_metal: str | None = None) -> BuildResult:
+                    ligand_metal: str | None = None, accept_geometry: bool = False) -> BuildResult:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     report = GateReport()
@@ -264,13 +264,17 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
         modeller.add(top, pos)
         lig_atom_ranges.append((rec.name, start, modeller.topology.getNumAtoms()))
         lig_names.add(rec.resname)
-        ladder = parameter_ladder(__import__("rdkit.Chem", fromlist=["SDMolSupplier"]).SDMolSupplier(rec.sdf_path, removeHs=False)[0],
-                                  prefer=((rec.provider,) if rec.provider else ("openff-sage", "gaff2")), decisions=None)
-        if not ladder["generator"]:
-            report.add(Gate(f"ligand {rec.name} parameters", NEEDS_HUMAN, "組裝階段無法重建配體參數：" + str(ladder["errors"])))
+    small = [r for r in ligands if getattr(r, "kind", "small") != "peptide"]
+    ladders = _consistent_ladders(small, decisions, report)
+    for rec in small:
+        ladder = ladders.get(rec.name) or {}
+        if not ladder.get("generator"):
+            report.add(Gate(f"ligand {rec.name} parameters", NEEDS_HUMAN, "組裝階段無法重建配體參數：" + str(ladder.get("errors"))))
         else:
             ff.registerTemplateGenerator(ladder["generator"].generator)
             generators.append(ladder["provider"])
+    if len(lig_atom_ranges) >= 1:
+        _geometry_backstop(modeller, lig_atom_ranges, n_protein, report, decisions, accept_geometry)
     if lig_atom_ranges:
         # REVIEW #15: metal sites were planned on the receptor alone; check the assembled complex for a docked
         # ligand that coordinates a metal directly
@@ -448,3 +452,75 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
     atomic_write_json({**res.to_dict(), "created_at": now_iso(), **({"implicit_solvent": gb_info} if implicit else {})},
                       out_dir / "build_manifest.json")
     return res
+
+
+def _consistent_ladders(small: list, decisions, report) -> dict:
+    """D-60: every small-molecule ligand in one system gets the same force field and charge model when possible.
+    Mixing OpenFF Sage (NAGL charges) with GAFF2 (AM1-BCC) inside one pocket changes the ligand–ligand balance in ways
+    no one can attribute afterwards.  Pass 1: each ligand's own preference; pass 2 (mixed): the first provider every
+    ligand supports.  If none is common, the mix stays and an advisory gate says so."""
+    from rdkit import Chem
+    mols = {r.name: Chem.SDMolSupplier(r.sdf_path, removeHs=False)[0] for r in small}
+    lad = {r.name: parameter_ladder(mols[r.name], prefer=((r.provider,) if r.provider else ("openff-sage", "gaff2")), decisions=None)
+           for r in small}
+    kinds = {n: (l.get("provider"), l.get("charge_method")) for n, l in lad.items() if l.get("generator")}
+    if len(small) < 2 or len(set(kinds.values())) <= 1:
+        return lad
+    for target in ("openff-sage", "gaff2"):
+        trial = {n: (lad[n] if kinds.get(n, (None,))[0] == target else parameter_ladder(mols[n], prefer=(target,), decisions=None))
+                 for n in lad}
+        if all(t.get("generator") for t in trial.values()) and len({t.get("charge_method") for t in trial.values()}) == 1:
+            if decisions:
+                decisions.record("build.ligand_ff", "consistency", target,
+                                 f"多配體系統原本混用力場／電荷模型（{kinds}），統一為 {target}，讓配體之間的作用在同一套參數下比較；"
+                                 "代價是個別配體可能不是其最佳選項。", kind="auto_fixed")
+            report.add(Gate("ligand force-field consistency", AUTO_FIXED,
+                            f"多個配體原本使用不同力場或電荷模型（{kinds}），已統一為 {target}。"))
+            return trial
+    report.add(Gate("ligand force-field consistency", AUTO_FIXED,
+                    f"多個配體無法使用同一套力場與電荷模型（{kinds}）；仍可模擬，但配體之間的相對比較含有力場差異，報告會標註。",
+                    advisory=True))
+    return lad
+
+
+def _geometry_backstop(modeller, lig_atom_ranges, n_protein, report, decisions, accept: bool) -> None:
+    """D-60: last check on the assembled complex with every hydrogen (Vina never saw the non-polar ones): overlaps
+    and ring piercing per ligand; a rigid nudge ≤ 2 Å RMSD is applied in place (AUTO_FIXED), otherwise NEEDS_HUMAN."""
+    from . import multi_ligand as ML
+    from openmm import unit
+    nm = np.asarray(modeller.positions.value_in_unit(unit.nanometer)) * 10.0
+    atoms = list(modeller.topology.atoms())
+    el = [(a.element.symbol if a.element is not None else "X") for a in atoms]
+    def bonds_in(lo, hi):
+        return [(b[0].index - lo, b[1].index - lo) for b in modeller.topology.bonds()
+                if lo <= b[0].index < hi and lo <= b[1].index < hi]
+    ligs = [ML.Mol(name, el[a:b], nm[a:b], bonds_in(a, b) or None) for name, a, b in lig_atom_ranges]
+    around = np.vstack([l.xyz for l in ligs])
+    lo, hi = around.min(0) - 10, around.max(0) + 10
+    near = [i for i in range(n_protein) if np.all((nm[i] >= lo) & (nm[i] <= hi))]
+    keep_res = {atoms[i].residue.index for i in near}
+    pidx = [i for i in range(n_protein) if atoms[i].residue.index in keep_res]
+    prot = ML.Mol("protein", [el[i] for i in pidx], nm[pidx], is_protein=True) if pidx else None
+    r = ML.resolve(ligs, prot, accept=accept, pose_entry=(ligs[0].name if len(ligs) == 1 else "joint"))
+    if r["status"] == "PASS":
+        return
+    if r["auto_excluded"] and len(ligs) > 1:
+        # removing atoms here would desynchronise every index downstream: the workflow-level check does exclusions
+        r["status"] = "ACCEPTED" if accept else "NEEDS_HUMAN"
+    if r["adjusted"]:
+        from openmm import Vec3
+        pos = list(modeller.positions.value_in_unit(unit.nanometer))
+        for name, a, b in lig_atom_ranges:
+            if name in r["adjusted"]:
+                for k, x in enumerate(r["adjusted"][name]["xyz"]):
+                    pos[a + k] = Vec3(*(x / 10.0))
+        modeller.positions = unit.Quantity(pos, unit.nanometer)
+    if r["status"] == "AUTO_FIXED":
+        report.add(Gate("ligand geometry (with hydrogens)", AUTO_FIXED, r["why"][0]))
+    elif r["status"] == "ACCEPTED":
+        report.add(Gate("ligand geometry (with hydrogens)", AUTO_FIXED, "使用者選擇照原樣建模：" + r["why"][0], advisory=True))
+    else:
+        report.add(Gate("ligand geometry (with hydrogens)", NEEDS_HUMAN, r["why"][0], options=r["options"]))
+    if decisions:
+        decisions.record("build.geometry", "+".join(n for n, _, _ in lig_atom_ranges), r["status"], r["why"][0],
+                         kind="human" if r["status"] == "NEEDS_HUMAN" else "auto_fixed")

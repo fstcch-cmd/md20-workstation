@@ -39,3 +39,4 @@
 - 閘門與 GUI：`md20/build/gates.py`、`md20/gui/actions.py`、`views.py`、`app.py`
 - 驗證案例：`md20/validation/`、`tests/test_validation_papers.py`
 | `report_language.md` | 報告用語規範：每張圖的通用說明（圖說、如何判讀、情境句型與門檻；D-54） |
+| `multi_ligand.md` | 多配體同時對接 → MD：穿環、重疊、漂浮的檢查與處置順序、力場一致性、報告版型（D-60） |

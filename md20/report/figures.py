@@ -377,7 +377,7 @@ def pose_positions(cents: np.ndarray, scores, box: dict, path: Path) -> str | No
     return _save(fig, path)
 
 
-def binary_map(rows: list[str], M, path: Path, cols: list[str] | None = None) -> str | None:
+def binary_map(rows: list[str], M, path: Path, cols: list[str] | None = None, xlabel: str = "Pose rank") -> str | None:
     M = np.asarray(M)
     if M.size == 0:
         return None
@@ -386,7 +386,7 @@ def binary_map(rows: list[str], M, path: Path, cols: list[str] | None = None) ->
     ax.imshow(M, cmap="Blues", vmin=0, vmax=1.2, aspect="auto", interpolation="nearest")
     ax.set_yticks(range(len(rows)), rows, fontsize=7)
     ax.set_xticks(range(M.shape[1]), cols or [str(i + 1) for i in range(M.shape[1])], fontsize=7)
-    ax.set_xlabel("Pose rank")
+    ax.set_xlabel(xlabel)
     return _save(fig, path)
 
 
@@ -402,4 +402,52 @@ def ligand_compare(rows: list[dict], path: Path) -> str | None:
         ax.set_xlabel(lab, fontsize=8)
     axes[0].set_yticks(range(len(rows)), names, fontsize=7)
     axes[0].invert_yaxis()
+    return _save(fig, path)
+
+
+# ------------------------------------------------------------------------------------------- D-60 multi-ligand
+def joint_poses(poses: list[dict], names: list[str], path: Path, *, ll_min: float = 3.3, ll_max: float = 4.5, chosen: int | None = None) -> str | None:
+    """Per joint pose: minimum ligand–ligand distance (band = co-occupancy without clash) and each ligand's protein contacts."""
+    if not poses or poses[0].get("min_ll_distance") is None:
+        return None
+    plt = _plt()
+    ranks = [p["rank"] for p in poses]
+    fig, axes = plt.subplots(2, 1, figsize=(6.4, 4.2), sharex=True)
+    d = [p.get("min_ll_distance") or np.nan for p in poses]
+    axes[0].axhspan(ll_min, ll_max, color="#2f7d5b", alpha=0.10, lw=0)
+    axes[0].axhline(ll_min, color="#b8433f", ls="--", lw=0.8)
+    axes[0].bar(ranks, d, color=["#b8433f" if x < ll_min else ("#9aa5b1" if x > ll_max else PALETTE[0]) for x in d], width=0.6)
+    axes[0].set_ylabel("Min. ligand–ligand\ndistance (Å)", fontsize=8)
+    cp = np.array([p.get("contacts_per_ligand") or [0] * len(names) for p in poses], float)
+    w = 0.8 / max(1, cp.shape[1])
+    for k in range(cp.shape[1]):
+        axes[1].bar(np.array(ranks) + (k - (cp.shape[1] - 1) / 2) * w, cp[:, k], width=w, color=PALETTE[k % len(PALETTE)],
+                    label=names[k] if k < len(names) else f"L{k + 1}")
+    axes[1].set_ylabel("Protein contacts\n(heavy atoms)", fontsize=8)
+    axes[1].set_xlabel("Joint pose rank")
+    axes[1].legend(fontsize=7, ncol=min(4, cp.shape[1]), frameon=False)
+    if chosen:
+        for ax in axes:
+            ax.axvline(chosen, color="#4d6170", ls=":", lw=1)
+    axes[1].set_xticks(ranks)
+    return _save(fig, path)
+
+
+def positions_by_ligand(cents: dict, box: dict, path: Path) -> str | None:
+    """Pose centres of each ligand in the box (colour = ligand, number = joint rank)."""
+    if not cents or not box.get("center"):
+        return None
+    plt = _plt()
+    c, h = np.asarray(box["center"], float), np.asarray(box.get("size") or [20, 20, 20], float) / 2
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.3))
+    for ax, (i, j, li, lj) in zip(axes, ((0, 1, "x (Å)", "y (Å)"), (0, 2, "x (Å)", "z (Å)"))):
+        ax.add_patch(plt.Rectangle((c[i] - h[i], c[j] - h[j]), 2 * h[i], 2 * h[j], fill=False, ec="#4d6170", lw=1))
+        for (name, X), col in zip(cents.items(), PALETTE * 3):
+            X = np.asarray(X)
+            ax.scatter(X[:, i], X[:, j], color=col, s=26, label=name)
+            for r, x in enumerate(X[:5], 1):
+                ax.annotate(r, (x[i], x[j]), fontsize=6, xytext=(2, 2), textcoords="offset points")
+        ax.set_xlim(c[i] - h[i] - 2, c[i] + h[i] + 2); ax.set_ylim(c[j] - h[j] - 2, c[j] + h[j] + 2)
+        ax.set_aspect("equal"); ax.set_xlabel(li); ax.set_ylabel(lj)
+    axes[1].legend(fontsize=7, frameon=False, loc="upper right")
     return _save(fig, path)

@@ -79,3 +79,23 @@ def test_ligand_compare():
     s = D.classify_ligand_compare(rows)
     assert "best score belongs to A" in en(s) and "ligand efficiency to B" in en(s) and "cannot be ordered" in en(s)
     assert D.classify_ligand_compare(rows[:1]) == []
+
+
+def test_multi_ligand_classifiers():
+    poses = [{"rank": r, "min_ll_distance": d, "contacts_per_ligand": c} for r, d, c in
+             ((1, 3.6, [14, 12]), (2, 3.9, [13, 11]), (3, 2.4, [12, 11]), (4, 4.0, [12, 3]))]
+    s = D.classify_joint_poses(poses, ["A", "B"], 1, [1, 1])
+    assert lv(s)[0] == "good" and "2 of 4" in en(s) and "Ranks 3" in en(s) and "caution" in lv(s)
+    assert lv(D.classify_joint_poses([dict(p, min_ll_distance=2.0) for p in poses], ["A", "B"], 1))[0] == "warn"
+    cents = {"A": np.array([[0, 0, 0], [0.3, 0, 0], [5, 0, 0]], float), "B": np.array([[5, 0, 0], [5.2, 0, 0], [0, 0, 0]], float)}
+    assert "exchange sites" in en(D.classify_joint_positions(cents))
+    calm = {"A": np.array([[0, 0, 0], [0.3, 0, 0]], float), "B": np.array([[5, 0, 0], [5.2, 0, 0]], float)}
+    assert lv(D.classify_joint_positions(calm)) == ["good"]
+    M = np.array([[1, 1], [1, 1], [1, 1], [1, 0], [0, 1]])
+    assert "share a subsite" in en(D.classify_subsites(["R1", "R2", "R3", "R4", "R5"], M, ["A", "B"]))
+    sep = np.array([[1, 0], [1, 0], [1, 0], [1, 0], [0, 1], [0, 1], [0, 1], [0, 1]])
+    assert "fully separate" in en(D.classify_subsites([f"R{i}" for i in range(8)], sep, ["A", "B"]))
+    t = np.linspace(0, 10, 50)
+    assert lv(D.classify_ll_distance({"L01-L02": (t, 5 + 0 * t)})) == ["good"]
+    assert lv(D.classify_ll_distance({"L01-L02": (t, 5 + t)})) == ["warn"]
+    assert lv(D.classify_ll_distance({"L01-L02": (t, 5 + 0 * t)}, restrained=True)) == ["good", "caution"]
