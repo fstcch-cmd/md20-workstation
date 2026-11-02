@@ -82,7 +82,8 @@ def softcore_system(system, moving: list[int], *, fixed: list[int], positions_nm
     for i in fixed:
         fix.addParticle(int(i), [float(v) for v in positions_nm[i]])
     sys2.addForce(fix)
-    hold = mm.CustomCentroidBondForce(1, "k_hold*step(d-w)*(d-w)^2; d=sqrt((x1-cx)^2+(y1-cy)^2+(z1-cz)^2)")
+    # +1e-8 nm²: at the starting point d = 0 and the derivative of sqrt would be 0/0 = NaN (CI d3502f0)
+    hold = mm.CustomCentroidBondForce(1, "k_hold*step(d-w)*(d-w)^2; d=sqrt((x1-cx)^2+(y1-cy)^2+(z1-cz)^2+1e-8)")
     c = positions_nm[ml].mean(0)
     for n, v in (("k_hold", k_hold), ("w", hold_nm), ("cx", c[0]), ("cy", c[1]), ("cz", c[2])):
         hold.addGlobalParameter(n, float(v))

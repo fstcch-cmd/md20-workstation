@@ -564,11 +564,19 @@ def _softcore_repair(modeller, ff, lig_atom_ranges, ligs, prot, r, decisions) ->
         fixed = [i for i in range(len(atoms)) if heavy[i] and not (a <= i < b)]
         base = by[bad].xyz.copy()
         base_contacts = ML.protein_contacts(by[bad], base, prot)
-        try:
-            new = SC.relax(system, pos, moving, fixed)
-        except Exception as exc:  # noqa: BLE001
-            if decisions:
-                decisions.record("build.geometry", f"soft-core {bad}", "failed", f"軟核修復失敗（{type(exc).__name__}: {exc}）。")
+        new = None
+        for seed in (2026, 2027, 2028):           # Langevin noise decides which way a threaded bond slides out; retry twice
+            try:
+                cand = SC.relax(system, pos, moving, fixed, seed=seed)
+            except Exception as exc:  # noqa: BLE001
+                if decisions:
+                    decisions.record("build.geometry", f"soft-core {bad}", "failed", f"軟核修復失敗（seed {seed}，{type(exc).__name__}: {exc}）。")
+                continue
+            t = ML.Mol(bad, by[bad].elements, cand[a:b] * 10.0, by[bad].bonds, False, by[bad].rings)
+            new = cand
+            if ML.check([t if l.name == bad else l for l in ligs], prot)[bad]["ok"]:
+                break
+        if new is None:
             return None
         x = new[a:b] * 10.0
         hv = by[bad].heavy

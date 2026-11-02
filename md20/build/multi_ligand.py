@@ -217,7 +217,10 @@ def check(ligands: list[Mol], protein: Mol | None) -> dict:
                     per[o.name]["partners"].add(l.name)
     for l in ligands:
         near_lig = any(_min_dist(l.xyz[l.heavy], o.xyz[o.heavy]) <= FLOAT_LL for o in ligands if o is not l)
-        per[l.name]["floating"] = protein is not None and per[l.name]["contacts"] < FLOAT_CONTACTS and not near_lig
+        # floating is a multi-ligand notion (the ligand takes part in nothing in a shared complex); a lone ligand far from
+        # the protein is a pose-quality question handled by its own gates (e.g. peptide site access) — CI d3502f0
+        per[l.name]["floating"] = (len(ligands) > 1 and protein is not None and per[l.name]["contacts"] < FLOAT_CONTACTS
+                                   and not near_lig)
     for v in per.values():
         v["partners"] = sorted(v["partners"])
         v["ok"] = not v["overlaps"] and not v["piercings"] and not v["floating"]

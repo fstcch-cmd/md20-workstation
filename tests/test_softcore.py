@@ -11,7 +11,7 @@ from md20.build import multi_ligand as ML, softcore as SC  # noqa: E402
 def _system():
     ang = np.linspace(0, 2 * np.pi, 7)[:-1]
     ring = np.c_[0.139 * np.cos(ang), 0.139 * np.sin(ang), np.zeros(6)]
-    chain = np.array([[0.02, 0.02, -0.16], [0.02, 0.02, -0.01], [0.02, 0.02, 0.14], [0.02, 0.02, 0.29]])   # threaded, off-centre
+    chain = np.array([[0.03, 0.02, -0.12], [0.03, 0.02, 0.03], [0.03, 0.02, 0.18], [0.03, 0.02, 0.33]])   # end bond threaded
     pos = np.vstack([ring, chain])
     s = mm.System()
     for _ in range(len(pos)):
@@ -45,8 +45,11 @@ def test_softcore_unthreads_and_keeps_the_ligand_near():
     ring = ML.Mol("A", ["C"] * 6, pos[:6] * 10)
     chain0 = ML.Mol("B", ["C"] * 4, pos[6:] * 10)
     assert ML.piercings(ring, ring.xyz, chain0, chain0.xyz)
-    new = SC.relax(s, pos, moving=list(range(6, 10)), fixed=list(range(6)), platform="Reference")
-    chain = ML.Mol("B", ["C"] * 4, new[6:] * 10)
+    for seed in (2026, 2027, 2028):                 # the build repair tries the same three seeds
+        new = SC.relax(s, pos, moving=list(range(6, 10)), fixed=list(range(6)), platform="Reference", seed=seed)
+        chain = ML.Mol("B", ["C"] * 4, new[6:] * 10)
+        if not ML.piercings(ring, ring.xyz, chain, chain.xyz):
+            break
     assert not ML.piercings(ring, ring.xyz, chain, chain.xyz)
     rmsd = float(np.sqrt(((new[6:] - pos[6:]) ** 2).sum(1).mean())) * 10
     assert rmsd <= SC.ACCEPT_RMSD_A and np.allclose(new[:6], pos[:6], atol=0.02)

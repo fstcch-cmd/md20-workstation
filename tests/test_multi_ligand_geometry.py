@@ -193,3 +193,9 @@ def test_backbone_bond_through_ligand_ring_after_minimisation(tmp_path):
     (tmp_path / "bb.pdb").write_text("\n".join(rows) + "\nEND\n")
     hits = ML.piercings_in_pdb(tmp_path / "bb.pdb")
     assert hits and hits[0]["bond_of"] == "protein"        # the C(1)–N(2) peptide bond threads the ring
+
+
+def test_lone_ligand_away_from_protein_is_not_a_geometry_problem():
+    far = ring("P01", (30.0, 0, 0))                    # e.g. a peptide built on its own chain, not docked
+    r = ML.resolve([far], shell())
+    assert r["status"] == "PASS"
