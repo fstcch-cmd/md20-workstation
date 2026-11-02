@@ -13,12 +13,60 @@ from ..util import default_projects_dir, load_json, safe_name
 from ..workflow import Workflow
 from .logic import Runner, config_from_form, list_workflows, pose_table, set_pose_choice, screen_table
 from .actions import apply_gate_action, resample_range, select_screen_ligands
-from ..docking.screen import echart_screen
+from ..docking.screen import echart_screen, echart_ranking
 from .views import (gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html,
                     coverage_targets, coverage_chart, coverage_summary)
+from .content import t, LANG_NAMES
 
 RUNNER = Runner()
-STATE: dict = {"projects_dir": default_projects_dir(), "platform": None, "doctor": None}
+STATE: dict = {"projects_dir": default_projects_dir(), "platform": None, "doctor": None, "lang": None}
+
+
+def lang() -> str:
+    """Interface language (D-51): English by default; the choice is kept in <projects>/gui_settings.json."""
+    path = Path(STATE["projects_dir"]) / "gui_settings.json"
+    try:
+        mt = path.stat().st_mtime_ns
+    except OSError:
+        mt = None
+    if STATE["lang"] is None or STATE.get("lang_mtime") != mt:      # re-read when the file changes (another window)
+        STATE["lang"] = load_json(path, {}).get("lang", "en") if mt else "en"
+        STATE["lang_mtime"] = mt
+    return STATE["lang"] if STATE["lang"] in LANG_NAMES else "en"
+
+
+def _(zh: str, en: str) -> str:
+    """Inline bilingual text for page code."""
+    return zh if lang() == "zh" else en
+
+
+def set_lang(code: str) -> None:
+    from ..util import atomic_write_json
+    STATE["lang"] = code if code in LANG_NAMES else "en"
+    path = Path(STATE["projects_dir"]) / "gui_settings.json"
+    d = load_json(path, {})
+    d["lang"] = STATE["lang"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(d, path)
+
+
+CSS = """
+<style>
+  body { font-family: "Inter", "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+         background: #f6f7f9; color: #1f2933; }
+  .md20-header { background: #1f2933 !important; }
+  .md20-title { font-weight: 600; letter-spacing: .01em; }
+  .md20-section { font-size: 1.05rem; font-weight: 600; color: #1f2933; margin-top: .5rem; }
+  .md20-muted { color: #616e7c; font-size: .85rem; }
+  .md20-card { background: #fff; border: 1px solid #e4e7eb; border-radius: 6px; box-shadow: none; }
+  .md20-mode { cursor: pointer; transition: border-color .15s; }
+  .md20-mode:hover { border-color: #2f6f9f; }
+  .md20-param-label { font-size: .9rem; font-weight: 500; }
+  .md20-why { color: #52606d; font-size: .8rem; line-height: 1.35; }
+  .md20-changed { color: #b44d12; font-size: .75rem; }
+  .q-table th { font-weight: 600; }
+</style>
+"""
 
 STATUS_COLOR = {"PASS": "positive", "COMPLETE": "positive", "RUNNING": "primary", "PAUSED": "warning",
                 "NEEDS_HUMAN": "negative", "ERROR": "negative"}
@@ -31,22 +79,29 @@ def _platform():
 
 
 def _header():
-    with ui.header().classes("items-center justify-between"):
-        ui.label("MD20 教學工作站").classes("text-lg font-bold")
-        with ui.row():
-            ui.link("儀表板", "/").classes("text-white")
-            ui.link("新流程", "/new").classes("text-white")
+    L = lang()
+    ui.add_head_html(CSS)
+    with ui.header().classes("items-center justify-between md20-header"):
+        ui.label(t("app_title", L)).classes("text-lg md20-title")
+        with ui.row().classes("items-center gap-4"):
+            ui.link(t("nav_home", L), "/").classes("text-white no-underline")
+            ui.link(t("nav_system", L), "/system").classes("text-white no-underline")
+
+            def change(e):
+                set_lang(e.value)
+                ui.navigate.reload()
+            ui.select(LANG_NAMES, value=L, on_change=change).props("dense dark borderless options-dense").classes("w-28")
 
 
-@ui.page("/")
+@ui.page("/system")
 def dashboard():
     _header()
     with ui.column().classes("w-full max-w-5xl mx-auto"):
-        ui.label("電腦狀態（Doctor）").classes("text-xl font-semibold")
-        box = ui.markdown("_按下按鈕執行診斷_")
+        ui.label(_("電腦狀態", "Computer status")).classes("text-xl font-semibold")
+        box = ui.markdown(_("_按下按鈕執行診斷_", "_Press a button to check this computer_"))
 
         async def do_doctor(bench: bool):
-            box.set_content("診斷中…（benchmark 約 20 秒）" if bench else "診斷中…")
+            box.set_content(_("診斷中，效能測試約 20 秒…", "Checking; the benchmark takes about 20 s…") if bench else _("診斷中…", "Checking…"))
             from nicegui import run as nrun
             rep = await nrun.io_bound(run_doctor, do_benchmark=bench, benchmark_seconds=15.0)
             STATE["doctor"] = rep
@@ -55,8 +110,8 @@ def dashboard():
             box.set_content(rep.to_markdown())
             render_drivers(rep)
         with ui.row():
-            ui.button("快速診斷", on_click=lambda: do_doctor(False))
-            ui.button("診斷＋效能測試", on_click=lambda: do_doctor(True)).props("outline")
+            ui.button(_("快速診斷", "Quick check"), on_click=lambda: do_doctor(False))
+            ui.button(_("診斷並測試效能", "Check and benchmark"), on_click=lambda: do_doctor(True)).props("outline")
         drv_box = ui.column().classes("w-full gap-2")
 
         def render_drivers(rep):
@@ -91,63 +146,16 @@ def dashboard():
                                 ui.button(f"一鍵下載官方驅動{'（' + dp.package_version + '）' if dp.package_version else ''}",
                                           on_click=do_download).props("color=primary")
                             if dp.download_page:
-                                ui.button("開啟官方下載頁", on_click=lambda u=dp.download_page: ui.navigate.to(u, new_tab=True)).props("outline")
+                                ui.button(_("開啟官方下載頁", "Open the official download page"), on_click=lambda u=dp.download_page: ui.navigate.to(u, new_tab=True)).props("outline")
         ui.separator()
-        ui.label("流程").classes("text-xl font-semibold")
+        ui.label(_("流程", "Workflows")).classes("text-xl font-semibold")
         rows = list_workflows(STATE["projects_dir"])
         cols = [{"name": k, "label": l, "field": k} for k, l in
                 (("project", "專案"), ("workflow", "流程"), ("last_step", "最後步驟"), ("status", "狀態"), ("updated", "更新"))]
         t = ui.table(columns=cols, rows=rows, row_key="workflow").classes("w-full")
         t.on("rowClick", lambda e: ui.navigate.to(f"/wf/{e.args[1]['project']}/{e.args[1]['workflow']}"))
         if not rows:
-            ui.label("尚無流程；按「新流程」開始。").classes("text-gray-500")
-
-
-@ui.page("/new")
-def new_pipeline():
-    _header()
-    with ui.column().classes("w-full max-w-4xl mx-auto gap-2"):
-        ui.label("建立 docking → MD → 結合強度 流程").classes("text-xl font-semibold")
-        project = ui.input("專案名稱", value="課堂專案").classes("w-full")
-        name = ui.input("流程名稱", value="trypsin_benzamidine").classes("w-full")
-        with ui.row().classes("w-full"):
-            pdb_id = ui.input("PDB ID", value="3PTB").classes("w-40")
-            ph = ui.number("pH", value=7.4, step=0.1).classes("w-24")
-            keep = ui.input("保留輔因子／金屬（逗號分隔）", value="CA").classes("w-80")
-        ligs = ui.textarea("配體（每行：名稱 SMILES [晶體殘基名]）",
-                           value="BEN NC(=[NH2+])c1ccccc1 BEN").classes("w-full font-mono")
-        ui.label("SMILES 的質子化狀態會直接用於 docking 與 MD；請依 pH 7.4 寫出帶電形式（如脒基 +1）。").classes("text-xs text-gray-500")
-        with ui.row().classes("w-full"):
-            box_res = ui.input("Box：以晶體殘基定義（如 BEN）", value="BEN").classes("w-64")
-            box_c = ui.input("或中心 x,y,z（Å）").classes("w-48")
-            box_s = ui.input("尺寸 x,y,z（Å）", value="22,22,22").classes("w-40")
-        with ui.row().classes("w-full items-center"):
-            mode = ui.select({"independent": "independent（逐一篩選）", "simultaneous": "simultaneous（同時對接）"},
-                             value="independent", label="Docking 模式").classes("w-72")
-            exh = ui.number("exhaustiveness", value=16, min=1, max=128).classes("w-36")
-        systems = ui.select({"apo": "apo（原始蛋白）", "docked_single": "docked_single（每個配體）", "docked_multi": "docked_multi（多配體同時）"},
-                            value=["apo", "docked_single"], multiple=True, label="MD 系統").classes("w-full")
-        with ui.row().classes("w-full items-center"):
-            tier = ui.select({"classroom": "課堂（2 ns）", "teaching": "教學（10 ns）", "research": "研究（100 ns）"},
-                             value="teaching", label="長度").classes("w-48")
-            reps = ui.number("replicas", value=1, min=1, max=10).classes("w-28")
-            binding = ui.switch("SMD＋傘狀採樣（結合強度）", value=True)
-        err = ui.label("").classes("text-negative")
-
-        def create():
-            try:
-                cfg = config_from_form(name=name.value, pdb_id=pdb_id.value, ligands_text=ligs.value, box_residue=box_res.value,
-                                       box_center=box_c.value, box_size=box_s.value, mode=mode.value, exhaustiveness=int(exh.value),
-                                       systems=list(systems.value), tier=tier.value, replicas=int(reps.value), binding=binding.value,
-                                       ph=float(ph.value), keep_hetero=keep.value)
-            except Exception as exc:  # noqa: BLE001
-                err.set_text(str(exc)); return
-            root = Path(STATE["projects_dir"]) / safe_name(project.value)
-            proj = Project(root) if (root / "project.json").is_file() else Project.create(STATE["projects_dir"], project.value)
-            wf = Workflow(proj, cfg)
-            _start(wf)
-            ui.navigate.to(f"/wf/{proj.dir.name}/{wf.name}")
-        ui.button("建立並開始", on_click=create).props("color=primary")
+            ui.label(_("尚無流程；從首頁選擇模式開始。", "No workflows yet; choose a mode on the home page.")).classes("text-gray-500")
 
 
 def _start(wf: Workflow):
@@ -179,16 +187,68 @@ def _gate_buttons(wf: Workflow, card: dict):
                           "按「開始／繼續」執行。", type="positive")
             ui.button(a["label"], on_click=do).props("outline color=primary no-caps")
     if card.get("manual"):
-        ui.label("需要在程式外處理（處理後重新提供輸入）：").classes("text-xs text-gray-500")
+        ui.label(_("需要在程式外處理（處理後重新提供輸入）：", "Needs work outside the program (then provide the new input):")).classes("text-xs text-gray-500")
         for o in card["manual"]:
             ui.label(f"→ {o}").classes("text-sm text-gray-700")
+
+
+async def _upload_payload(e) -> tuple[str, bytes]:
+    """File name and bytes from a NiceGUI upload event (works with the 1.x/2.x and the 3.x event shapes)."""
+    f = getattr(e, "file", None)
+    if f is not None:
+        data = f.read()
+        if hasattr(data, "__await__"):
+            data = await data
+        return getattr(f, "name", "upload"), data
+    content = getattr(e, "content", None)
+    return getattr(e, "name", "upload"), (content.read() if content is not None else b"")
+
+
+def _manual_upload_panel(wf: Workflow):
+    """D-50: manual SDF upload with strict naming for compounds whose download failed or was blocked."""
+    from ..docking.library import manual_upload_report, check_upload_name, MANUAL_DIR, NAMING_RULES
+    from ..advisor import tx
+    lib_dir = wf.dir / "screen" / "library"
+    man = load_json(lib_dir / "library_manifest.json", {})
+    names = sorted((man.get("entries") or {}).keys())
+    if not names:
+        return
+    rep = manual_upload_report(names, lib_dir)
+    failed = [n for n, r in (man.get("entries") or {}).items() if r.get("status") != "OK"]
+    with ui.expansion(_("手動上傳結構（下載被阻擋時）", "Upload structures manually (when downloads are blocked)"),
+                      value=bool(failed)).classes("w-full md20-card"):
+        ui.label(tx(NAMING_RULES[0], lang())).classes("md20-why")
+        if failed:
+            ui.label(_("仍需結構：", "Still missing: ") + ", ".join(f"{n}.sdf" for n in failed[:40])).classes("text-sm")
+        if rep["bad_name"] or rep["unmatched"]:
+            ui.label(_("未使用（命名不符）：", "Not used (name does not match): ") + ", ".join(rep["bad_name"] + rep["unmatched"])).classes("text-sm text-negative")
+        log = ui.column().classes("gap-0")
+
+        async def got(e):
+            fname, data = await _upload_payload(e)
+            ok, why = check_upload_name(fname, names)
+            with log:
+                if not ok:
+                    ui.label(f"{fname}: {_('已拒絕', 'Rejected')} — {tx(why, lang())}").classes("text-sm text-negative")
+                    return
+                d = lib_dir / MANUAL_DIR
+                d.mkdir(parents=True, exist_ok=True)
+                (d / fname).write_bytes(data)
+                ui.label(f"{fname}: {_('已接受', 'Accepted')}").classes("text-sm text-positive")
+            # the library step is re-run so the new file is picked up (downloaded files are cached, not re-fetched)
+            st = wf.state()
+            for k in ("screen_library", "screen_docking", "screen_selection"):
+                st["steps"].pop(k, None)
+            from ..util import atomic_write_json
+            atomic_write_json(st, wf.state_path)
+        ui.upload(on_upload=got, multiple=True, auto_upload=True, label=_("選擇 .sdf 檔", "Choose .sdf files")).props("accept=.sdf").classes("w-full")
 
 
 @ui.page("/wf/{project}/{name}")
 def workflow_page(project: str, name: str):
     _header()
     if safe_name(project) != project or safe_name(name) != name or not (Path(STATE["projects_dir"]) / project / "project.json").is_file():
-        ui.label("找不到這個專案／流程。").classes("text-negative"); return
+        ui.label(_("找不到這個專案或流程。", "Project or workflow not found.")).classes("text-negative"); return
     proj = Project(Path(STATE["projects_dir"]) / project)
     try:
         wf = Workflow.open(proj, name)          # never creates an empty workflow for a mistyped URL
@@ -199,13 +259,47 @@ def workflow_page(project: str, name: str):
         ui.label(f"{project} / {name}").classes("text-xl font-semibold")
         status = ui.label("").classes("text-lg")
         msg = ui.markdown("")
+        confirm_box = ui.column().classes("w-full")
+        confirm_sig = {"v": None}
+
+        def render_confirm():
+            stp = wf.state()["steps"].get("md_confirm") or {}
+            sig = (stp.get("status"), stp.get("at"))
+            if sig == confirm_sig["v"]:
+                return
+            confirm_sig["v"] = sig
+            confirm_box.clear()
+            if stp.get("status") != "NEEDS_HUMAN":
+                return
+            card = next((c for c in gate_cards(wf) if c["title"] == "confirm MD"), None)
+            go = next((a for a in (card or {}).get("actions", []) if a["label"].startswith("進入分子動力學")), None)
+            with confirm_box, ui.card().classes("w-full md20-card").style("border-left: 4px solid #2f6f9f"):
+                ui.label(t("confirm_md_title", lang())).classes("md20-section")
+                ui.label(_(stp.get("message", ""), "Docking and pose selection are complete. Check the selected poses in "
+                           "the pose table, then decide whether to continue to molecular dynamics (building, "
+                           "equilibration and production; this can take hours depending on the settings).")).classes("text-sm")
+
+                def proceed():
+                    job = RUNNER.get(wf)
+                    if job and job.thread and job.thread.is_alive():
+                        ui.notify(t("busy", lang()), type="warning"); return
+                    if go:
+                        apply_gate_action(wf, go)
+                    _start(wf)
+                    ui.notify(_("已確認，開始分子動力學。", "Confirmed; molecular dynamics is starting."), type="positive")
+                with ui.row().classes("gap-2"):
+                    ui.button(_("進入分子動力學", "Proceed to molecular dynamics"), on_click=proceed).props("color=primary no-caps")
+                    ui.button(_("先改選姿勢", "Choose another pose first"),
+                              on_click=lambda: ui.notify(_("在下方姿勢表點選要使用的姿勢，再按「進入分子動力學」。",
+                                                           "Click the pose to use in the table below, then press Proceed."))
+                              ).props("outline no-caps")
         with ui.row():
-            ui.button("開始／繼續", on_click=lambda: _start(wf))
-            ui.button("暫停（在下一個 chunk 邊界）", on_click=lambda: (wf.project.dir / "PAUSE").touch()).props("outline")
-            report_btn = ui.button("開啟報告", on_click=lambda: ui.navigate.to(f"/file?path={wf.dir / 'workflow_report.html'}", new_tab=True)).props("outline")
+            ui.button(_("開始或繼續", "Start or continue"), on_click=lambda: _start(wf))
+            ui.button(_("暫停（在下一個區段結束時）", "Pause (at the end of the next segment)"), on_click=lambda: (wf.project.dir / "PAUSE").touch()).props("outline")
+            report_btn = ui.button(_("開啟報告", "Open report"), on_click=lambda: ui.navigate.to(f"/file?path={wf.dir / 'workflow_report.html'}", new_tab=True)).props("outline")
         steps = ui.table(columns=[{"name": k, "label": l, "field": k} for k, l in (("step", "步驟"), ("status", "狀態"), ("at", "時間"), ("message", "訊息"))],
                          rows=[], row_key="key").classes("w-full")
-        ui.label("Pose（★ 推薦、✔ 已選；點選某列改用該 pose，系統會從 pose 選擇之後重新執行）").classes("font-semibold")
+        ui.label(_("對接姿勢（★ 推薦、✔ 已選；點選一列改用該姿勢，系統會從姿勢選擇之後重新執行）", "Docking poses (★ recommended, ✔ selected; click a row to use that pose, the run restarts from pose selection)")).classes("font-semibold")
         poses = ui.table(columns=[{"name": k, "label": l, "field": k} for k, l in
                                   (("entry", "配體"), ("rank", "rank"), ("score", "score"), ("cluster", "cluster"), ("contacts", "接觸"),
                                    ("rmsd_ref", "RMSD 晶體"), ("md_screen", "短 MD"), ("tag", ""))], rows=[], row_key="key").classes("w-full")
@@ -221,23 +315,45 @@ def workflow_page(project: str, name: str):
         poses.on("rowClick", pick)
         # ---- WP13: gate cards / live curves / timeline / offline 3D -------------------------------------
         with ui.tabs().classes("w-full") as tabs:
-            t_gate, t_screen, t_live, t_umb, t_time, t_3d = (ui.tab("閘門"), ui.tab("篩選"), ui.tab("即時曲線"), ui.tab("傘狀採樣覆蓋"),
-                                                             ui.tab("時間軸"), ui.tab("3D 檢視"))
+            t_gate, t_screen, t_live, t_umb, t_time, t_3d = (ui.tab(_("閘門", "Gates")), ui.tab(_("篩選", "Screening")), ui.tab(_("即時曲線", "Live curves")),
+                                                             ui.tab(_("傘狀採樣覆蓋", "Umbrella coverage")), ui.tab(_("時間軸", "Timeline")), ui.tab(_("3D 檢視", "3D view")))
         with ui.tab_panels(tabs, value=t_gate).classes("w-full"):
             with ui.tab_panel(t_gate):
                 cards_box = ui.column().classes("w-full gap-2")
             with ui.tab_panel(t_screen):
-                ui.label("高通量篩選（縮減搜尋的 Vina 分數，只用來剔除）。勾選要進入下一步的化合物：「各自對接＋MD」或「多配體同時對接」。"
-                         "≈ 表示與第 1 名差距 < 1 kcal/mol，在 Vina 誤差內、名次沒有統計意義。").classes("text-sm")
+                ui.label(_("高通量篩選（縮減搜尋的 Vina 分數，只用來剔除）。勾選要進入下一步的化合物，或直接點選排名圖的長條。", "High-throughput screen (reduced-search Vina scores, used only to discard). Tick the compounds to take forward, or click a bar in the ranking chart.") + " " + _(
+                         "≈ 表示與第 1 名差距 < 1 kcal/mol，在 Vina 誤差內、名次沒有統計意義。",
+                         "≈ marks a gap below 1 kcal/mol to the best compound: within Vina's error, the order is not meaningful.")).classes("text-sm")
                 scr_info = ui.label("").classes("text-sm")
+                ch_rank = ui.echart(echart_ranking([], lang=lang())).classes("w-full h-96")
                 ch_scr = ui.echart(echart_screen([])).classes("w-full h-80")
                 scr_tbl = ui.table(columns=[{"name": k, "label": l, "field": k, "sortable": True} for k, l in
                                             (("rank", "名次"), ("name", "化合物"), ("score", "score"), ("delta_to_best", "Δ最佳"),
                                              ("heavy_atoms", "重原子"), ("ligand_efficiency", "LE"), ("cluster_size", "cluster"),
                                              ("contacts", "接觸"), ("recommendation_status", "推薦"), ("tag", ""))],
                                    rows=[], row_key="key", selection="multiple", pagination=25).classes("w-full")
+
+
+                def bar_click(e):
+                    data = getattr(e, "data", None)
+                    nm = getattr(e, "name", None) or (data.get("name") if isinstance(data, dict) else None)
+                    nm = str(nm or "").split("：")[0]
+                    row = next((r for r in scr_tbl.rows if r.get("name") == nm), None)
+                    if not row:
+                        return
+                    sel = [r for r in scr_tbl.selected if r.get("key") != row.get("key")]
+                    if len(sel) == len(scr_tbl.selected):
+                        sel.append(row)
+                    scr_tbl.selected = sel
+                    scr_tbl.update()
+                    ui.notify(_(f"已選 {len(sel)} 個化合物", f"{len(sel)} compounds selected"))
+                try:
+                    ch_rank.on_point_click(bar_click)
+                    ch_scr.on_point_click(bar_click)
+                except AttributeError:      # older NiceGUI without point-click events: the table selection still works
+                    pass
                 with ui.row().classes("items-end gap-2"):
-                    scr_note = ui.input("備註（為什麼選這些）").classes("w-72")
+                    scr_note = ui.input(_("備註（為什麼選這些）", "Note (why these compounds)")).classes("w-72")
 
                     def do_select(mode: str):
                         job = RUNNER.get(wf)
@@ -249,17 +365,18 @@ def workflow_page(project: str, name: str):
                         except ValueError as exc:
                             ui.notify(str(exc), type="negative"); return
                         ui.notify(f"已選 {len(out['selected'])} 個化合物（{mode}）；按「開始／繼續」進入正式對接與 MD", type="positive")
-                    ui.button("各自對接 → MD", on_click=lambda: do_select("independent")).props("color=primary")
-                    ui.button("多配體同時對接 → MD", on_click=lambda: do_select("simultaneous")).props("outline")
+                    ui.button(_("各自對接後進入模擬", "Dock each, then simulate"), on_click=lambda: do_select("independent")).props("color=primary")
+                    ui.button(_("多配體同時對接後進入模擬", "Dock together, then simulate"), on_click=lambda: do_select("simultaneous")).props("outline")
+                _manual_upload_panel(wf)
             with ui.tab_panel(t_live):
                 prog = ui.label("").classes("text-sm")
                 bar = ui.linear_progress(value=0, show_value=False).classes("w-full")
                 with ui.row().classes("w-full"):
-                    ch_t = ui.echart(echart_options([], title="溫度", x="步", y="K")).classes("w-[48%] h-60")
-                    ch_e = ui.echart(echart_options([], title="位能", x="步", y="kJ/mol")).classes("w-[48%] h-60")
+                    ch_t = ui.echart(echart_options([], title=_("溫度", "Temperature"), x=_("步", "step"), y="K")).classes("w-[48%] h-60")
+                    ch_e = ui.echart(echart_options([], title=_("位能", "Potential energy"), x=_("步", "step"), y="kJ mol⁻¹")).classes("w-[48%] h-60")
                 with ui.row().classes("w-full"):
-                    ch_f = ui.echart(echart_options([], title="SMD 拉力", x="r (nm)", y="kJ/mol/nm")).classes("w-[48%] h-60")
-                    ch_w = ui.echart(echart_options([], title="SMD 功", x="r (nm)", y="kJ/mol")).classes("w-[48%] h-60")
+                    ch_f = ui.echart(echart_options([], title=_("SMD 拉力", "SMD force"), x="r (nm)", y="kJ mol⁻¹ nm⁻¹")).classes("w-[48%] h-60")
+                    ch_w = ui.echart(echart_options([], title=_("SMD 功", "SMD work"), x="r (nm)", y="kJ mol⁻¹")).classes("w-[48%] h-60")
             with ui.tab_panel(t_umb):
                 ui.label("每個 window 的取樣分佈（細線）與合併樣本（面積）；紅色 = 斷點，PMF 在那裡不可信。"
                          "自動補窗會由大缺口到小缺口補齊；若你看到想補的區間，輸入範圍後按「補採樣」。").classes("text-sm")
@@ -286,13 +403,13 @@ def workflow_page(project: str, name: str):
                             ui.notify(str(exc), type="negative"); return
                         ui.notify(f"{target}：在此區間新增 {len(out['windows'])} 個 window（k {out['k']:.0f}、間距 "
                                   f"{out['spacing_nm']:.3f} nm）；按「開始／繼續」執行，已完成的 window 不重跑。", type="positive")
-                    ui.button("補採樣", on_click=do_resample).props("color=primary")
+                    ui.button(_("補採樣", "Add windows"), on_click=do_resample).props("color=primary")
             with ui.tab_panel(t_time):
                 time_box = ui.column().classes("w-full gap-1")
             with ui.tab_panel(t_3d):
                 targets = viewer_targets(wf)
                 if not targets:
-                    ui.label("建模完成後即可檢視 3D 結構；production 完成後可播放軌跡。").classes("text-gray-500")
+                    ui.label(_("建模完成後即可檢視 3D 結構；正式模擬完成後可播放軌跡。", "The 3D structure appears after building; the trajectory plays after production.")).classes("text-gray-500")
                 else:
                     pick3d = ui.select({i: t["label"] for i, t in enumerate(targets)}, value=0, label="結構").classes("w-96")
                     frame = ui.html("").classes("w-full")
@@ -310,7 +427,8 @@ def workflow_page(project: str, name: str):
         def refresh():
             job = RUNNER.get(wf)
             snap = job.snapshot() if job else {"status": "IDLE", "message": "", "steps": __import__("md20.gui.logic", fromlist=["step_rows"]).step_rows(wf.state()), "history": []}
-            status.set_text(f"狀態：{snap['status']}")
+            status.set_text(_("狀態：", "Status: ") + str(snap['status']))
+            render_confirm()
             msg.set_content(f"```\n{snap['message']}\n```" if snap["message"] else "")
             steps.rows = snap["steps"]
             rows = pose_table(wf)
@@ -343,6 +461,7 @@ def workflow_page(project: str, name: str):
                 scr_sig["v"] = len(srows)
                 scr_tbl.rows = srows
                 ch_scr.options.clear(); ch_scr.options.update(echart_screen(srows)); ch_scr.update()
+                ch_rank.options.clear(); ch_rank.options.update(echart_ranking(srows, lang=lang())); ch_rank.update()
                 sd = wf.state()["steps"].get("screen_docking") or {}
                 scr_info.set_text(f"{len(srows)} 個化合物有分數；{len(sd.get('failed') or [])} 個失敗／略過（見閘門與報告）。" if srows else
                                   "尚無篩選結果（config 的 screen.library 指定化合物庫後執行）。")
@@ -352,7 +471,7 @@ def workflow_page(project: str, name: str):
                 cards_box.clear()
                 with cards_box:
                     if not cards:
-                        ui.label("目前沒有需要注意的閘門。").classes("text-gray-500")
+                        ui.label(_("目前沒有需要注意的閘門。", "No gates need attention.")).classes("text-gray-500")
                     for c in cards:
                         with ui.card().classes("w-full"):
                             with ui.row().classes("items-center gap-2"):
@@ -413,12 +532,16 @@ def serve_file(path: str):
     return FileResponse(p)
 
 
+from . import pages_v2  # noqa: E402,F401  (registers the v2 pages: home, teaching, quick and pro forms)
+
+
 def main(projects_dir: str | None = None, port: int = 8020, show: bool = True, host: str = "127.0.0.1"):
     """Local-only by default: NiceGUI would otherwise listen on 0.0.0.0, and on a classroom Wi-Fi anyone could open
     another student's GUI, start/pause runs, rewrite config and download project files.  `--host 0.0.0.0` opts in."""
     if projects_dir:
         STATE["projects_dir"] = Path(projects_dir)
+        STATE["lang"] = None
     Path(STATE["projects_dir"]).mkdir(parents=True, exist_ok=True)
     if host not in ("127.0.0.1", "localhost", "::1"):
         print(f"注意：GUI 對外開放於 {host}:{port}——同一網路上的任何人都能操作此工作站與下載專案檔。", flush=True)
-    ui.run(title="MD20", host=host, port=port, show=show, reload=False, language="zh-TW")
+    ui.run(title="MD20", host=host, port=port, show=show, reload=False, language="zh-TW" if lang() == "zh" else "en-US")

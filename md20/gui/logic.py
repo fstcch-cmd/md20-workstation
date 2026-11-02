@@ -1,6 +1,7 @@
 """GUI logic without NiceGUI (testable): form → config, background runner, status snapshots."""
 from __future__ import annotations
 
+import copy
 import queue
 import threading
 import traceback
@@ -212,3 +213,89 @@ def screen_table(wf: Workflow) -> list[dict]:
         r["chosen"] = r["name"] in chosen
         r["tag"] = ("✔" if r["chosen"] else "") + ("≈" if r.get("indistinguishable_from_top") else "")
     return rows
+
+
+# ------------------------------------------------------------------------------------- GUI v2 (D-51)
+def parse_ligand_lines(text: str) -> list[dict]:
+    """One ligand per line: `NAME SMILES [crystal_resname]` or `NAME peptide:SEQUENCE [target_location]`.
+    Names become 3-character residue names (topology); they must stay unique."""
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p for p in line.replace(",", " ").replace("\t", " ").split(" ") if p]
+        if len(parts) < 2:
+            raise ValueError(f"每行需要「名稱 SMILES」或「名稱 peptide:序列」：{line}")
+        name = safe_name(parts[0])[:3].upper()
+        if parts[1].lower().startswith("peptide:"):
+            from ..build.peptide import clean_sequence
+            d = {"name": name, "sequence": clean_sequence(parts[1].split(":", 1)[1]), "termini": "charged"}
+            if len(parts) > 2:
+                d["target_location"] = parts[2]
+        else:
+            d = {"name": name, "smiles": parts[1]}
+            if len(parts) > 2:
+                d["reference_resname"] = parts[2].upper()
+        out.append(d)
+    names = [d["name"] for d in out]
+    if len(set(names)) != len(names):
+        raise ValueError("配體名稱（前三字元）重複；請改名以免拓撲殘基名衝突。")
+    return out
+
+
+def config_from_mode(*, mode: str, name: str, values: dict, pdb_id: str = "", receptor_file: str = "",
+                     ligands_text: str = "", box_residue: str = "", box_center: str = "", box_size: str = "",
+                     systems: list[str] | None = None, ph: float = 7.4, keep_hetero: str = "", goal: str = "teaching",
+                     library_file: str = "", lang: str = "en") -> dict:
+    """Quick or pro form → workflow config.  `values` are the advisor parameters (already merged with the
+    recommendation); the GUI always asks before molecular dynamics (confirm_before_md)."""
+    from .. import advisor
+    cfg = copy.deepcopy(example_config())
+    cfg["name"] = safe_name(name or "workflow")
+    if pdb_id.strip():
+        cfg["receptor"] = {"pdb_id": pdb_id.strip().upper()}
+    elif receptor_file:
+        cfg["receptor"] = {"file": receptor_file}
+    else:
+        raise ValueError("請輸入 PDB 編號或上傳受體結構檔")
+    cfg["ph"] = float(ph)
+    cfg["keep_hetero"] = [x.strip().upper() for x in keep_hetero.replace(",", " ").split() if x.strip()]
+    cfg["ligands"] = parse_ligand_lines(ligands_text)
+    if box_residue.strip():
+        cfg["box"] = {"from_residue": box_residue.strip().upper()}
+    elif box_center.strip():
+        c = [float(x) for x in box_center.replace(" ", "").split(",")]
+        s = [float(x) for x in (box_size or "22,22,22").replace(" ", "").split(",")]
+        if len(c) != 3 or len(s) != 3:
+            raise ValueError("搜尋區中心與尺寸各需要三個數字（x, y, z）")
+        cfg["box"] = {"center": c, "size": s}
+    else:
+        cfg["box"] = {}
+    ligs = cfg["ligands"]
+    systems = list(systems or (["apo", "docked_single"] if ligs else ["apo"]))
+    bad = [s for s in systems if s not in SYSTEM_MODES]
+    if bad:
+        raise ValueError(f"未知的模擬系統：{bad}")
+    if "docked_multi" in systems and len(ligs) < 2:
+        raise ValueError("「所有配體同時與蛋白」需要至少兩個配體")
+    if not ligs:
+        systems = ["apo"]
+    v = dict(values)
+    if v.get("docking_mode") == "simultaneous" and len(ligs) < 2:
+        v["docking_mode"] = "independent"
+    cfg = advisor.apply(v, cfg)
+    cfg["md"]["systems"] = systems
+    cfg["binding"]["enabled"] = bool(v.get("binding")) and bool(ligs) and "docked_single" in systems
+    cfg["binding"]["ligands"] = [l["name"] for l in ligs] if cfg["binding"]["enabled"] else []
+    if library_file:
+        cfg["screen"] = {"library": library_file, "exhaustiveness": 8, "n_poses": 3, "top_n": 20, "allow_partial": False,
+                         "allow_name_lookup": False, "select": [], "next_mode": v.get("docking_mode", "independent")}
+    else:
+        cfg.pop("screen", None)
+    cfg["pose_choices"] = {}
+    cfg["confirm_before_md"] = True
+    cfg["language"] = lang if lang in ("en", "zh") else "en"
+    cfg["gui_mode"] = mode
+    cfg["goal"] = goal
+    return cfg

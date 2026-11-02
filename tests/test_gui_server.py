@@ -48,6 +48,7 @@ def gui_project(tmp_path):
             "options": ["換一個更高解析度的結構", "仍要使用（structure_override.resolution）"]}])
     except WorkflowBlocked:
         pass
+    atomic_write_json({"lang": "zh"}, tmp_path / "gui_settings.json")      # the assertions below read Chinese text
     return tmp_path, proj.dir.name, wf.name
 
 
@@ -74,6 +75,14 @@ def test_gui_pages_render(gui_project):
             pytest.skip("GUI server did not become reachable in time on this runner")
         st, body = _get(base + "/")
         assert st == 200
+        # GUI v2 pages (D-51): four modes, both teaching cases, quick and pro forms, computer status, template download
+        for path in ("/teach/hsieh2024", "/teach/hsieh2025", "/new/quick", "/new/pro", "/new", "/system"):
+            st, body = _get(base + path)
+            assert st == 200, path
+        st, body = _get(base + "/teach/hsieh2025")
+        assert "GGGGGKP" in body and "Keap1" in body
+        with urllib.request.urlopen(base + "/template/compound_library.xlsx", timeout=30) as r:
+            assert r.status == 200 and r.read(2) == b"PK"            # an xlsx is a zip file
         st, body = _get(f"{base}/wf/{project}/{name}")
         assert st == 200 and "閘門" in body and "3D" in body, body[-2000:]
         assert "仍要使用" in body and "需要在程式外處理" in body, body[-2000:]     # one-click button + manual hint rendered

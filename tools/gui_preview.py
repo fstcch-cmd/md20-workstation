@@ -67,16 +67,23 @@ def main(out: Path) -> int:
                 if proc.poll() is not None:
                     print(proc.stdout.read().decode(errors="ignore")[-4000:]); return 1
                 time.sleep(0.5)
-        pages = {"01_dashboard": "/", "02_new_pipeline": "/new", "03_workflow": f"/wf/{project}/{name}",
-                 "04_viewer": f"/viewer?project={project}&name={name}&i=0"}
+        pages = {"01_home": "/", "02_teach_small_molecules": "/teach/hsieh2024", "03_teach_peptide": "/teach/hsieh2025",
+                 "04_quick": "/new/quick", "05_pro": "/new/pro", "06_workflow": f"/wf/{project}/{name}",
+                 "07_system": "/system", "08_viewer": f"/viewer?project={project}&name={name}&i=0"}
         with sync_playwright() as p:
             br = p.chromium.launch()
             pg = br.new_page(viewport={"width": 1400, "height": 900}, device_scale_factor=1)
-            for fname, path in pages.items():
-                pg.goto(base + path, wait_until="networkidle", timeout=60000)
-                pg.wait_for_timeout(2500)
-                pg.screenshot(path=str(out / f"{fname}.png"), full_page=True)
-                print("saved", fname)
+            from md20.util.jsonio import atomic_write_json
+            for code in ("en", "zh"):                      # D-51: both interface languages
+                atomic_write_json({"lang": code}, root / "gui_settings.json")
+                urllib.request.urlopen(base + "/", timeout=30).read()
+                for fname, path in pages.items():
+                    if code == "zh" and fname.startswith("08"):
+                        continue
+                    pg.goto(base + path, wait_until="networkidle", timeout=60000)
+                    pg.wait_for_timeout(2500)
+                    pg.screenshot(path=str(out / f"{code}_{fname}.png"), full_page=True)
+                    print("saved", code, fname)
             br.close()
     finally:
         proc.terminate()

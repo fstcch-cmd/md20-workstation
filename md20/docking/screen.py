@@ -227,6 +227,33 @@ def screen_plots(rows: list[dict], out_dir: Path | str, *, top_n: int = 20) -> d
     return paths
 
 
+STATUS_COLORS = {"PASS": "#2f7d5b", "AUTO_FIXED": "#c08a1e", "NEEDS_HUMAN": "#b8433f"}
+
+
+def echart_ranking(rows: list[dict], *, top_n: int = 30, lang: str = "en") -> dict:
+    """Ranked horizontal bar chart (best score at the top), coloured by recommendation; the band marks compounds within
+    1 kcal/mol of the best (inside Vina's error).  Each bar's name is the compound name, so a click selects it."""
+    zh = lang == "zh"
+    rs = sorted([r for r in rows if r.get("score") is not None], key=lambda r: r["score"])[:top_n]
+    rs = list(reversed(rs))                      # ECharts category axes draw bottom-up
+    best = min((r["score"] for r in rs), default=0.0)
+    data = [{"value": r["score"], "name": r["name"],
+             "itemStyle": {"color": STATUS_COLORS.get(r.get("recommendation_status"), "#7b8794")}} for r in rs]
+    return {
+        "title": {"text": "篩選排名（Vina 分數，越負越好）" if zh else "Screening ranking (Vina score, more negative is better)",
+                  "subtext": ("灰色帶：與最佳差距 1 kcal/mol 以內，名次在誤差內；點選長條可選取化合物" if zh else
+                              "Grey band: within 1 kcal/mol of the best, order within error; click a bar to select the compound"),
+                  "textStyle": {"fontSize": 13, "fontWeight": 600}, "subtextStyle": {"fontSize": 11}},
+        "grid": {"left": 120, "right": 40, "top": 60, "bottom": 30},
+        "tooltip": {"trigger": "item", "formatter": "{b}: {c} kcal/mol"},
+        "xAxis": {"type": "value", "name": "kcal/mol", "inverse": True},
+        "yAxis": {"type": "category", "data": [r["name"] for r in rs], "axisLabel": {"fontSize": 11}},
+        "series": [{"type": "bar", "data": data, "barMaxWidth": 14,
+                    "markArea": {"silent": True, "itemStyle": {"color": "rgba(123,135,148,0.12)"},
+                                 "data": [[{"xAxis": best}, {"xAxis": best + 1.0}]]} if rs else {}}],
+    }
+
+
 def echart_screen(rows: list[dict], top_n: int = 20) -> dict:
     """ECharts option for the GUI: score vs heavy atoms, one series per recommendation status."""
     series = []
