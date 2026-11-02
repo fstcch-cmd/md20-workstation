@@ -247,12 +247,12 @@ def cmd_validate(a):
 
 def cmd_drivers(a):
     """Detect GPUs → decide → one-click download of the official driver (never executed by us)."""
-    from .env.hardware import probe_hardware
+    from .env.hardware import probe_hardware, gpu_label
     from .env.drivers import plan_drivers, resolve_nvidia_download, download_driver, installer_hint
     hw = probe_hardware()
     plans = plan_drivers(hw, resolve=resolve_nvidia_download)
     for i, p in enumerate(plans, 1):
-        _p(f"[{i}] {p.vendor} {p.gpu}  驅動 {p.driver or '未知'}  狀態 {p.status}  → 現在會用 {p.platform_now}")
+        _p(f"[{i}] {gpu_label(p.vendor, p.gpu)}  驅動 {p.driver or '未知'}  狀態 {p.status}  → 現在會用 {p.platform_now}")
         _p("    " + p.why)
         for st in p.steps:
             _p("    " + st)

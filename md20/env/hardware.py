@@ -145,6 +145,26 @@ def _power_state() -> dict:
         return {"error": str(exc)}
 
 
+
+def os_release(system: str | None = None, release: str | None = None, version: str | None = None) -> str:
+    """platform.release() says "10" on Windows 11 (Python 3.11); Windows 11 is build >= 22000."""
+    system = system or platform.system(); release = release or platform.release(); version = version or platform.version()
+    if system == "Windows" and release == "10":
+        try:
+            if int(str(version).split(".")[2]) >= 22000:
+                return "11"
+        except (IndexError, ValueError):
+            pass
+    return release
+
+
+def gpu_label(vendor: str | None, name: str | None) -> str:
+    """"NVIDIA GeForce RTX 4060" — not "NVIDIA NVIDIA GeForce ..." when the name already starts with the vendor."""
+    vendor, name = (vendor or "").strip(), (name or "").strip()
+    if vendor and not name.lower().startswith(vendor.lower()):
+        return f"{vendor} {name}".strip()
+    return name or vendor
+
 def probe_hardware(workdir: Path | str | None = None) -> dict:
     wd = Path(workdir) if workdir else Path.cwd()
     try:
@@ -159,7 +179,7 @@ def probe_hardware(workdir: Path | str | None = None) -> dict:
     from .winfix import nvidia_driver_files
     nv_files = nvidia_driver_files()
     return {
-        "os": {"system": platform.system(), "release": platform.release(), "version": platform.version(),
+        "os": {"system": platform.system(), "release": os_release(), "version": platform.version(),
                "machine": platform.machine(), "python": platform.python_version()},
         "cpu": {"logical_cores": os.cpu_count(), "name": platform.processor() or None},
         "ram_gb": round(ram / 1e9, 1) if ram else None,

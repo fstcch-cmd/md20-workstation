@@ -7,6 +7,11 @@
 
 ## 2026-11-02
 
+### D-39　Doctor 文字：Windows 11 被報成「Windows 10」、GPU 名稱重複「NVIDIA NVIDIA」
+- 事實（MSI Cyborg 14 實機）：`platform.release()` 在 Python 3.11 的 Windows 11（build 26200）回傳 "10"；`nvidia-smi` 的名稱已含廠牌，前面再加 vendor 變成重複。
+- 決定：`hardware.os_release()` 以 build ≥ 22000 判定 Windows 11；`hardware.gpu_label()` 名稱已以廠牌開頭時不重複；Doctor 報告、驅動 finding、`md20 drivers plan` 都改用。只影響顯示文字，不影響平台選擇。
+- 證據：`tests/test_installer_paths.py::test_windows_11_and_gpu_label_seen_on_the_msi_laptop`。
+
 ### D-38　Windows 260 字元路徑：套件快取太深 → 安裝路徑過長時改放 `<磁碟>:\MD20pkgs`；並更正 D-36 的修正其實沒進 commit
 - 事實（MSI Cyborg 14，2026-11-02 11:39）：CUDA 環境已解出（cuda-version 12.4、openmm 8.2.0），但解壓 pytorch 時
   `remove_all: The directory is not empty` 失敗。最深的檔案在

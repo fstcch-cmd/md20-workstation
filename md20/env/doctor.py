@@ -13,7 +13,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 from ..util import atomic_write_json, now_iso, app_data_dir, ensure_dir
-from .hardware import probe_hardware
+from .hardware import probe_hardware, gpu_label
 from .platforms import choose_platform, available_platforms, explain_rejection
 from .winfix import suppress_windows_error_dialogs, diagnose_nvidia_files
 
@@ -65,7 +65,7 @@ class DoctorReport:
         lines = [f"# MD20 Doctor 報告（{self.created_at}）", "",
                  f"- OS: {hw['os']['system']} {hw['os']['release']} ({hw['os']['machine']}), Python {hw['os']['python']}",
                  f"- CPU 邏輯核心: {hw['cpu']['logical_cores']}  RAM: {hw.get('ram_gb')} GB  可用磁碟: {hw['disk'].get('free_gb')} GB",
-                 f"- GPU: " + ("; ".join(f"{g.get('vendor')} {g.get('name')} {g.get('vram_mb') or ''}MB" for g in hw['gpus']) or "未偵測到獨立顯示卡"),
+                 f"- GPU: " + ("; ".join(f"{gpu_label(g.get('vendor'), g.get('name'))} {g.get('vram_mb') or ''}MB" for g in hw['gpus']) or "未偵測到獨立顯示卡"),
                  f"- 電源: {'接電' if hw.get('power', {}).get('on_ac', True) else '電池（效能會降低，建議接電）'}", ""]
         if self.platform:
             lines.append(f"- 選用 OpenMM 平台: **{self.platform['name']}** {self.platform.get('properties', {})}")
@@ -153,7 +153,7 @@ def run_doctor(*, do_benchmark: bool = True, benchmark_seconds: float = 20.0, wo
         elif dp.download_page:
             fix += f"\n官方頁面：{dp.download_page}"
         fix += f"\n安裝器指令：{installer_hint(dp)}"
-        findings.append(Finding(f"驅動 {dp.vendor} {dp.gpu}", sev, f"{dp.driver or '未知版本'} → {dp.platform_now}", fix))
+        findings.append(Finding(f"驅動 {gpu_label(dp.vendor, dp.gpu)}", sev, f"{dp.driver or '未知版本'} → {dp.platform_now}", fix))
     hardware["driver_plans"] = [dp.to_dict() for dp in drivers]
     platform = None
     bench = None

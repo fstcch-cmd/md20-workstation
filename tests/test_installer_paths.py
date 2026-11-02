@@ -36,3 +36,13 @@ def test_installer_exports_pkgs_dir_and_cuda_env_has_no_linux_only_packages():
     assert "$env:CONDA_PKGS_DIRS = $Pkgs" in PS1
     cuda = (ROOT / "environment" / "windows-cuda.yml").read_text(encoding="utf-8")
     assert "ocl-icd-system" not in cuda   # does not exist on win-64; broke every NVIDIA install in v0.1.0a1 (D-36)
+
+
+def test_windows_11_and_gpu_label_seen_on_the_msi_laptop():
+    from md20.env.hardware import os_release, gpu_label
+    assert os_release("Windows", "10", "10.0.26200") == "11"    # Windows 11 home 26200 was reported as "Windows 10"
+    assert os_release("Windows", "10", "10.0.19045") == "10"
+    assert os_release("Linux", "6.8.0", "#1 SMP") == "6.8.0"
+    assert gpu_label("NVIDIA", "NVIDIA GeForce RTX 4060 Laptop GPU") == "NVIDIA GeForce RTX 4060 Laptop GPU"
+    assert gpu_label("AMD", "Radeon RX 7600") == "AMD Radeon RX 7600"
+    assert gpu_label(None, "Intel(R) UHD Graphics") == "Intel(R) UHD Graphics"
