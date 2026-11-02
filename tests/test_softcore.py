@@ -68,3 +68,9 @@ def test_spectator_hold_force_is_flat_inside_the_band():
         ctx.setPositions(np.array([[0.0, 0, 0], [x, 0, 0]]) * unit.nanometer)
         e = ctx.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
         assert (e == pytest.approx(0.0)) == zero
+
+
+def test_free_drift_radius_is_inside_the_acceptance_limit():   # D-64
+    import inspect
+    assert SC.HOLD_NM * 10 <= SC.ACCEPT_RMSD_A - 0.5
+    assert inspect.signature(SC.softcore_system).parameters["hold_nm"].default == SC.HOLD_NM

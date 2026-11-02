@@ -8,7 +8,9 @@ and overlapping atoms separate without the huge forces that would eject the liga
 
 Everything else is held: protein and other-ligand heavy atoms by strong position restraints, the moving ligand's centroid
 by a flat-bottom restraint (free within `hold_nm` of where it started), so the ligand keeps its binding mode and only
-untangles.  Soft-core form (Beutler et al., 1994):
+untangles.  The free radius is smaller than ACCEPT_RMSD_A on purpose (D-64): inside it the centroid random-walks during
+the 6 ps of Langevin dynamics, so a free radius equal to the acceptance limit rejected correctly untangled ligands
+(CI 617658e: unthreaded, RMSD 3.38 Å > 3.0 Å on all three OS).  Soft-core form (Beutler et al., 1994):
     U_LJ = λ·4ε [ 1/(α(1−λ) + (r/σ)^6)^2 − 1/(α(1−λ) + (r/σ)^6) ],   α = 0.5
     U_C  = λ·q_i q_j / (4πε0 · sqrt(r² + β(1−λ)))                      β = 0.01 nm²
 Each λ: local minimisation, 1 ps Langevin at 300 K, minimisation.  The result is accepted by the caller only if the pure
@@ -22,10 +24,11 @@ import numpy as np
 LAMBDAS = (0.05, 0.2, 0.4, 0.6, 0.8, 1.0)
 ALPHA, BETA_NM2 = 0.5, 0.01
 ACCEPT_RMSD_A = 3.0
+HOLD_NM = 0.2      # D-64: free drift (2 Å) must stay well inside the acceptance limit (3 Å), see below
 COULOMB = 138.935456
 
 
-def softcore_system(system, moving: list[int], *, fixed: list[int], positions_nm: np.ndarray, hold_nm: float = 0.3,
+def softcore_system(system, moving: list[int], *, fixed: list[int], positions_nm: np.ndarray, hold_nm: float = HOLD_NM,
                     k_fix: float = 5000.0, k_hold: float = 2000.0, cutoff_nm: float = 1.2):
     """Copy of `system` (vacuum or non-periodic) in which `moving` interacts softly with every other particle.
     Returns (new_system, global parameter name of λ)."""
