@@ -115,7 +115,7 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
 def gate_actions(gate: dict, *, step: str, ligand: str | None = None) -> tuple[list[dict], list[str]]:
     """(clickable actions, options that must be handled outside the program)."""
     actions, manual = [], []
-    if gate.get("status") != "NEEDS_HUMAN":
+    if gate.get("status") != "NEEDS_HUMAN" and not gate.get("advisory"):    # D-48 notices keep their options clickable
         return actions, manual
     for i, opt in enumerate(gate.get("options") or []):
         a = _option_action(gate, opt, step=step, ligand=ligand)

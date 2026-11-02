@@ -237,14 +237,17 @@ def _manual_upload_panel(wf: Workflow):
 
         async def got(e):
             fname, data = await _upload_payload(e)
-            ok, why = check_upload_name(fname, names)
+            ok, why, save_as = check_upload_name(fname, names)
             with log:
                 if not ok:
                     ui.label(f"{fname}: {_('已拒絕', 'Rejected')} — {tx(why, lang())}").classes("text-sm text-negative")
                     return
                 d = lib_dir / MANUAL_DIR
                 d.mkdir(parents=True, exist_ok=True)
-                (d / fname).write_bytes(data)
+                for old_f in d.glob("*"):               # one file per compound whatever its case on disk
+                    if old_f.name.lower() == save_as.lower() and old_f.name != save_as:
+                        old_f.replace(d / save_as)
+                (d / save_as).write_bytes(data)
                 ui.label(f"{fname}: {_('已接受', 'Accepted')}").classes("text-sm text-positive")
             # the library step is re-run so the new file is picked up (downloaded files are cached, not re-fetched)
             st = wf.state()

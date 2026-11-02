@@ -180,3 +180,12 @@ def test_confirm_before_md_gate(tmp_path):
     wf.confirm_md(sel)                                   # no longer blocks
     from md20.workflow import DECISION_KEYS
     assert ("md_confirmed",) in DECISION_KEYS
+
+
+def test_advisory_gate_keeps_clickable_options():
+    """D-48 notices are AUTO_FIXED but their options stay one click (no RDKit needed for this part)."""
+    g = {"name": "CPP", "status": "AUTO_FIXED", "advisory": True,
+         "options": ["胞內 intracellular", "膜外側 extracellular-membrane", "改設計：縮短為帶電核心"]}
+    acts, manual = gate_actions(g, step="docking_preflight", ligand="PEP")
+    assert [a["patch"][0]["value"] for a in acts] == ["intracellular", "extracellular-membrane"] and manual == ["改設計：縮短為帶電核心"]
+    assert gate_actions({**g, "advisory": False}, step="docking_preflight", ligand="PEP") == ([], [])

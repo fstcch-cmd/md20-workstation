@@ -214,21 +214,24 @@ def test_filters_from_cfg_ignores_unknown_keys():
 
 
 def test_manual_upload_naming_and_priority(tmp_path):
-    """D-50: a correctly named manual SDF is used instead of any download; misnamed files are reported, never used."""
+    """D-50: a correctly named manual SDF is used instead of any download; misnamed files are reported, never used.
+    Names match case-insensitively (Windows and macOS file systems ignore case)."""
     from md20.docking.library import (LibraryEntry, resolve_library, manual_upload_report, check_upload_name, MANUAL_DIR)
     up = tmp_path / MANUAL_DIR; up.mkdir()
     sdf = "m\n  x\n\n  1  0  0  0  0  0  0  0  0  0999 V2000\n    0.0000    0.0000    0.0000 C   0  0\nM  END\n$$$$\n"
-    (up / "caffeine.sdf").write_text(sdf)
-    (up / "Caffeine.sdf").write_text(sdf)          # case differs → unmatched
+    (up / "Caffeine.sdf").write_text(sdf)          # case differs from the sheet → still the same compound
     (up / "bad name.sdf").write_text(sdf)          # space → bad name
+    (up / "theophylline.sdf").write_text(sdf)      # no such row → unmatched
     rep = manual_upload_report(["caffeine", "aspirin"], tmp_path)
     assert rep["matched"] == ["caffeine"] and rep["missing"] == ["aspirin"]
-    assert rep["bad_name"] == ["bad name.sdf"] and rep["unmatched"] == ["Caffeine.sdf"]
+    assert rep["bad_name"] == ["bad name.sdf"] and rep["unmatched"] == ["theophylline.sdf"]
+    assert manual_upload_report(["Abc", "abc"], tmp_path)["case_conflicts"] == [["Abc", "abc"]]
     calls = []
     man = resolve_library([LibraryEntry(name="caffeine", label="caffeine", row=2, pubchem_cid="2519")], tmp_path,
                           fetch=lambda url, headers=None: calls.append(url) or b"", workers=1, sleep=lambda s: None)
     assert man["entries"]["caffeine"]["source"] == "manual-upload" and not calls
-    assert check_upload_name("caffeine.sdf", ["caffeine"])[0]
-    ok, why = check_upload_name("Caffeine.sdf", ["caffeine"])
-    assert not ok and "caffeine" in why[1] and "case" in why[1]
+    ok, why, save_as = check_upload_name("CAFFEINE.sdf", ["caffeine"])
+    assert ok and save_as == "caffeine.sdf"                      # saved under the sheet's spelling
     assert not check_upload_name("caffeine.mol2", ["caffeine"])[0]
+    ok, why, _ = check_upload_name("x.sdf", ["Abc", "abc", "x", "X"])
+    assert not ok and "differ only by case" in why[1]

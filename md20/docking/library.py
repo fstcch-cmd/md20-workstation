@@ -161,41 +161,58 @@ def read_library(path: Path | str, *, sheet: str | int | None = None) -> tuple[l
 MANUAL_DIR = "manual_upload"
 NAMING_RULES = (
     ("檔名必須與表格「name」欄完全相同，加上 .sdf（例：表格寫 caffeine，檔名為 caffeine.sdf）；"
-     "只用英文字母、數字、底線與連字號，不含空格，最長 40 字元，大小寫視為不同；一個檔案只放一個化合物。",
+     "只用英文字母、數字、底線與連字號，不含空格，最長 40 字元；大小寫不區分（Windows 檔案系統不分大小寫），所以表格中不可有只差大小寫的名稱；一個檔案只放一個化合物。",
      "The file name must equal the sheet's \"name\" column plus .sdf (sheet says caffeine → caffeine.sdf); "
-     "letters, digits, underscore and hyphen only, no spaces, at most 40 characters, case-sensitive; one compound per file."),
+     "letters, digits, underscore and hyphen only, no spaces, at most 40 characters; case is ignored (Windows file "
+     "systems do not distinguish it), so the sheet must not contain names that differ only by case; one compound per file."),
 )
 _NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
 
+def _manual_file(out_dir: Path, name: str) -> Path | None:
+    """The manual upload for a sheet name, matched case-insensitively (as the Windows file system does)."""
+    d = Path(out_dir) / MANUAL_DIR
+    if not d.is_dir():
+        return None
+    want = f"{name}.sdf".lower()
+    return next((x for x in d.iterdir() if x.is_file() and x.name.lower() == want), None)
+
+
 def manual_upload_report(names: list[str], out_dir: Path | str) -> dict:
-    """Which manual SDF uploads match the sheet: matched, still missing, and files that break the naming rule or match
-    no row (those are never used, so a misnamed file cannot silently stand in for another compound)."""
+    """Which manual SDF uploads match the sheet: matched, still missing, files that break the naming rule or match no
+    row (never used, so a misnamed file cannot stand in for another compound), and sheet names that differ only by
+    case (they would share one file on Windows)."""
     d = Path(out_dir) / MANUAL_DIR
     files = sorted(x.name for x in d.glob("*")) if d.is_dir() else []
-    wanted = {f"{n}.sdf": n for n in names}
-    matched = [wanted[f] for f in files if f in wanted]
-    bad_name = [f for f in files if not (f.endswith(".sdf") and _NAME_RE.match(f[:-4]))]
-    unmatched = [f for f in files if f not in wanted and f not in bad_name]
+    wanted = {f"{n}.sdf".lower(): n for n in names}
+    bad_name = [f for f in files if not (f.lower().endswith(".sdf") and _NAME_RE.match(f[:-4]))]
+    matched = [wanted[f.lower()] for f in files if f.lower() in wanted and f not in bad_name]
+    unmatched = [f for f in files if f.lower() not in wanted and f not in bad_name]
+    seen, conflicts = {}, []
+    for n in names:
+        k = n.lower()
+        if k in seen and seen[k] != n:
+            conflicts.append([seen[k], n])
+        seen.setdefault(k, n)
     return {"dir": str(d), "matched": matched, "missing": [n for n in names if n not in matched],
-            "bad_name": bad_name, "unmatched": unmatched, "rules": NAMING_RULES[0]}
+            "bad_name": bad_name, "unmatched": unmatched, "case_conflicts": conflicts, "rules": NAMING_RULES[0]}
 
 
-def check_upload_name(filename: str, names: list[str]) -> tuple[bool, tuple[str, str]]:
-    """GUI upload check: (ok, (zh, en) reason)."""
+def check_upload_name(filename: str, names: list[str]) -> tuple[bool, tuple[str, str], str | None]:
+    """GUI upload check: (ok, (zh, en) reason, file name to save as — the sheet's own spelling)."""
     stem, ext = (filename[:-4], filename[-4:]) if len(filename) > 4 else (filename, "")
     if ext.lower() != ".sdf":
-        return False, ("只接受 .sdf 檔。", "Only .sdf files are accepted.")
-    if ext != ".sdf":
-        return False, ("副檔名請用小寫 .sdf。", "Use a lower-case .sdf extension.")
+        return False, ("只接受 .sdf 檔。", "Only .sdf files are accepted."), None
     if not _NAME_RE.match(stem):
         return False, ("檔名只能有英文字母、數字、底線與連字號，最長 40 字元。",
-                       "Only letters, digits, underscore and hyphen, at most 40 characters.")
-    if stem not in names:
-        close = [n for n in names if n.lower() == stem.lower()]
-        hint = (f"（大小寫不同：表格中是 {close[0]}）", f" (case differs: the sheet has {close[0]})") if close else ("", "")
-        return False, (f"表格中沒有名為 {stem} 的化合物{hint[0]}。", f"No compound named {stem} in the sheet{hint[1]}.")
-    return True, ("", "")
+                       "Only letters, digits, underscore and hyphen, at most 40 characters."), None
+    hits = [n for n in names if n.lower() == stem.lower()]
+    if not hits:
+        return False, (f"表格中沒有名為 {stem} 的化合物。", f"No compound named {stem} in the sheet."), None
+    if len(hits) > 1:
+        return False, (f"表格中有只差大小寫的名稱（{'、'.join(hits)}），請先在表格改名。",
+                       f"The sheet has names that differ only by case ({', '.join(hits)}); rename them in the sheet first."), None
+    return True, ("", ""), f"{hits[0]}.sdf"
 
 
 def write_template(path: Path | str) -> Path:
@@ -415,8 +432,8 @@ def resolve_library(entries: list[LibraryEntry], out_dir: Path | str, *, fetch=h
         dst = out / f"{e.name}.sdf"
         try:
             src, data, note = None, None, ""
-            manual = out / MANUAL_DIR / f"{e.name}.sdf"
-            if manual.is_file():
+            manual = _manual_file(out, e.name)
+            if manual is not None:
                 # manual upload (D-50): wins over any download, so a blocked network never blocks the screen
                 data, src = manual.read_bytes(), "manual-upload"
             elif e.sdf:
