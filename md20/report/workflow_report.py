@@ -11,10 +11,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
+
 from .. import advisor
 from ..advisor import tx
 from ..util import load_json, now_iso
 from . import interpret as I
+from . import figures as FG
+from .figure_text import FIG
+from . import figure_text as FT
 from .html import _img, _esc, build_run_report
 
 
@@ -50,6 +55,9 @@ figure{margin:1rem 0}figure img{border:1px solid var(--line)}
 .methods{font-family:Georgia,"Noto Serif TC",serif;font-size:.95rem;background:#fff;border:1px solid var(--line);padding:1rem 1.2rem}
 details{margin:.6rem 0}summary{cursor:pointer;color:var(--accent)}pre{font-size:.75rem;white-space:pre-wrap}
 .muted{color:var(--muted)}.warn{color:var(--warn)}
+.figblock{border:1px solid var(--line);border-radius:4px;padding:.8rem 1rem;margin:1.2rem 0;background:#fff}
+.figblock img{border:none;max-width:720px;width:100%;display:block;margin:0 auto}.figtext p{margin:.35rem 0;font-size:.9rem}.figtext b{color:var(--ink)}
+.figtext ul{margin:.2rem 0 .2rem 1.1rem;padding:0}.figtext li{margin:.15rem 0;font-size:.9rem}
 @media print{body{max-width:none;margin:1cm}h2{page-break-after:avoid}figure,table{page-break-inside:avoid}details{display:none}}
 """
 
@@ -69,6 +77,9 @@ H = {  # fixed headings and labels
     "appendix_cfg": ("附錄 C　設定檔", "Appendix C  Configuration file"),
     "zh_note": ("", "Some automatic explanations and the decision log are recorded in Traditional Chinese and are shown as recorded."),
     "not_run": ("此步驟未執行。", "This step was not run."),
+    "how_to_read": ("如何判讀", "How to read"), "in_project": ("本專案的結果", "In this project"),
+    "synthesis_ok": ("數據支持以下結論：", "The data support the following:"),
+    "synthesis_caution": ("以下結果需要保守看待：", "The following results call for caution:"),
 }
 
 SECTION = {
@@ -149,8 +160,10 @@ SECTION = {
 class Doc:
     """Numbered figures and tables."""
 
-    def __init__(self, lang: str):
+    def __init__(self, lang: str, figdir: Path | None = None):
         self.lang, self.nf, self.nt = lang, 0, 0
+        self.figdir = figdir or Path(".")
+        self.collected: list[dict] = []
 
     def t(self, pair) -> str:
         return tx(pair, self.lang)
@@ -162,6 +175,22 @@ class Doc:
         self.nf += 1
         return (f"<figure>{img}<div class=caption><b>{self.t(H['figure'])} {self.nf}.</b> "
                 f"{_esc(self.t(caption_pair))}</div></figure>")
+
+    def figure_block(self, path, kind: str, findings: list[dict], subject: str = "") -> str:
+        """Figure + caption + how to read (general) + what it shows in this project (scenario sentences)."""
+        img = _img(path)
+        if not img:
+            return ""
+        self.nf += 1
+        self.collected += findings
+        f = FIG[kind]
+        title = self.t(f["title"]) + (f"：{subject}" if subject and self.lang == "zh" else (f": {subject}" if subject else ""))
+        items = "".join(f"<li class={x['level']}>{_esc(self.t(x['text']))}</li>" for x in findings)
+        sep = "。" if self.lang == "zh" else ". "
+        return (f"<div class=figblock><figure>{img}<div class=caption><b>{self.t(H['figure'])} {self.nf}.</b> {_esc(title)}{sep}"
+                f"{_esc(self.t(f['caption']))}</div></figure><div class=figtext>"
+                f"<p><b>{self.t(H['how_to_read'])}</b>　{_esc(self.t(f['read']))}</p>"
+                + (f"<p><b>{self.t(H['in_project'])}</b></p><ul class=findings>{items}</ul>" if items else "") + "</div></div>")
 
     def table(self, headers: list, rows: list[list], caption_pair, num_cols: set | None = None) -> str:
         self.nt += 1
@@ -179,6 +208,21 @@ def _findings_html(findings: list[dict], lang: str) -> str:
     return "<ul class=findings>" + "".join(f"<li class={f['level']}>{_esc(tx(f['text'], lang))}</li>" for f in findings) + "</ul>"
 
 
+def _synthesis(findings: list[dict], lang: str) -> str:
+    """Section-level interpretation: cautions first (what limits the conclusion), then what the data support."""
+    if not findings:
+        return ""
+    cau = [f for f in findings if f["level"] == "caution"]
+    good = [f for f in findings if f["level"] == "good"]
+    note = [f for f in findings if f["level"] == "note"]
+    out = ""
+    if good or (note and not cau):
+        out += f"<p>{_esc(tx(H['synthesis_ok'], lang))}</p>" + _findings_html((good or note)[:4], lang)
+    if cau:
+        out += f"<p>{_esc(tx(H['synthesis_caution'], lang))}</p>" + _findings_html(cau, lang)
+    return out
+
+
 def _section(doc: Doc, n: int, key: str, params_html: str, results_html: str, findings: list[dict]) -> str:
     s = SECTION[key]
     L = doc.lang
@@ -187,7 +231,7 @@ def _section(doc: Doc, n: int, key: str, params_html: str, results_html: str, fi
                     f"<h4>{tx(H['meaning'], L)}</h4><p>{_esc(tx(s['meaning'], L))}</p>",
                     (f"<h4>{tx(H['params'], L)}</h4>{params_html}" if params_html else ""),
                     f"<h4>{tx(H['results'], L)}</h4>{results_html or '<p class=muted>' + _esc(tx(H['not_run'], L)) + '</p>'}",
-                    (f"<h4>{tx(H['interpretation'], L)}</h4>{_findings_html(findings, L)}" if findings else "")])
+                    (f"<h4>{tx(H['interpretation'], L)}</h4>{_synthesis(findings, L)}" if findings else "")])
 
 
 # ------------------------------------------------------------------------------------------- parameters actually used
@@ -318,11 +362,9 @@ def _screen(doc: Doc, wf) -> str:
                         [tx(("化合物庫", "Library"), L), _esc(Path(str(scfg.get("library", "—"))).name)]],
                        ("篩選參數", "Screening parameters"))
     out = ""
-    for k, cap in (("top", ("前段化合物分數", "Scores of the leading compounds")), ("scatter", ("分數與重原子數", "Score against heavy-atom count")),
-                   ("histogram", ("分數分佈", "Score distribution"))):
-        pth = ((d.get("plots") or {}).get(k) or {}).get("png")
-        if pth:
-            out += doc.figure(pth, cap)
+    start = len(doc.collected)
+    if rows:
+        out += doc.figure_block(FG.screen_ranking(rows, doc.figdir / "screen_ranking.png"), "screen_ranking", FT.classify_screen(rows))
     if rows:
         out += doc.table([tx(("名次", "Rank"), L), tx(("化合物", "Compound"), L), "Score (kcal mol⁻¹)", tx(("與最佳差距", "Δ to best"), L),
                           tx(("重原子", "Heavy atoms"), L), tx(("配體效率", "Ligand efficiency"), L), tx(("選入", "Selected"), L)],
@@ -334,7 +376,8 @@ def _screen(doc: Doc, wf) -> str:
         out += doc.table([tx(("化合物", "Compound"), L), tx(("階段", "Stage"), L), tx(("原因", "Reason"), L)],
                          [[_esc(b["name"]), _esc(b["stage"]), _esc(b.get("error", ""))] for b in bad[:60]],
                          ("未納入篩選的化合物", "Compounds not screened"))
-    return _section(doc, doc.next(), "screen", params, out, I.screen(rows, len(bad), sel))
+    extra = I.screen(rows, len(bad), sel)[1:]          # failed count and user selection; the ranking itself is in the figure
+    return _section(doc, doc.next(), "screen", params, out, doc.collected[start:] + extra)
 
 
 def _docking(doc: Doc, wf, vals, f, goal) -> str:
@@ -352,7 +395,11 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
     chosen = {}
     for v in (sel.get("ligands") or {}).values():
         chosen.setdefault(v.get("entry"), set()).add(v.get("rank"))
+    start = len(doc.collected)
     for e in res.get("entries", []):
+        rank_used = min(chosen.get(e["name"], {e.get("recommended_rank") or 1}))
+        out += doc.figure_block(FG.docking_scores(e["poses"], rank_used, e["name"], doc.figdir / f"docking_{e['name']}.png"),
+                                "docking_scores", FT.classify_docking_scores(e["name"], e["poses"], rank_used), e["name"])
         trs = []
         for p in e["poses"]:
             tag = ("✔ " + tx(("選用", "used"), L) if p["rank"] in chosen.get(e["name"], set()) else "") + \
@@ -365,7 +412,7 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
                          trs, (f"{e['name']} 的對接姿勢", f"Docking poses of {e['name']}"), {0, 1, 3, 4})
         if e.get("reason"):
             out += f"<p class=muted>{_esc(tx(('系統推薦理由', 'Reason for the recommendation'), L))}: {_esc(e['reason'])}</p>"
-    return _section(doc, doc.next(), "docking", params, out, I.docking(res, sel))
+    return _section(doc, doc.next(), "docking", params, out, doc.collected[start:])
 
 
 def _peptide(doc: Doc, wf) -> str:
@@ -464,25 +511,56 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
                           tx(("數值", "Values"), L)], acc_rows,
                          ("平衡與正式模擬的驗收檢查（溫度、密度）", "Acceptance checks of equilibration and production (temperature, density)"))
     comp = ana.get("comparison") or {}
-    if (comp.get("figures") or {}).get("compare"):
-        out += doc.figure(comp["figures"]["compare"]["png"], ("蛋白單獨與複合物的主鏈 RMSD（上）與 Cα RMSF（下）。",
-                                                             "Backbone RMSD (top) and Cα RMSF (bottom) of the protein alone and the complexes."))
-    caps = {"timeseries": ("主鏈 RMSD、蛋白迴轉半徑與配體口袋 RMSD 隨時間的變化；平台代表結構已平衡。",
-                           "Backbone RMSD, protein radius of gyration and ligand pocket RMSD over time; a plateau means the structure has equilibrated."),
-            "rmsf": ("每個殘基 Cα 的均方根擾動（RMSF）；峰值通常是 loop 與末端。",
-                     "Cα root-mean-square fluctuation (RMSF) per residue; peaks are usually loops and termini."),
-            "ligand_ligand": ("配體之間的距離隨時間的變化（多配體系統）。", "Distances between ligands over time (multi-ligand systems).")}
-    for key, s in sums.items():
-        figs = s.get("figures") or {}
-        for k in ("timeseries", "rmsf", "ligand_ligand"):
-            if figs.get(k):
-                out += doc.figure(figs[k]["png"], (f"{key}：{caps[k][0]}", f"{key}: {caps[k][1]}"))
-        for k, fig in figs.items():
-            if k.startswith("contacts_"):
-                out += doc.figure(fig["png"], (f"{key}：口袋殘基與配體的接觸頻率（模擬時間中距離 < 4 Å 的比例）。",
-                                               f"{key}: contact frequency between pocket residues and the ligand (fraction of time within 4 Å)."))
-    findings = I.md(sums, metrics, restrained) + I.rigidified(comp.get("most_rigidified_on_binding") or [])
+    start = len(doc.collected)
+    if metrics:
+        out += _md_figures(doc, sums, metrics)
+    else:                                              # older runs without metrics.json: the analysis images as drawn
+        for key, s_ in sums.items():
+            figs = s_.get("figures") or {}
+            if figs.get("timeseries"):
+                out += doc.figure_block(figs["timeseries"]["png"], "rmsd", [], key)
+            for k, fig in figs.items():
+                if k.startswith("contacts_"):
+                    out += doc.figure_block(fig["png"], "contacts", [], key)
+    findings = doc.collected[start:]
+    if restrained:
+        findings.append(I.F("caution", "正式模擬保留了主鏈約束，RMSD 與 RMSF 被人為壓低，不能作為結構穩定的證據。",
+                            "The backbone was restrained in production; RMSD and RMSF are artificially suppressed and are not evidence of stability."))
     return _section(doc, doc.next(), "md", params, out, findings)
+
+
+def _md_figures(doc: Doc, sums: dict, metrics: dict) -> str:
+    """F3–F7 drawn from metrics.json of each system, each with its general reading guide and scenario sentences."""
+    order = sorted(metrics, key=lambda k: (not k.lower().startswith("apo"), k))
+    out = ""
+    rmsd = {k: (metrics[k].get("time_ns") or [], metrics[k].get("rmsd_backbone_A") or []) for k in order if metrics[k].get("rmsd_backbone_A")}
+    if rmsd:
+        out += doc.figure_block(FG.timeseries(rmsd, "Backbone RMSD (Å)", doc.figdir / "md_rmsd.png"), "rmsd", FT.classify_rmsd(rmsd))
+    rg = {k: (metrics[k].get("time_ns") or [], metrics[k].get("rg_protein_A") or []) for k in order if metrics[k].get("rg_protein_A")}
+    if rg:
+        out += doc.figure_block(FG.timeseries(rg, "Radius of gyration (Å)", doc.figdir / "md_rg.png"), "rg", FT.classify_rg(rg))
+    lig, lf = {}, []
+    for k in order:
+        for rn, d in (metrics[k].get("ligands") or {}).items():
+            if d.get("rmsd_in_pocket_A"):
+                lig[f"{k} {rn}"] = (metrics[k].get("time_ns") or [], d["rmsd_in_pocket_A"])
+                lf += FT.classify_ligand_rmsd(k, rn, metrics[k].get("time_ns") or np.arange(len(d["rmsd_in_pocket_A"])), d["rmsd_in_pocket_A"])
+    if lig:
+        out += doc.figure_block(FG.timeseries(lig, "Ligand RMSD in pocket (Å)", doc.figdir / "md_ligand_rmsd.png", threshold=3.0), "ligand_rmsd", lf)
+    rf = {k: (metrics[k].get("rmsf_residues") or [], metrics[k].get("rmsf_ca_A") or []) for k in order if metrics[k].get("rmsf_ca_A")}
+    if rf:
+        keys = list(rf)
+        ff = []
+        for k in keys[1:]:
+            ff += FT.classify_rmsf(rf[k][0], rf[keys[0]][1], rf[k][1], k)
+        out += doc.figure_block(FG.rmsf(rf, doc.figdir / "md_rmsf.png"), "rmsf", ff)
+    for k in order:
+        for rn, d in (metrics[k].get("ligands") or {}).items():
+            fq = d.get("contact_frequency") or {}
+            if fq:
+                out += doc.figure_block(FG.contacts(fq, doc.figdir / f"md_contacts_{k}_{rn}.png"), "contacts",
+                                        FT.classify_contacts(k, rn, fq), f"{k} {rn}")
+    return out
 
 
 def _binding(doc: Doc, wf, vals, f, goal) -> str:
@@ -502,23 +580,49 @@ def _binding(doc: Doc, wf, vals, f, goal) -> str:
     out = doc.table([tx(("配體", "Ligand"), L), "ΔPMF (kJ mol⁻¹)", "ΔG° (kJ mol⁻¹)", "ΔG° (kcal mol⁻¹)", tx(("結合距離（nm）", "Bound distance (nm)"), L),
                      tx(("SMD 最大拉力（kJ mol⁻¹ nm⁻¹）", "SMD peak force (kJ mol⁻¹ nm⁻¹)"), L), tx(("SMD 功（kJ mol⁻¹）", "SMD work (kJ mol⁻¹)"), L)],
                     trs, ("結合自由能結果", "Binding free-energy results"), {1, 2, 3, 4, 5, 6})
+    start = len(doc.collected)
     for name, r in b.items():
-        figs = r.get("figures") or {}
         out += f"<h3>{_esc(name)}</h3>"
-        for k, cap in (("smd", ("SMD 拉力、功與距離，對彈簧位置作圖；功與拉速有關，不是自由能。", "SMD force, work and distance against spring position; the work depends on the pulling speed and is not a free energy.")),
-                       ("histograms", ("各窗口沿反應座標的取樣分佈；相鄰窗口必須重疊，剖面才能連續。", "Sampling distribution of each window along the reaction coordinate; neighbouring windows must overlap for a continuous profile.")),
-                       ("pmf", ("自由能剖面（PMF）與自助法誤差；井深為 ΔPMF。", "Free-energy profile (PMF) with bootstrap error; the depth is ΔPMF."))):
-            if figs.get(k):
-                out += doc.figure(figs[k]["png"], (f"{name}：{cap[0]}", f"{name}: {cap[1]}"))
+        out += _binding_figures(doc, name, r)
         if r.get("dG_withheld"):
             out += f"<p class=warn>{_esc(tx(('ΔG° 不輸出的原因', 'Why ΔG° is not reported'), L))}: {_esc(str(r['dG_withheld']))}</p>"
     comp = (wf.state()["steps"].get("binding") or {}).get("comparison") or {}
     out += _comparison_html(comp, L)
-    findings = I.binding(b)
+    # the profile itself is described under its figure; here the reported numbers and the convergence check
+    findings = doc.collected[start:] + [x for x in I.binding(b) if "ΔG°" in x["text"][1] or "halves" in x["text"][1]]
     for ctx, c in (comp.get("contexts") or {}).items():
         if c.get("status") == "PASS" and c.get("why"):
             findings.append(I.F("note", c["why"], c["why"]))
     return _section(doc, doc.next(), "binding", params, out, findings)
+
+
+def _binding_figures(doc: Doc, name: str, r: dict) -> str:
+    """F8–F10 from the binding output folder (smd.tsv, binding_manifest.json); falls back to the stored images."""
+    figs = r.get("figures") or {}
+    anchor = next((figs[k]["png"] for k in ("pmf", "smd", "histograms") if figs.get(k)), None)
+    bdir = Path(anchor).parent if anchor else None
+    out = ""
+    arr = None
+    if bdir and (bdir / "smd.tsv").is_file():
+        try:
+            arr = np.loadtxt(bdir / "smd.tsv", ndmin=2)
+        except Exception:  # noqa: BLE001
+            arr = None
+    if arr is not None and arr.shape[0] >= 10 and arr.shape[1] >= 5:
+        pos, force, work = arr[:, 1], arr[:, 3], arr[:, 4]
+        out += doc.figure_block(FG.smd(pos, force, work, doc.figdir / f"smd_{name}.png"), "smd", FT.classify_smd(pos, force, work, name), name)
+    elif figs.get("smd"):
+        out += doc.figure_block(figs["smd"]["png"], "smd", [], name)
+    pm = ((load_json(bdir / "binding_manifest.json", {}) if bdir else {}).get("result") or {}).get("pmf") or {}
+    if figs.get("histograms"):
+        out += doc.figure_block(figs["histograms"]["png"], "umbrella", FT.classify_umbrella(pm.get("coverage") or {}, name), name)
+    if pm.get("grid_nm") and pm.get("pmf_radial_kj_mol"):
+        g, W = pm["grid_nm"], pm["pmf_radial_kj_mol"]
+        err = pm.get("err_kj_mol")
+        out += doc.figure_block(FG.pmf(g, W, err, doc.figdir / f"pmf_{name}.png"), "pmf", FT.classify_pmf(g, W, err, name), name)
+    elif figs.get("pmf"):
+        out += doc.figure_block(figs["pmf"]["png"], "pmf", [], name)
+    return out
 
 
 def _comparison_html(comp: dict, lang: str = "zh") -> str:
@@ -548,7 +652,7 @@ def _comparison_html(comp: dict, lang: str = "zh") -> str:
 
 def _binding_section(wf, lang: str = "zh") -> str:
     """Binding section on its own (kept for callers and tests)."""
-    doc = Doc(lang)
+    doc = Doc(lang, wf.dir / "report_figures")
     doc.user_keys = set(advisor.values_from_config(wf.cfg))
     n = {"i": 0}
     doc.next = lambda: n.__setitem__("i", n["i"] + 1) or n["i"]
@@ -641,7 +745,7 @@ def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None 
     out_path = Path(out_path) if out_path else wf.dir / "workflow_report.html"
     L = lang or wf.cfg.get("language") or "en"
     L = L if L in ("en", "zh") else "en"
-    doc = Doc(L)
+    doc = Doc(L, wf.dir / "report_figures")
     counter = {"n": 0}
 
     def nxt():
@@ -655,17 +759,15 @@ def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None 
     f = advisor.features_from_config(cfg)
     body = [_design(doc, wf), _structure(doc, wf), _screen(doc, wf), _docking(doc, wf, vals, f, goal), _peptide(doc, wf),
             _md(doc, wf, vals, f, goal), _binding(doc, wf, vals, f, goal)]
-    # key findings from every section's interpretation (recomputed cheaply from the same data)
+    # key findings: the same sentences the figures carry (cautions first), plus the peptide and structure notes
     st = wf.state()
-    secs = [I.structure((load_json(wf.dir / "structure_gates.json", {}) or {}).get("gates") or [])]
-    d = st["steps"].get("docking")
-    if d:
-        secs.append(I.docking(load_json(d["result"], {}), (st["steps"].get("pose_selection") or {}).get("selection", {})))
-    secs.append(I.peptide(st.get("cpp") or {}, st.get("peptide_access") or {}))
-    ana = st["steps"].get("analysis") or {}
-    secs.append(I.md(ana.get("summaries") or {}))
-    secs.append(I.binding((st["steps"].get("binding") or {}).get("results") or {}))
-    key = I.headline(secs)
+    pool = I.peptide(st.get("cpp") or {}, st.get("peptide_access") or {}) + doc.collected + \
+        I.structure((load_json(wf.dir / "structure_gates.json", {}) or {}).get("gates") or [])[:1]
+    seen, key = set(), []
+    for f_ in [x for x in pool if x["level"] == "caution"] + [x for x in pool if x["level"] == "good"] + [x for x in pool if x["level"] == "note"]:
+        if f_["text"] not in seen:
+            seen.add(f_["text"]); key.append(f_)
+    key = key[:10]
     rows_log = [r for r in wf.project.decisions.read() if str(r.get("stage", "")).startswith(
         ("workflow", "docking", "binding", "build", "engine", "screen", "gui", "peptide"))]
     log = doc.table([tx(("時間", "Time"), L), tx(("階段", "Stage"), L), tx(("項目", "Item"), L), tx(("選擇", "Choice"), L),
