@@ -107,8 +107,9 @@ if (-not (Test-Path $md20)) {
   $cfg = Join-Path $base 'trypsin.json'
   [IO.File]::WriteAllText($cfg, $j, (New-Object Text.UTF8Encoding($false)))
   Get-Content $cfg | Out-Host
-  Run '5 pipeline run' { & $md20 pipeline run $cfg --project laptop_test } | Out-Null
-  $projDir = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'MD20_Projects\laptop_test'
+  $proj = "laptop_$ts"     # a fresh project every run: an existing finished project would only be re-reported (D-35)
+  Run '5 pipeline run' { & $md20 pipeline run $cfg --project $proj } | Out-Null
+  $projDir = Join-Path ([Environment]::GetFolderPath('MyDocuments')) "MD20_Projects\$proj"
   Write-Host "project dir: $projDir"
   Get-ChildItem -Path $projDir -Recurse -Filter 'report.html' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "report: $($_.FullName)" }
 }
