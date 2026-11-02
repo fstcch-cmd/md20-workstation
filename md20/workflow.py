@@ -125,7 +125,7 @@ def example_config(screen: bool = False) -> dict:
 DECISION_KEYS: tuple[tuple[str, ...], ...] = (
     ("pose_choices",), ("human_choices",), ("structure_override",), ("metal_policy",), ("metal_params",), ("peptide_policy",),
     ("docking", "skip_redock"), ("box", "allow_blind"), ("binding", "manual_windows"),
-    ("screen", "select"), ("screen", "next_mode"), ("screen", "allow_partial"),
+    ("screen", "select"), ("screen", "next_mode"), ("screen", "allow_partial"), ("md_confirmed",),
 )
 LIGAND_DECISION_KEYS = ("cpp_override", "cpp_evidence", "target_location")
 
@@ -1166,6 +1166,20 @@ class Workflow:
         finally:
             lock.release()
 
+    def confirm_md(self, sel: dict) -> None:
+        """GUI flow (D-50): after the poses are fixed, stop and ask whether to go on to molecular dynamics.
+        Only when the config asks for it (`confirm_before_md`); the CLI default runs straight through."""
+        if not self.cfg.get("confirm_before_md") or self.cfg.get("md_confirmed"):
+            if self.cfg.get("md_confirmed"):
+                self._mark("md_confirm", confirmed=True)
+            return
+        lig = ", ".join(f"{k} (rank {v.get('rank')}, {v.get('score')} kcal/mol)" for k, v in (sel.get("ligands") or {}).items())
+        msg = (f"對接與姿勢選擇已完成：{lig or '—'}。請在姿勢表確認選用的姿勢，再決定是否進入分子動力學"
+               "（建模、平衡、正式模擬；依設定可能需要數小時）。")
+        self._block("md_confirm", msg, gates=[{
+            "name": "confirm MD", "status": "NEEDS_HUMAN", "explanation": msg,
+            "options": ["進入分子動力學（md_confirmed）", "先改選姿勢（在姿勢表點選後再回來確認）"]}])
+
     def _run(self, make_factory: Callable, platform, *, should_pause=None, progress_cb=None) -> dict:
         raw = self.fetch_receptor()
         clean = self.prepare_docking_receptor(raw)
@@ -1180,6 +1194,7 @@ class Workflow:
                                                                               should_pause=should_pause, progress_cb=progress_cb))
             if sel is None:
                 return {"status": "PAUSED", "state": self.state()}
+            self.confirm_md(sel)
         built = self.build_cases(raw, sel or {"mode": "none", "ligands": {}})
         runs = self.run_md(built, make_factory, should_pause=should_pause, progress_cb=progress_cb)
         if any(r["status"] == "PAUSED" for r in runs.values()):

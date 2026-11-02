@@ -18,7 +18,7 @@ STATIC = Path(__file__).parent / "static"
 STATUS_STYLE = {"PASS": ("通過", "positive"), "AUTO_FIXED": ("已自動修正", "warning"), "NEEDS_HUMAN": ("需要你決定", "negative"),
                 "PAUSED": ("已暫停", "warning"), "RUNNING": ("執行中", "info")}
 STEP_LABEL = {"receptor_input": "受體來源", "structure_gate": "結構可信度", "receptor_docking": "受體整理",
-              "docking_preflight": "對接前檢查", "docking": "分子對接", "pose_selection": "pose 選擇", "md_cases": "MD 建模",
+              "docking_preflight": "對接前檢查", "docking": "分子對接", "pose_selection": "pose 選擇", "md_confirm": "確認進入 MD", "md_cases": "MD 建模",
               "md_runs": "MD 執行", "analysis": "軌跡分析", "binding": "SMD＋傘狀採樣", "report": "報告"}
 
 

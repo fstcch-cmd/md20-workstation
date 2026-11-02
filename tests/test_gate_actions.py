@@ -161,3 +161,20 @@ def test_receptor_unimplemented_choice_keeps_blocking(tmp_path):
                            human_choices={"missing loops (long)": "以 PDBFixer 補建並接受風險"})
     g = {x["name"]: x for x in man["gates"]["gates"]}["missing loops (long)"]
     assert man["status"] == "NEEDS_HUMAN" and g["status"] == "NEEDS_HUMAN" and "不會由程式自動執行" in g["explanation"]
+
+
+def test_confirm_before_md_gate(tmp_path):
+    """D-50: GUI runs stop after pose selection and ask before MD; one click writes md_confirmed and the run goes on."""
+    wf = _wf(tmp_path)
+    wf.cfg["confirm_before_md"] = True
+    sel = {"mode": "independent", "ligands": {"BEN": {"rank": 1, "score": -6.1}}}
+    with pytest.raises(WorkflowBlocked):
+        wf.confirm_md(sel)
+    card = next(c for c in gate_cards(wf) if c["title"] == "confirm MD")
+    go = next(a for a in card["actions"] if a["label"].startswith("進入分子動力學"))
+    assert card["manual"] and card["manual"][0].startswith("先改選")
+    apply_gate_action(wf, go)
+    assert wf.cfg["md_confirmed"] is True
+    wf.confirm_md(sel)                                   # no longer blocks
+    from md20.workflow import DECISION_KEYS
+    assert ("md_confirmed",) in DECISION_KEYS

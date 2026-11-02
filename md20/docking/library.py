@@ -158,6 +158,46 @@ def read_library(path: Path | str, *, sheet: str | int | None = None) -> tuple[l
     return entries, problems
 
 
+MANUAL_DIR = "manual_upload"
+NAMING_RULES = (
+    ("檔名必須與表格「name」欄完全相同，加上 .sdf（例：表格寫 caffeine，檔名為 caffeine.sdf）；"
+     "只用英文字母、數字、底線與連字號，不含空格，最長 40 字元，大小寫視為不同；一個檔案只放一個化合物。",
+     "The file name must equal the sheet's \"name\" column plus .sdf (sheet says caffeine → caffeine.sdf); "
+     "letters, digits, underscore and hyphen only, no spaces, at most 40 characters, case-sensitive; one compound per file."),
+)
+_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+
+def manual_upload_report(names: list[str], out_dir: Path | str) -> dict:
+    """Which manual SDF uploads match the sheet: matched, still missing, and files that break the naming rule or match
+    no row (those are never used, so a misnamed file cannot silently stand in for another compound)."""
+    d = Path(out_dir) / MANUAL_DIR
+    files = sorted(x.name for x in d.glob("*")) if d.is_dir() else []
+    wanted = {f"{n}.sdf": n for n in names}
+    matched = [wanted[f] for f in files if f in wanted]
+    bad_name = [f for f in files if not (f.endswith(".sdf") and _NAME_RE.match(f[:-4]))]
+    unmatched = [f for f in files if f not in wanted and f not in bad_name]
+    return {"dir": str(d), "matched": matched, "missing": [n for n in names if n not in matched],
+            "bad_name": bad_name, "unmatched": unmatched, "rules": NAMING_RULES[0]}
+
+
+def check_upload_name(filename: str, names: list[str]) -> tuple[bool, tuple[str, str]]:
+    """GUI upload check: (ok, (zh, en) reason)."""
+    stem, ext = (filename[:-4], filename[-4:]) if len(filename) > 4 else (filename, "")
+    if ext.lower() != ".sdf":
+        return False, ("只接受 .sdf 檔。", "Only .sdf files are accepted.")
+    if ext != ".sdf":
+        return False, ("副檔名請用小寫 .sdf。", "Use a lower-case .sdf extension.")
+    if not _NAME_RE.match(stem):
+        return False, ("檔名只能有英文字母、數字、底線與連字號，最長 40 字元。",
+                       "Only letters, digits, underscore and hyphen, at most 40 characters.")
+    if stem not in names:
+        close = [n for n in names if n.lower() == stem.lower()]
+        hint = (f"（大小寫不同：表格中是 {close[0]}）", f" (case differs: the sheet has {close[0]})") if close else ("", "")
+        return False, (f"表格中沒有名為 {stem} 的化合物{hint[0]}。", f"No compound named {stem} in the sheet{hint[1]}.")
+    return True, ("", "")
+
+
 def write_template(path: Path | str) -> Path:
     """Example sheet (xlsx or csv by extension) showing every accepted column."""
     import pandas as pd
@@ -375,7 +415,11 @@ def resolve_library(entries: list[LibraryEntry], out_dir: Path | str, *, fetch=h
         dst = out / f"{e.name}.sdf"
         try:
             src, data, note = None, None, ""
-            if e.sdf:
+            manual = out / MANUAL_DIR / f"{e.name}.sdf"
+            if manual.is_file():
+                # manual upload (D-50): wins over any download, so a blocked network never blocks the screen
+                data, src = manual.read_bytes(), "manual-upload"
+            elif e.sdf:
                 sp = Path(e.sdf)
                 if not sp.is_file():
                     raise FileNotFoundError(f"找不到 SDF {sp}")

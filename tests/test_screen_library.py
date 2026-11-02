@@ -211,3 +211,24 @@ def test_progress_callback_counts_every_entry(tmp_path):
 def test_filters_from_cfg_ignores_unknown_keys():
     f = LibraryFilters.from_cfg({"max_mw": 500, "bogus": 1})
     assert f.max_mw == 500 and f.min_heavy_atoms == 5
+
+
+def test_manual_upload_naming_and_priority(tmp_path):
+    """D-50: a correctly named manual SDF is used instead of any download; misnamed files are reported, never used."""
+    from md20.docking.library import (LibraryEntry, resolve_library, manual_upload_report, check_upload_name, MANUAL_DIR)
+    up = tmp_path / MANUAL_DIR; up.mkdir()
+    sdf = "m\n  x\n\n  1  0  0  0  0  0  0  0  0  0999 V2000\n    0.0000    0.0000    0.0000 C   0  0\nM  END\n$$$$\n"
+    (up / "caffeine.sdf").write_text(sdf)
+    (up / "Caffeine.sdf").write_text(sdf)          # case differs → unmatched
+    (up / "bad name.sdf").write_text(sdf)          # space → bad name
+    rep = manual_upload_report(["caffeine", "aspirin"], tmp_path)
+    assert rep["matched"] == ["caffeine"] and rep["missing"] == ["aspirin"]
+    assert rep["bad_name"] == ["bad name.sdf"] and rep["unmatched"] == ["Caffeine.sdf"]
+    calls = []
+    man = resolve_library([LibraryEntry(name="caffeine", label="caffeine", row=2, pubchem_cid="2519")], tmp_path,
+                          fetch=lambda url, headers=None: calls.append(url) or b"", workers=1, sleep=lambda s: None)
+    assert man["entries"]["caffeine"]["source"] == "manual-upload" and not calls
+    assert check_upload_name("caffeine.sdf", ["caffeine"])[0]
+    ok, why = check_upload_name("Caffeine.sdf", ["caffeine"])
+    assert not ok and "caffeine" in why[1] and "case" in why[1]
+    assert not check_upload_name("caffeine.mol2", ["caffeine"])[0]

@@ -19,7 +19,7 @@ from ..util import atomic_write_json, load_json
 
 # workflow step keys in execution order; a decision at step X invalidates X and everything after it
 STEP_ORDER = ["structure_gate", "receptor_docking", "screen_library", "screen_docking", "screen_selection", "docking_preflight",
-              "docking", "pose_selection", "md_cases", "md_runs", "analysis", "binding", "report"]
+              "docking", "pose_selection", "md_confirm", "md_cases", "md_runs", "analysis", "binding", "report"]
 STRUCTURE_OVERRIDE = {"resolution": "resolution", "R-free": "r_free", "ligand occupancy": "ligand_occupancy",
                       "pocket occupancy": "pocket"}
 _METAL_OPT = re.compile(r"metal_policy:\s*\{\s*([A-Za-z0-9:]+)\s*:\s*(bonded|keep_nonbonded|remove)\s*\}")
@@ -86,6 +86,8 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
     if name in ("library partial", "screen partial") and option.startswith("screen.allow_partial"):
         return _act(option, [{"path": ["screen", "allow_partial"], "value": True}],
                     "screen_library" if name == "library partial" else "screen_docking")
+    if name == "confirm MD" and option.startswith("進入分子動力學"):
+        return _act(option, [{"path": ["md_confirmed"], "value": True}], "md_confirm")
     if name == "redocking" and option.startswith("docking.skip_redock"):
         return _act(option, [{"path": ["docking", "skip_redock"], "value": True}], step)
     # peptide CPP gate (per ligand)

@@ -149,7 +149,7 @@ def set_pose_choice(wf: Workflow, entry: str, rank: int) -> None:
     from ..util import atomic_write_json
     atomic_write_json(cfg, wf.dir / "config.json")
     st = wf.state()
-    for k in ("pose_selection", "md_cases", "md_runs", "analysis", "binding", "report"):
+    for k in ("pose_selection", "md_confirm", "md_cases", "md_runs", "analysis", "binding", "report"):
         st["steps"].pop(k, None)
     atomic_write_json(st, wf.state_path)
 

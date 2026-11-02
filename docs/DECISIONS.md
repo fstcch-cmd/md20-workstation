@@ -7,6 +7,16 @@
 
 ## 2026-11-02
 
+### D-50　HTS 手動上傳（嚴格命名）與「姿勢選定後確認是否進入 MD」
+- 使用者（11/02 14:3x，GUI 第二輪回饋）：自動下載被阻擋時要有手動上傳機制並限制命名原則；姿勢選擇後詢問是否進入 MD。
+- 決定：
+  1. `<library>/manual_upload/<name>.sdf`：檔名必須與表格 name 欄完全相同（英數、底線、連字號，≤ 40 字元，大小寫不同視為不同），
+     存在時優先於任何下載（來源記為 manual-upload）。`manual_upload_report` 列出已對上、仍缺、命名不合、對不到任何列的檔案；
+     命名不合或對不到的檔案**一律不使用**，避免誤名的檔案頂替另一個化合物。`check_upload_name` 供 GUI 上傳時即時檢查（雙語理由，含大小寫提示）。
+  2. `confirm_before_md: true`（GUI 建立的流程預設開啟；CLI 預設關閉，照常一路跑完）：姿勢選定後在新步驟 `md_confirm` 停下，
+     閘門「confirm MD」一鍵「進入分子動力學」寫回 `md_confirmed`（已加入 DECISION_KEYS，重跑不會遺失）。改選姿勢會清掉此步驟。
+- 證據：`tests/test_screen_library.py::test_manual_upload_naming_and_priority`、`tests/test_gate_actions.py::test_confirm_before_md_gate`。
+
 ### D-49　依個案建議初始參數（快速、專業、教學模式共用）＋合理性檢查＋時間估計；介面與報告雙語（英文預設）
 - 使用者（15:06）：動力學參數複雜，即使是專業模式也應依個案建議初始預設值，要夠聰明。（15:14）操作介面與報告可選語系，繁中與英文，英文預設。
 - 決定：新增 `md20/advisor.py`（純 Python，所有入口共用）：
