@@ -543,7 +543,7 @@ def workflow_page(project: str, name: str):
                     for e in reversed(tl):
                         with ui.row().classes("w-full items-start gap-2"):
                             ui.label(e["at"][11:19]).classes("text-xs text-gray-500 w-16")
-                            ui.badge("人工" if e["status"] == "human" else ("步驟" if e["kind"] == "step" else "自動"),
+                            ui.badge(_("人工", "Manual") if e["status"] == "human" else (_("步驟", "Step") if e["kind"] == "step" else _("自動", "Automatic")),
                                      color="negative" if e["status"] in ("human", "NEEDS_HUMAN") else
                                      ("primary" if e["kind"] == "step" else "grey"))
                             with ui.column().classes("gap-0"):
