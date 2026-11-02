@@ -136,15 +136,18 @@ def teach(case: str):
                 ui.label(f"{i}. {tx(q, L)}").classes("text-sm")
 
         def start():
-            proj = _project("Teaching" if L == "en" else "教學")
+            proj = _project("Teaching")       # D-67: one folder whatever the interface language (a switch restarted the lesson)
             if (proj.dir / "workflows" / safe_name(cfg["name"]) / "config.json").is_file():
                 # the lesson already exists: continue it instead of overwriting its decisions
                 wf = Workflow.open(proj, cfg["name"])
                 ui.notify(_("這個教學案例已經建立過，繼續原本的流程。", "This lesson already exists; continuing it."))
             else:
                 wf = Workflow(proj, cfg)
-            _start(wf)
-            ui.navigate.to(f"/wf/{proj.dir.name}/{wf.name}")
+            job = _start(wf)
+            if job.wf.dir != wf.dir:
+                ui.notify(_("已有另一個計算在進行，先帶你回到它（同一時間只跑一個）。",
+                            "Another calculation is running; taking you to it (one at a time)."), type="warning")
+            ui.navigate.to(f"/wf/{job.wf.project.dir.name}/{job.wf.name}")
         ui.button(t("start_lesson", L), on_click=start).props("color=primary no-caps size=lg")
 
 
@@ -413,8 +416,12 @@ def _form(mode: str):
         wf = Workflow(proj, cfg)
         if state["library_file"]:
             shutil.copy2(state["library_file"], wf.dir / Path(state["library_file"]).name)
-        _start(wf)
-        ui.navigate.to(f"/wf/{proj.dir.name}/{wf.name}")
+        job = _start(wf)
+        if job.wf.dir != wf.dir:
+            ui.notify(_("已有另一個計算在進行；新流程已建立但尚未開始，等目前的完成後在它的頁面按「開始／繼續」。",
+                        "Another calculation is running; the new workflow is created but not started. Start it from its page when the current one finishes."),
+                      type="warning")
+        ui.navigate.to(f"/wf/{job.wf.project.dir.name}/{job.wf.name}")
 
     build_params()
     refresh()

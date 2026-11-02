@@ -33,9 +33,16 @@ def ensure_dir(path: Path | str) -> Path:
 
 
 def safe_name(value: str, fallback: str = "item", max_len: int = 80) -> str:
-    """File-system safe identifier (Windows reserved characters removed)."""
-    value = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value).strip())
+    """File-system safe identifier (Windows reserved characters removed).  Characters outside ASCII are dropped
+    (paths stay safe on cp950 consoles); when any were dropped a short hash of the original is appended, so
+    "教學" and "測試" no longer both become the same "project" folder (D-67)."""
+    raw = str(value).strip()
+    value = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw)
     value = re.sub(r"_+", "_", value).strip("_.")
     if value.upper() in {"CON", "PRN", "AUX", "NUL"} or re.match(r"^(COM|LPT)\d$", value.upper()):
         value = f"{value}_"
+    if any(ord(ch) > 127 for ch in raw):
+        import hashlib
+        tag = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:6]
+        return f"{(value or fallback)[:max_len - 7]}_{tag}"
     return (value or fallback)[:max_len]

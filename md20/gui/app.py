@@ -19,6 +19,7 @@ from .views import (gate_cards, timeline, live_series, echart_options, viewer_ta
 from .content import t, LANG_NAMES
 from .gate_text import gate_title, gate_general, option_text
 
+from ..util.timeutil import to_local
 RUNNER = Runner()
 STATE: dict = {"projects_dir": default_projects_dir(), "platform": None, "doctor": None, "lang": None}
 
@@ -125,6 +126,14 @@ def _header():
                 set_lang(e.value)
                 ui.navigate.reload()
             ui.select(LANG_NAMES, value=L, on_change=change).props("dense dark borderless options-dense").classes("w-28")
+    # D-67: wherever the user goes (home, system page, another language), the running calculation is one click away
+    job = RUNNER.running()
+    if job is not None:
+        href = f"/wf/{job.wf.project.dir.name}/{job.wf.name}"
+        with ui.row().classes("w-full items-center gap-3 px-4 py-2").style("background:#fff7e6;border-bottom:1px solid #f0d9a8"):
+            ui.icon("autorenew").classes("text-warning")
+            ui.label(_("計算進行中：", "Calculation running: ") + f"{job.wf.project.dir.name} / {job.wf.name}").classes("text-sm")
+            ui.button(_("回到進度", "Back to progress"), on_click=lambda h=href: ui.navigate.to(h)).props("dense outline no-caps color=primary")
 
 
 @ui.page("/system")
@@ -595,7 +604,7 @@ def workflow_page(project: str, name: str):
                 with time_box:
                     for e in reversed(tl):
                         with ui.row().classes("w-full items-start gap-2"):
-                            ui.label(e["at"][11:19]).classes("text-xs text-gray-500 w-16")
+                            ui.label(to_local(e["at"], "%H:%M:%S")).classes("text-xs text-gray-500 w-16")
                             ui.badge(_("人工", "Manual") if e["status"] == "human" else (_("步驟", "Step") if e["kind"] == "step" else _("自動", "Automatic")),
                                      color="negative" if e["status"] in ("human", "NEEDS_HUMAN") else
                                      ("primary" if e["kind"] == "step" else "grey"))

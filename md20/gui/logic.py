@@ -1,6 +1,7 @@
 """GUI logic without NiceGUI (testable): form → config, background runner, status snapshots."""
 from __future__ import annotations
 
+from ..util.timeutil import to_local
 import copy
 import queue
 import threading
@@ -85,7 +86,7 @@ def step_rows(state: dict) -> list[dict]:
         order = [k for k in order if k not in screen_keys]      # no screen configured: keep the table short
     if "md_confirm" not in steps:
         order = [k for k in order if k != "md_confirm"]
-    return [{"step": labels[k], "key": k, "status": steps.get(k, {}).get("status", "—"), "at": steps.get(k, {}).get("at", ""),
+    return [{"step": labels[k], "key": k, "status": steps.get(k, {}).get("status", "—"), "at": to_local(steps.get(k, {}).get("at", "")),
              "message": steps.get(k, {}).get("message", "")} for k in order]
 
 
@@ -122,6 +123,11 @@ class Runner:
         job = self.jobs.get(key)
         if job and job.thread and job.thread.is_alive():
             return job
+        busy = self.running()
+        if busy is not None:
+            # D-67: one calculation at a time on this computer (two on one GPU/CPU are each slower and a second
+            # click must never start the same lesson again).  The caller sees a job for another workflow.
+            return busy
         job = Job(wf=wf)
         self.jobs[key] = job
 
@@ -139,6 +145,12 @@ class Runner:
         job.thread = threading.Thread(target=target, name=f"md20-{wf.name}", daemon=True)
         job.thread.start()
         return job
+
+    def running(self) -> Job | None:
+        for j in self.jobs.values():
+            if j.thread and j.thread.is_alive():
+                return j
+        return None
 
     def get(self, wf: Workflow) -> Job | None:
         return self.jobs.get(f"{wf.project.dir}::{wf.name}")
