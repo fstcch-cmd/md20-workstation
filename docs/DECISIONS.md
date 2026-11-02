@@ -23,6 +23,12 @@
 - 更正（2026-11-02 09:50）：使用者授權 Claude 在本專案範圍內自行新增／刪除檔案。自測腳本改為一律執行安裝（安裝器取代 `app`、沿用並補齊環境），log 會列出被取代的路徑；另加 `MD20_test\local_src.txt`（一行：含 `Install-MD20.cmd` 的資料夾）供開發時用修補過的本機副本安裝。
 - 未決：電池模式下 pipeline 會依 PausePolicy 暫停（測試時請接電源）；中文使用者名稱路徑由本次實機驗證。
 
+### D-36　安裝器不再刪除舊版 `app`：改為移到 `_to_delete\app-<時間>`（使用者規則「刪除前先問」）
+- 事實：D-33 的 `install.ps1` 在 ZIP 安裝時會 `Remove-Item` 既有的 `%LOCALAPPDATA%\MD20\app` 再複製新版；筆電 session（D-35）指出這違反使用者「刪除任何東西前先問我」的規則。
+- 決定：改為 `Move-Item` 到 `%LOCALAPPDATA%\MD20\_to_delete\app-yyyyMMdd-HHmmss` 並印出路徑，由使用者確認新版可用後自行刪除。安裝器內不再有任何刪除動作（`tmp`／`pipcache` 也不清）。
+- 理由：安裝器是非互動執行（CI、雙擊），無法在中途詢問；移走不刪是唯一同時滿足「不中斷」與「不刪」的做法。
+- 證據：release workflow 的 verify-windows 為全新安裝（不觸發此分支）；重裝情境待筆電實測。
+
 ### D-34　鋅鍵結模型偏移：先診斷再改物理
 - 決定：先不改模型；`test_bonded_zinc_ca2` 在失敗時附上平均鍵長、r0 與「Zn 3 Å 內的非鍵重原子（殘基:原子、出現幀數、平均距離）」。
   依證據在三個假說中選修法（`docs/specs/metal_sites.md` §4c：H1 第四配位水、H2 元素×配位原子力常數、H3 Li–Merz IOD LJ）。

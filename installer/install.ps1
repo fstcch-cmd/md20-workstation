@@ -27,7 +27,13 @@ if (-not (Test-Path (Join-Path $Src ".git"))) {
   $App = Join-Path $Root "app"
   if ($Src.TrimEnd("\") -ne $App.TrimEnd("\")) {
     Write-Host "複製程式到 $App ..."
-    if (Test-Path $App) { Remove-Item -Recurse -Force $App }
+    if (Test-Path $App) {
+      # never delete (user rule, D-36): move the previous copy aside; the user decides when to remove _to_delete
+      $Old = Join-Path $Root ("_to_delete\app-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Old) | Out-Null
+      Move-Item -Path $App -Destination $Old
+      Write-Host "舊版程式已移到 $Old（未刪除；確認新版可用後可自行刪除）"
+    }
     New-Item -ItemType Directory -Force -Path $App | Out-Null
     Copy-Item -Recurse -Force (Join-Path $Src "*") $App
   }
