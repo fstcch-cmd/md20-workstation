@@ -29,6 +29,9 @@
 ## 完成
 | 項目 | session | commit |
 |---|---|---|
+| 對接多 5 種圖（姿勢相似度、漏斗、位置、接觸殘基、配體比較）＋報告範本（所有圖種，合成資料，CI `report-template` 分支）（D-59） | session_016gcJz8q2F6515MWPncJEZu | 本 commit |
+| 圖表豐富度：延伸分析與 32 種圖進結案報告與 GUI 圖表分頁（D-58） | session_016gcJz8q2F6515MWPncJEZu | 9aa78d1 |
+| 命令列進度剩餘時間與 ns/day（D-57） | session_016gcJz8q2F6515MWPncJEZu | 04f8a9a |
 | 對接盒子過大提醒（D-56；不擋流程） | session_016gcJz8q2F6515MWPncJEZu | 本 commit |
 | 發行 **v0.1.0a2**（D-36／37／38／39；verify-windows 含 CUDA dry-run） | session_016gcJz8q2F6515MWPncJEZu | release run 41391866636（5f0945e） |
 | Windows 安裝程式發行 **v0.1.0a1**（GitHub Release，prerelease：`MD20-Windows-v0.1.0a1.zip`＋SHA256SUMS；雙擊 `Install-MD20.cmd`；D-33） | session_016gcJz8q2F6515MWPncJEZu | 0bf6954；release run 41365326632（Windows PS 5.1 解壓實裝、刪除解壓資料夾後 doctor/demo 通過才發行） |

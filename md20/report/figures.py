@@ -267,7 +267,7 @@ def heatmap(M, path: Path, *, cmap: str = "RdBu_r", vmin=-1, vmax=1, label: str 
     im = ax.imshow(M, cmap=cmap, vmin=vmin, vmax=vmax, origin="lower", aspect="auto")
     fig.colorbar(im, ax=ax, label=label)
     if ticks:
-        idx = np.linspace(0, len(ticks) - 1, min(8, len(ticks))).astype(int)
+        idx = np.arange(len(ticks)) if len(ticks) <= 12 else np.linspace(0, len(ticks) - 1, 8).astype(int)   # D-59: label every row up to 12
         ax.set_xticks(idx, [ticks[i] for i in idx], fontsize=6, rotation=90)
         ax.set_yticks(idx, [ticks[i] for i in idx], fontsize=6)
     ax.set_xlabel(xlabel)
@@ -339,4 +339,67 @@ def chem_space_plot(xy, scores, names, path: Path) -> str | None:
         ax.annotate(names[i], xy[i], fontsize=6, xytext=(3, 3), textcoords="offset points")
     ax.set_xlabel("Fingerprint PC1")
     ax.set_ylabel("Fingerprint PC2")
+    return _save(fig, path)
+
+
+# ============================================================================================ D-59: docking figures
+def funnel(poses: list[dict], path: Path) -> str | None:
+    pts = [(p["rmsd_ref"], p["score"], p["rank"]) for p in poses if p.get("rmsd_ref") is not None]
+    if len(pts) < 2:
+        return None
+    plt = _plt()
+    r, s, k = np.array(pts).T
+    fig, ax = plt.subplots(figsize=(5.2, 3.2))
+    ax.axvspan(0, 2.0, color="#2f7d5b", alpha=0.08, lw=0)
+    ax.scatter(r, s, c=PALETTE[0], s=28)
+    for x, y, n in pts:
+        ax.annotate(int(n), (x, y), fontsize=7, xytext=(3, 2), textcoords="offset points")
+    ax.set_xlabel("RMSD to co-crystal pose (Å)")
+    ax.set_ylabel("Vina score (kcal mol$^{-1}$)")
+    ax.invert_yaxis()
+    return _save(fig, path)
+
+
+def pose_positions(cents: np.ndarray, scores, box: dict, path: Path) -> str | None:
+    if len(cents) < 1 or not box.get("center"):
+        return None
+    plt = _plt()
+    c, h = np.asarray(box["center"], float), np.asarray(box.get("size") or [20, 20, 20], float) / 2
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.2))
+    for ax, (i, j, li, lj) in zip(axes, ((0, 1, "x (Å)", "y (Å)"), (0, 2, "x (Å)", "z (Å)"))):
+        ax.add_patch(plt.Rectangle((c[i] - h[i], c[j] - h[j]), 2 * h[i], 2 * h[j], fill=False, ec="#4d6170", lw=1))
+        sc = ax.scatter(cents[:, i], cents[:, j], c=scores, cmap="viridis_r", s=30)
+        ax.set_xlim(c[i] - h[i] - 2, c[i] + h[i] + 2)
+        ax.set_ylim(c[j] - h[j] - 2, c[j] + h[j] + 2)
+        ax.set_aspect("equal")
+        ax.set_xlabel(li); ax.set_ylabel(lj)
+    fig.colorbar(sc, ax=axes, label="Score (kcal mol$^{-1}$)", shrink=0.8)
+    return _save(fig, path)
+
+
+def binary_map(rows: list[str], M, path: Path, cols: list[str] | None = None) -> str | None:
+    M = np.asarray(M)
+    if M.size == 0:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(min(7.2, 0.35 * M.shape[1] + 2.4), 0.2 * len(rows) + 1.0))
+    ax.imshow(M, cmap="Blues", vmin=0, vmax=1.2, aspect="auto", interpolation="nearest")
+    ax.set_yticks(range(len(rows)), rows, fontsize=7)
+    ax.set_xticks(range(M.shape[1]), cols or [str(i + 1) for i in range(M.shape[1])], fontsize=7)
+    ax.set_xlabel("Pose rank")
+    return _save(fig, path)
+
+
+def ligand_compare(rows: list[dict], path: Path) -> str | None:
+    if len(rows) < 2:
+        return None
+    plt = _plt()
+    rows = sorted(rows, key=lambda r: r["score"])
+    names = [r["name"] for r in rows]
+    fig, axes = plt.subplots(1, 3, figsize=(7.2, 0.28 * len(rows) + 1.4), sharey=True)
+    for ax, key, lab, col in zip(axes, ("score", "le", "heavy"), ("Score (kcal mol$^{-1}$)", "Ligand efficiency", "Heavy atoms"), PALETTE):
+        ax.barh(range(len(rows)), [r.get(key) or 0 for r in rows], color=col, height=0.6)
+        ax.set_xlabel(lab, fontsize=8)
+    axes[0].set_yticks(range(len(rows)), names, fontsize=7)
+    axes[0].invert_yaxis()
     return _save(fig, path)

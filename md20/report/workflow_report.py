@@ -269,15 +269,16 @@ def actual_values(wf) -> dict:
                 proto = None
             if proto:
                 break
-    if not proto:
-        try:
-            p = make_protocol(tier, production_ns=md.get("production_ns"), restraints=v["restraints"])
-            proto = p.to_dict()
-            for st in proto["stages"]:
-                st.update((md.get("stage_overrides") or {}).get(st["name"], {}))
-        except Exception:  # noqa: BLE001
-            proto = {"stages": []}
-    st = {s["name"]: s for s in proto.get("stages") or []}
+    try:
+        default = make_protocol(tier, production_ns=md.get("production_ns"), restraints=v["restraints"]).to_dict()
+        for s_ in default["stages"]:
+            s_.update((md.get("stage_overrides") or {}).get(s_["name"], {}))
+    except Exception:  # noqa: BLE001
+        default = {"stages": []}
+    # D-59: per stage, the run's own protocol wins; stages or fields it lacks (old or partial manifests) fall back to the tier defaults
+    st = {s["name"]: dict(s) for s in default.get("stages") or []}
+    for s_ in (proto or {}).get("stages") or []:
+        st.setdefault(s_["name"], {}).update({k: x for k, x in s_.items() if x is not None})
     mn, nvt, npt, prod = (st.get(k, {}) for k in ("minimize", "nvt", "npt", "production"))
     v.update({"minimize_iterations": mn.get("max_iterations"), "minimize_tolerance": mn.get("tolerance_kj_mol_nm"),
               "heat_start_k": nvt.get("start_temperature_k"), "nvt_ps": nvt.get("length_ps"), "npt_ps": npt.get("length_ps"),
@@ -425,6 +426,37 @@ def _screen_extra(doc: Doc, d: dict, rows: list[dict], man: dict, size_findings:
     return out
 
 
+def _docking_extra(doc: Doc, e: dict, box: dict, rec_pdb, cmp_rows: list) -> str:
+    """D-59: pose similarity, docking funnel, pose positions in the box and contact residues across poses."""
+    from . import docking_figs as DF
+    out = ""
+    prot = DF.receptor_atoms(rec_pdb) if rec_pdb and Path(rec_pdb).is_file() else []
+    scores = [p["score"] for p in e["poses"]]
+    for lig, paths in (e.get("pose_sdfs") or {}).items():
+        poses = [DF.sdf_heavy(pth) if pth and Path(pth).is_file() else None for pth in paths]
+        if not any(x is not None for x in poses):
+            continue
+        tag = f"{e['name']}" + (f" {lig}" if lig != e["name"] else "")
+        D = DF.pose_rmsd_matrix(poses)
+        out += doc.figure_block(FG.heatmap(D, doc.figdir / f"docking_rmsd_{tag}.png", cmap="viridis_r", vmin=0, vmax=max(1.0, float(np.nanmax(D))),
+                                           label="RMSD (Å)", ticks=[str(i + 1) for i in range(len(D))], xlabel="Pose rank", ylabel="Pose rank"),
+                                "pose_rmsd", DF.classify_pose_rmsd(tag, D, scores), tag)
+        if any(p.get("rmsd_ref") is not None for p in e["poses"]):
+            out += doc.figure_block(FG.funnel(e["poses"], doc.figdir / f"docking_funnel_{tag}.png"), "funnel", DF.classify_funnel(tag, e["poses"]), tag)
+        cents = np.array([x.mean(0) for x in poses if x is not None])
+        sc = [s_ for s_, x in zip(scores, poses) if x is not None]
+        out += doc.figure_block(FG.pose_positions(cents, sc, box, doc.figdir / f"docking_positions_{tag}.png"), "pose_positions",
+                                DF.classify_positions(tag, cents, box), tag)
+        if prot:
+            rows, M = DF.contact_map(poses, prot)
+            out += doc.figure_block(FG.binary_map(rows, M, doc.figdir / f"docking_contacts_{tag}.png"), "pose_contacts",
+                                    DF.classify_contact_map(tag, rows, M), tag)
+        if e["name"] != "joint" and poses[0] is not None:
+            n = len(poses[0])
+            cmp_rows.append({"name": lig, "score": float(min(scores)), "heavy": n, "le": float(min(scores)) / max(1, n)})
+    return out
+
+
 def _docking(doc: Doc, wf, vals, f, goal) -> str:
     doc.section = tx(SECTION["docking"]["title"], doc.lang)
     L = doc.lang
@@ -442,11 +474,13 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
     for v in (sel.get("ligands") or {}).values():
         chosen.setdefault(v.get("entry"), set()).add(v.get("rank"))
     start = len(doc.collected)
+    cmp_rows: list[dict] = []
     for e in res.get("entries", []):
         rank_used = min(chosen.get(e["name"], {e.get("recommended_rank") or 1}))
         out += doc.figure_block(FG.docking_scores(e["poses"], rank_used, e["name"], doc.figdir / f"docking_{e['name']}.png"),
                                 "docking_scores", FT.classify_docking_scores(e["name"], e["poses"], rank_used), e["name"])
         rec_pdb = (wf.state()["steps"].get("receptor_docking") or {}).get("path")
+        out += _docking_extra(doc, e, res.get("box") or {}, rec_pdb, cmp_rows)
         for lig, info in (sel.get("ligands") or {}).items():
             if info.get("entry") == e["name"] and info.get("sdf") and rec_pdb and Path(info["sdf"]).is_file():
                 from .chem import interaction_diagram
@@ -465,6 +499,9 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
                          trs, (f"{e['name']} 的對接姿勢", f"Docking poses of {e['name']}"), {0, 1, 3, 4})
         if e.get("reason"):
             out += f"<p class=muted>{_esc(tx(('系統推薦理由', 'Reason for the recommendation'), L))}: {_esc(e['reason'])}</p>"
+    if len(cmp_rows) >= 2:
+        from . import docking_figs as DF
+        out += doc.figure_block(FG.ligand_compare(cmp_rows, doc.figdir / "docking_compare.png"), "ligand_compare", DF.classify_ligand_compare(cmp_rows))
     return _section(doc, doc.next(), "docking", params, out, doc.collected[start:])
 
 
@@ -917,7 +954,8 @@ def _limitations(doc: Doc, wf) -> list[str]:
 
 
 # ------------------------------------------------------------------------------------------- build
-def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None = None) -> Path:
+def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None = None, banner_html: str = "") -> Path:
+    """banner_html: trusted markup placed above the title (the report template marks itself as synthetic data)."""
     out_path = Path(out_path) if out_path else wf.dir / "workflow_report.html"
     L = lang or wf.cfg.get("language") or "en"
     L = L if L in ("en", "zh") else "en"
@@ -954,7 +992,7 @@ def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None 
     n_meth = nxt()
     n_lim = nxt()
     html = [f"<!doctype html><html lang={'zh-Hant' if L == 'zh' else 'en'}><head><meta charset=utf-8>"
-            f"<title>{_esc(tx(H['title'], L))} — {_esc(wf.name)}</title><style>{CSS}</style></head><body>",
+            f"<title>{_esc(tx(H['title'], L))} — {_esc(wf.name)}</title><style>{CSS}</style></head><body>" + banner_html,
             f"<h1>{_esc(tx(H['title'], L))}</h1>",
             f"<p class=meta>{_esc(tx(H['project'], L))}: {_esc(wf.project.name)} · {_esc(tx(H['workflow'], L))}: {_esc(wf.name)} · "
             f"{_esc(tx(H['generated'], L))}: {now_iso()[:19].replace('T', ' ')} UTC</p>",

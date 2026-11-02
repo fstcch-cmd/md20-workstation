@@ -699,3 +699,32 @@ def classify_interaction_2d(name: str, cons: list[dict]) -> list[dict]:
     zh = {"hbond": "氫鍵", "ionic": "離子", "hydrophobic": "疏水", "contact": "其他接觸"}
     return [S("note", f"{name}：{len(hit)} 個配體原子與蛋白接觸；" + "；".join(f"{zh[k]}：{'、'.join(sorted(v))}" for k, v in kinds.items()) + "。",
               f"{name}: {len(hit)} ligand atoms contact the protein; " + "; ".join(f"{k}: {', '.join(sorted(v))}" for k, v in kinds.items()) + ".")]
+
+
+FIG.update({
+    "pose_rmsd": {
+        "title": ("姿勢相似度矩陣", "Pose similarity matrix"),
+        "caption": ("各姿勢之間的 RMSD（在受體座標中直接比較，不重新疊合）；依名次排列。", "RMSD between every pair of poses in the receptor frame (no superposition), ordered by rank."),
+        "read": ("左下角（前幾名）若是一塊低 RMSD 區域，代表低分姿勢屬同一結合模式；顏色分塊代表不同結合模式。", "A low-RMSD block in the corner of the top ranks means low-scoring poses share one binding mode; separate blocks are distinct modes."),
+    },
+    "funnel": {
+        "title": ("對接漏斗", "Docking funnel"),
+        "caption": ("每個姿勢的分數對其與共結晶姿勢的 RMSD 作圖（重新對接自檢）。", "Score of each pose against its RMSD from the co-crystal pose (redocking check)."),
+        "read": ("理想情況下分數最好的點落在 2 Å 以內，且 RMSD 越大分數越差（漏斗形），代表評分函數能辨認正確的結合模式。", "Ideally the best-scoring point lies within 2 Å and scores worsen as RMSD grows (a funnel): the scoring function recognises the correct mode."),
+    },
+    "pose_positions": {
+        "title": ("姿勢在搜尋區中的位置", "Pose positions in the search box"),
+        "caption": ("各姿勢中心的俯視（x–y）與側視（x–z）投影；框線為搜尋區，顏色為分數。", "Top (x–y) and side (x–z) projections of pose centres; the frame is the search box, colour is the score."),
+        "read": ("點聚集在一處代表配體一致選擇同一口袋；分散在搜尋區各處代表有多個候選位置，常見於盲對接。", "Points gathered in one place mean the ligand consistently chooses one pocket; points scattered across the box mean several candidate sites, common in blind docking."),
+    },
+    "pose_contacts": {
+        "title": ("各姿勢的接觸殘基", "Contact residues of each pose"),
+        "caption": ("每個姿勢與哪些殘基相距 4 Å 以內（列為殘基，行為姿勢名次）。", "Which residues each pose contacts within 4 Å (rows residues, columns pose ranks)."),
+        "read": ("整列都有接觸的殘基是結合位的核心；只在少數姿勢出現的殘基屬於替代結合模式。", "Residues contacted across the row form the binding-site core; residues seen in only a few poses belong to alternative modes."),
+    },
+    "ligand_compare": {
+        "title": ("配體比較", "Ligand comparison"),
+        "caption": ("各配體最佳姿勢的分數、配體效率（每個重原子的分數）與重原子數。", "Best-pose score, ligand efficiency (score per heavy atom) and heavy-atom count of each ligand."),
+        "read": ("分數比較受分子大小影響，配體效率可校正大小；相差小於 1 kcal mol⁻¹ 的配體不能排序。", "Scores favour larger molecules, which ligand efficiency corrects for; ligands within 1 kcal mol⁻¹ cannot be ordered."),
+    },
+})
