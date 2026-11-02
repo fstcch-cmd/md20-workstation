@@ -141,7 +141,7 @@ def dashboard():
             STATE["doctor"] = rep
             if rep.platform:
                 STATE["platform"] = None
-            box.set_content(rep.to_markdown())
+            box.set_content(rep.to_markdown(lang()))
             render_drivers(rep)
         with ui.row():
             ui.button(_("快速診斷", "Quick check"), on_click=lambda: do_doctor(False))

@@ -60,18 +60,25 @@ class DoctorReport:
         d = asdict(self)
         return d
 
-    def to_markdown(self) -> str:
+    def to_markdown(self, lang: str = "zh") -> str:
+        """Human-readable report; `lang` "en" for the English interface (findings' detail text stays as recorded)."""
         hw = self.hardware
-        lines = [f"# MD20 Doctor 報告（{self.created_at}）", "",
-                 f"- OS: {hw['os']['system']} {hw['os']['release']} ({hw['os']['machine']}), Python {hw['os']['python']}",
-                 f"- CPU 邏輯核心: {hw['cpu']['logical_cores']}  RAM: {hw.get('ram_gb')} GB  可用磁碟: {hw['disk'].get('free_gb')} GB",
-                 f"- GPU: " + ("; ".join(f"{gpu_label(g.get('vendor'), g.get('name'))} {g.get('vram_mb') or ''}MB" for g in hw['gpus']) or "未偵測到獨立顯示卡"),
-                 f"- 電源: {'接電' if hw.get('power', {}).get('on_ac', True) else '電池（效能會降低，建議接電）'}", ""]
+        en = lang == "en"
+        T = (lambda zh, e: e if en else zh)  # noqa: E731
+        gpus = "; ".join(f"{gpu_label(g.get('vendor'), g.get('name'))} {g.get('vram_mb') or ''}MB" for g in hw['gpus'])
+        power = hw.get('power', {}).get('on_ac', True)
+        lines = [f"# {T('MD20 電腦診斷報告', 'MD20 computer check')}（{self.created_at}）" if not en else f"# MD20 computer check ({self.created_at})", "",
+                 f"- {T('作業系統', 'Operating system')}: {hw['os']['system']} {hw['os']['release']} ({hw['os']['machine']}), Python {hw['os']['python']}",
+                 f"- {T('CPU 邏輯核心', 'CPU logical cores')}: {hw['cpu']['logical_cores']}  RAM: {hw.get('ram_gb')} GB  "
+                 f"{T('可用磁碟', 'Free disk')}: {hw['disk'].get('free_gb')} GB",
+                 f"- GPU: " + (gpus or T("未偵測到獨立顯示卡", "no discrete graphics card detected")),
+                 f"- {T('電源', 'Power')}: " + (T("接電", "mains") if power else T("電池（效能會降低，建議接電）", "battery (slower; plug in)")), ""]
         if self.platform:
-            lines.append(f"- 選用 OpenMM 平台: **{self.platform['name']}** {self.platform.get('properties', {})}")
+            lines.append(f"- {T('選用 OpenMM 平台', 'OpenMM platform used')}: **{self.platform['name']}** {self.platform.get('properties', {})}")
         if self.benchmark and self.benchmark.get("ns_per_day"):
-            lines.append(f"- Benchmark: {self.benchmark['ns_per_day']:.1f} ns/day（{self.benchmark['n_atoms']} 原子，dt {self.benchmark['timestep_fs']} fs）")
-        lines += ["", "| 項目 | 狀態 | 說明 | 建議 |", "|---|---|---|---|"]
+            lines.append(f"- {T('效能測試', 'Benchmark')}: {self.benchmark['ns_per_day']:.1f} ns/day（{self.benchmark['n_atoms']} "
+                         f"{T('原子', 'atoms')}，dt {self.benchmark['timestep_fs']} fs）")
+        lines += ["", T("| 項目 | 狀態 | 說明 | 建議 |", "| Item | Status | Detail | Suggestion |"), "|---|---|---|---|"]
         for f in self.findings:
             lines.append(f"| {f.item} | {f.severity} | {f.detail} | {f.fix} |")
         return "\n".join(lines)
