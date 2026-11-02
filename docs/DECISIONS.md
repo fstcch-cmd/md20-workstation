@@ -7,6 +7,12 @@
 
 ## 2026-11-02
 
+### D-35　筆電實機測試：一鍵自測腳本 `installer/MD20-SelfTest.cmd`
+- 決定：新增雙擊即跑的自測腳本（cmd/PowerShell 5.1 polyglot、純 ASCII、CRLF）：系統資訊（OS、CPU、RAM、GPU/驅動、`nvidia-smi`、各磁碟剩餘）→ 下載最新 Release ZIP 並比對 SHA256 → `Install-MD20.cmd` → `doctor` → `drivers plan` → `demo` → 啟動 GUI 並以 HTTP 200 判定 → `pipeline example` 改 `tier: classroom` 後 `pipeline run --project laptop_test`。全程 `Start-Transcript` 寫到 `桌面\MD20_test\selftest_<時間>.log`，最後印每步 rc 與耗時。
+- 理由：筆電 session 的遠端工具是 Linux VM（不能執行 Windows 程式、量不到 Windows 的 GPU），電腦操作對終端機只允許點擊、不允許輸入；所以由使用者雙擊一次、Claude 讀 log 是唯一可稽核且不繞過權限的做法。
+- 安全：**不刪任何東西**。若 `%LOCALAPPDATA%\MD20`（或 `MD20_ROOT`）已有 `app`／`envs\md20`／`md20.cmd`，安裝步驟跳過並列出路徑（安裝器會 `Remove-Item` 取代 `app`，須先問使用者），改用既有安裝繼續測。
+- 未決：電池模式下 pipeline 會依 PausePolicy 暫停（測試時請接電源）；中文使用者名稱路徑由本次實機驗證。
+
 ### D-34　鋅鍵結模型偏移：先診斷再改物理
 - 決定：先不改模型；`test_bonded_zinc_ca2` 在失敗時附上平均鍵長、r0 與「Zn 3 Å 內的非鍵重原子（殘基:原子、出現幀數、平均距離）」。
   依證據在三個假說中選修法（`docs/specs/metal_sites.md` §4c：H1 第四配位水、H2 元素×配位原子力常數、H3 Li–Merz IOD LJ）。
