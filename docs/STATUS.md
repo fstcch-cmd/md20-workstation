@@ -4,6 +4,11 @@
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
 CI 依據(`fstcch-cmd/md20-workstation`):
+- **11/02 下午（session_016gcJz8q2F6515MWPncJEZu）：週二交付版的新功能，目前等級**（CI 結果出來後更新）：
+  - **B 級（寫好、本地純 Python 測試全過、等 CI 真環境）**：D-47 斷鏈 ACE／NME 截斷（3PTB 真流程測試在 CI）、D-48 胜肽科學限制（CPP 不擋流程＋活性位可及性）、
+    D-49 依個案建議參數與合理性檢查、D-50 HTS 手動上傳與「確認進入 MD」、D-51 GUI v2（四種模式、教學頁、雙語）、D-52 專案報告等級的雙語報告。
+  - **GUI v2 已由 CI 截圖確認可渲染**（gui-preview，英文與繁中各 7 頁，HTTP 200）；按鈕實際互動、上傳、建立流程後的真跑，要在筆電上確認（開發容器無法安裝 NiceGUI）。
+  - **C 級（未做）**：配體直接配位金屬的距離約束後備；舊閘門說明的英文翻譯；預設拉離速度（等筆電 teaching 重跑結果判斷）。
 - **63d363b（第二個 session 最終版）openmm-stack**:**Windows OpenCL 124 passed、macOS 126 passed**,各只有 1 個失敗——`test_gui_pages_render`,原因是 NiceGUI 在子行程看到 pytest 環境變數就切到它自己的測試模式(非 GUI 本身問題),本 session 已修;Ubuntu `MD20_HEAVY=1` 重測結果見該 commit 留言。
 - **f879764(第三個 session:閘門一鍵決定、3D 互作、金屬擬合參數、GUI server 測試修正)openmm-stack**:**Windows OpenCL 與 macOS 全綠**(含 `test_gui_pages_render`);Ubuntu `MD20_HEAVY=1` 重測卡在論文對接重現(已移出)。**ef32b48 的 Ubuntu 重測跑完:151 passed、4 failed,全是從未在 Ubuntu 跑完過的重測抓到的真 bug**,已修:(1)重複原子名閘門把 altloc A/B 同名原子算成重複(3KS3 被擋,兩個金屬整合測試因此失敗);(2)`DockingResult.load` 讀到戳記 `_md20` 欄位就當掉(全流程續跑時);(3)短 MD 篩 pose 的 2 ps stage 只記 4 筆 log → 無法驗收,且引擎用 +0 ps「延長」兩次白跑——現在短 stage 自動加密記錄、無法靠延長解決的直接 NEEDS_HUMAN;(4)workflow 讀 `pull_distance`(實際鍵名 `pull_distance_nm`),padding 一律被拉到 2.0 nm,且套到 apo 與篩選系統——全流程測試因此跑了 51 分鐘。
 - **12dcd80 Ubuntu 重測:158 passed、1 failed**。全流程(3PTB,含 binding)、短 MD 篩 pose、金屬擬合參數(JSON)整合測試**在 Ubuntu 真跑通過**。唯一失敗:**幾何鍵結的鋅模型守不住配位**——最小化+2 ps MD 後 Zn–His94 NE2 由 2.03 Å 拉到 2.56 Å。原因:只排除了金屬–配位原子(1-2)非鍵作用,+2 的鋅仍與咪唑環上 CE1/CD2(1-3)及其氫有完整靜電斥力。已改成與一般共價鍵相同的處理:1-2、1-3 排除,1-4 依 Amber 縮放(靜電 ÷1.2、LJ ÷2),並加金屬–配位原子–鄰原子角項;待下一輪 CI 確認。Windows OpenCL 該輪因 `setup-vina` 遇 GitHub API 限流在測試前失敗(已修:token + 固定版本後備下載)。
