@@ -7,6 +7,14 @@
 
 ## 2026-11-02
 
+### D-57　執行進度的剩餘時間與實測速度（介面與命令列）
+- 使用者（16:45）：要能監看 cmd 的資訊。原本命令列每 15 秒印一行 `stage=…, completed_local_steps=…` 原始欄位，看不出還要多久。
+- 決定：`md20/engine/progress_text.py::StageMeter` 由同一階段第一與最新兩筆心跳計算速率（續跑時時鐘重設也能處理），命令列輸出
+  `[npt]  11.0 % | T 300.0 K | 14 min left in stage | 35 ns/day`；介面即時曲線分頁同樣顯示「此階段約剩」與本機實測 ns/day（`views.live_series`）。
+  只估目前階段，不估整個流程（後續階段長度依閘門與補窗而變，整體估計會誤導）。
+- 雲端 session 無法看到筆電螢幕（本 session 沒有電腦操作工具）：改由筆電 session 依 `docs/LAPTOP_SESSION.md` 的監看流程把進度與結果推到 `docs/runs/`，雲端 session 讀取後解讀並修正。
+- 證據：`tests/test_progress_text.py`、`tests/test_gui_views.py::test_live_series_stage_eta_and_speed`。
+
 ### D-56　搜尋區過大提醒（REVIEW #6、看板待認領項）：不擋流程，卡片＋報告限制段落
 - 決定：`docking_preflight` 在使用者給定中心與尺寸時，計算最長邊與搜尋區內殘基數；最長邊 > 40 Å 或殘基 > 300 個 → 科學限制提醒（AUTO_FIXED、advisory），
   說明格點數（間距 0.375 Å）與「等同盲對接、可信度下降」；存於 `state["advisories"]`，GUI 顯示卡片（選項：以共結晶配體或活性位殘基重新定義、接受並標註），報告列入限制。

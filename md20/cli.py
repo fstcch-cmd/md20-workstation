@@ -175,13 +175,15 @@ def cmd_pipeline(a):
     policy = PausePolicy(pause_file=proj.dir / "PAUSE", pause_on_battery=not a.ignore_battery, allowed_hours=hours,
                          power_probe=_power_state, resource_guard=_guard())
     last = {"t": 0.0}
+    from .engine.progress_text import StageMeter
+    meter = StageMeter()
 
     def cb(ev):
         import time
-        if time.monotonic() - last["t"] > 15:
+        txt = meter.line(ev)                      # always fed, so the rate stays correct between printed lines
+        if txt and time.monotonic() - last["t"] > 15:
             last["t"] = time.monotonic()
-            _p("  " + ", ".join(f"{k}={v:.3g}" if isinstance(v, float) else f"{k}={v}" for k, v in ev.items() if k in
-                                {"stage", "chunk", "completed_local_steps", "total_steps", "temperature_k", "ligand", "window", "n", "r0", "force"}))
+            _p(txt)
     try:
         out = wf.run(lambda case, proto: make_backend_factory(case, proto, fake=a.fake, platform=platform, resource_mode=a.mode), platform,
                      should_pause=policy, progress_cb=cb)
