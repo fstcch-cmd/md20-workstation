@@ -1351,7 +1351,7 @@ def _viewer_section(wf, lang: str = "zh") -> str:
         return ""
     parts = []
     by_key: dict = {}
-    for t in viewer_targets(wf):
+    for t in viewer_targets(wf, lang=lang):
         if t["key"] == "apo":
             continue
         by_key[t["key"]] = t if t["mode"] == "traj" or t["key"] not in by_key else by_key[t["key"]]
@@ -1364,7 +1364,7 @@ def _viewer_section(wf, lang: str = "zh") -> str:
                 t = {**t, "label": key + colon(lang) + pick(("建模起始結構", "starting structure from the build", "構築した初期構造", "구축된 시작 구조"), lang)}
             except Exception:  # noqa: BLE001
                 continue
-        parts.append(f"<h3>{_esc(t['label'])}</h3>" + viewer_html(sc, standalone=False, height_px=380))
+        parts.append(f"<h3>{_esc(t['label'])}</h3>" + viewer_html(sc, standalone=False, height_px=380, lang=lang))
     if not parts:
         return ""
     return ("<h2>" + pick(("3D 檢視（離線可用。拖曳可旋轉，軌跡可以播放）", "3D view (works offline. Drag to rotate and play the trajectory)",

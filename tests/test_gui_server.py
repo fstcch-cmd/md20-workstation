@@ -88,7 +88,7 @@ def test_gui_pages_render(gui_project):
             assert r.status == 200 and r.read(2) == b"PK"            # an xlsx is a zip file
         st, body = _get(f"{base}/wf/{project}/{name}")
         assert st == 200 and "閘門" in body and "3D" in body, body[-2000:]
-        assert "仍要使用" in body and "需要在程式外處理" in body, body[-2000:]     # one-click button + manual hint rendered
+        assert "仍要使用" in body and "要在程式外處理" in body, body[-2000:]     # one-click button + manual hint rendered
         st, body = _get(f"{base}/viewer?project={project}&name={name}&i=0")
         assert st == 200 and "md20Mount" in body and "https://" not in body
     finally:

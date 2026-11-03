@@ -31,6 +31,10 @@
   我逐張看了日文與韓文截圖（首頁、教學二、專業模式、流程頁）：文字完整、無亂碼或缺字，資源選單與語言選單顯示正確。發現兩個問題並修正：
   (1) 空表格顯示 Quasar 的英文「No data available」（Quasar 語言在伺服器啟動時固定）→ 每個表格設 `no-data-label`；
   (2) 首頁「最近的流程」的時間是 UTC 原始字串、步驟與狀態是程式代碼（md_cases、PASS）→ 改為本機時間與所選語言的名稱。
+- **更正（CI bffc0e9，03:28 UTC）**：openmm-stack（Ubuntu、macOS 各 1 失敗／488 通過）與 heavy workflow 紅。原因都是只在真環境跑的測試仍斷言改寫前的中文：
+  `test_gui_server` 找「需要在程式外處理」（現為「以下要在程式外處理…」），`test_full_workflow_3ptb` 找報告裡的「production 軌跡」（現為「正式模擬軌跡」）。
+  科學結果都通過（3PTB 全流程 binding PASS）。改寫時各子代理只能跑純 Python 測試，這兩處沒被抓到——之後改用語要先 grep 只在 CI 跑的測試。
+  同時修正：報告的 3D 檢視沒有把語言傳給 `viewer_targets`／`viewer_html`，英日韓報告的檢視器標題與按鈕會是中文。發行改等新一輪 CI 全綠。
 
 ### D-73　全部文件與 v0.1.0a3 同步
 - 使用者要求（11/03 09:03）：遍歷 GitHub 上所有文件，全部更新為與最新版一致。
