@@ -5,7 +5,7 @@
 > © HCC Lab, National Kaohsiung University of Science and Technology. All rights reserved.
 > 本 repo 暫時公開，只供持續整合（CI）測試使用。沒有附授權，請勿重製、散布或用於其他用途。
 
-> **最新版本：[v0.1.0a8](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a8)**，2026-11-03 發行，含 Windows 與 macOS 安裝檔，是教學預覽版。
+> **最新版本：[v0.1.0a9](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a9)**，2026-11-03 發行，含 Windows 與 macOS 安裝檔，是教學預覽版。
 > 學生操作說明在 [`docs/students/WINDOWS.md`](docs/students/WINDOWS.md) 和 [`docs/students/MAC.md`](docs/students/MAC.md)，有繁中、English、日本語、한국어 四種版本。
 > 測試機的安裝與回報看 [`docs/WINDOWS_QUICKSTART.md`](docs/WINDOWS_QUICKSTART.md)。接手開發看 [`docs/HANDOFF.md`](docs/HANDOFF.md)，現況看 [`docs/STATUS.md`](docs/STATUS.md)。
 
@@ -53,6 +53,11 @@ md20 demo                        # 不需要 OpenMM，用合成後端跑完整�
 md20 screen template             # 高通量篩選的化合物庫 Excel 範本（name 加上 smiles、pubchem_cid、inchikey、chembl_id、ccd 或 sdf 其中一欄）
 md20 pipeline example --screen   # 含篩選的全流程範本：100–500 個化合物自動下載 3D → 快速對接 → 看圖勾選 → 正式對接 → MD
 ```
+
+## 專業模式的新功能（v0.1.0a9 起，初步）
+- **輸入序列一鍵摺疊**：`md20 fold <序列>`，或快速模式的「摺疊這個胜肽」。工具需另外安裝（數 GB）：`md20 setup-fold --engine omegafold --yes`。規格：`docs/specs/structure_prediction.md`。
+- **膜系統**：膜蛋白、膜表面接觸（胜肽或分子在膜上方，不穿膜）、純膜。在專業模式的「膜」群組設定。規格：`docs/specs/membrane.md`。
+- **長時間模擬**：專業模式最長 10 µs；超過 100 ns 會先列出天數與硬碟用量，超過 1 µs 要確認。粗粒化工具：`md20 setup-cg --yes`。規格：`docs/specs/long_timescale.md`。
 
 ## 架構
 

@@ -27,6 +27,7 @@ STEP_LABELS = {"receptor_input": ("受體來源", "Receptor source", "受容体�
                "structure_gate": ("結構可信度", "Structure validity", "構造の信頼性", "구조 신뢰성"),
                "receptor_docking": ("受體整理", "Receptor preparation", "受容体の準備", "수용체 준비"),
                "docking_preflight": ("對接前檢查", "Docking pre-checks", "ドッキング前のチェック", "도킹 전 검사"),
+               "fold": ("胜肽摺疊", "Peptide folding", "ペプチドの折りたたみ", "펩타이드 접힘"),
                "docking": ("分子對接", "Molecular docking", "分子ドッキング", "분자 도킹"),
                "pose_selection": ("姿勢選擇", "Pose selection", "ポーズの選択", "포즈 선택"),
                "md_confirm": ("確認進入分子動力學", "Confirm molecular dynamics", "分子動力学に進む確認", "분자동역학 진행 확인"),

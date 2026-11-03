@@ -134,6 +134,35 @@
 - F42 協同自由能（`cooperativity`，熱力學循環，D-61）：先看循環閉合（兩路徑的差 ≤ 2σ；無誤差時 ≤ 4 kJ/mol）——不閉合 → warn（採樣未收斂，不報協同）；
   閉合且 |ΔΔG_coop| < 2σ → good（無可偵測協同）；≥ 2σ → note（負值正協同、正值互斥）；缺誤差 → caution（只給方向）；三個以上配體 → note（無成對循環，只列各配體位移）。
 
+### 新子系統：結構預測、膜、長時間模擬、粗粒化（D-82，2026-11-03）
+程式：`md20/report/subsystem_report.py`（章節）、`figure_text.py`（F43–F57 用語與情境）、`figures.py`（畫圖）、`interpret.py`（章節判讀、`score_text`）。章節只在資料存在時出現，依五段結構。
+資料來源：`state["fold"][名稱]`；`analysis.summaries[系統]["membrane_metrics_file"]`（`analysis/membrane_run.py`）與 `["membrane_file"]`（`analysis/membrane_report.py` 的 `membrane_report_data`，密度、S_CD、頭基停留、傾角、厚度圖）；
+`state["long_run"][系統]`（`Workflow._plan_long_run` 寫入的規劃；實際值讀 run 資料夾）；`stream_metrics.json` 的 `rmsf_first_half_A`／`rmsf_second_half_A`（`analysis/stream.py`）；`state["coarse_grained"][名稱]`。
+由預測複合物放置的胜肽沒有對接分數，報告一律寫「預測複合物，沒有對接分數」（四種語言，`interpret.NO_SCORE`），不印 None。
+
+**結構預測**
+- F43 逐殘基可信度（`fold_plddt`）：平均 ≥ 70 good；50–70 note（MD 檢查，RMSD 很快 > 3 Å 代表不穩定）；< 50 caution；列出 < 50 的殘基；ipTM ≥ 0.5 note、< 0.5 caution；受體鏈平均 < 70 caution。
+- F44 預測與實際受體的逐殘基偏差（`fold_superposition`）：整體 Cα RMSD ≤ 2 Å good、> 2 Å caution；結合位（胜肽 10 Å 內）RMSD 同門檻；偏差 > 3 Å 的殘基在結合位 → caution，否則 note。
+- F45 胜肽與受體接觸圖（`fold_contacts`）：4 Å 內算接觸；≥ 50 % 胜肽殘基接觸 good、25–50 % note、< 25 % caution；接觸 ≥ 3 個胜肽殘基的受體殘基列為熱點；最短距離 < 1.5 Å caution。
+
+**膜**
+- F46 面積與厚度（`membrane_equil`）：後半段平均在參考值 ±6 %（面積）、±0.3 nm（厚度）內 good，否則 caution；後半段面積漂移 > ±2 % caution；含蛋白時面積只看平台（note）；沒有參考值 note。
+- F47 密度剖面（`membrane_density`）：膜中心 |z| < 0.5 nm 的水 < 水相 1 % good，否則 caution；兩個磷峰距離（note）；溶質平均 |z| 在磷峰外 0.5 nm 以上＝水中、±0.5 nm＝頭基區、內側 0.5 nm 以上＝插入。
+- F48 序參數（`membrane_scd`）：碳 4–10 平台 −S_CD 0.12–0.25 good；0.25–0.3 note；> 0.3 或 < 0.12 caution。
+- F49 插入深度（`insertion_depth`）：後半段質心在磷平面上方 > 0.5 nm＝水中（note）；上方 0.5 到下方 0.3 nm＝表面吸附（good）；下方 0.3–1.0 nm＝介面（note）；≥ 1.0 nm＝疏水核心（note）；開始到後半段變化 > 0.5 nm note；穿過膜中心 caution。
+- F50 頭基接觸與停留（`headgroup_residence`）：≥ 50 % 為錨點（good，列出離胺酸、精胺酸）；沒有 → note（短暫）；最後一幀仍接觸者停留時間為下限。
+- F51 胜肽傾角（`peptide_tilt`）：≥ 60° 平躺、30–60° 斜插、< 30° 直立（note）；標準差 > 20° caution。
+- F52 厚度圖（`thickness_map`）：最薄格 < 平均 80 % caution；格間差 > 0.5 nm note；≤ 0.5 nm good。
+
+**長時間模擬**
+- F53 規劃與實際（`longrun_plan`）：完成 ≥ 規劃 99 % good，否則 caution；硬碟 ≤ 規劃每份 125 % good，否則 note；實際天數 > 估計 1.5 倍 note；只存溶質 note。
+- F54 前後半段 RMSF（`convergence_rmsf`）：r ≥ 0.8 且平均差 ≤ 0.3 Å good；r ≥ 0.6 note；其他 caution；後半段平均高 > 0.3 Å note。
+- F55 前後半段 RMSD 分佈（`convergence_rmsd`）：重疊係數 ≥ 0.6 good、0.3–0.6 note、< 0.3 caution。
+- F56 叢集比例隨時間（`cluster_timeline`）：前後兩半各叢集比例差 ≤ 10 個百分點 good，否則 note；前半 < 5 %、最後四分之一 ≥ 20 % 的新叢集 caution。
+
+**粗粒化**
+- F57 粗粒化膜性質（`cg_membrane`）：一律先註明粗粒化、珠子層級、不是全原子（note）；面積與厚度同 F46；鍵的 P2 平均 0.1–0.6 good，其他 caution。
+
 **呈現位置**：結案報告（中英文）依章節呈現；系統的「圖表」分頁顯示同一組圖與說明（`report_figures/index.json`）。
 所需套件：二級結構、氫鍵、溶劑可及面積、叢集等需要 mdtraj；化合物性質、化學空間與二維作用圖需要 RDKit。缺少時該圖不產生並記錄原因，其餘圖不受影響。
 

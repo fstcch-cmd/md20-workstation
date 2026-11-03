@@ -65,6 +65,7 @@ class StreamingMetrics:
         self.rmsd: list[float] = []
         self.time_ps: list[float] = []
         self._s1 = self._s2 = None
+        self._segs: list = []          # per-update (n, Σx, Σ|x|²) for the first/second-half RMSF (report convergence)
         self._pair_count = None
         if self.pairs is not None:
             res = np.asarray(pair_residues if pair_residues is not None else np.arange(len(self.pairs)))
@@ -93,6 +94,7 @@ class StreamingMetrics:
                 self._s1 = np.zeros(a.shape[1:]); self._s2 = np.zeros(a.shape[1])
             self._s1 += a.sum(0)
             self._s2 += (a ** 2).sum(-1).sum(0)
+            self._segs.append((len(a), a.sum(0), (a ** 2).sum(-1).sum(0)))
         if self.pairs is not None:
             dist = np.linalg.norm(xyz[:, self.pairs[:, 0]] - xyz[:, self.pairs[:, 1]], axis=-1)
             c = dist < self.cutoff
@@ -114,6 +116,15 @@ class StreamingMetrics:
             mean = self._s1 / self.n
             msd = self._s2 / self.n - (mean ** 2).sum(-1)
             out["rmsf_A"] = (np.sqrt(np.clip(msd, 0.0, None)) * 10.0).tolist()
+            if len(self._segs) >= 2:      # halves split at the update boundary nearest the middle (exact for those frames)
+                cum = np.cumsum([g[0] for g in self._segs])
+                k = int(np.argmin(np.abs(cum - self.n / 2.0))) + 1
+                k = min(max(k, 1), len(self._segs) - 1)
+                for key, part in (("rmsf_first_half_A", self._segs[:k]), ("rmsf_second_half_A", self._segs[k:])):
+                    n_ = sum(g[0] for g in part)
+                    m_ = sum(g[1] for g in part) / n_
+                    v_ = sum(g[2] for g in part) / n_ - (m_ ** 2).sum(-1)
+                    out[key] = (np.sqrt(np.clip(v_, 0.0, None)) * 10.0).tolist()
         if self.pairs is not None and self.n:
             out["pair_frequency"] = (self._pair_count / self.n).tolist()
             out["residue_frequency"] = {str(k): float(v) / self.n for k, v in zip(self._res_keys, self._res_count)}
@@ -245,6 +256,7 @@ def stream_production_metrics(run_dir: Path | str, topology_pdb: Path | str, *, 
     p = prot.result()
     out = {"status": "PASS", "n_frames": p["n_frames"], "time_ns": p.get("time_ns", []),
            "rmsd_backbone_A": p.get("rmsd_A", []), "rmsf_ca_A": p.get("rmsf_A", []),
+           "rmsf_first_half_A": p.get("rmsf_first_half_A", []), "rmsf_second_half_A": p.get("rmsf_second_half_A", []),
            "rmsf_residues": [f"{top.atom(int(i)).residue.name}{top.atom(int(i)).residue.resSeq}" for i in ca],
            "trajectory_atoms": info["dcd_atoms"], "chunk_frames": int(chunk), "created_at": now_iso(), "ligands": {}}
     for name, sm in per_lig.items():

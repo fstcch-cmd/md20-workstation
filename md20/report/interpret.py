@@ -344,3 +344,148 @@ def headline(sections: list[list[dict]]) -> list[dict]:
     cautions = [f for f in flat if f["level"] == "caution"]
     firsts = [s[0] for s in sections if s and s[0]["level"] != "caution"]
     return (cautions + firsts)[:10]
+
+
+# ----------------------------------------------------------------------------------- D-82: score, fold, membrane, long run, CG
+NO_SCORE = ("預測複合物，沒有對接分數", "predicted complex, no docking score", "予測複合体（ドッキングスコアなし）", "예측 복합체, 도킹 점수 없음")   # same words as gui/advanced.py
+
+
+def score_text(score, lang: str = "en", nd: int = 2, unit: bool = False) -> str:
+    """A docking score for display.  A peptide placed from a predicted complex has no score (None): say so, never "None"."""
+    from ..i18n import pick
+    if score is None:
+        return pick(NO_SCORE, lang)
+    return f"{float(score):.{nd}f}" + (" kcal mol⁻¹" if unit else "")
+
+
+def fold(name: str, rec: dict) -> list[dict]:
+    """Section-level findings of one folded peptide (state["fold"][name])."""
+    if not rec or rec.get("status") == "SKIPPED_SHORT":
+        if rec and rec.get("status") == "SKIPPED_SHORT":
+            n = len(rec.get("peptide_sequence") or (rec.get("request") or {}).get("sequence") or "")
+            return [F("note", f"{name}：胜肽只有 {n} 個殘基（< 10），不做結構預測，使用延伸構形對接。",
+                      f"{name}: the peptide has only {n} residues (< 10), so it was not folded and the extended build was docked.",
+                      f"{name}：ペプチドは {n} 残基（< 10）しかないため構造予測はせず、伸びた構造でドッキングしました。",
+                      f"{name}: 펩타이드가 잔기 {n}개(< 10)뿐이라 구조 예측을 하지 않고 늘어난 구조로 도킹했습니다.")]
+        return []
+    out = []
+    eng, dev, rt = rec.get("engine") or "—", rec.get("device") or "—", rec.get("runtime_s")
+    rts = f"{rt:g} s" if isinstance(rt, (int, float)) else "—"
+    out.append(F("note", f"{name}：結構由 {eng} 預測（{dev}，{rts}），結果是預測，不是實驗結構。",
+                 f"{name}: the structure was predicted with {eng} ({dev}, {rts}). It is a prediction, not an experimental structure.",
+                 f"{name}：構造は {eng} で予測しました（{dev}、{rts}）。予測であり、実験構造ではありません。",
+                 f"{name}: 구조는 {eng}로 예측했습니다({dev}, {rts}). 예측이며 실험 구조가 아닙니다."))
+    req = rec.get("request") or {}
+    m = rec.get("mean_plddt")
+    if req.get("accept_low") and m is not None and m < 50:
+        out.append(F("caution", f"{name}：pLDDT {m:.1f} 低於 50，使用者選擇仍使用這個預測。所有以它為起點的結果都要保守看待。",
+                     f"{name}: pLDDT {m:.1f} is below 50 and the user chose to use the prediction anyway. Read every result built on it conservatively.",
+                     f"{name}：pLDDT {m:.1f} は 50 未満ですが、ユーザーはこの予測を使うことを選びました。これを出発点とする結果はすべて慎重に解釈してください。",
+                     f"{name}: pLDDT {m:.1f}가 50 미만이지만 사용자가 이 예측을 쓰기로 했습니다. 이를 출발점으로 한 모든 결과는 신중하게 해석하십시오."))
+    pl = rec.get("placement") or {}
+    if req.get("mode") == "complex" or pl:
+        if pl.get("receptor_source") == "predicted":
+            out.append(F("caution", f"{name}：沒有實際受體結構，受體也是預測的。MD 在預測的受體上進行，結合位的形狀未經實驗驗證。",
+                         f"{name}: there is no actual receptor structure, so the receptor is predicted too. MD runs on a predicted receptor and the site shape is not validated experimentally.",
+                         f"{name}：実際の受容体構造がないため、受容体も予測構造です。MD は予測した受容体で行っており、結合部位の形は実験で確かめられていません。",
+                         f"{name}: 실제 수용체 구조가 없어 수용체도 예측 구조입니다. MD는 예측한 수용체에서 수행되며 결합 부위 모양은 실험으로 검증되지 않았습니다."))
+        elif pl.get("rmsd_ca") is not None:
+            r, n = float(pl["rmsd_ca"]), int(pl.get("n_matched") or 0)
+            ok = r <= 2.0
+            out.append(F("good" if ok else "caution",
+                         f"{name}：預測複合物以 {n} 個 Cα 疊合到實際受體（RMSD {r:.2f} Å，門檻 2.0 Å），只取胜肽姿勢，不經對接直接進入 MD，所以沒有對接分數。"
+                         + ("" if ok else "RMSD 超過門檻，是使用者選擇仍使用。"),
+                         f"{name}: the predicted complex was superposed on the actual receptor with {n} Cα (RMSD {r:.2f} Å, threshold 2.0 Å). "
+                         "Only the peptide pose was taken and it went to MD without docking, so there is no docking score."
+                         + ("" if ok else " The RMSD exceeds the threshold and the user chose to use it anyway."),
+                         f"{name}：予測複合体を Cα {n} 個で実際の受容体に重ね合わせ（RMSD {r:.2f} Å、しきい値 2.0 Å）、ペプチドのポーズだけを取り出してドッキングを経ずに MD に進めました。そのためドッキングスコアはありません。"
+                         + ("" if ok else "RMSD はしきい値を超えていますが、ユーザーが使用を選びました。"),
+                         f"{name}: 예측 복합체를 Cα {n}개로 실제 수용체에 겹치고(RMSD {r:.2f} Å, 기준 2.0 Å) 펩타이드 포즈만 가져와 도킹 없이 MD로 보냈습니다. 그래서 도킹 점수가 없습니다."
+                         + ("" if ok else " RMSD가 기준을 넘었지만 사용자가 사용하기로 했습니다.")))
+    return out
+
+
+def membrane(key: str, summ: dict) -> list[dict]:
+    """Section-level findings of one membrane system (membrane_summary JSON): core water and the membrane type."""
+    out = []
+    cw = summ.get("core_water")
+    n = int(summ.get("n_lipids") or 0)
+    if cw and not (summ.get("acceptance") or {}).get("status"):
+        m = float(np.mean(cw))
+        lim = max(1.0, 0.01 * n)
+        out.append(F("good" if m <= lim else "caution",
+                     f"{key}：疏水核心（膜中心 ±0.5 nm）平均 {m:.1f} 個水分子（上限 {lim:.0f}，即 1 和脂質數 1 % 的較大者）"
+                     + ("，膜沒有孔洞。" if m <= lim else "，超過上限，膜可能有孔洞或缺陷。"),
+                     f"{key}: the hydrophobic core (±0.5 nm of the centre) holds {m:.1f} water molecules on average (limit {lim:.0f}, the larger of 1 and 1 % of the lipids)"
+                     + (", so the membrane has no pore." if m <= lim else ", above the limit, so the membrane may have a pore or defect."),
+                     f"{key}：疎水性コア（膜中心 ±0.5 nm）の水分子は平均 {m:.1f} 個（上限 {lim:.0f}、1 と脂質数の 1 % の大きい方）"
+                     + ("で、膜に孔はありません。" if m <= lim else "で上限を超えており、膜に孔や欠陥がある可能性があります。"),
+                     f"{key}: 소수성 중심부(막 중심 ±0.5 nm)의 물 분자는 평균 {m:.1f}개(상한 {lim:.0f}, 1과 지질 수의 1 % 중 큰 값)"
+                     + ("로 막에 구멍이 없습니다." if m <= lim else "로 상한을 넘어 막에 구멍이나 결함이 있을 수 있습니다.")))
+    acc = summ.get("acceptance") or {}
+    if acc.get("status"):
+        ev = acc.get("evidence") or {}
+        failed = [k for k, v in (ev.get("checks") or {}).items() if not v]
+        if not ev.get("checked", True):
+            out.append(F("caution", f"{key}：軌跡沒有存水分子，無法事後做膜平衡驗收，膜的結果要當作未經驗收解讀。",
+                         f"{key}: the trajectory has no water, so the membrane acceptance could not be checked afterwards. Read the membrane results as unchecked.",
+                         f"{key}：軌跡に水分子が保存されていないため、膜の平衡の検査を後から行えません。膜の結果は未検査として解釈してください。",
+                         f"{key}: 궤적에 물 분자가 저장되지 않아 막 평형 검수를 나중에 할 수 없습니다. 막 결과는 검수되지 않은 것으로 해석하십시오."))
+        elif acc["status"] == "PASS":
+            out.append(F("good", f"{key}：以正式模擬後半段做膜平衡驗收（面積 ±6 %、厚度 ±0.3 nm、疏水核心的水），全部通過。",
+                         f"{key}: the membrane acceptance on the second half of production (area ±6 %, thickness ±0.3 nm, water in the core) passes.",
+                         f"{key}：本計算の後半で行った膜の平衡の検査（面積 ±6 %、厚さ ±0.3 nm、疎水性コアの水）にすべて合格しました。",
+                         f"{key}: 본 시뮬레이션 후반부로 한 막 평형 검수(면적 ±6 %, 두께 ±0.3 nm, 소수성 중심부의 물)를 모두 통과했습니다."))
+        else:
+            fz, fe = "、".join(failed) or "—", ", ".join(failed) or "—"
+            out.append(F("caution", f"{key}：膜平衡驗收沒有通過（{fz}）。驗收只在分析時執行，沒有自動延長平衡。面積、厚度與接觸結果要當作未平衡的膜解讀。",
+                         f"{key}: the membrane acceptance fails ({fe}). It runs only at analysis time, so equilibration was not extended. "
+                         "Read area, thickness and contacts as those of an unequilibrated membrane.",
+                         f"{key}：膜の平衡の検査に不合格です（{fz}）。検査は解析時にだけ行うため、平衡化は自動では延長していません。面積、厚さ、接触の結果は平衡に達していない膜のものとして解釈してください。",
+                         f"{key}: 막 평형 검수를 통과하지 못했습니다({fe}). 검수는 분석할 때만 하므로 평형화를 자동으로 늘리지 않았습니다. 면적, 두께, 접촉 결과는 평형에 도달하지 않은 막의 것으로 해석하십시오."))
+    if summ.get("type") == "surface":
+        out.append(F("note", f"{key}：這是膜表面接觸系統（只有一片膜，溶質放在膜上方），模擬的是吸附，不是穿膜。",
+                     f"{key}: this is a membrane-surface system (one bilayer with the solute placed above it). It simulates adsorption, not permeation.",
+                     f"{key}：これは膜表面接触の系（膜 1 枚の上に溶質を置いた系）で、透過ではなく吸着をシミュレーションしています。",
+                     f"{key}: 막 표면 접촉 시스템(막 한 장 위에 용질을 놓은 시스템)으로, 투과가 아니라 흡착을 시뮬레이션합니다."))
+    return out
+
+
+def long_run(key: str, plan: dict) -> list[dict]:
+    out = []
+    p = float(plan.get("production_ns") or 0)
+    reps = int(plan.get("replicas") or 1)
+    days = plan.get("days")
+    d = (f"估計 {days:.1f} 天", f"an estimated {days:.1f} days", f"見積もり {days:.1f} 日", f"예상 {days:.1f}일") if days is not None else \
+        ("沒有效能測試，無法估計天數", "no benchmark, so no estimate of days", "ベンチマークがないため日数は見積もれません", "벤치마크가 없어 일수를 추정할 수 없음")
+    tg, iv = float(plan.get("total_gb") or 0), float(plan.get("trajectory_interval_ps") or 0)
+    out.append(F("note", f"{key}：規劃 {p:g} ns × {reps} 份，{d[0]}，硬碟約 {tg:.1f} GB，每 {iv:g} ps 存一幀，分成 {plan.get('n_chunks', 0)} 段。",
+                 f"{key}: planned {p:g} ns × {reps} replica(s), {d[1]}, about {tg:.1f} GB of disk, one frame every {iv:g} ps in {plan.get('n_chunks', 0)} chunks.",
+                 f"{key}：計画は {p:g} ns × {reps} 回、{d[2]}、ディスク約 {tg:.1f} GB、{iv:g} ps ごとに 1 フレーム、{plan.get('n_chunks', 0)} 区間です。",
+                 f"{key}: 계획은 {p:g} ns × {reps}회, {d[3]}, 디스크 약 {tg:.1f} GB, {iv:g} ps마다 한 프레임, {plan.get('n_chunks', 0)}구간입니다."))
+    if p > 1000:
+        out.append(F("note", f"{key}：長度超過 1 µs，使用者已確認天數與硬碟用量後才開始。",
+                     f"{key}: longer than 1 µs, started only after the user confirmed the days and disk use.",
+                     f"{key}：長さが 1 µs を超えるため、ユーザーが日数とディスク使用量を確認してから開始しました。",
+                     f"{key}: 길이가 1 µs를 넘어 사용자가 일수와 디스크 사용량을 확인한 뒤 시작했습니다."))
+    if reps < 2:
+        out.append(F("note", f"{key}：一條長軌跡不能取代獨立重複。單一長軌跡可能一直停在同一個能量盆地，收斂圖只能檢查軌跡內部的一致性。",
+                     f"{key}: one long trajectory is not a substitute for independent replicas. It can stay in one basin, and the convergence plots only check consistency within the trajectory.",
+                     f"{key}：1 本の長い軌跡は独立な繰り返しの代わりにはなりません。同じエネルギーの谷にとどまり続けることがあり、収束の図は軌跡の内部での一貫性しか確かめられません。",
+                     f"{key}: 긴 궤적 하나가 독립 반복을 대신할 수는 없습니다. 한 에너지 분지에 계속 머물 수 있으며 수렴 그림은 궤적 내부의 일관성만 확인합니다."))
+    return out
+
+
+def coarse_grained(name: str, rec: dict) -> list[dict]:
+    plan = rec.get("plan") or {}
+    out = []
+    for i in plan.get("issues") or []:
+        t = i.get("text")
+        if isinstance(t, (list, tuple)) and len(t) == 4:
+            out.append(F("caution", *t))
+    if not out and plan.get("status") == "PASS":
+        out.append(F("good", f"{name}：粗粒化工具與 Martini 3 力場檔都齊全，計畫的 {len(plan.get('steps') or [])} 個步驟可以執行。",
+                     f"{name}: the coarse-grained tools and Martini 3 force-field files are all present, so the {len(plan.get('steps') or [])} planned steps can run.",
+                     f"{name}：粗視化ツールと Martini 3 の力場ファイルがそろっており、計画した {len(plan.get('steps') or [])} 段階を実行できます。",
+                     f"{name}: 조립화 도구와 Martini 3 역장 파일이 모두 있어 계획한 {len(plan.get('steps') or [])}단계를 실행할 수 있습니다."))
+    return out

@@ -84,10 +84,41 @@ def main(out: Path) -> int:
                     pg.wait_for_timeout(2500)
                     pg.screenshot(path=str(out / f"{code}_{fname}.png"), full_page=True)
                     print("saved", code, fname)
+                extras(pg, base, out, code)
             br.close()
     finally:
         proc.terminate()
     return stability(out)
+
+
+def extras(pg, base: str, out: Path, code: str) -> None:
+    """D-80 groups: professional mode with every group open (membrane, peptide folding), the long-run card for a
+    2 µs production, and the computer status page after pressing the install-plan buttons.  A failure here is
+    printed and does not stop the other screenshots."""
+    from md20.advisor import param_label
+    try:
+        pg.goto(base + "/new/pro?expand=all", wait_until="networkidle", timeout=60000)
+        pg.wait_for_timeout(2500)
+        pg.screenshot(path=str(out / f"{code}_05b_pro_membrane_fold.png"), full_page=True)
+        print("saved", code, "05b_pro_membrane_fold")
+        box = pg.get_by_label(param_label("production_ns", code)).first
+        box.fill("2000")
+        box.blur()
+        pg.wait_for_timeout(1500)
+        pg.get_by_test_id("long-run").screenshot(path=str(out / f"{code}_05c_pro_long_run.png"))
+        print("saved", code, "05c_pro_long_run")
+    except Exception as exc:  # noqa: BLE001
+        print("extras (pro groups) failed:", code, type(exc).__name__, exc)
+    try:
+        pg.goto(base + "/system", wait_until="networkidle", timeout=60000)
+        pg.wait_for_timeout(1500)
+        for k in ("fold", "cg"):
+            pg.get_by_test_id(f"preview-{k}").click()
+            pg.wait_for_timeout(1500)
+        pg.screenshot(path=str(out / f"{code}_07b_system_tools.png"), full_page=True)
+        print("saved", code, "07b_system_tools")
+    except Exception as exc:  # noqa: BLE001
+        print("extras (tools) failed:", code, type(exc).__name__, exc)
 
 
 def _fake_state(wf_dir: Path) -> dict:

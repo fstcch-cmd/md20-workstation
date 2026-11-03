@@ -63,3 +63,12 @@ md20 gui                                  # 或用圖形介面（瀏覽器 http:
 "human_choices": {"receptor": {"hetero groups": "全部移除（預設）"}},
 "pose_choices": {"BEN": 2}
 ```
+
+## 新增欄位（v0.1.0a9，初步）
+| 欄位 | 說明 |
+|---|---|
+| `ligands[].fold` | `true`：先依序列預測胜肽結構再對接（主鏈固定、側鏈可轉）；`"complex"`：預測受體＋胜肽複合物，疊合到實際受體後直接進 MD |
+| `ligands[].fold_engine` | `auto`（預設）、`omegafold`、`esmfold`、`boltz`、`colabfold`、`upload` |
+| `md.membrane` | `{"type": "protein"|"surface"|"bilayer", "lipids": {...} 或預設名稱, "oriented": false, "surface_distance_nm": 1.0}` |
+| `md.production_ns` | 專業模式最長 10000；> 100 ns 自動規劃存檔與硬碟用量 |
+| `md.long_run_confirmed` | > 1 µs 時必須設為 `true` 才會執行 |

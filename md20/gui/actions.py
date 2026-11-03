@@ -19,7 +19,7 @@ from ..util import atomic_write_json, load_json
 
 # workflow step keys in execution order; a decision at step X invalidates X and everything after it
 STEP_ORDER = ["structure_gate", "receptor_docking", "screen_library", "screen_docking", "screen_selection", "docking_preflight",
-              "docking", "pose_selection", "md_confirm", "md_cases", "md_runs", "analysis", "binding", "report"]
+              "fold", "docking", "pose_selection", "md_confirm", "md_cases", "md_runs", "analysis", "binding", "report"]
 STRUCTURE_OVERRIDE = {"resolution": "resolution", "R-free": "r_free", "ligand occupancy": "ligand_occupancy",
                       "pocket occupancy": "pocket"}
 _METAL_OPT = re.compile(r"metal_policy:\s*\{\s*([A-Za-z0-9:]+)\s*:\s*(bonded|keep_nonbonded|remove)\s*\}")
@@ -110,6 +110,15 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
             path = ["md", "production_ns"] if m.group(1) == "production_ns" else ["md", "long_run", "target_gb"]
             return _act(option, [{"path": path, "value": float(m.group(2))}], "md_runs")
         return None
+    # D-80 folding (workflow step "fold", per ligand): choices the fold step carries out on the next run
+    if name in ("fold", "fold confidence", "fold placement") and ligand:
+        a = _fold_action(option, ligand)
+        if a is not None:
+            return a
+        return None
+    # D-80 membrane gates written by the build (md_cases): orientation, composition, temperature, surface placement
+    if name.startswith("membrane "):
+        return _membrane_action(option)
     if name == "confirm MD" and option.startswith("進入分子動力學"):
         return _act(option, [{"path": ["md_confirmed"], "value": True}], "md_confirm")
     if name == "redocking" and option.startswith("docking.skip_redock"):
@@ -131,6 +140,58 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
         return _act(option, [{"path": ["peptide_policy", "allow_small_molecule"], "value": "{text}"}], "md_cases",
                     needs_text=True, text_hint="為什麼它是擬肽小分子而不是胜肽")
     return None
+
+
+_FOLD_ENGINES = "omegafold、esmfold、boltz 或 colabfold"
+
+
+def _fold_action(option: str, ligand: str) -> dict | None:
+    from ..build import fold as F
+    lig = f"ligand:{ligand}"
+    if option == F.OPT_NO_FOLD:
+        return _act(option, [{"path": [lig, "fold"], "value": False}], "fold")
+    if option == F.OPT_ACCEPT_LOW:
+        return _act(option, [{"path": [lig, "fold_accept_low"], "value": True}], "fold")
+    if option == F.OPT_ACCEPT_RMSD:
+        return _act(option, [{"path": [lig, "fold_accept_rmsd"], "value": True}], "fold")
+    if option == F.OPT_DOCK:
+        return _act(option, [{"path": [lig, "fold"], "value": True}], "fold")
+    if option == F.OPT_OTHER_ENGINE:
+        return _act(option, [{"path": [lig, "fold_engine"], "value": "{text}"}], "fold", needs_text=True,
+                    text_hint=_FOLD_ENGINES)
+    if option == F.OPT_RECEPTOR_SEQ:
+        return _act(option, [{"path": [lig, "fold_receptor_seq"], "value": "{text}"}], "fold", needs_text=True,
+                    text_hint="完整的受體序列（單字母代碼）")
+    m = re.match(r"fold_engine:\s*(omegafold|esmfold|boltz|colabfold)\b", option)
+    if m:
+        return _act(option, [{"path": [lig, "fold_engine"], "value": m.group(1)}], "fold")
+    return None          # install a tool, upload a structure: work outside the program
+
+
+_LIPID_DICT = re.compile(r"^\{\s*([A-Za-z0-9]+\s*:\s*[0-9.]+\s*(,\s*[A-Za-z0-9]+\s*:\s*[0-9.]+\s*)*)\}$")
+
+
+def _membrane_action(option: str) -> dict | None:
+    from ..build.membrane import PRESETS
+    if option.startswith("md.membrane.oriented: true"):
+        return _act(option, [{"path": ["md", "membrane", "oriented"], "value": True}], "md_cases")
+    m = re.match(r"md\.membrane\.lipids:\s*(.+?)\s*$", option)
+    if m:
+        val = m.group(1)
+        if val in PRESETS and val != "gram_positive":           # gram_positive is refused by the force-field gate
+            return _act(option, [{"path": ["md", "membrane", "lipids"], "value": val}], "md_cases")
+        d = _LIPID_DICT.match(val)
+        if d:
+            comp = {k.strip().upper(): float(v) for k, v in (x.split(":") for x in d.group(1).split(","))}
+            return _act(option, [{"path": ["md", "membrane", "lipids"], "value": comp}], "md_cases")
+        return None
+    m = re.match(r"md\.membrane\.(temperature_k|surface_distance_nm):\s*([0-9.]+)", option)
+    if m:
+        return _act(option, [{"path": ["md", "membrane", m.group(1)], "value": float(m.group(2))}], "md_cases")
+    m = re.match(r"md\.membrane\.surface_orientation:\s*(as_is|random|parallel|normal)\b", option)
+    if m:
+        return _act(option, [{"path": ["md", "membrane", "surface_orientation"], "value": m.group(1)}], "md_cases")
+    return None          # type changes, templates, OPM downloads: decided outside this button
 
 
 def gate_actions(gate: dict, *, step: str, ligand: str | None = None) -> tuple[list[dict], list[str]]:

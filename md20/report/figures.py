@@ -474,3 +474,269 @@ def cooperativity_plot(rows: list[dict], ylabel: str, path: Path) -> str | None:
     ax.set_ylabel(ylabel)
     ax.legend(fontsize=7, frameon=False)
     return _save(fig, path)
+
+
+# ============================================================================================ D-82: fold, membrane, long run, coarse-grained
+PLDDT_BANDS = ((90, 100, "#0b4f8a", "very high"), (70, 90, "#5fa8e0", "confident"), (50, 70, "#f2d24b", "low"), (0, 50, "#ef8a3b", "very low"))
+
+
+def plddt_profile(by_chain: dict, path: Path, peptide_chain: str | None = None) -> str | None:
+    """Per-residue pLDDT of every chain, concatenated, with the usual confidence bands."""
+    chains = [(c, [float(x) for x in v]) for c, v in (by_chain or {}).items() if v]
+    if not chains:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(6.4, 2.6))
+    for lo, hi, col, _ in PLDDT_BANDS:
+        ax.axhspan(lo, hi, color=col, alpha=0.13, lw=0)
+    x0 = 0
+    for k, (c, v) in enumerate(chains):
+        x = np.arange(x0 + 1, x0 + len(v) + 1)
+        ax.plot(x, v, color=PALETTE[1] if c == peptide_chain else PALETTE[0], lw=1.2 if c == peptide_chain else 0.9,
+                marker="o" if len(v) <= 40 else None, ms=2.5, label=f"chain {c}" + (" (peptide)" if c == peptide_chain else ""))
+        if k:
+            ax.axvline(x0 + 0.5, color="#4d6170", ls="--", lw=0.8)
+        x0 += len(v)
+    ax.set_ylim(0, 100)
+    ax.set_xlim(0.5, x0 + 0.5)
+    ax.set_xlabel("Residue (all chains in order)")
+    ax.set_ylabel("pLDDT")
+    handles = [plt.Rectangle((0, 0), 1, 1, color=c, alpha=0.4) for _, _, c, _ in PLDDT_BANDS]
+    leg = ax.legend(fontsize=7, loc="lower right")
+    ax.add_artist(leg)
+    ax.legend(handles, [f"{lab} ({lo}–{hi})" for lo, hi, _, lab in PLDDT_BANDS], fontsize=6, ncol=4, loc="upper left",
+              bbox_to_anchor=(0, -0.25))
+    return _save(fig, path)
+
+
+def residue_deviation(labels: list, dev, path: Path, *, pocket_mask=None, threshold: float = 2.0) -> str | None:
+    d = np.asarray(dev, float)
+    if not len(d):
+        return None
+    plt = _plt()
+    pm = np.zeros(len(d), bool) if pocket_mask is None else np.asarray(pocket_mask, bool)
+    fig, ax = plt.subplots(figsize=(6.4, 2.5))
+    ax.bar(np.arange(len(d)), d, width=1.0, color=[PALETTE[1] if p else "#9aa5b1" for p in pm])
+    ax.axhline(threshold, color="#b8433f", ls="--", lw=0.8)
+    if len(labels) == len(d):
+        idx = np.linspace(0, len(d) - 1, min(len(d), 10)).astype(int)
+        ax.set_xticks(idx, [str(labels[i]) for i in idx], fontsize=6, rotation=60)
+    ax.set_xlabel("Receptor residue (sequence-matched Cα)")
+    ax.set_ylabel("Deviation after superposition (Å)")
+    handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in (PALETTE[1], "#9aa5b1")]
+    ax.legend(handles, ["within 10 Å of the peptide", "elsewhere"], fontsize=7, loc="upper right")
+    return _save(fig, path)
+
+
+def contact_matrix(rows: list, cols: list, M, path: Path, *, vmax: float = 8.0, cutoff: float = 4.0) -> str | None:
+    D = np.asarray(M, float)
+    if D.size == 0:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(min(7.2, 0.18 * D.shape[1] + 2.6), 0.24 * D.shape[0] + 1.4))
+    im = ax.imshow(np.clip(D, 0, vmax), cmap="viridis", vmin=0, vmax=vmax, aspect="auto", interpolation="nearest")
+    fig.colorbar(im, ax=ax, label="Min. heavy-atom distance (Å)", shrink=0.8)
+    for i, j in zip(*np.where(D <= cutoff)):
+        ax.add_patch(plt.Rectangle((j - 0.5, i - 0.5), 1, 1, fill=False, ec="white", lw=0.8))
+    ax.set_yticks(range(len(rows)), [str(r) for r in rows], fontsize=6)
+    step = max(1, len(cols) // 30)
+    ax.set_xticks(range(0, len(cols), step), [str(cols[j]) for j in range(0, len(cols), step)], fontsize=6, rotation=90)
+    ax.set_xlabel("Receptor residue")
+    ax.set_ylabel("Peptide residue")
+    return _save(fig, path)
+
+
+def _band_panel(ax, t, y, ref, lo, hi, ylabel: str, color: str) -> None:
+    t, y = np.asarray(t, float)[:len(y)], np.asarray(y, float)
+    if ref is not None:
+        ax.axhspan(lo, hi, color="#7b8794", alpha=0.15, lw=0)
+        ax.axhline(ref, color="#4d6170", lw=0.8)
+    ax.plot(t, y, color=color, lw=0.9)
+    n = len(y)
+    if n >= 8:
+        ax.hlines(y[n // 2:].mean(), t[n // 2], t[-1], colors=color, linestyles=":", lw=1.4)
+    ax.set_ylabel(ylabel)
+
+
+def membrane_equil(t, apl, dpp, ref: dict | None, path: Path, *, tol_apl: float = 0.06, tol_dpp: float = 0.30) -> str | None:
+    if apl is None or len(apl) < 2:
+        return None
+    plt = _plt()
+    ref = ref or {}
+    fig, axes = plt.subplots(2, 1, figsize=(6.4, 3.8), sharex=True)
+    ra, rd = ref.get("apl_nm2"), ref.get("dpp_nm")
+    _band_panel(axes[0], t, apl, ra, (ra or 0) * (1 - tol_apl), (ra or 0) * (1 + tol_apl), "Area per lipid (nm²)", PALETTE[0])
+    _band_panel(axes[1], t, dpp, rd, (rd or 0) - tol_dpp, (rd or 0) + tol_dpp, "P–P thickness (nm)", PALETTE[1])
+    axes[1].set_xlabel("Time (ns)")
+    return _save(fig, path)
+
+
+def density_profile(dens: dict, path: Path) -> str | None:
+    z = np.asarray(dens.get("z_nm") if dens.get("z_nm") is not None else [], float)
+    groups = dens.get("groups") or {}
+    if len(z) < 3 or not groups:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(6.4, 2.8))
+    for (name, v), c in zip(groups.items(), PALETTE * 3):
+        v = np.asarray(v, float)
+        ax.plot(z[:len(v)], v / (v.max() if v.max() > 0 else 1), color=c, lw=1.1, label=f"{name} (max {v.max():.1f})")
+    ax.axvline(0, color="#4d6170", lw=0.6, ls=":")
+    ax.set_xlabel("z from membrane centre (nm)")
+    ax.set_ylabel(f"Density / group max ({dens.get('unit', 'per nm³')})")
+    ax.legend(fontsize=7, ncol=2)
+    return _save(fig, path)
+
+
+def scd_plot(series: dict, path: Path, band=(0.12, 0.25)) -> str | None:
+    """series: {"sn1": (carbons, −S_CD), "sn2": ...}"""
+    if not series:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(5.6, 2.8))
+    ax.axhspan(*band, color="#7b8794", alpha=0.15, lw=0)
+    for (tail, (n, s)), c in zip(series.items(), PALETTE):
+        ax.plot(n, s, "o-", color=c, ms=3, lw=1.0, label=tail)
+    ax.set_xlabel("Carbon number")
+    ax.set_ylabel("−S$_{CD}$")
+    ax.set_ylim(bottom=0)
+    ax.legend(fontsize=7)
+    return _save(fig, path)
+
+
+def insertion_plot(t, com, deepest, path: Path) -> str | None:
+    if com is None or len(com) < 2:
+        return None
+    plt = _plt()
+    t = np.asarray(t, float)[:len(com)]
+    fig, ax = plt.subplots(figsize=(6.4, 2.6))
+    ax.axhspan(-0.5, 0.3, color="#7b8794", alpha=0.15, lw=0)
+    ax.axhline(0, color="#4d6170", lw=0.8)
+    ax.plot(t, com, color=PALETTE[0], lw=1.0, label="centroid")
+    if deepest is not None and len(deepest):
+        ax.plot(t[:len(deepest)], deepest, color=PALETTE[1], lw=0.9, ls="--", label="deepest heavy atom")
+    ax.invert_yaxis()
+    ax.set_xlabel("Time (ns)")
+    ax.set_ylabel("Depth below P plane (nm)")
+    ax.legend(fontsize=7)
+    return _save(fig, path)
+
+
+def tilt_hist(tilt, path: Path) -> str | None:
+    a = np.asarray(tilt, float)
+    if len(a) < 4:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(5.6, 2.6))
+    bins = np.linspace(0, 90, 19)
+    ax.hist(a[: len(a) // 2], bins=bins, color="#9aa5b1", alpha=0.7, label="first half")
+    ax.hist(a[len(a) // 2:], bins=bins, color=PALETTE[0], alpha=0.7, label="second half")
+    for x in (30, 60):
+        ax.axvline(x, color="#4d6170", ls=":", lw=0.8)
+    ax.set_xlim(0, 90)
+    ax.set_xlabel("Tilt to membrane normal (°)  (90° = flat on the surface)")
+    ax.set_ylabel("Frames")
+    ax.legend(fontsize=7)
+    return _save(fig, path)
+
+
+def thickness_map_plot(tmap: dict, path: Path, marker=None) -> str | None:
+    G = np.array([[np.nan if v is None else v for v in row] for row in (tmap or {}).get("dpp_nm") or []], float)
+    if G.size == 0 or not np.isfinite(G).any():
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(4.8, 4.0))
+    im = ax.pcolormesh(tmap["x_nm"], tmap["y_nm"], np.ma.masked_invalid(G), cmap="cividis", shading="flat")
+    fig.colorbar(im, ax=ax, label="Local P–P thickness (nm)")
+    if marker is not None:
+        ax.plot([marker[0]], [marker[1]], "x", color="#b8433f", ms=9, mew=2)
+    ax.set_aspect("equal")
+    ax.set_xlabel("x (nm)")
+    ax.set_ylabel("y (nm)")
+    return _save(fig, path)
+
+
+def longrun_plot(plan: dict, actual: dict, path: Path) -> str | None:
+    if not plan:
+        return None
+    plt = _plt()
+    reps = max(1, int(plan.get("replicas") or 1))
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 2.6), gridspec_kw={"width_ratios": [1, 2]})
+    axes[0].bar([0, 1], [plan.get("production_ns") or 0, actual.get("production_ns") or 0], color=["#9aa5b1", PALETTE[0]], width=0.6)
+    axes[0].set_xticks([0, 1], ["planned", "completed"])
+    axes[0].set_ylabel("Production (ns)")
+    lab = ["trajectory", "chunk files", "planned total", "actual folder"]
+    val = [(plan.get("trajectory_gb") or 0) / reps, (plan.get("states_gb") or 0) / reps, (plan.get("total_gb") or 0) / reps,
+           actual.get("disk_gb") or 0]
+    axes[1].bar(range(4), val, color=["#c9d3dc", "#c9d3dc", "#9aa5b1", PALETTE[1]], width=0.6)
+    axes[1].set_xticks(range(4), lab, fontsize=7)
+    axes[1].set_ylabel("Disk per replica (GB)")
+    fig.tight_layout()
+    return _save(fig, path)
+
+
+def rmsf_halves(residues: list, a, b, path: Path) -> str | None:
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    n = min(len(a), len(b))
+    if n < 3:
+        return None
+    return rmsf({"first half": (residues[:n], a[:n]), "second half": (residues[:n], b[:n])}, path)
+
+
+def rmsd_halves(y, path: Path) -> str | None:
+    y = np.asarray(y, float)
+    if len(y) < 10:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(5.6, 2.6))
+    bins = np.linspace(y.min(), y.max(), 31)
+    ax.hist(y[: len(y) // 2], bins=bins, density=True, color="#9aa5b1", alpha=0.7, label="first half")
+    ax.hist(y[len(y) // 2:], bins=bins, density=True, color=PALETTE[0], alpha=0.7, label="second half")
+    ax.set_xlabel("Backbone RMSD (Å)")
+    ax.set_ylabel("Probability density")
+    ax.legend(fontsize=7)
+    return _save(fig, path)
+
+
+def cluster_timeline_plot(P, ids: list, t_edges, path: Path) -> str | None:
+    P = np.asarray(P, float)
+    if P.size == 0:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(6.4, 2.6))
+    x = np.asarray(t_edges, float)
+    xc = 0.5 * (x[1:] + x[:-1]) if len(x) == len(P) + 1 else np.arange(len(P))
+    ax.stackplot(xc, P.T, labels=[f"cluster {c + 1}" for c in ids], colors=(PALETTE * 3)[:len(ids)], alpha=0.85)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("Time (ns, window centre)")
+    ax.set_ylabel("Share of frames")
+    ax.legend(fontsize=7, ncol=min(5, len(ids)), loc="upper left", bbox_to_anchor=(0, -0.25))
+    return _save(fig, path)
+
+
+def cg_membrane_plot(summ: dict, path: Path, *, tol_apl: float = 0.06, tol_dpp: float = 0.30) -> str | None:
+    apl = summ.get("apl_nm2") or []
+    if len(apl) < 2:
+        return None
+    plt = _plt()
+    p2 = summ.get("p2") or {}
+    fig = plt.figure(figsize=(7.2, 3.8))
+    gs = fig.add_gridspec(2, 2, width_ratios=[3, 2])
+    a0, a1 = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[1, 0])
+    ref = summ.get("reference") or {}
+    ra, rd = ref.get("apl_nm2"), ref.get("dpp_nm")
+    t = summ.get("time_ns") or list(range(len(apl)))
+    _band_panel(a0, t, apl, ra, (ra or 0) * (1 - tol_apl), (ra or 0) * (1 + tol_apl), "APL (nm²)", PALETTE[0])
+    _band_panel(a1, t, summ.get("dpp_nm") or [], rd, (rd or 0) - tol_dpp, (rd or 0) + tol_dpp, "PO4–PO4 (nm)", PALETTE[1])
+    a1.set_xlabel("Simulated time (ns, CG)")
+    if p2:
+        a2 = fig.add_subplot(gs[:, 1])
+        ks = list(p2)
+        a2.barh(range(len(ks)), [p2[k] for k in ks], color=PALETTE[2], height=0.6)
+        a2.axvspan(0.1, 0.6, color="#7b8794", alpha=0.12, lw=0)
+        a2.set_yticks(range(len(ks)), ks, fontsize=7)
+        a2.invert_yaxis()
+        a2.set_xlabel("Bond order P2")
+    fig.suptitle("COARSE-GRAINED (Martini 3), bead level, not atomistic", fontsize=9, color="#b8433f", x=0.02, ha="left")
+    fig.tight_layout()
+    return _save(fig, path)

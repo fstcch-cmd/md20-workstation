@@ -47,3 +47,51 @@
 - 專業模式依個案給建議初始值（`md20/advisor.py`，D-49），所有入口共用；介面與報告雙語，英文預設。
 - 頁面：`/`、`/teach/{case}`、`/new/quick`、`/new/pro`、`/wf/{project}/{name}`、`/system`、`/template/compound_library.xlsx`。
 - 實作檔：`md20/gui/pages_v2.py`（頁面）、`md20/gui/content.py`（文字與教學內容）、`md20/gui/logic.py::config_from_mode`。
+
+## D-80 整合：膜系統、胜肽摺疊、長時間模擬接上流程與介面（2026-11-03，實作，待 CI 與筆電）
+狀態：**[已實作，純 Python 測試通過；NiceGUI 頁面只在 CI `gui-preview` 與 `test_gui_server.py` 執行]**。
+
+### 流程（`md20/workflow.py`，增量修改）
+- 情境 B（`md.membrane.type: surface`）與 C（`bilayer`）：`Workflow._run` 一開始就轉到 `_run_membrane_only`，
+  不取受體、不對接，沿用既有步驟鍵 `md_cases → md_runs → analysis → binding → report`（沒有新增 phase）。
+  `build_membrane_cases`：surface 每個溶質一個系統（鍵 `surface_<名稱>`），bilayer 一個系統（鍵 `bilayer`），
+  以 `membrane.build_membrane_system(ligands=...)` 建模；胜肽用 `prepare_peptide`（設了 `fold` 時起始構形取預測結構），
+  小分子用 `prepare_ligand`（由 SMILES 產生構形）。建好後把 assemble 的紀錄另存一份在 build_manifest 的 `assembly`，
+  讓所有讀取端（manifest_ligands、閘門卡片、長時間規劃）和一般流程一樣。
+- 擋下（閘門 `membrane type`，NEEDS_HUMAN）：B 或 C 卻有受體、surface 沒有配體、bilayer 有配體、`fold: complex`（沒有受體可疊合）。
+  不猜「受體是不是要放進膜」。GUI 建立 B、C 時會自己把受體拿掉，並在合理性檢查顯示「不會放入受體」。
+- 膜系統的結合自由能仍由 `membrane binding` 擋下；GUI 在膜系統開著結合計算時列為錯誤，可一鍵關閉。
+- `assess_equilibration`：要在 NPT 之後檢查並延長 NPT，必須在 engine 的 stage 之間停下來讀軌跡，等於新步驟；
+  依開發規則**改成只在分析時執行**（`md20/analysis/membrane_run.py`）：以正式模擬後半段計算面積、P–P 厚度、核心水，
+  `attempt=1`（不會說「延長一次」）。通過記 PASS；不通過記為提醒卡片（AUTO_FIXED、advisory，存在 `state["advisories"]`），
+  因為模擬已經跑完，擋下只會讓報告出不來。只存溶質的軌跡沒有水，驗收寫「未檢查」。情境 A 在一般分析之後加做膜分析；B、C 只做膜分析
+  （沒有受體，主鏈 RMSD 與口袋接觸不適用），`metrics.json` 只有 `membrane` 區塊，不做系統比較圖。
+  報告用的資料另以 `analysis/membrane_report.membrane_report_data`（報告端的格式）寫成 `analysis/membrane_report.json`，路徑放在 `analysis.summaries[系統]["membrane_file"]`。
+- 順便修正：`_plan_long_run` 讀原子數時也看 `assembly`（`build_case` 的 manifest 只在 `assembly` 下有 `n_atoms`，
+  原本 > 100 ns 的一般流程一定被「build 沒有原子數」擋下；`test_longrun.py` 的假 manifest 把數字放在最上層所以沒測出來）。
+- `confirm_md` 的訊息：預測複合物的胜肽（score None）寫「預測複合物，沒有對接分數」，不再印出 `None kcal/mol`。
+- `DECISION_KEYS` 加入 `("md", "membrane", "oriented")`（一鍵「結構已定向」的決定，重跑時保留）。
+
+### 介面
+- 新模組 `md20/gui/advanced.py`（純 Python）：選項表、四種語言文字、`apply_advanced`（寫入 `md.membrane`、`ligands[i].fold*`、
+  `md.long_run_confirmed`）、`advanced_checks`（和 advisor.check 同格式，錯誤會擋下「建立並開始」；膜的組成、相、力場、擺放閘門
+  直接呼叫 `membrane.plan_membrane`，顯示 `gate_text` 的四語標題與說明）、`long_run_view`、`tool_rows`、`setup_preview`、`score_text`、`selection_lines`。
+- 專業模式：參數群組下方加「膜系統」（類型 none、protein、surface、bilayer；脂質組成預設；已定向；起始距離）與「胜肽摺疊」
+  （off、預測後對接、預測複合物；工具 auto、omegafold、boltz、upload；受體序列可不填，多條鏈用冒號分開；上傳預測結構）。
+  `/new/pro?expand=all` 打開所有群組（截圖用）。
+- 長時間模擬：正式模擬 > 100 ns 時右欄顯示規劃（天數、硬碟、存檔間隔、幀數與分段、續跑檔保留數，取自 `advisor.long_run_plan`）；
+  > 1 µs 顯示確認勾選，勾了寫 `md.long_run_confirmed: true`，沒勾是警告（流程會在正式模擬前停下來問）。估計以水盒中的蛋白計算，卡片上註明。
+- 快速模式：配體欄裡每個胜肽旁邊一個「先摺疊這個胜肽」勾選（`fold: true`，只對勾選的胜肽）。
+- 電腦狀態頁「選用工具」：摺疊環境與粗粒化工具是否安裝、完整安裝指令（Windows `%LOCALAPPDATA%\MD20\md20.cmd setup-fold --engine omegafold --yes`、
+  `... setup-cg --yes`；macOS `~/MD20/md20`），「顯示安裝計畫（不安裝）」按鈕只呼叫 `fold.setup_plan` 與 `martini.install_plan` 列出指令，不執行任何程式。
+- 閘門一鍵（`actions.py`）：`fold`、`fold confidence`、`fold placement`（不摺疊、仍使用、改用對接、改用指定工具、輸入工具名或受體序列）；
+  `membrane orientation`（已定向）、`membrane phase`（溫度、改預設組成）、`membrane force field`、`membrane composition`（預設名稱或 `{脂質: 比例}`；
+  `gram_positive` 不給按鈕）、`membrane surface placement`（距離、方向）；`membrane binding` 用既有的「binding.enabled: false」。
+  安裝工具、上傳結構、改膜系統類型、模板資料夾、OPM 下載維持文字。`STEP_ORDER` 加入 `fold`（在 docking 前），一鍵後從 fold 起重跑。
+- 姿勢表：預測複合物放置的胜肽列出一列，分數欄寫「預測複合物，沒有對接分數」（四種語言），點選不會改姿勢；確認進入 MD 的卡片逐條列出選用的姿勢。
+- 測試：`tests/test_gui_advanced.py`、`tests/test_membrane_workflow.py`；`tools/gui_preview.py` 另存 `05b_pro_membrane_fold`、`05c_pro_long_run`、`07b_system_tools`（失敗只印出，不影響穩定性檢查）。
+
+### 未決
+- 長時間估計對膜系統的原子數（3–12 萬）不準；要不要在膜系統改用膜的原子數估計。
+- 膜表面系統一個溶質一個系統；多個胜肽同時在膜上（聚集）沒有做。
+- 情境 B、C 的報告內容（`metrics.json` 的 `membrane` 區塊、`membrane_metrics.json`）要由報告端接上（md20/report 屬其他 session）。

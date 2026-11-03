@@ -637,6 +637,10 @@ OPTIONS.update({   # free-text hints of the decision inputs
                                   "이 구조를 그래도 쓸 수 있는 이유(결정 기록과 보고서에 남음)"),
     "備註（為什麼選這些）": ("Note (why these compounds)", "メモ（これらを選んだ理由）", "메모(이 화합물을 고른 이유)"),
     "聯合姿勢名次（數字）": ("Joint pose rank (a number)", "組み合わせポーズの順位（数字）", "결합 포즈 순위(숫자)"),
+    "omegafold、esmfold、boltz 或 colabfold": ("omegafold, esmfold, boltz or colabfold", "omegafold、esmfold、boltz、colabfold のいずれか",
+                                              "omegafold, esmfold, boltz, colabfold 중 하나"),
+    "完整的受體序列（單字母代碼）": ("The full receptor sequence (one-letter codes)", "受容体の完全な配列（1 文字表記）",
+                           "수용체 전체 서열(한 글자 기호)"),
 })
 
 # options that carry a value after a fixed prefix → (en, ja, ko); a label ending in a colon is followed by the value

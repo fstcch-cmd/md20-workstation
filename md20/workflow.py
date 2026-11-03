@@ -132,6 +132,7 @@ DECISION_KEYS: tuple[tuple[str, ...], ...] = (
     ("docking", "skip_redock"), ("box", "allow_blind"), ("binding", "manual_windows"),
     ("screen", "select"), ("screen", "next_mode"), ("screen", "allow_partial"), ("md_confirmed",), ("ligand_metal",),
     ("multi_ligand",), ("md", "long_run_confirmed"), ("md", "long_run"),
+    ("md", "membrane", "oriented"),        # gate `membrane orientation` one-click choice (D-80)
 )
 LIGAND_DECISION_KEYS = ("cpp_override", "cpp_evidence", "target_location", "fold_accept_low", "fold_upload", "fold_engine",
                         "fold_accept_rmsd", "fold_receptor_seq")
@@ -1252,6 +1253,102 @@ class Workflow:
                 self._block("md_cases", f"{spec['key']} 建模需要人工決定：{s.get('blocking')}：{s.get('blocking_detail')}", cases=built)
         return built
 
+    # ------------------------------------------------------------------ membrane systems without a receptor (D-80)
+    def membrane_only_type(self) -> str | None:
+        """"surface" (case B: a peptide or small molecule above a bilayer) or "bilayer" (case C: lipids only) when
+        md.membrane asks for one of them; None for every other workflow (case A goes through the normal build)."""
+        m = (self.cfg.get("md") or {}).get("membrane")
+        t = m.get("type") if isinstance(m, dict) else None
+        return t if t in ("surface", "bilayer") else None
+
+    def _membrane_input_gate(self, mtype: str) -> None:
+        """Inputs that do not fit case B or C stop with options (block rather than guess)."""
+        ligs = [l for l in self.cfg.get("ligands") or [] if isinstance(l, dict)]
+        rec = self.cfg.get("receptor") or {}
+        problem, options = None, []
+        if rec.get("pdb_id") or rec.get("file") or rec.get("alphafold"):
+            problem = (f"md.membrane.type = {mtype} 不使用受體，但設定裡有受體（{rec.get('pdb_id') or rec.get('file') or 'AlphaFold'}）。"
+                       "不確定要把受體放進膜裡還是忽略它。")
+            options = ["md.membrane.type: protein", "移除 receptor（只模擬膜與溶質）"]
+        elif mtype == "surface" and not ligs:
+            problem = "type: surface 要有胜肽或小分子放在膜上方，但沒有配體。"
+            options = ["md.membrane.type: bilayer"]
+        elif mtype == "bilayer" and ligs:
+            problem = f"type: bilayer 是純膜，但設定裡有 {len(ligs)} 個配體。"
+            options = ["md.membrane.type: surface"]
+        elif any(l.get("fold") == "complex" for l in ligs):
+            problem = "fold: complex 需要受體（預測複合物再疊合到受體），膜表面系統沒有受體。"
+            options = ["改用對接（fold: true）", "不使用預測結構，改用延伸構形（fold: false）"]
+        if problem:
+            self._block("md_cases", problem, gates=[{"name": "membrane type", "status": "NEEDS_HUMAN",
+                                                     "explanation": problem, "options": options}])
+
+    def _membrane_solute(self, l: dict, bdir: Path, index: int):
+        """One solute of a surface system: a peptide (ff14SB, chain P; predicted structure when `fold` is set) or a
+        small molecule (conformer from the SMILES; prepare_ligand's parameter ladder)."""
+        if l.get("sequence"):
+            from .build.peptide import prepare_peptide, clean_sequence
+            pose = self._fold_peptide(l) if l.get("fold") else None
+            self.dec.record("build.membrane", l["name"], "peptide above the bilayer",
+                            f"{l['name']} 以序列建成胜肽（ff14SB，獨立 chain P）" +
+                            ("，起始構形用預測結構" if pose else "，起始構形為由序列建立的構形") +
+                            "；放在膜上方由建膜程式決定位置（md.membrane.surface_distance_nm），不經對接。", kind="auto")
+            return prepare_peptide(clean_sequence(l["sequence"]), pose, bdir / "ligands", name=l["name"], chain_id="P",
+                                   termini=l.get("termini", "charged"), decisions=self.dec)
+        from .build.ligand import prepare_ligand
+        return prepare_ligand(l.get("sdf") or l["smiles"], None, bdir / "ligands", name=f"L{index:02d}", decisions=self.dec)
+
+    def build_membrane_cases(self) -> dict:
+        """Cases B and C (docs/specs/membrane.md §2): no receptor and no docking.  surface → one system per solute
+        (key surface_<name>); bilayer → one system (key bilayer).  Built with membrane.build_membrane_system."""
+        from .build.membrane import build_membrane_system
+        from .build.pipeline import _update_case
+        mtype = self.membrane_only_type()
+        self._membrane_input_gate(mtype)
+        md = self.cfg.get("md") or {}
+        built = dict((self._done("md_cases") or {}).get("cases", {}))
+        ligs = [l for l in self.cfg.get("ligands") or [] if isinstance(l, dict)]
+        specs = [("bilayer", [])] if mtype == "bilayer" else [(f"surface_{safe_name(l['name'])}", [l]) for l in ligs]
+        if not built:
+            self.dec.record("workflow.membrane", "system", mtype,
+                            ("膜表面接觸（情境 B）：沒有受體、不做對接，每個溶質各建一個系統，放在上葉磷原子平面上方"
+                             f" {md['membrane'].get('surface_distance_nm', 1.0)} nm，水盒由脂雙層取代。" if mtype == "surface" else
+                             "純膜（情境 C）：只有脂雙層、水與離子，不做對接。"), kind="auto")
+        for key, solutes in specs:
+            if built.get(key, {}).get("status") == "PASS":
+                continue
+            case = self.project.new_case(f"{self.name}_{key}")
+            recs, blocked = [], None
+            for i, l in enumerate(solutes, 1):
+                r = self._membrane_solute(l, case.build_dir, i)
+                if r.status == "NEEDS_HUMAN":
+                    blocked = [g for g in (r.gates or {}).get("gates", []) if g.get("status") == "NEEDS_HUMAN"]
+                    break
+                recs.append(r)
+            if blocked is None:
+                res = build_membrane_system(case.build_dir, md["membrane"], ligands=recs, decisions=self.dec,
+                                            ionic_strength_molar=float(md.get("ionic_strength_molar", 0.15)),
+                                            ions=md.get("ions") or None, solvent=self._solvent())
+                # same layout as build_case(): readers look for the assembly record (ligand indices, gates) under "assembly"
+                bm_path = case.build_dir / "build_manifest.json"
+                bm = load_json(bm_path, {})
+                if bm and "assembly" not in bm:
+                    bm["assembly"] = res.to_dict()
+                    atomic_write_json(bm, bm_path)
+                if res.status == "NEEDS_HUMAN":
+                    blocked = [g for g in (res.gates or {}).get("gates", []) if g.get("status") == "NEEDS_HUMAN"]
+            status = "NEEDS_HUMAN" if blocked is not None else "PASS"
+            _update_case(case, {"status": status})
+            names = [l["name"] for l in solutes]
+            built[key] = {"case_id": case.case_id, "mode": f"membrane_{mtype}", "ligands": names,
+                          "ligand_map": {n: (n if l.get("sequence") else f"L{i:02d}") for i, (n, l) in enumerate(zip(names, solutes), 1)},
+                          "status": status, "blocking": "assembly" if blocked is not None else None, "blocking_detail": blocked}
+            self._mark("md_cases", cases=built)
+            if blocked is not None:
+                self._block("md_cases", f"{key} 建膜需要人工決定：" + "；".join(g.get("explanation", "") for g in blocked[:2]),
+                            cases=built)
+        return built
+
     def _restraint_strategy(self) -> str:
         """md.restraints: standard（預設）| gentle | hold_backbone（D-23）。未知值 → 擋下，不猜。"""
         from .engine.protocol import RESTRAINT_STRATEGIES
@@ -1321,6 +1418,8 @@ class Workflow:
         if prod is None or not needs_plan(prod.length_ps / 1000.0, lr):
             return
         bm = load_json(case.build_dir / "build_manifest.json", {})
+        # build_case() keeps the assembly counts under "assembly"; assemble_system alone (membrane cases B, C) at top level
+        bm = {**(bm.get("assembly") or {}), **{k: v for k, v in bm.items() if v not in (None, 0, "")}}
         n_atoms = int(bm.get("n_atoms") or 0)
         if n_atoms <= 0:
             self._block("md_runs", f"{key}：正式模擬 {prod.length_ps / 1000:g} ns 需要先估計硬碟用量，但 build 沒有原子數。"
@@ -1348,6 +1447,9 @@ class Workflow:
                                                            "options": plan.options(), "evidence": ev}])
         apply_plan(proto, plan)
         record_plan(plan, self.dec, stage=f"workflow.md.{key}")
+        st = self.state()                                   # D-82: the report compares this plan with the run
+        st.setdefault("long_run", {})[key] = {k: v for k, v in plan.to_dict().items() if k not in ("decisions",)}
+        atomic_write_json(st, self.state_path)
 
     def analyse(self, runs: dict) -> dict:
         from .analysis.traj import analyse_run, compare_runs
@@ -1359,14 +1461,35 @@ class Workflow:
             rid = r["run_ids"][0]
             run_dir = case.dir / "runs" / rid
             man = load_json(run_dir / "analysis" / "analysis_manifest.json", {})
+            membrane = bool((self.cfg.get("md") or {}).get("membrane"))
             if man.get("status") != "PASS":
                 bm = load_json(case.build_dir / "build_manifest.json", {})
-                groups = {l["name"]: l["heavy_atom_indices"] for l in manifest_ligands(bm) if l.get("heavy_atom_indices")}
-                man = analyse_run(run_dir, top, label=key, ligand_groups=groups or None, metal_indices=metal_indices_from_manifest(bm),
-                                  decisions=self.dec)
+                if self.membrane_only_type():
+                    # cases B and C have no receptor: membrane analysis only (analysis/membrane_run.py)
+                    from .analysis.membrane_run import membrane_only_analysis
+                    man = membrane_only_analysis(run_dir, bm, label=key, decisions=self.dec)
+                else:
+                    groups = {l["name"]: l["heavy_atom_indices"] for l in manifest_ligands(bm) if l.get("heavy_atom_indices")}
+                    man = analyse_run(run_dir, top, label=key, ligand_groups=groups or None, metal_indices=metal_indices_from_manifest(bm),
+                                      decisions=self.dec)
+                    if membrane:            # case A: membrane metrics and the equilibration acceptance next to the usual ones
+                        from .analysis.membrane_run import analyse_membrane_run
+                        try:
+                            ms = analyse_membrane_run(run_dir, bm, label=key, decisions=self.dec)
+                            man = {**man, "membrane_metrics_file": str(run_dir / "analysis" / "membrane_metrics.json"),
+                                   "membrane_acceptance": ms.get("acceptance"),
+                                   **({"membrane_file": ms["membrane_file"]} if ms.get("membrane_file") else {})}
+                        except Exception as exc:  # noqa: BLE001 — the general analysis above stands; the failure is recorded
+                            self.dec.record("analysis.membrane", key, "failed", f"膜分析失敗：{type(exc).__name__}: {exc}。"
+                                            "一般分析的結果仍保留，膜的面積、厚度與平衡驗收沒有計算。", kind="auto")
+            acc = man.get("membrane_acceptance")
+            if acc and acc.get("status") != "PASS":
+                st = self.state()
+                st.setdefault("advisories", {})[f"membrane equilibration {key}"] = acc
+                atomic_write_json(st, self.state_path)
             out[key] = man
             metrics[key] = load_json(man["metrics_file"], {})
-        comp = compare_runs(metrics, self.dir / "figures") if len(metrics) > 1 else {}
+        comp = compare_runs(metrics, self.dir / "figures") if len(metrics) > 1 and not self.membrane_only_type() else {}
         self._mark("analysis", summaries=out, comparison=comp)
         return {"summaries": out, "comparison": comp}
 
@@ -1572,7 +1695,8 @@ class Workflow:
             if self.cfg.get("md_confirmed"):
                 self._mark("md_confirm", confirmed=True)
             return
-        lig = ", ".join(f"{k} (rank {v.get('rank')}, {v.get('score')} kcal/mol)" for k, v in (sel.get("ligands") or {}).items())
+        lig = ", ".join(f"{k} (rank {v.get('rank')}, {v.get('score')} kcal/mol)" if v.get("score") is not None
+                        else f"{k}（預測複合物，沒有對接分數）" for k, v in (sel.get("ligands") or {}).items())
         msg = (f"對接與姿勢選擇已完成：{lig or '—'}。請在姿勢表確認選用的姿勢，再決定是否進入分子動力學"
                "（建模、平衡、正式模擬；依設定可能需要數小時）。")
         self._block("md_confirm", msg, gates=[{
@@ -1580,6 +1704,8 @@ class Workflow:
             "options": ["進入分子動力學（md_confirmed）", "先改選姿勢（在姿勢表點選後再回來確認）"]}])
 
     def _run(self, make_factory: Callable, platform, *, should_pause=None, progress_cb=None) -> dict:
+        if self.membrane_only_type():
+            return self._run_membrane_only(make_factory, platform, should_pause=should_pause, progress_cb=progress_cb)
         raw = self.fetch_receptor()
         clean = self.prepare_docking_receptor(raw)
         sel = None
@@ -1602,6 +1728,20 @@ class Workflow:
         bind = self.binding(runs, built, platform, should_pause=should_pause, progress_cb=progress_cb)
         if any(v.get("status") == "PAUSED" for v in bind.values()):
             return {"status": "PAUSED", "state": self.state()}
+        from .report.workflow_report import build_workflow_report
+        rep = build_workflow_report(self)
+        self._mark("report", path=str(rep))
+        return {"status": "COMPLETE", "report": str(rep), "binding": bind, "analysis": ana}
+
+    def _run_membrane_only(self, make_factory: Callable, platform, *, should_pause=None, progress_cb=None) -> dict:
+        """Cases B and C: build → MD → analysis → report, the same steps without receptor and docking.
+        Binding stays blocked for membrane systems (gate `membrane binding`)."""
+        built = self.build_membrane_cases()
+        runs = self.run_md(built, make_factory, should_pause=should_pause, progress_cb=progress_cb)
+        if any(r["status"] == "PAUSED" for r in runs.values()):
+            return {"status": "PAUSED", "state": self.state()}
+        ana = self.analyse(runs)
+        bind = self.binding(runs, built, platform, should_pause=should_pause, progress_cb=progress_cb)
         from .report.workflow_report import build_workflow_report
         rep = build_workflow_report(self)
         self._mark("report", path=str(rep))

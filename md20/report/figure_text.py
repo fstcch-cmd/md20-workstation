@@ -1416,3 +1416,908 @@ def classify_cooperativity(rec: dict) -> list[dict]:
     lvl = {"COOPERATIVE": "note", "ANTICOOPERATIVE": "note", "NONE": "good", "UNCERTAIN": "caution", "NOT_CLOSED": "warn",
            "PER_LIGAND": "note", "INSUFFICIENT": "caution"}.get(rec.get("status"), "note")
     return [S(lvl, *rec["why"])] if rec.get("why") else []
+
+
+# ============================================================================================ D-82: fold, membrane, long run, coarse-grained
+FIG.update({
+    "fold_plddt": {
+        "title": ("預測結構的逐殘基可信度（pLDDT）", "Per-residue confidence of the predicted structure (pLDDT)",
+                  "予測構造の残基ごとの信頼度（pLDDT）", "예측 구조의 잔기별 신뢰도(pLDDT)"),
+        "caption": ("每個殘基的 pLDDT。背景色帶依常用分級：90 以上很高、70 到 90 可信、50 到 70 偏低、50 以下很低。虛線分開不同的鏈。",
+                    "pLDDT of every residue. The background bands follow the usual grades: above 90 very high, 70–90 confident, "
+                    "50–70 low and below 50 very low. Dashed lines separate the chains.",
+                    "各残基の pLDDT です。背景の色帯は一般的な区分で、90 以上はとても高い、70〜90 は信頼できる、50〜70 は低い、50 未満はとても低いです。"
+                    "破線は鎖の境目です。",
+                    "각 잔기의 pLDDT입니다. 배경 색 띠는 흔히 쓰는 구분으로 90 이상은 매우 높음, 70~90은 신뢰 가능, 50~70은 낮음, 50 미만은 매우 낮음입니다. "
+                    "점선은 사슬 경계입니다."),
+        "read": ("pLDDT 是模型對自己局部結構的信心，不是和實驗比較的誤差。平均 70 以上可以當起始構形，50 到 70 要靠 MD 檢查，50 以下的區段通常沒有固定結構，"
+                 "不要解讀它的構形。末端偏低很常見。",
+                 "pLDDT is the model's confidence in its own local structure, not an error against experiment. A mean of 70 or "
+                 "more is a usable starting structure, 50–70 needs checking in MD, and stretches below 50 usually have no fixed "
+                 "structure, so do not interpret their conformation. Low termini are common.",
+                 "pLDDT はモデル自身の局所構造に対する確信度で、実験との誤差ではありません。平均 70 以上なら初期構造として使え、50〜70 は MD で確認が必要です。"
+                 "50 未満の区間はふつう決まった構造を持たないため、その形を解釈しないでください。末端が低いのはよくあることです。",
+                 "pLDDT는 모델이 자신의 국소 구조에 대해 갖는 확신도이며 실험과 비교한 오차가 아닙니다. 평균 70 이상이면 시작 구조로 쓸 수 있고, "
+                 "50~70은 MD로 확인해야 합니다. 50 미만 구간은 대개 고정된 구조가 없으므로 그 모양을 해석하지 마십시오. 말단이 낮은 것은 흔합니다."),
+    },
+    "fold_superposition": {
+        "title": ("預測受體與實際受體的逐殘基偏差", "Predicted versus actual receptor, deviation per residue",
+                  "予測受容体と実際の受容体の残基ごとのずれ", "예측 수용체와 실제 수용체의 잔기별 편차"),
+        "caption": ("以序列比對配對的 Cα，Kabsch 疊合後每個殘基與實際受體的距離。深色是胜肽 10 Å 內的結合位殘基，虛線是 2 Å。",
+                    "Distance of each sequence-matched Cα from the actual receptor after Kabsch superposition. Dark bars are "
+                    "binding-site residues within 10 Å of the peptide. The dashed line marks 2 Å.",
+                    "配列アラインメントで対応づけた Cα を Kabsch 法で重ね合わせた後の、各残基と実際の受容体との距離です。濃い棒はペプチドから 10 Å 以内の結合部位残基、破線は 2 Å です。",
+                    "서열 정렬로 짝지은 Cα를 Kabsch 방법으로 겹친 뒤 각 잔기와 실제 수용체 사이의 거리입니다. 진한 막대는 펩타이드 10 Å 이내의 결합 부위 잔기이고 점선은 2 Å입니다."),
+        "read": ("整體 Cα RMSD 在 2 Å 以內，代表預測的受體和實際結構一致，胜肽的位置可以搬到實際受體上。重要的是結合位：結合位殘基偏差小，胜肽的姿勢才可信。"
+                 "loop 與末端偏差大是常見的，只要不在結合位就影響不大。",
+                 "An overall Cα RMSD within 2 Å means the predicted receptor matches the actual structure and the peptide's "
+                 "position can be transferred. The binding site matters most: the peptide pose is credible only if the site "
+                 "residues deviate little. Large deviations in loops and termini are common and matter little away from the site.",
+                 "全体の Cα RMSD が 2 Å 以内なら、予測した受容体は実際の構造と一致しており、ペプチドの位置を実際の受容体に移せます。"
+                 "大事なのは結合部位で、結合部位の残基のずれが小さいときにだけペプチドのポーズを信頼できます。ループや末端のずれが大きいのはよくあることで、結合部位から離れていれば影響は小さいです。",
+                 "전체 Cα RMSD가 2 Å 이내이면 예측한 수용체가 실제 구조와 일치하므로 펩타이드의 위치를 실제 수용체로 옮길 수 있습니다. "
+                 "가장 중요한 것은 결합 부위입니다. 결합 부위 잔기의 편차가 작아야 펩타이드 포즈를 믿을 수 있습니다. 루프와 말단의 큰 편차는 흔하며 결합 부위에서 멀면 영향이 작습니다."),
+    },
+    "fold_contacts": {
+        "title": ("胜肽與受體的接觸圖", "Peptide–receptor contact map", "ペプチドと受容体の接触マップ", "펩타이드-수용체 접촉 지도"),
+        "caption": ("放進受體後，每個胜肽殘基（列）與受體殘基（欄）之間最短的重原子距離，只列出 8 Å 內的受體殘基。白框是 4 Å 以內的接觸。",
+                    "Shortest heavy-atom distance between each peptide residue (rows) and receptor residue (columns) after "
+                    "placement. Only receptor residues within 8 Å are shown. White boxes mark contacts within 4 Å.",
+                    "受容体に置いた後の、各ペプチド残基（行）と受容体残基（列）の最短重原子間距離です。8 Å 以内の受容体残基だけを示し、白枠は 4 Å 以内の接触です。",
+                    "수용체에 놓은 뒤 각 펩타이드 잔기(행)와 수용체 잔기(열) 사이의 최단 중원자 거리입니다. 8 Å 이내의 수용체 잔기만 표시했고 흰 테두리는 4 Å 이내 접촉입니다."),
+        "read": ("4 Å 以內算接觸。一半以上的胜肽殘基有接觸，代表介面完整。只有少數殘基接觸，代表胜肽大多懸在溶劑中，預測的介面弱。"
+                 "同一個受體殘基接觸好幾個胜肽殘基時，它可能是熱點。距離小於 1.5 Å 是原子重疊，最小化必須先解開。",
+                 "Within 4 Å counts as a contact. Contacts on half or more of the peptide residues mean a complete interface. "
+                 "Only a few contacting residues mean the peptide mostly hangs in solvent and the predicted interface is weak. "
+                 "A receptor residue touching several peptide residues may be a hot spot. Below 1.5 Å atoms overlap and "
+                 "minimisation has to resolve them first.",
+                 "4 Å 以内を接触とします。ペプチド残基の半分以上が接触していれば界面は十分です。接触する残基が少なければペプチドの大部分は溶媒中にあり、予測された界面は弱いです。"
+                 "1 つの受容体残基が複数のペプチド残基と接触していれば、ホットスポットの可能性があります。1.5 Å 未満は原子の重なりで、まず最小化で解消する必要があります。",
+                 "4 Å 이내를 접촉으로 봅니다. 펩타이드 잔기의 절반 이상이 접촉하면 계면이 온전합니다. 접촉하는 잔기가 적으면 펩타이드 대부분이 용매에 떠 있어 예측된 계면이 약합니다. "
+                 "한 수용체 잔기가 여러 펩타이드 잔기와 접촉하면 핫스팟일 수 있습니다. 1.5 Å 미만은 원자가 겹친 것이며 최소화로 먼저 풀어야 합니다."),
+    },
+    "membrane_equil": {
+        "title": ("膜的平衡：每個脂質的面積與厚度", "Membrane equilibration: area per lipid and thickness",
+                  "膜の平衡化：脂質あたりの面積と厚さ", "막 평형화: 지질당 면적과 두께"),
+        "caption": ("上：每個脂質的面積。下：上下兩葉磷原子平面的距離（P–P 厚度）。灰色帶是實驗參考值 ±6 % 面積、±0.3 nm 厚度，虛線是後半段平均。",
+                    "Top: area per lipid. Bottom: distance between the phosphate planes of the two leaflets (P–P thickness). "
+                    "Grey bands are the experimental reference ±6 % in area and ±0.3 nm in thickness. Dotted lines are the second-half means.",
+                    "上は脂質あたりの面積、下は上下 2 枚のリン原子面の距離（P–P 厚さ）です。灰色の帯は実験の参照値の面積 ±6 %、厚さ ±0.3 nm、点線は後半の平均です。",
+                    "위는 지질당 면적, 아래는 위아래 두 층의 인 원자 평면 사이 거리(P–P 두께)입니다. 회색 띠는 실험 참고값의 면적 ±6 %, 두께 ±0.3 nm이고 점선은 후반부 평균입니다."),
+        "read": ("膜平衡後，面積與厚度都在平台上，並落在灰色帶內。面積還在下降或上升，代表膜仍在收縮或展開，要延長平衡。落在帶外通常是溫度、組成或力場的問題。"
+                 "含蛋白的膜，面積包含蛋白截面，只能看趨勢。",
+                 "An equilibrated membrane has both area and thickness on a plateau inside the grey bands. An area still "
+                 "falling or rising means the membrane is still contracting or expanding, so extend equilibration. Values "
+                 "outside the band usually point to temperature, composition or force field. With a protein, the area includes "
+                 "the protein cross-section, so only the trend is meaningful.",
+                 "平衡化した膜では、面積と厚さがどちらも平坦で灰色の帯の中にあります。面積がまだ下がる、または上がる場合は膜が縮んでいるか広がっている途中なので、平衡化を延ばしてください。"
+                 "帯の外にあるときは、たいてい温度、組成、力場の問題です。タンパク質を含む膜では面積にタンパク質の断面が含まれるため、傾向だけを見ます。",
+                 "평형에 도달한 막은 면적과 두께가 모두 평탄하고 회색 띠 안에 있습니다. 면적이 계속 줄거나 늘면 막이 아직 수축하거나 팽창하는 중이므로 평형화를 늘리십시오. "
+                 "띠 밖에 있으면 대개 온도, 조성, 역장의 문제입니다. 단백질이 있는 막은 면적에 단백질 단면이 포함되므로 경향만 봅니다."),
+    },
+    "membrane_density": {
+        "title": ("沿膜法線的密度剖面", "Density profile along the membrane normal", "膜法線方向の密度分布", "막 법선 방향 밀도 분포"),
+        "caption": ("各組原子的數密度對膜中心的距離 z（膜中心 z = 0），整段模擬平均。",
+                    "Number density of each atom group against the distance z from the membrane centre (z = 0), averaged over the run.",
+                    "各原子グループの数密度を膜中心からの距離 z（膜中心が z = 0）に対してプロットし、計算全体で平均しています。",
+                    "각 원자 그룹의 수밀도를 막 중심으로부터의 거리 z(막 중심 z = 0)에 대해 그렸으며 전체 시뮬레이션에 걸쳐 평균했습니다."),
+        "read": ("磷原子的兩個峰之間的距離就是膜厚。膜中心（|z| < 0.5 nm）的水密度應低於水相的 1 %，否則有孔洞或缺陷。胜肽或配體的分佈落在磷峰外側，代表在水中。"
+                 "落在磷峰附近，代表吸附在頭基區。落在磷峰內側，代表插入膜中。",
+                 "The distance between the two phosphate peaks is the thickness. Water at the centre (|z| < 0.5 nm) should be "
+                 "below 1 % of bulk water, otherwise there is a pore or defect. A peptide or ligand distribution outside the "
+                 "phosphate peaks is in the water, one near the peaks is adsorbed at the head groups, and one inside them has "
+                 "inserted into the membrane.",
+                 "リンの 2 つのピークの間隔が膜厚です。膜中心（|z| < 0.5 nm）の水密度はバルクの 1 % 未満であるべきで、それを超えるなら孔や欠陥があります。"
+                 "ペプチドやリガンドの分布がリンのピークより外側なら水中、ピーク付近なら頭部基の領域に吸着、ピークより内側なら膜に入り込んでいます。",
+                 "인의 두 피크 사이 거리가 막 두께입니다. 막 중심(|z| < 0.5 nm)의 물 밀도는 벌크의 1 % 미만이어야 하며, 넘으면 구멍이나 결함이 있는 것입니다. "
+                 "펩타이드나 리간드 분포가 인 피크 바깥이면 물속에, 피크 근처면 머리 부분 영역에 흡착, 피크 안쪽이면 막 안으로 들어간 것입니다."),
+    },
+    "membrane_scd": {
+        "title": ("脂肪鏈的序參數 −S_CD", "Acyl-chain order parameter −S_CD", "アシル鎖の秩序パラメータ −S_CD", "아실 사슬 질서 매개변수 −S_CD"),
+        "caption": ("每個碳原子的 −S_CD，sn-1 與 sn-2 兩條鏈分開畫。碳編號從羰基往鏈尾增加。灰色帶是流體相常見的 0.12 到 0.25。",
+                    "−S_CD of every carbon, sn-1 and sn-2 chains drawn separately. Carbon numbers increase from the carbonyl "
+                    "towards the chain end. The grey band is the usual fluid-phase range 0.12–0.25.",
+                    "各炭素の −S_CD で、sn-1 鎖と sn-2 鎖を分けて描いています。炭素番号はカルボニルから鎖末端に向かって増えます。灰色の帯は流動相でよく見られる 0.12〜0.25 です。",
+                    "각 탄소의 −S_CD이며 sn-1과 sn-2 사슬을 따로 그렸습니다. 탄소 번호는 카르보닐에서 사슬 끝으로 갈수록 커집니다. 회색 띠는 유동상에서 흔한 0.12~0.25입니다."),
+        "read": ("−S_CD 越大，鏈越有序。流體相的平台（碳 4 到 10）約 0.12 到 0.25，往鏈尾逐漸下降。平台高於 0.3 代表膜過於有序，可能接近凝膠相。"
+                 "低於 0.12 代表過於無序。這是和氘 NMR 直接比較的量。",
+                 "A larger −S_CD means a more ordered chain. In the fluid phase the plateau (carbons 4–10) is about 0.12–0.25 "
+                 "and falls towards the chain end. A plateau above 0.3 means an over-ordered membrane, possibly near the gel "
+                 "phase, and one below 0.12 an over-disordered one. This quantity is compared directly with deuterium NMR.",
+                 "−S_CD が大きいほど鎖は秩序立っています。流動相の平坦部（炭素 4〜10）はおよそ 0.12〜0.25 で、鎖末端に向かって下がります。"
+                 "平坦部が 0.3 を超えると膜は秩序が高すぎ、ゲル相に近い可能性があります。0.12 未満は無秩序すぎます。重水素 NMR と直接比べられる量です。",
+                 "−S_CD가 클수록 사슬이 질서 있습니다. 유동상에서 평탄 구간(탄소 4~10)은 약 0.12~0.25이며 사슬 끝으로 갈수록 낮아집니다. "
+                 "평탄 구간이 0.3을 넘으면 막이 지나치게 질서 있어 겔상에 가까울 수 있고, 0.12 미만이면 지나치게 무질서합니다. 중수소 NMR과 직접 비교하는 양입니다."),
+    },
+    "insertion_depth": {
+        "title": ("插入深度隨時間的變化", "Insertion depth over time", "挿入の深さの時間変化", "삽입 깊이의 시간 변화"),
+        "caption": ("溶質相對所在那一葉磷原子平面的深度，正值是進入膜內。實線是重原子質心，虛線是最深的重原子。0 是磷平面，灰色帶是頭基區（磷平面上方 0.5 nm 到下方 0.3 nm）。",
+                    "Depth of the solute relative to the phosphate plane of its leaflet. Positive is inside the membrane. The solid "
+                    "line is the heavy-atom centroid and the dashed line the deepest heavy atom. Zero is the phosphate plane and "
+                    "the grey band the head-group region (0.5 nm above to 0.3 nm below it).",
+                    "溶質が接している葉のリン原子面からの深さで、正の値は膜の内側です。実線は重原子の重心、破線は最も深い重原子です。0 がリン原子面、灰色の帯が頭部基の領域（リン原子面の上 0.5 nm から下 0.3 nm）です。",
+                    "용질이 놓인 층의 인 원자 평면으로부터의 깊이이며 양수는 막 안쪽입니다. 실선은 중원자 무게중심, 점선은 가장 깊은 중원자입니다. 0은 인 원자 평면이고 회색 띠는 머리 부분 영역(인 평면 위 0.5 nm부터 아래 0.3 nm)입니다."),
+        "read": ("質心在磷平面上方超過 0.5 nm，溶質仍在水中。落在灰色帶，代表吸附在膜表面。磷平面下方 0.3 到 1.0 nm 是介面區，超過 1.0 nm 已進入疏水核心。"
+                 "曲線在後半段仍在變化，代表吸附或插入還沒完成。穿過膜中心是罕見事件，一次不能當作速率。",
+                 "A centroid more than 0.5 nm above the phosphate plane is still in the water. Inside the grey band the solute "
+                 "is adsorbed on the surface. 0.3–1.0 nm below the plane is the interface, and beyond 1.0 nm it has entered "
+                 "the hydrophobic core. A curve still changing in the second half means adsorption or insertion is not "
+                 "finished. Crossing the membrane centre is a rare event, and one crossing is not a rate.",
+                 "重心がリン原子面より 0.5 nm 以上上にあれば、溶質はまだ水中です。灰色の帯の中なら膜表面に吸着しています。リン原子面の下 0.3〜1.0 nm は界面領域で、1.0 nm を超えると疎水性コアに入っています。"
+                 "後半になっても曲線が変化していれば、吸着や挿入はまだ終わっていません。膜中心の通過はまれな現象で、1 回だけでは速度とは言えません。",
+                 "무게중심이 인 원자 평면보다 0.5 nm 넘게 위에 있으면 용질은 아직 물속에 있습니다. 회색 띠 안이면 막 표면에 흡착한 것입니다. 인 평면 아래 0.3~1.0 nm는 계면 영역이고 1.0 nm를 넘으면 소수성 중심부에 들어간 것입니다. "
+                 "후반부에도 곡선이 변하면 흡착이나 삽입이 끝나지 않은 것입니다. 막 중심 통과는 드문 사건이며 한 번으로는 속도라고 할 수 없습니다."),
+    },
+    "headgroup_residence": {
+        "title": ("與頭基接觸的殘基與停留比例", "Residues in contact with the head groups and their residence",
+                  "頭部基と接触する残基と滞在の割合", "머리 부분과 접촉하는 잔기와 체류 비율"),
+        "caption": ("每個殘基與脂質磷原子（或膽固醇 O3）距離 0.4 nm 以內的時間比例，依比例排序。",
+                    "Fraction of time each residue spends within 0.4 nm of a lipid phosphorus (or cholesterol O3), sorted by fraction.",
+                    "各残基が脂質のリン原子（またはコレステロールの O3）から 0.4 nm 以内にある時間の割合を、割合の高い順に並べています。",
+                    "각 잔기가 지질의 인 원자(또는 콜레스테롤 O3)로부터 0.4 nm 이내에 있는 시간의 비율을 비율순으로 정렬했습니다."),
+        "read": ("50 % 以上是持續接觸，是吸附的錨點，常見的是帶正電的離胺酸與精胺酸。20 % 到 50 % 是間歇接觸。最後一幀仍在接觸的事件，停留時間只能算下限。",
+                 "Above 50 % is a persistent contact that anchors the adsorption, often positively charged lysine and arginine. "
+                 "20–50 % is intermittent. For a contact still open at the last frame the residence time is only a lower bound.",
+                 "50 % 以上は持続的な接触で吸着のアンカーです。正に帯電したリシンやアルギニンがよく見られます。20〜50 % は断続的な接触です。最後のフレームでも接触が続いている場合、滞在時間は下限値にすぎません。",
+                 "50 % 이상은 지속적인 접촉으로 흡착의 앵커이며 양전하를 띤 라이신과 아르지닌이 흔합니다. 20~50 %는 간헐적 접촉입니다. 마지막 프레임에서도 접촉 중이면 체류 시간은 하한값일 뿐입니다."),
+    },
+    "peptide_tilt": {
+        "title": ("胜肽傾角的分佈", "Distribution of the peptide tilt", "ペプチドの傾きの分布", "펩타이드 기울기 분포"),
+        "caption": ("胜肽主軸（Cα 的主成分）與膜法線的夾角，前半段與後半段分開畫。90° 是平躺在膜面，0° 是沿法線直立。",
+                    "Angle between the peptide's principal axis (principal component of the Cα atoms) and the membrane normal, "
+                    "first and second halves drawn separately. 90° lies flat on the surface and 0° stands along the normal.",
+                    "ペプチドの主軸（Cα の主成分）と膜法線のなす角で、前半と後半を分けて描いています。90° は膜面に寝た状態、0° は法線に沿って立った状態です。",
+                    "펩타이드 주축(Cα의 주성분)과 막 법선 사이의 각도이며 전반부와 후반부를 따로 그렸습니다. 90°는 막 표면에 누운 상태, 0°는 법선을 따라 선 상태입니다."),
+        "read": ("60° 以上是平躺，兩親性螺旋吸附在膜表面時常見。30° 到 60° 是斜插。30° 以下是沿法線直立，表面接觸的短胜肽很少這樣。標準差超過 20° 代表方向還沒穩定。"
+                 "胜肽沒有固定的二級結構時，主軸只是大致的方向。",
+                 "Above 60° the peptide lies flat, as amphipathic helices usually do on a membrane surface. 30–60° is oblique. "
+                 "Below 30° it stands along the normal, which is rare for a short surface-bound peptide. A standard deviation "
+                 "above 20° means the orientation has not settled. Without a fixed secondary structure the principal axis is only a rough direction.",
+                 "60° 以上は寝た状態で、両親媒性ヘリックスが膜表面に吸着したときによく見られます。30〜60° は斜めに入った状態、30° 未満は法線に沿って立った状態で、表面に接触する短いペプチドではまれです。"
+                 "標準偏差が 20° を超えるなら向きはまだ定まっていません。二次構造が決まっていないペプチドでは、主軸はおおよその方向にすぎません。",
+                 "60° 이상은 누운 상태로, 양친매성 나선이 막 표면에 흡착할 때 흔합니다. 30~60°는 비스듬히 들어간 상태이고 30° 미만은 법선을 따라 선 상태로, 표면에 접촉하는 짧은 펩타이드에서는 드뭅니다. "
+                 "표준편차가 20°를 넘으면 방향이 아직 안정되지 않은 것입니다. 이차 구조가 정해지지 않은 펩타이드에서는 주축이 대략적인 방향일 뿐입니다."),
+    },
+    "thickness_map": {
+        "title": ("膜厚度的平面分佈", "Thickness map of the membrane plane", "膜厚の面内分布", "막 두께의 평면 분포"),
+        "caption": ("把膜面切成格子，每格上下兩葉磷原子的平均距離，整段模擬平均。白色是沒有取樣的格子，× 是溶質的平均位置。",
+                    "The membrane plane cut into a grid, with the mean distance between the phosphates of the two leaflets in each "
+                    "cell, averaged over the run. White cells were not sampled and × marks the mean solute position.",
+                    "膜面を格子に分け、各格子で上下 2 枚のリン原子の平均距離を求めて計算全体で平均しています。白はサンプルのない格子、× は溶質の平均位置です。",
+                    "막 평면을 격자로 나누고 각 칸에서 위아래 두 층 인 원자의 평균 거리를 구해 전체 시뮬레이션에 걸쳐 평균했습니다. 흰색은 표본이 없는 칸, ×는 용질의 평균 위치입니다."),
+        "read": ("均勻的膜各格相差不到 0.5 nm。溶質附近變薄，代表它擾動了膜。局部厚度低於平均的 80 % 是明顯變薄，可能是缺陷或孔洞的前兆。格子少、取樣短時，邊緣的格子雜訊大。",
+                 "In a uniform membrane the cells differ by less than 0.5 nm. Thinning near the solute means it perturbs the "
+                 "membrane. A local thickness below 80 % of the mean is marked thinning and may precede a defect or pore. With "
+                 "few cells or short sampling, edge cells are noisy.",
+                 "均一な膜では格子間の差は 0.5 nm 未満です。溶質の近くで薄くなっていれば、溶質が膜を乱しています。局所的な厚さが平均の 80 % を下回るのは明らかな薄化で、欠陥や孔の前ぶれかもしれません。"
+                 "格子が少ない、またはサンプリングが短い場合、端の格子はノイズが大きくなります。",
+                 "균일한 막에서는 칸 사이의 차이가 0.5 nm 미만입니다. 용질 근처에서 얇아지면 용질이 막을 교란한 것입니다. 국소 두께가 평균의 80 %보다 낮으면 뚜렷하게 얇아진 것이며 결함이나 구멍의 전조일 수 있습니다. "
+                 "칸이 적거나 샘플링이 짧으면 가장자리 칸은 잡음이 큽니다."),
+    },
+    "longrun_plan": {
+        "title": ("長時間模擬：規劃與實際", "Long simulation: plan and actual", "長時間シミュレーション：計画と実績", "장시간 시뮬레이션: 계획과 실제"),
+        "caption": ("左：正式模擬的長度（ns），規劃與實際完成。右：硬碟用量（GB），規劃的軌跡、chunk 檔與合計，和實際的資料夾大小。",
+                    "Left: production length (ns), planned and completed. Right: disk use (GB), the planned trajectory, chunk "
+                    "files and total, against the actual size of the run folder.",
+                    "左は本計算の長さ（ns）の計画値と完了した値、右はディスク使用量（GB）で、計画した軌跡、chunk ファイル、合計と実際のフォルダの大きさです。",
+                    "왼쪽은 본 시뮬레이션 길이(ns)의 계획값과 완료값, 오른쪽은 디스크 사용량(GB)으로 계획한 궤적, chunk 파일, 합계와 실제 폴더 크기입니다."),
+        "read": ("實際完成的長度達到規劃的 99 % 才算跑完。沒跑完時，後面的分析只代表已完成的部分。實際硬碟用量超過規劃的 125 %，代表規劃的估計偏低，下次要多留空間。"
+                 "只存溶質時，水的分析（水橋、水的密度）無法做。",
+                 "The run is complete only when at least 99 % of the planned length is done. Otherwise the analysis covers "
+                 "only the completed part. Actual disk use above 125 % of the plan means the estimate was low, so leave more "
+                 "space next time. When only the solute is saved, water analyses (water bridges, water density) are not possible.",
+                 "完了した長さが計画の 99 % に達して初めて完走とみなします。達していなければ、解析は完了した部分だけを表します。実際のディスク使用量が計画の 125 % を超えたら見積もりが低かったので、次回は余裕を持たせてください。"
+                 "溶質だけを保存した場合、水の解析（水架橋、水の密度）はできません。",
+                 "완료한 길이가 계획의 99 %에 이르러야 끝까지 실행한 것입니다. 그렇지 않으면 분석은 완료된 부분만 나타냅니다. 실제 디스크 사용량이 계획의 125 %를 넘으면 추정이 낮았던 것이므로 다음에는 공간을 더 확보하십시오. "
+                 "용질만 저장했다면 물 분석(물 다리, 물 밀도)은 할 수 없습니다."),
+    },
+    "convergence_rmsf": {
+        "title": ("收斂：前半段與後半段的殘基柔性", "Convergence: residue flexibility in the first and second halves",
+                  "収束：前半と後半の残基の柔軟性", "수렴: 전반부와 후반부의 잔기 유연성"),
+        "caption": ("把正式模擬切成前後兩半，各自計算的 Cα RMSF。下方是後半減前半。",
+                    "Cα RMSF computed separately for the first and second halves of production. The panel below is the second half minus the first.",
+                    "本計算を前半と後半に分け、それぞれで計算した Cα RMSF です。下段は後半から前半を引いた差です。",
+                    "본 시뮬레이션을 전반부와 후반부로 나누어 각각 계산한 Cα RMSF입니다. 아래쪽은 후반부에서 전반부를 뺀 차이입니다."),
+        "read": ("兩半的柔性剖面相關係數 0.8 以上、平均差 0.3 Å 以內，代表動態已經收斂，延長模擬不會改變結論。後半段整體較高，代表還在取樣新的運動，例如 loop 開合。",
+                 "A correlation of 0.8 or more between the two profiles with a mean difference within 0.3 Å means the dynamics "
+                 "have converged and a longer run would not change the conclusion. A second half that is higher overall means "
+                 "new motions, such as a loop opening, are still being sampled.",
+                 "2 つの柔軟性プロファイルの相関係数が 0.8 以上で平均差が 0.3 Å 以内なら、動きは収束しており、計算を延ばしても結論は変わりません。後半が全体に高い場合は、ループの開閉のような新しい動きをまだサンプリングしています。",
+                 "두 유연성 프로파일의 상관계수가 0.8 이상이고 평균 차이가 0.3 Å 이내이면 동역학이 수렴한 것이며 시뮬레이션을 늘려도 결론이 바뀌지 않습니다. 후반부가 전체적으로 높으면 루프 개폐 같은 새로운 움직임을 아직 샘플링하는 중입니다."),
+    },
+    "convergence_rmsd": {
+        "title": ("收斂：前半段與後半段的 RMSD 分佈", "Convergence: RMSD distribution in the first and second halves",
+                  "収束：前半と後半の RMSD 分布", "수렴: 전반부와 후반부의 RMSD 분포"),
+        "caption": ("主鏈 RMSD 在前半段與後半段的直方圖（面積標準化）。", "Histograms of the backbone RMSD in the first and second halves (normalised to equal area).",
+                    "主鎖 RMSD の前半と後半のヒストグラム（面積で規格化）です。", "주사슬 RMSD의 전반부와 후반부 히스토그램(면적으로 정규화)입니다."),
+        "read": ("兩個分佈的重疊係數 0.6 以上，代表兩半取樣到同一組構形。0.3 到 0.6 是部分重疊，結構還在慢慢變化。0.3 以下代表後半段到了新的構形，前半段的平均不能代表整體。",
+                 "An overlap coefficient of 0.6 or more means both halves sampled the same set of conformations. 0.3–0.6 is "
+                 "partial overlap and the structure is still drifting slowly. Below 0.3 the second half reached new "
+                 "conformations and an average over the whole run is not representative.",
+                 "2 つの分布の重なり係数が 0.6 以上なら、前半と後半は同じ構造の集まりをサンプリングしています。0.3〜0.6 は部分的な重なりで、構造はまだゆっくり変化しています。0.3 未満なら後半は新しい構造に移っており、全体の平均は代表値になりません。",
+                 "두 분포의 겹침 계수가 0.6 이상이면 두 절반이 같은 구조 집합을 샘플링한 것입니다. 0.3~0.6은 부분 겹침으로 구조가 아직 천천히 변하고 있습니다. 0.3 미만이면 후반부가 새로운 구조로 옮겨 간 것이므로 전체 평균은 대표값이 되지 못합니다."),
+    },
+    "cluster_timeline": {
+        "title": ("構形叢集比例隨時間的變化", "Cluster populations over time", "構造クラスターの割合の時間変化", "구조 클러스터 비율의 시간 변화"),
+        "caption": ("把模擬切成 10 段，每段中各構形叢集所占的比例（堆疊面積圖）。",
+                    "The run cut into 10 windows, with the share of each conformational cluster in every window (stacked area).",
+                    "計算を 10 区間に分け、各区間で各構造クラスターが占める割合を積み上げ面グラフで示しています。",
+                    "시뮬레이션을 10구간으로 나누고 각 구간에서 구조 클러스터가 차지하는 비율을 누적 면적 그래프로 나타냈습니다."),
+        "read": ("各叢集在前後兩半的比例相差 10 個百分點以內，代表構形的分佈穩定。後四分之一才出現、占 20 % 以上的新叢集，代表模擬還在探索新的狀態，還沒收斂。"
+                 "叢集之間來回切換，代表狀態之間有轉換，這是長時間模擬才看得到的資訊。",
+                 "Cluster shares within 10 percentage points between the two halves mean a stable distribution of "
+                 "conformations. A new cluster that appears only in the last quarter with 20 % or more means the run is still "
+                 "exploring new states and has not converged. Switching back and forth between clusters shows transitions "
+                 "between states, information only a long run can give.",
+                 "各クラスターの割合の差が前半と後半で 10 ポイント以内なら、構造の分布は安定しています。最後の 4 分の 1 で初めて現れ、20 % 以上を占める新しいクラスターがあれば、計算はまだ新しい状態を探しており収束していません。"
+                 "クラスター間を行き来していれば状態間の遷移があり、これは長時間の計算でしか得られない情報です。",
+                 "각 클러스터 비율이 전반부와 후반부에서 10 %p 이내로 차이 나면 구조 분포가 안정적입니다. 마지막 4분의 1에서야 나타나 20 % 이상을 차지하는 새 클러스터가 있으면 시뮬레이션이 아직 새로운 상태를 탐색 중이며 수렴하지 않은 것입니다. "
+                 "클러스터 사이를 오가면 상태 간 전이가 있는 것이며, 이는 장시간 시뮬레이션에서만 얻을 수 있는 정보입니다."),
+    },
+    "cg_membrane": {
+        "title": ("粗粒化膜的性質（Martini 3，珠子層級）", "Coarse-grained membrane properties (Martini 3, bead level)",
+                  "粗視化膜の性質（Martini 3、ビーズ単位）", "조립화 막의 성질(Martini 3, 비드 단위)"),
+        "caption": ("粗粒化模擬，不是全原子。左上：每個脂質的面積。左下：PO4 珠子平面之間的厚度，灰色帶是實驗參考值 ±6 % 與 ±0.3 nm。右：每個鍵的序參數 P2。",
+                    "Coarse-grained simulation, not atomistic. Top left: area per lipid. Bottom left: thickness between the PO4 "
+                    "bead planes, with grey bands at the experimental reference ±6 % and ±0.3 nm. Right: order parameter P2 of each bond.",
+                    "粗視化シミュレーションで、全原子ではありません。左上は脂質あたりの面積、左下は PO4 ビーズ面の間の厚さで、灰色の帯は実験参照値の ±6 % と ±0.3 nm です。右は各結合の秩序パラメータ P2 です。",
+                    "조립화 시뮬레이션이며 전원자가 아닙니다. 왼쪽 위는 지질당 면적, 왼쪽 아래는 PO4 비드 평면 사이의 두께이고 회색 띠는 실험 참고값 ±6 %와 ±0.3 nm입니다. 오른쪽은 각 결합의 질서 매개변수 P2입니다."),
+        "read": ("每顆珠子約代表 4 個重原子，所以沒有氫鍵與原子細節，序參數是鍵的 P2，不能和氘 NMR 的 S_CD 直接比較。面積與厚度可以和實驗比。"
+                 "P2 平均在 0.1 到 0.6 之間是流體相。高於 0.6 偏凝膠，低於 0.1 過於無序。粗粒化的動態比真實快，模擬時間不能直接當真實時間。",
+                 "Each bead stands for about 4 heavy atoms, so there are no hydrogen bonds or atomic detail, and the order "
+                 "parameter is the bond P2, which cannot be compared directly with the deuterium S_CD. Area and thickness can be "
+                 "compared with experiment. A mean P2 of 0.1–0.6 is the fluid phase. Above 0.6 tends towards gel and below 0.1 "
+                 "is over-disordered. Coarse-grained dynamics run faster than real ones, so simulated time is not real time.",
+                 "ビーズ 1 個はおよそ 4 個の重原子にあたるため、水素結合や原子の細部はありません。秩序パラメータは結合の P2 で、重水素 NMR の S_CD とは直接比べられません。面積と厚さは実験と比べられます。"
+                 "P2 の平均が 0.1〜0.6 なら流動相、0.6 を超えるとゲル寄り、0.1 未満は無秩序すぎます。粗視化の動きは実際より速いため、シミュレーション時間をそのまま実時間とみなせません。",
+                 "비드 하나가 중원자 약 4개를 나타내므로 수소 결합과 원자 수준의 세부가 없고, 질서 매개변수는 결합의 P2로 중수소 NMR의 S_CD와 직접 비교할 수 없습니다. 면적과 두께는 실험과 비교할 수 있습니다. "
+                 "P2 평균이 0.1~0.6이면 유동상이고 0.6을 넘으면 겔 쪽, 0.1 미만이면 지나치게 무질서합니다. 조립화 동역학은 실제보다 빠르므로 시뮬레이션 시간을 그대로 실제 시간으로 볼 수 없습니다."),
+    },
+})
+
+
+def _jz(items, n: int = 8) -> tuple[str, str]:
+    """A short list in Chinese/Japanese and in English/Korean separators."""
+    items = [str(x) for x in items][:n]
+    return "、".join(items), ", ".join(items)
+
+
+def _halfmean(y) -> float:
+    y = np.asarray(y, float)
+    return float(y[len(y) // 2:].mean())
+
+
+# --------------------------------------------------------------------------------------------- fold
+PLDDT_GOOD, PLDDT_LOW, IPTM_MIN = 70.0, 50.0, 0.5
+
+
+def classify_fold_plddt(name: str, rec: dict) -> list[dict]:
+    pl = [float(x) for x in rec.get("per_residue_plddt") or []]
+    m = rec.get("mean_plddt")
+    if m is None and pl:
+        m = float(np.mean(pl))
+    if m is None:
+        return []
+    out = []
+    eng = rec.get("engine") or "—"
+    if m >= PLDDT_GOOD:
+        out.append(S("good",
+                     f"{name}：胜肽平均 pLDDT {m:.1f}（≥ 70，{eng}），預測的主鏈可信，可以當起始構形。這仍是預測，不是實驗結構。",
+                     f"{name}: mean peptide pLDDT {m:.1f} (≥ 70, {eng}), so the predicted backbone is confident and usable as the "
+                     "starting structure. It is still a prediction, not an experimental structure.",
+                     f"{name}：ペプチドの平均 pLDDT は {m:.1f}（≥ 70、{eng}）で、予測した主鎖は信頼でき、初期構造として使えます。それでも予測であり、実験構造ではありません。",
+                     f"{name}: 펩타이드 평균 pLDDT {m:.1f}(≥ 70, {eng})로 예측한 주사슬을 믿을 수 있어 시작 구조로 쓸 수 있습니다. 그래도 예측이며 실험 구조가 아닙니다."))
+    elif m >= PLDDT_LOW:
+        out.append(S("note",
+                     f"{name}：胜肽平均 pLDDT {m:.1f}（50 到 70，{eng}），可信度偏低。MD 要確認這個構形站得住，主鏈 RMSD 若很快超過 3 Å，代表預測的構形不穩定。",
+                     f"{name}: mean peptide pLDDT {m:.1f} (50–70, {eng}), low confidence. MD has to show that this conformation "
+                     "holds. A backbone RMSD quickly above 3 Å means the predicted conformation is unstable.",
+                     f"{name}：ペプチドの平均 pLDDT は {m:.1f}（50〜70、{eng}）で、信頼度は低めです。この構造が保たれるかを MD で確かめる必要があり、主鎖 RMSD がすぐ 3 Å を超えるなら予測構造は不安定です。",
+                     f"{name}: 펩타이드 평균 pLDDT {m:.1f}(50~70, {eng})로 신뢰도가 낮습니다. 이 구조가 유지되는지 MD로 확인해야 하며 주사슬 RMSD가 곧 3 Å을 넘으면 예측 구조가 불안정한 것입니다."))
+    else:
+        out.append(S("caution",
+                     f"{name}：胜肽平均 pLDDT {m:.1f}（< 50，{eng}），預測不可信，胜肽在溶液中可能沒有固定結構。以這個構形得到的結果只能當定性參考。",
+                     f"{name}: mean peptide pLDDT {m:.1f} (< 50, {eng}). The prediction is not reliable and the peptide may have no "
+                     "fixed structure in solution. Results from this conformation are qualitative only.",
+                     f"{name}：ペプチドの平均 pLDDT は {m:.1f}（< 50、{eng}）で、予測は信頼できません。ペプチドは溶液中で決まった構造を持たない可能性があり、この構造から得た結果は定性的な参考にとどまります。",
+                     f"{name}: 펩타이드 평균 pLDDT {m:.1f}(< 50, {eng})로 예측을 믿을 수 없습니다. 펩타이드가 용액에서 고정된 구조가 없을 수 있으므로 이 구조로 얻은 결과는 정성적 참고로만 쓰십시오."))
+    low = [i + 1 for i, v in enumerate(pl) if v < PLDDT_LOW]
+    if low and m >= PLDDT_LOW:
+        z, e = _jz(low, 12)
+        out.append(S("note",
+                     f"{name}：第 {z} 個殘基的 pLDDT 低於 50，通常是末端或柔軟的 loop，不要解讀這些位置的構形。",
+                     f"{name}: residues {e} are below pLDDT 50, usually termini or flexible loops. Do not interpret their conformation.",
+                     f"{name}：{z} 番目の残基は pLDDT が 50 未満で、たいてい末端か柔らかいループです。これらの位置の構造は解釈しないでください。",
+                     f"{name}: {e}번째 잔기는 pLDDT가 50 미만으로 대개 말단이나 유연한 루프입니다. 이 위치의 구조는 해석하지 마십시오."))
+    ip = rec.get("iptm")
+    if ip is not None:
+        ip = float(ip)
+        out.append(S("note", f"{name}：介面的 ipTM {ip:.2f}（≥ 0.5），預測的結合介面可以參考，仍要以 MD 確認。",
+                     f"{name}: interface ipTM {ip:.2f} (≥ 0.5). The predicted interface is a reasonable hypothesis, still to be confirmed by MD.",
+                     f"{name}：界面の ipTM は {ip:.2f}（≥ 0.5）で、予測された結合界面は参考になりますが、MD で確認が必要です。",
+                     f"{name}: 계면 ipTM {ip:.2f}(≥ 0.5)로 예측한 결합 계면을 참고할 수 있지만 MD로 확인해야 합니다.")
+                   if ip >= IPTM_MIN else
+                   S("caution", f"{name}：介面的 ipTM {ip:.2f}（< 0.5），預測的結合介面不可信，胜肽的結合位置可能是錯的。",
+                     f"{name}: interface ipTM {ip:.2f} (< 0.5). The predicted interface is not reliable and the peptide may sit in the wrong place.",
+                     f"{name}：界面の ipTM は {ip:.2f}（< 0.5）で、予測された結合界面は信頼できず、ペプチドの結合位置が誤っている可能性があります。",
+                     f"{name}: 계면 ipTM {ip:.2f}(< 0.5)로 예측한 결합 계면을 믿을 수 없으며 펩타이드의 결합 위치가 틀렸을 수 있습니다."))
+    by = rec.get("plddt_by_chain") or {}
+    pc = rec.get("peptide_chain")
+    for c, v in by.items():
+        if c == pc or not v:
+            continue
+        cm = float(np.mean(v))
+        if cm < PLDDT_GOOD:
+            out.append(S("caution",
+                         f"{name}：預測的受體鏈 {c} 平均 pLDDT {cm:.1f}（< 70），受體本身的預測不可靠，放置胜肽時應以實際受體為準。",
+                         f"{name}: predicted receptor chain {c} has a mean pLDDT of {cm:.1f} (< 70). The receptor prediction itself "
+                         "is unreliable, so rely on the actual receptor when placing the peptide.",
+                         f"{name}：予測した受容体の鎖 {c} は平均 pLDDT {cm:.1f}（< 70）で、受容体自体の予測が信頼できません。ペプチドを置くときは実際の受容体を基準にしてください。",
+                         f"{name}: 예측한 수용체 사슬 {c}의 평균 pLDDT가 {cm:.1f}(< 70)로 수용체 예측 자체를 믿기 어렵습니다. 펩타이드를 놓을 때는 실제 수용체를 기준으로 하십시오."))
+    return out
+
+
+def classify_fold_superposition(name: str, dev, labels, rmsd=None, pocket_rmsd=None, pocket_mask=None, max_rmsd: float = 2.0) -> list[dict]:
+    d = np.asarray(dev, float)
+    if not len(d):
+        return []
+    r = float(rmsd) if rmsd is not None else float(np.sqrt((d ** 2).mean()))
+    out = [S("good",
+             f"{name}：{len(d)} 個配對的 Cα 疊合後 RMSD {r:.2f} Å（≤ {max_rmsd:g} Å），預測的受體和實際受體一致，胜肽的位置可以搬過來。",
+             f"{name}: {len(d)} matched Cα superpose at {r:.2f} Å RMSD (≤ {max_rmsd:g} Å). The predicted receptor agrees with the "
+             "actual one, so the peptide's position can be transferred.",
+             f"{name}：対応づけた Cα {len(d)} 個の重ね合わせ RMSD は {r:.2f} Å（≤ {max_rmsd:g} Å）で、予測した受容体は実際の受容体と一致しています。ペプチドの位置を移せます。",
+             f"{name}: 짝지은 Cα {len(d)}개를 겹친 RMSD가 {r:.2f} Å(≤ {max_rmsd:g} Å)로 예측한 수용체가 실제 수용체와 일치합니다. 펩타이드 위치를 옮길 수 있습니다.")
+           if r <= max_rmsd else
+           S("caution",
+             f"{name}：{len(d)} 個配對的 Cα 疊合後 RMSD {r:.2f} Å（> {max_rmsd:g} Å），預測的受體和實際受體不一致，搬過來的胜肽姿勢可能不在正確的位置。",
+             f"{name}: {len(d)} matched Cα superpose at {r:.2f} Å RMSD (> {max_rmsd:g} Å). The predicted receptor differs from the "
+             "actual one, so the transferred peptide pose may be misplaced.",
+             f"{name}：対応づけた Cα {len(d)} 個の重ね合わせ RMSD は {r:.2f} Å（> {max_rmsd:g} Å）で、予測した受容体は実際の受容体と一致しません。移したペプチドのポーズは正しい位置にない可能性があります。",
+             f"{name}: 짝지은 Cα {len(d)}개를 겹친 RMSD가 {r:.2f} Å(> {max_rmsd:g} Å)로 예측한 수용체가 실제 수용체와 다릅니다. 옮긴 펩타이드 포즈가 잘못된 위치에 있을 수 있습니다.")]
+    pm = None if pocket_mask is None else np.asarray(pocket_mask, bool)
+    if pocket_rmsd is None and pm is not None and pm.sum() >= 3:
+        pocket_rmsd = float(np.sqrt((d[pm] ** 2).mean()))
+    if pocket_rmsd is not None:
+        p = float(pocket_rmsd)
+        out.append(S("good" if p <= max_rmsd else "caution",
+                     f"{name}：胜肽 10 Å 內結合位殘基的 Cα RMSD {p:.2f} Å（{'≤' if p <= max_rmsd else '>'} {max_rmsd:g} Å），"
+                     + ("結合位的形狀和實際結構相同。" if p <= max_rmsd else "結合位的形狀不同，胜肽姿勢是在另一種口袋形狀下預測的。"),
+                     f"{name}: binding-site Cα within 10 Å of the peptide deviate by {p:.2f} Å RMSD ({'≤' if p <= max_rmsd else '>'} {max_rmsd:g} Å). "
+                     + ("The site has the same shape as in the actual structure." if p <= max_rmsd else
+                        "The site has a different shape, so the peptide pose was predicted for another pocket shape."),
+                     f"{name}：ペプチドから 10 Å 以内の結合部位残基の Cα RMSD は {p:.2f} Å（{'≤' if p <= max_rmsd else '>'} {max_rmsd:g} Å）です。"
+                     + ("結合部位の形は実際の構造と同じです。" if p <= max_rmsd else "結合部位の形が異なり、ペプチドのポーズは別のポケットの形で予測されています。"),
+                     f"{name}: 펩타이드 10 Å 이내 결합 부위 잔기의 Cα RMSD는 {p:.2f} Å({'≤' if p <= max_rmsd else '>'} {max_rmsd:g} Å)입니다. "
+                     + ("결합 부위 모양이 실제 구조와 같습니다." if p <= max_rmsd else "결합 부위 모양이 달라 펩타이드 포즈가 다른 포켓 모양에서 예측된 것입니다.")))
+    labels = list(labels) if labels is not None and len(labels) == len(d) else [f"#{i + 1}" for i in range(len(d))]
+    big = [str(labels[i]) for i in np.argsort(-d) if d[i] > 3.0][:8]
+    if big:
+        z, e = _jz(big)
+        inpk = pm is not None and any(pm[i] for i in range(len(d)) if d[i] > 3.0)
+        out.append(S("caution" if inpk else "note",
+                     f"{name}：偏差超過 3 Å 的殘基有 {z}" + ("，其中有結合位殘基，結合位附近的預測要保守看待。" if inpk else "，都不在結合位，對胜肽姿勢影響不大。"),
+                     f"{name}: residues deviating by more than 3 Å are {e}" + (". Some line the binding site, so read the prediction near the site with caution."
+                                                                          if inpk else ". None lines the binding site, so they matter little for the peptide pose."),
+                     f"{name}：ずれが 3 Å を超える残基は {z} です" + ("。結合部位の残基を含むため、結合部位付近の予測は慎重に扱ってください。" if inpk else "。どれも結合部位にはなく、ペプチドのポーズへの影響は小さいです。"),
+                     f"{name}: 편차가 3 Å을 넘는 잔기는 {e}입니다" + (". 결합 부위 잔기가 포함되어 있으므로 결합 부위 근처 예측은 신중하게 보십시오." if inpk else ". 모두 결합 부위 밖이므로 펩타이드 포즈에는 영향이 작습니다.")))
+    return out
+
+
+def classify_fold_contacts(name: str, rows: list, cols: list, M) -> list[dict]:
+    D = np.asarray(M, float)
+    if D.size == 0:
+        return []
+    c = D <= 4.0
+    k, n = int(c.any(1).sum()), len(rows)
+    f = k / max(1, n)
+    if f >= 0.5:
+        out = [S("good", f"{name}：{n} 個胜肽殘基中有 {k} 個（{f:.0%}，≥ 50 %）與受體接觸，介面完整。",
+                 f"{name}: {k} of {n} peptide residues ({f:.0%}, ≥ 50 %) touch the receptor, a complete interface.",
+                 f"{name}：ペプチド残基 {n} 個のうち {k} 個（{f:.0%}、≥ 50 %）が受容体と接触しており、界面は十分です。",
+                 f"{name}: 펩타이드 잔기 {n}개 중 {k}개({f:.0%}, ≥ 50 %)가 수용체와 접촉하여 계면이 온전합니다.")]
+    elif f >= 0.25:
+        out = [S("note", f"{name}：{n} 個胜肽殘基中有 {k} 個（{f:.0%}，25 % 到 50 %）與受體接觸，其餘伸在溶劑中。",
+                 f"{name}: {k} of {n} peptide residues ({f:.0%}, 25–50 %) touch the receptor and the rest extend into solvent.",
+                 f"{name}：ペプチド残基 {n} 個のうち {k} 個（{f:.0%}、25〜50 %）が受容体と接触し、残りは溶媒中に出ています。",
+                 f"{name}: 펩타이드 잔기 {n}개 중 {k}개({f:.0%}, 25~50 %)가 수용체와 접촉하고 나머지는 용매 쪽으로 뻗어 있습니다.")]
+    else:
+        out = [S("caution", f"{name}：只有 {k} 個胜肽殘基（{f:.0%}，< 25 %）與受體接觸，預測的介面很弱，胜肽可能只是貼在表面。",
+                 f"{name}: only {k} peptide residues ({f:.0%}, < 25 %) touch the receptor. The predicted interface is weak and "
+                 "the peptide may only lie on the surface.",
+                 f"{name}：受容体と接触するペプチド残基は {k} 個（{f:.0%}、< 25 %）だけです。予測された界面は弱く、ペプチドは表面に貼り付いているだけかもしれません。",
+                 f"{name}: 수용체와 접촉하는 펩타이드 잔기가 {k}개({f:.0%}, < 25 %)뿐입니다. 예측된 계면이 약하며 펩타이드가 표면에 붙어 있기만 할 수 있습니다.")]
+    hot = [str(cols[j]) for j in np.argsort(-c.sum(0)) if c[:, j].sum() >= 3][:6]
+    if hot:
+        z, e = _jz(hot)
+        out.append(S("note", f"{name}：{z} 同時接觸 3 個以上胜肽殘基，可能是介面的熱點，可優先做突變或比對實驗資料。",
+                     f"{name}: {e} each touch 3 or more peptide residues and may be interface hot spots, good first candidates for mutation or comparison with experiment.",
+                     f"{name}：{z} はそれぞれ 3 個以上のペプチド残基と接触しており、界面のホットスポットの可能性があります。変異実験や実験データとの比較の候補になります。",
+                     f"{name}: {e} 잔기는 각각 펩타이드 잔기 3개 이상과 접촉하므로 계면 핫스팟일 수 있습니다. 돌연변이 실험이나 실험 자료와 비교할 우선 후보입니다."))
+    mn = float(np.nanmin(D))
+    if mn < 1.5:
+        out.append(S("caution", f"{name}：最短距離 {mn:.2f} Å（< 1.5 Å），有原子重疊，必須靠能量最小化解開，最小化後要確認胜肽沒有被推離。",
+                     f"{name}: the shortest distance is {mn:.2f} Å (< 1.5 Å). Atoms overlap and energy minimisation must resolve "
+                     "them. Check after minimisation that the peptide was not pushed away.",
+                     f"{name}：最短距離は {mn:.2f} Å（< 1.5 Å）で原子が重なっています。エネルギー最小化で解消する必要があり、最小化の後にペプチドが押し出されていないか確認してください。",
+                     f"{name}: 최단 거리가 {mn:.2f} Å(< 1.5 Å)로 원자가 겹칩니다. 에너지 최소화로 풀어야 하며 최소화 후 펩타이드가 밀려나지 않았는지 확인하십시오."))
+    return out
+
+
+# --------------------------------------------------------------------------------------------- membrane
+APL_TOL, DPP_TOL_NM = 0.06, 0.30
+
+
+def _band(key: str, what: tuple, unit: str, m: float, ref, lo: float, hi: float, nd: int) -> dict:
+    ok = lo <= m <= hi
+    v, a, b, rf = f"{m:.{nd}f}", f"{lo:.{nd}f}", f"{hi:.{nd}f}", f"{ref:.{nd}f}"
+    if ok:
+        return S("good", f"{key}：{what[0]}後半段平均 {v} {unit}，在參考值 {rf} 的容許範圍 {a} 到 {b} 內。",
+                 f"{key}: {what[1]} averages {v} {unit} in the second half, inside the range {a}–{b} around the reference {rf}.",
+                 f"{key}：{what[2]}の後半の平均は {v} {unit} で、参照値 {rf} の許容範囲 {a}〜{b} に入っています。",
+                 f"{key}: {what[3]} 후반부 평균은 {v} {unit}로 참고값 {rf}의 허용 범위 {a}~{b} 안에 있습니다.")
+    return S("caution", f"{key}：{what[0]}後半段平均 {v} {unit}，超出參考值 {rf} 的容許範圍 {a} 到 {b}。請檢查溫度、脂質組成與力場，或延長平衡。",
+             f"{key}: {what[1]} averages {v} {unit} in the second half, outside the range {a}–{b} around the reference {rf}. "
+             "Check temperature, lipid composition and force field, or extend equilibration.",
+             f"{key}：{what[2]}の後半の平均は {v} {unit} で、参照値 {rf} の許容範囲 {a}〜{b} から外れています。温度、脂質組成、力場を確認するか、平衡化を延ばしてください。",
+             f"{key}: {what[3]} 후반부 평균은 {v} {unit}로 참고값 {rf}의 허용 범위 {a}~{b}를 벗어났습니다. 온도, 지질 조성, 역장을 확인하거나 평형화를 늘리십시오.")
+
+
+_APL = ("每個脂質的面積", "the area per lipid", "脂質あたりの面積", "지질당 면적")
+_DPP = ("P–P 厚度", "the P–P thickness", "P–P 厚さ", "P–P 두께")
+
+
+def classify_membrane_equil(key: str, t, apl, dpp, ref: dict | None, approximate: bool = False) -> list[dict]:
+    apl, dpp = np.asarray(apl, float), np.asarray(dpp, float)
+    if len(apl) < 4:
+        return []
+    ref = ref or {}
+    out = []
+    ma, md_ = _halfmean(apl), _halfmean(dpp)
+    if approximate:
+        out.append(S("note", f"{key}：膜中有蛋白，面積包含蛋白截面（後半段 {ma:.3f} nm²），不和參考值比較，只看是否進入平台。",
+                     f"{key}: the membrane holds a protein, so the area includes its cross-section ({ma:.3f} nm² in the second half). "
+                     "It is not compared with the reference; only the plateau is checked.",
+                     f"{key}：膜にタンパク質が入っているため、面積にはその断面が含まれます（後半 {ma:.3f} nm²）。参照値とは比べず、平坦になったかだけを見ます。",
+                     f"{key}: 막에 단백질이 있어 면적에 단백질 단면이 포함됩니다(후반부 {ma:.3f} nm²). 참고값과 비교하지 않고 평탄해졌는지만 봅니다."))
+    elif ref.get("apl_nm2"):
+        r = float(ref["apl_nm2"])
+        out.append(_band(key, _APL, "nm²", ma, r, r * (1 - APL_TOL), r * (1 + APL_TOL), 3))
+    if ref.get("dpp_nm"):
+        r = float(ref["dpp_nm"])
+        out.append(_band(key, _DPP, "nm", md_, r, r - DPP_TOL_NM, r + DPP_TOL_NM, 2))
+    if not ref.get("apl_nm2") and not ref.get("dpp_nm"):
+        out.append(S("note", f"{key}：這個脂質組成沒有實驗參考值（例如含膽固醇或心磷脂），面積 {ma:.3f} nm² 與厚度 {md_:.2f} nm 沒有和實驗比較。",
+                     f"{key}: there is no experimental reference for this composition (for example with cholesterol or cardiolipin), "
+                     f"so the area {ma:.3f} nm² and thickness {md_:.2f} nm are not compared with experiment.",
+                     f"{key}：この脂質組成には実験の参照値がありません（コレステロールやカルジオリピンを含む場合など）。面積 {ma:.3f} nm² と厚さ {md_:.2f} nm は実験と比べていません。",
+                     f"{key}: 이 지질 조성에는 실험 참고값이 없습니다(콜레스테롤이나 카디오리핀을 포함한 경우 등). 면적 {ma:.3f} nm²와 두께 {md_:.2f} nm는 실험과 비교하지 않았습니다."))
+    h = apl[len(apl) // 2:]
+    th = np.asarray(t, float)[len(apl) // 2:len(apl)] if len(t) >= len(apl) else np.arange(len(h), dtype=float)
+    if len(h) > 2 and th[-1] > th[0]:
+        drift = float(np.polyfit(th, h, 1)[0] * (th[-1] - th[0])) / max(1e-9, abs(ma))
+        if abs(drift) > 0.02:
+            out.append(S("caution", f"{key}：後半段面積仍改變 {drift:+.1%}（超過 ±2 %），膜還沒平衡，請延長平衡後再分析。",
+                         f"{key}: the area still changes by {drift:+.1%} over the second half (more than ±2 %). The membrane has not "
+                         "equilibrated, so extend equilibration before analysing.",
+                         f"{key}：後半でも面積が {drift:+.1%} 変化しています（±2 % 超）。膜はまだ平衡に達していないため、平衡化を延ばしてから解析してください。",
+                         f"{key}: 후반부에도 면적이 {drift:+.1%} 변합니다(±2 % 초과). 막이 아직 평형에 도달하지 않았으므로 평형화를 늘린 뒤 분석하십시오."))
+    return out
+
+
+def _is(name: str, *keys) -> bool:
+    n = name.lower()
+    return any(k in n for k in keys)
+
+
+def classify_density(key: str, dens: dict) -> list[dict]:
+    z = np.asarray(dens.get("z_nm") if dens.get("z_nm") is not None else [], float)
+    g = {k: np.asarray(v, float) for k, v in (dens.get("groups") or {}).items()}
+    if len(z) < 5 or not g:
+        return []
+    out = []
+    phos = next((v for k, v in g.items() if _is(k, "phosph", "po4", "磷") or k.strip().upper() == "P"), None)
+    zp = None
+    if phos is not None and phos.max() > 0:
+        up, lo = z > 0, z < 0
+        if up.any() and lo.any():
+            pu, pl = float(z[up][np.argmax(phos[up])]), float(z[lo][np.argmax(phos[lo])])
+            zp = 0.5 * (pu - pl)
+            out.append(S("note", f"{key}：兩個磷峰位於 z = {pl:+.2f} 與 {pu:+.2f} nm，峰距 {pu - pl:.2f} nm，就是這段模擬的膜厚。",
+                         f"{key}: the two phosphate peaks sit at z = {pl:+.2f} and {pu:+.2f} nm, {pu - pl:.2f} nm apart, which is the thickness in this run.",
+                         f"{key}：リンの 2 つのピークは z = {pl:+.2f} と {pu:+.2f} nm にあり、間隔 {pu - pl:.2f} nm がこの計算での膜厚です。",
+                         f"{key}: 인의 두 피크는 z = {pl:+.2f}와 {pu:+.2f} nm에 있으며 간격 {pu - pl:.2f} nm가 이 시뮬레이션의 막 두께입니다."))
+    water = next((v for k, v in g.items() if _is(k, "water", "水") or k.strip().upper() == "W"), None)
+    if water is not None and water.max() > 0:
+        bulk = float(water[np.abs(z) >= np.abs(z).max() - 1.0].mean()) or float(water.max())
+        core = float(water[np.abs(z) < 0.5].mean()) if (np.abs(z) < 0.5).any() else 0.0
+        fr = core / max(bulk, 1e-12)
+        out.append(S("good", f"{key}：膜中心（|z| < 0.5 nm）的水密度只有水相的 {fr:.1%}（< 1 %），疏水核心是乾的，沒有孔洞。",
+                     f"{key}: water at the centre (|z| < 0.5 nm) is {fr:.1%} of bulk (< 1 %). The hydrophobic core is dry and there is no pore.",
+                     f"{key}：膜中心（|z| < 0.5 nm）の水密度はバルクの {fr:.1%}（< 1 %）しかなく、疎水性コアは乾いており孔はありません。",
+                     f"{key}: 막 중심(|z| < 0.5 nm)의 물 밀도가 벌크의 {fr:.1%}(< 1 %)에 불과해 소수성 중심부가 건조하고 구멍이 없습니다.")
+                   if fr < 0.01 else
+                   S("caution", f"{key}：膜中心（|z| < 0.5 nm）的水密度是水相的 {fr:.1%}（≥ 1 %），水進入疏水核心，可能有孔洞或缺陷。請看厚度圖找變薄的位置。",
+                     f"{key}: water at the centre (|z| < 0.5 nm) is {fr:.1%} of bulk (≥ 1 %). Water has entered the hydrophobic core, "
+                     "so there may be a pore or defect. Look at the thickness map for thinning.",
+                     f"{key}：膜中心（|z| < 0.5 nm）の水密度はバルクの {fr:.1%}（≥ 1 %）で、水が疎水性コアに入っています。孔や欠陥の可能性があるため、膜厚マップで薄い場所を確認してください。",
+                     f"{key}: 막 중심(|z| < 0.5 nm)의 물 밀도가 벌크의 {fr:.1%}(≥ 1 %)로 물이 소수성 중심부에 들어왔습니다. 구멍이나 결함이 있을 수 있으므로 두께 지도에서 얇아진 곳을 확인하십시오."))
+    for k, v in g.items():
+        if not _is(k, "peptide", "ligand", "solute", "胜肽", "配體") or v.sum() <= 0 or zp is None:
+            continue
+        mz = float((np.abs(z) * v).sum() / v.sum())
+        if mz > zp + 0.5:
+            t = ("在磷峰外側超過 0.5 nm，主要在水中", "more than 0.5 nm outside the phosphate peak, mostly in the water",
+                 "リンのピークより 0.5 nm 以上外側で、主に水中", "인 피크보다 0.5 nm 넘게 바깥쪽으로 주로 물속")
+        elif mz >= zp - 0.5:
+            t = ("在磷峰 ±0.5 nm 內，吸附在頭基區", "within ±0.5 nm of the phosphate peak, adsorbed at the head groups",
+                 "リンのピークから ±0.5 nm 以内で、頭部基の領域に吸着", "인 피크 ±0.5 nm 이내로 머리 부분 영역에 흡착")
+        else:
+            t = ("在磷峰內側超過 0.5 nm，已插入膜中", "more than 0.5 nm inside the phosphate peak, inserted into the membrane",
+                 "リンのピークより 0.5 nm 以上内側で、膜に挿入", "인 피크보다 0.5 nm 넘게 안쪽으로 막에 삽입")
+        out.append(S("note", f"{key}：{k} 的平均 |z| 為 {mz:.2f} nm（磷峰 {zp:.2f} nm），{t[0]}。",
+                     f"{key}: {k} has a mean |z| of {mz:.2f} nm (phosphate peak {zp:.2f} nm), {t[1]}.",
+                     f"{key}：{k} の平均 |z| は {mz:.2f} nm（リンのピーク {zp:.2f} nm）で、{t[2]}しています。",
+                     f"{key}: {k} 그룹의 평균 |z|는 {mz:.2f} nm(인 피크 {zp:.2f} nm)로 {t[3]}되어 있습니다."))
+    return out
+
+
+def scd_series(scd: dict) -> dict:
+    """{"sn1:C32": S} → {"sn1": ([2, 3, ...], [−S ...]), "sn2": ...} sorted by carbon number."""
+    out: dict = {}
+    for k, v in (scd or {}).items():
+        try:
+            tail, atom = k.split(":", 1)
+            n = int("".join(ch for ch in atom[2:] if ch.isdigit()))
+        except ValueError:
+            continue
+        out.setdefault(tail, []).append((n, -float(v)))
+    return {t: ([a for a, _ in sorted(v)], [b for _, b in sorted(v)]) for t, v in sorted(out.items())}
+
+
+def classify_scd(key: str, scd: dict) -> list[dict]:
+    ser = scd_series(scd)
+    if not ser:
+        return []
+    out = []
+    for tail, (n, s) in ser.items():
+        p = [y for x, y in zip(n, s) if 4 <= x <= 10]
+        if not p:
+            continue
+        m = float(np.mean(p))
+        if 0.12 <= m <= 0.25:
+            out.append(S("good", f"{key}：{tail} 鏈的平台（碳 4 到 10）−S_CD = {m:.2f}，在流體相的 0.12 到 0.25 之間。",
+                         f"{key}: the {tail} plateau (carbons 4–10) has −S_CD = {m:.2f}, within the fluid-phase range 0.12–0.25.",
+                         f"{key}：{tail} 鎖の平坦部（炭素 4〜10）の −S_CD は {m:.2f} で、流動相の 0.12〜0.25 に入っています。",
+                         f"{key}: {tail} 사슬 평탄 구간(탄소 4~10)의 −S_CD는 {m:.2f}로 유동상 범위 0.12~0.25 안에 있습니다."))
+        elif 0.25 < m <= 0.3:
+            out.append(S("note", f"{key}：{tail} 鏈的平台 −S_CD = {m:.2f}（0.25 到 0.3），比一般流體相有序，膽固醇或飽和鏈會造成這種情形。",
+                         f"{key}: the {tail} plateau has −S_CD = {m:.2f} (0.25–0.3), more ordered than a typical fluid phase, as cholesterol or saturated chains cause.",
+                         f"{key}：{tail} 鎖の平坦部の −S_CD は {m:.2f}（0.25〜0.3）で、一般的な流動相より秩序立っています。コレステロールや飽和鎖でこうなります。",
+                         f"{key}: {tail} 사슬 평탄 구간의 −S_CD는 {m:.2f}(0.25~0.3)로 일반 유동상보다 질서 있습니다. 콜레스테롤이나 포화 사슬이 있으면 이렇게 됩니다."))
+        else:
+            hi = m > 0.3
+            out.append(S("caution",
+                         f"{key}：{tail} 鏈的平台 −S_CD = {m:.2f}（{'> 0.3，過於有序，可能接近凝膠相' if hi else '< 0.12，過於無序'}）。請檢查模擬溫度與脂質的相轉變溫度。",
+                         f"{key}: the {tail} plateau has −S_CD = {m:.2f} ({'> 0.3, over-ordered and possibly near the gel phase' if hi else '< 0.12, over-disordered'}). "
+                         "Check the simulation temperature against the lipid's transition temperature.",
+                         f"{key}：{tail} 鎖の平坦部の −S_CD は {m:.2f}（{'> 0.3、秩序が高すぎゲル相に近い可能性' if hi else '< 0.12、無秩序すぎる'}）です。シミュレーション温度と脂質の相転移温度を確認してください。",
+                         f"{key}: {tail} 사슬 평탄 구간의 −S_CD는 {m:.2f}({'> 0.3, 지나치게 질서 있어 겔상에 가까울 수 있음' if hi else '< 0.12, 지나치게 무질서함'})입니다. 시뮬레이션 온도와 지질의 상전이 온도를 확인하십시오."))
+    return out
+
+
+def classify_insertion(key: str, t, com, deepest=None, crossed: bool = False) -> list[dict]:
+    c = np.asarray(com, float)
+    if len(c) < 4:
+        return []
+    d = _halfmean(c)
+    dd = _halfmean(deepest) if deepest is not None and len(deepest) else None
+    tail = (f"，最深的原子 {dd:+.2f} nm" if dd is not None else "", f", deepest atom {dd:+.2f} nm" if dd is not None else "",
+            f"、最も深い原子は {dd:+.2f} nm" if dd is not None else "", f", 가장 깊은 원자 {dd:+.2f} nm" if dd is not None else "")
+    if d < -0.5:
+        out = [S("note", f"{key}：後半段質心在磷平面上方 {-d:.2f} nm（> 0.5 nm）{tail[0]}，溶質留在水中，沒有吸附到膜上。",
+                 f"{key}: in the second half the centroid is {-d:.2f} nm above the phosphate plane (> 0.5 nm){tail[1]}. The solute stays in the water and has not adsorbed.",
+                 f"{key}：後半の重心はリン原子面の {-d:.2f} nm 上（> 0.5 nm）にあり{tail[2]}、溶質は水中にとどまって膜に吸着していません。",
+                 f"{key}: 후반부 무게중심이 인 원자 평면보다 {-d:.2f} nm 위(> 0.5 nm)에 있으며{tail[3]}, 용질이 물속에 머물러 막에 흡착하지 않았습니다.")]
+    elif d < 0.3:
+        out = [S("good", f"{key}：後半段質心深度 {d:+.2f} nm（磷平面上方 0.5 到下方 0.3 nm 之間）{tail[0]}，溶質吸附在頭基區，屬於膜表面接觸。",
+                 f"{key}: the second-half centroid depth is {d:+.2f} nm (between 0.5 nm above and 0.3 nm below the phosphate plane){tail[1]}. "
+                 "The solute is adsorbed at the head groups, a surface contact.",
+                 f"{key}：後半の重心の深さは {d:+.2f} nm（リン原子面の上 0.5 nm から下 0.3 nm の間）で{tail[2]}、溶質は頭部基の領域に吸着しており、膜表面での接触です。",
+                 f"{key}: 후반부 무게중심 깊이는 {d:+.2f} nm(인 평면 위 0.5 nm와 아래 0.3 nm 사이)이며{tail[3]}, 용질이 머리 부분 영역에 흡착한 막 표면 접촉입니다.")]
+    elif d < 1.0:
+        out = [S("note", f"{key}：後半段質心在磷平面下方 {d:.2f} nm（0.3 到 1.0 nm）{tail[0]}，溶質插入頭基與脂肪鏈之間的介面區。",
+                 f"{key}: the second-half centroid is {d:.2f} nm below the phosphate plane (0.3–1.0 nm){tail[1]}. The solute has inserted into the interface between head groups and acyl chains.",
+                 f"{key}：後半の重心はリン原子面の {d:.2f} nm 下（0.3〜1.0 nm）にあり{tail[2]}、溶質は頭部基とアシル鎖の間の界面領域に入り込んでいます。",
+                 f"{key}: 후반부 무게중심이 인 원자 평면보다 {d:.2f} nm 아래(0.3~1.0 nm)에 있으며{tail[3]}, 용질이 머리 부분과 아실 사슬 사이의 계면 영역에 삽입되었습니다.")]
+    else:
+        out = [S("note", f"{key}：後半段質心在磷平面下方 {d:.2f} nm（≥ 1.0 nm）{tail[0]}，溶質進入疏水核心。",
+                 f"{key}: the second-half centroid is {d:.2f} nm below the phosphate plane (≥ 1.0 nm){tail[1]}. The solute has entered the hydrophobic core.",
+                 f"{key}：後半の重心はリン原子面の {d:.2f} nm 下（≥ 1.0 nm）にあり{tail[2]}、溶質は疎水性コアに入っています。",
+                 f"{key}: 후반부 무게중심이 인 원자 평면보다 {d:.2f} nm 아래(≥ 1.0 nm)에 있으며{tail[3]}, 용질이 소수성 중심부에 들어갔습니다.")]
+    a = float(c[: max(1, len(c) // 10)].mean())
+    if abs(d - a) > 0.5:
+        out.append(S("note", f"{key}：深度從開始的 {a:+.2f} nm 變到後半段的 {d:+.2f} nm（變化 > 0.5 nm），吸附或插入在模擬中發生，後半段可能仍未穩定。",
+                     f"{key}: the depth moved from {a:+.2f} nm at the start to {d:+.2f} nm in the second half (change > 0.5 nm). "
+                     "Adsorption or insertion happened during the run and may not have settled.",
+                     f"{key}：深さは最初の {a:+.2f} nm から後半の {d:+.2f} nm に変わりました（変化 > 0.5 nm）。吸着や挿入は計算中に起きており、後半でもまだ落ち着いていない可能性があります。",
+                     f"{key}: 깊이가 처음 {a:+.2f} nm에서 후반부 {d:+.2f} nm로 바뀌었습니다(변화 > 0.5 nm). 흡착이나 삽입이 시뮬레이션 중에 일어났으며 후반부에도 아직 안정되지 않았을 수 있습니다."))
+    if crossed:
+        out.append(S("caution", f"{key}：溶質穿過了膜中心。這是罕見事件，請確認盒子大小與約束設定。一次穿越不能當作穿膜速率。",
+                     f"{key}: the solute crossed the membrane centre. This is a rare event, so check the box size and restraints. One crossing is not a permeation rate.",
+                     f"{key}：溶質が膜中心を通過しました。まれな現象なので、ボックスの大きさと拘束の設定を確認してください。1 回の通過は透過速度にはなりません。",
+                     f"{key}: 용질이 막 중심을 통과했습니다. 드문 사건이므로 상자 크기와 구속 설정을 확인하십시오. 한 번의 통과는 투과 속도가 아닙니다."))
+    return out
+
+
+def classify_headgroup(key: str, rows: list[dict]) -> list[dict]:
+    if not rows:
+        return []
+    anch = [r for r in rows if r["fraction"] >= 0.5]
+    out = []
+    if anch:
+        names = [r["residue"] for r in anch]
+        z, e = _jz(names)
+        basic = [n for n in names if str(n).upper().startswith(("LYS", "ARG", "K", "R"))]
+        out.append(S("good", f"{key}：{z} 有 50 % 以上的時間與頭基接觸，是吸附的錨點" + (f"。其中帶正電的離胺酸或精胺酸有 {'、'.join(basic)}，符合與磷酸基的靜電吸引。" if basic else "。"),
+                     f"{key}: {e} touch the head groups at least 50 % of the time and anchor the adsorption"
+                     + (f". The positively charged lysine or arginine among them ({', '.join(basic)}) fits electrostatic attraction to the phosphates." if basic else "."),
+                     f"{key}：{z} は 50 % 以上の時間、頭部基と接触しており、吸着のアンカーです" + (f"。そのうち正に帯電したリシンまたはアルギニン（{'、'.join(basic)}）は、リン酸基との静電的な引力と合っています。" if basic else "。"),
+                     f"{key}: {e} 잔기는 50 % 이상의 시간 동안 머리 부분과 접촉하는 흡착 앵커입니다" + (f". 그중 양전하를 띤 라이신이나 아르지닌({', '.join(basic)})은 인산기와의 정전기적 인력과 맞습니다." if basic else ".")))
+    else:
+        top = rows[0]
+        out.append(S("note", f"{key}：沒有殘基與頭基接觸超過 50 % 的時間（最高 {top['residue']} {top['fraction']:.0%}），接觸是短暫的。",
+                     f"{key}: no residue touches the head groups for 50 % of the time (highest {top['residue']} {top['fraction']:.0%}), so contacts are transient.",
+                     f"{key}：50 % 以上の時間頭部基と接触する残基はなく（最大は {top['residue']} の {top['fraction']:.0%}）、接触は一時的です。",
+                     f"{key}: 50 % 이상 머리 부분과 접촉하는 잔기가 없으며(최고 {top['residue']} {top['fraction']:.0%}) 접촉은 일시적입니다."))
+    best = max(rows, key=lambda r: r.get("max_ps") or 0)
+    if best.get("max_ps"):
+        mx = best["max_ps"] / 1000.0
+        out.append(S("note", f"{key}：最長的連續接觸是 {best['residue']} 的 {mx:.2f} ns（共 {best.get('events', 0)} 次接觸，平均 {best.get('mean_ps', 0) / 1000:.2f} ns）。",
+                     f"{key}: the longest continuous contact is {best['residue']} at {mx:.2f} ns ({best.get('events', 0)} contact events, mean {best.get('mean_ps', 0) / 1000:.2f} ns).",
+                     f"{key}：最も長い連続接触は {best['residue']} の {mx:.2f} ns です（接触 {best.get('events', 0)} 回、平均 {best.get('mean_ps', 0) / 1000:.2f} ns）。",
+                     f"{key}: 가장 긴 연속 접촉은 {best['residue']} 잔기의 {mx:.2f} ns입니다(접촉 {best.get('events', 0)}회, 평균 {best.get('mean_ps', 0) / 1000:.2f} ns)."))
+    op = [r["residue"] for r in rows if r.get("open_at_end") and r["fraction"] >= 0.2]
+    if op:
+        z, e = _jz(op)
+        out.append(S("note", f"{key}：{z} 在最後一幀仍在接觸，它們的停留時間只是下限，真正的停留更長。",
+                     f"{key}: {e} are still in contact at the last frame, so their residence times are lower bounds and the true residence is longer.",
+                     f"{key}：{z} は最後のフレームでも接触が続いているため、滞在時間は下限値で、実際の滞在はもっと長いです。",
+                     f"{key}: {e} 잔기는 마지막 프레임에서도 접촉 중이므로 체류 시간은 하한값이며 실제 체류는 더 깁니다."))
+    return out
+
+
+def classify_tilt(key: str, tilt) -> list[dict]:
+    a = np.asarray(tilt, float)
+    if len(a) < 4:
+        return []
+    h = a[len(a) // 2:]
+    m, sd = float(h.mean()), float(h.std())
+    if m >= 60:
+        t = ("平躺在膜面（≥ 60°），兩親性螺旋吸附時常見", "lies flat on the surface (≥ 60°), as amphipathic helices usually do when adsorbed",
+             "膜面に寝ており（≥ 60°）、両親媒性ヘリックスが吸着したときによく見られる向き", "막 표면에 누워 있으며(≥ 60°) 양친매성 나선이 흡착할 때 흔한 방향")
+    elif m >= 30:
+        t = ("斜插（30° 到 60°）", "is oblique (30–60°)", "斜めに入った状態（30〜60°）", "비스듬히 들어간 상태(30~60°)")
+    else:
+        t = ("沿法線直立（< 30°），表面接觸的短胜肽很少這樣，請檢查是否插入膜中", "stands along the normal (< 30°), rare for a short surface-bound "
+             "peptide, so check whether it has inserted", "法線に沿って立っており（< 30°）、表面に接触する短いペプチドではまれなので、膜に入り込んでいないか確認が必要",
+             "법선을 따라 서 있으며(< 30°) 표면에 접촉하는 짧은 펩타이드에서는 드물므로 막에 삽입되었는지 확인 필요")
+    out = [S("note", f"{key}：後半段平均傾角 {m:.0f}° ± {sd:.0f}°，胜肽{t[0]}。",
+             f"{key}: the mean tilt in the second half is {m:.0f}° ± {sd:.0f}°, so the peptide {t[1]}.",
+             f"{key}：後半の平均の傾きは {m:.0f}° ± {sd:.0f}° で、ペプチドは{t[2]}です。",
+             f"{key}: 후반부 평균 기울기는 {m:.0f}° ± {sd:.0f}°로 펩타이드가 {t[3]}입니다.")]
+    if sd > 20:
+        out.append(S("caution", f"{key}：傾角的標準差 {sd:.0f}°（> 20°），方向還沒穩定，請延長模擬或增加重複。",
+                     f"{key}: the tilt varies with a standard deviation of {sd:.0f}° (> 20°). The orientation has not settled, so extend the run or add replicas.",
+                     f"{key}：傾きの標準偏差は {sd:.0f}°（> 20°）で、向きはまだ定まっていません。計算を延ばすか、繰り返しを増やしてください。",
+                     f"{key}: 기울기 표준편차가 {sd:.0f}°(> 20°)로 방향이 아직 안정되지 않았습니다. 시뮬레이션을 늘리거나 반복을 추가하십시오."))
+    return out
+
+
+def classify_thickness_map(key: str, tmap: dict) -> list[dict]:
+    G = np.array([[np.nan if v is None else v for v in row] for row in (tmap or {}).get("dpp_nm") or []], float)
+    if G.size == 0 or not np.isfinite(G).any():
+        return []
+    m, lo, hi = float(np.nanmean(G)), float(np.nanmin(G)), float(np.nanmax(G))
+    rng = hi - lo
+    out = []
+    if lo < 0.8 * m:
+        out.append(S("caution", f"{key}：局部厚度最薄 {lo:.2f} nm，低於平均 {m:.2f} nm 的 80 %，膜明顯變薄，可能是缺陷或孔洞的前兆。請對照溶質的位置與膜中心的水。",
+                     f"{key}: the thinnest cell is {lo:.2f} nm, below 80 % of the mean {m:.2f} nm. The membrane thins markedly, which may precede a "
+                     "defect or pore. Compare with the solute position and water at the centre.",
+                     f"{key}：最も薄い格子は {lo:.2f} nm で、平均 {m:.2f} nm の 80 % を下回っています。膜が明らかに薄くなっており、欠陥や孔の前ぶれかもしれません。溶質の位置と膜中心の水と照らし合わせてください。",
+                     f"{key}: 가장 얇은 칸이 {lo:.2f} nm로 평균 {m:.2f} nm의 80 %보다 낮습니다. 막이 뚜렷하게 얇아졌으며 결함이나 구멍의 전조일 수 있습니다. 용질 위치와 막 중심의 물과 비교하십시오."))
+    elif rng > 0.5:
+        out.append(S("note", f"{key}：局部厚度在 {lo:.2f} 到 {hi:.2f} nm 之間（相差 {rng:.2f} nm，> 0.5 nm），膜有局部的厚薄變化。",
+                     f"{key}: the local thickness ranges from {lo:.2f} to {hi:.2f} nm (a spread of {rng:.2f} nm, > 0.5 nm), so the membrane varies locally.",
+                     f"{key}：局所的な厚さは {lo:.2f}〜{hi:.2f} nm（差 {rng:.2f} nm、> 0.5 nm）で、膜には局所的な厚さの変化があります。",
+                     f"{key}: 국소 두께가 {lo:.2f}~{hi:.2f} nm(차이 {rng:.2f} nm, > 0.5 nm)로 막에 국소적인 두께 변화가 있습니다."))
+    else:
+        out.append(S("good", f"{key}：局部厚度在 {lo:.2f} 到 {hi:.2f} nm 之間（相差 {rng:.2f} nm，≤ 0.5 nm），膜厚均勻。",
+                     f"{key}: the local thickness ranges from {lo:.2f} to {hi:.2f} nm (a spread of {rng:.2f} nm, ≤ 0.5 nm), so the membrane is uniform.",
+                     f"{key}：局所的な厚さは {lo:.2f}〜{hi:.2f} nm（差 {rng:.2f} nm、≤ 0.5 nm）で、膜厚は均一です。",
+                     f"{key}: 국소 두께가 {lo:.2f}~{hi:.2f} nm(차이 {rng:.2f} nm, ≤ 0.5 nm)로 막 두께가 균일합니다."))
+    return out
+
+
+# --------------------------------------------------------------------------------------------- long run
+def classify_longrun(key: str, plan: dict, actual: dict) -> list[dict]:
+    out = []
+    p, a = float(plan.get("production_ns") or 0), actual.get("production_ns")
+    if p and a is not None:
+        f = float(a) / p
+        out.append(S("good", f"{key}：正式模擬完成 {a:g} ns，達到規劃 {p:g} ns 的 {f:.0%}（≥ 99 %）。",
+                     f"{key}: production completed {a:g} ns, {f:.0%} of the planned {p:g} ns (≥ 99 %).",
+                     f"{key}：本計算は {a:g} ns 完了し、計画 {p:g} ns の {f:.0%}（≥ 99 %）に達しました。",
+                     f"{key}: 본 시뮬레이션은 {a:g} ns를 완료해 계획 {p:g} ns의 {f:.0%}(≥ 99 %)에 도달했습니다.")
+                   if f >= 0.99 else
+                   S("caution", f"{key}：正式模擬只完成 {a:g} ns，是規劃 {p:g} ns 的 {f:.0%}（< 99 %）。後面的分析只代表已完成的部分，續跑後要重新產生報告。",
+                     f"{key}: production completed only {a:g} ns, {f:.0%} of the planned {p:g} ns (< 99 %). The analysis covers only the "
+                     "completed part, so regenerate the report after resuming.",
+                     f"{key}：本計算は {a:g} ns しか完了しておらず、計画 {p:g} ns の {f:.0%}（< 99 %）です。解析は完了した部分だけを表すため、続きを実行した後でレポートを作り直してください。",
+                     f"{key}: 본 시뮬레이션은 {a:g} ns만 완료해 계획 {p:g} ns의 {f:.0%}(< 99 %)입니다. 분석은 완료된 부분만 나타내므로 이어서 실행한 뒤 보고서를 다시 만드십시오."))
+    reps = max(1, int(plan.get("replicas") or 1))
+    pd_ = float(plan.get("total_gb") or 0) / reps
+    ad = actual.get("disk_gb")
+    if pd_ > 0 and ad is not None:
+        r = float(ad) / pd_
+        out.append(S("good", f"{key}：實際硬碟用量 {ad:.1f} GB，規劃每份 {pd_:.1f} GB（{r:.0%}，≤ 125 %）。",
+                     f"{key}: actual disk use is {ad:.1f} GB against {pd_:.1f} GB planned per replica ({r:.0%}, ≤ 125 %).",
+                     f"{key}：実際のディスク使用量は {ad:.1f} GB で、1 回分の計画 {pd_:.1f} GB の {r:.0%}（≤ 125 %）です。",
+                     f"{key}: 실제 디스크 사용량은 {ad:.1f} GB로 1회분 계획 {pd_:.1f} GB의 {r:.0%}(≤ 125 %)입니다.")
+                   if r <= 1.25 else
+                   S("note", f"{key}：實際硬碟用量 {ad:.1f} GB，超過規劃每份 {pd_:.1f} GB 的 125 %（{r:.0%}），規劃的估計偏低，下次同樣大小的系統要多留空間。",
+                     f"{key}: actual disk use is {ad:.1f} GB, more than 125 % of the {pd_:.1f} GB planned per replica ({r:.0%}). The estimate "
+                     "was low, so leave more space next time for a system of this size.",
+                     f"{key}：実際のディスク使用量は {ad:.1f} GB で、1 回分の計画 {pd_:.1f} GB の 125 % を超えました（{r:.0%}）。見積もりが低かったため、同じ大きさの系では次回もっと余裕を持たせてください。",
+                     f"{key}: 실제 디스크 사용량이 {ad:.1f} GB로 1회분 계획 {pd_:.1f} GB의 125 %를 넘었습니다({r:.0%}). 추정이 낮았으므로 같은 크기의 시스템은 다음에 공간을 더 확보하십시오."))
+    pdays, adays = plan.get("days"), actual.get("days")
+    if pdays and adays:
+        r = float(adays) / (float(pdays) / reps)
+        if r > 1.5:
+            out.append(S("note", f"{key}：實際花了約 {adays:.1f} 天，是估計的 {r:.1f} 倍（> 1.5 倍），效能測試可能高估了速度，請重新做效能測試。",
+                         f"{key}: the run took about {adays:.1f} days, {r:.1f} times the estimate (> 1.5). The benchmark probably overestimated the speed, so run it again.",
+                         f"{key}：実際には約 {adays:.1f} 日かかり、見積もりの {r:.1f} 倍（> 1.5 倍）でした。ベンチマークが速度を過大評価した可能性があるため、測り直してください。",
+                         f"{key}: 실제로 약 {adays:.1f}일이 걸려 추정의 {r:.1f}배(> 1.5배)였습니다. 벤치마크가 속도를 과대평가했을 수 있으므로 다시 측정하십시오."))
+    if plan.get("solute_only"):
+        out.append(S("note", f"{key}：軌跡只存溶質（每 {plan.get('trajectory_interval_ps', 0):g} ps 一幀），水橋與水的密度剖面無法分析。",
+                     f"{key}: only the solute was saved (one frame every {plan.get('trajectory_interval_ps', 0):g} ps), so water bridges and the water density profile cannot be analysed.",
+                     f"{key}：軌跡は溶質だけを保存したため（{plan.get('trajectory_interval_ps', 0):g} ps ごとに 1 フレーム）、水架橋と水の密度分布は解析できません。",
+                     f"{key}: 궤적은 용질만 저장했으므로({plan.get('trajectory_interval_ps', 0):g} ps마다 한 프레임) 물 다리와 물 밀도 분포는 분석할 수 없습니다."))
+    return out
+
+
+def classify_rmsf_halves(key: str, a, b) -> list[dict]:
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    n = min(len(a), len(b))
+    if n < 5:
+        return []
+    a, b = a[:n], b[:n]
+    r = float(np.corrcoef(a, b)[0, 1]) if a.std() > 0 and b.std() > 0 else 0.0
+    mad = float(np.abs(b - a).mean())
+    shift = float(b.mean() - a.mean())
+    if r >= 0.8 and mad <= 0.3:
+        out = [S("good", f"{key}：前後兩半的 RMSF 相關係數 {r:.2f}（≥ 0.8），平均差 {mad:.2f} Å（≤ 0.3 Å），殘基柔性已收斂。",
+                 f"{key}: the RMSF of the two halves correlates at r = {r:.2f} (≥ 0.8) with a mean difference of {mad:.2f} Å (≤ 0.3 Å). Residue flexibility has converged.",
+                 f"{key}：前半と後半の RMSF の相関係数は {r:.2f}（≥ 0.8）、平均差は {mad:.2f} Å（≤ 0.3 Å）で、残基の柔軟性は収束しています。",
+                 f"{key}: 전반부와 후반부 RMSF의 상관계수는 {r:.2f}(≥ 0.8), 평균 차이는 {mad:.2f} Å(≤ 0.3 Å)로 잔기 유연성이 수렴했습니다.")]
+    elif r >= 0.6:
+        out = [S("note", f"{key}：前後兩半的 RMSF 相關係數 {r:.2f}（0.6 到 0.8），平均差 {mad:.2f} Å，柔性的分佈大致一致，個別區域仍在變化。",
+                 f"{key}: the RMSF of the two halves correlates at r = {r:.2f} (0.6–0.8) with a mean difference of {mad:.2f} Å. The pattern "
+                 "broadly agrees but some regions are still changing.",
+                 f"{key}：前半と後半の RMSF の相関係数は {r:.2f}（0.6〜0.8）、平均差は {mad:.2f} Å です。柔軟性の分布はおおむね一致していますが、一部の領域はまだ変化しています。",
+                 f"{key}: 전반부와 후반부 RMSF의 상관계수는 {r:.2f}(0.6~0.8), 평균 차이는 {mad:.2f} Å입니다. 유연성 분포는 대체로 일치하지만 일부 영역은 아직 변하고 있습니다.")]
+    else:
+        out = [S("caution", f"{key}：前後兩半的 RMSF 相關係數只有 {r:.2f}（< 0.6），柔性還沒收斂，RMSF 的結論要等更長的模擬或更多重複。",
+                 f"{key}: the RMSF of the two halves correlates at only r = {r:.2f} (< 0.6). Flexibility has not converged, so conclusions "
+                 "from RMSF need a longer run or more replicas.",
+                 f"{key}：前半と後半の RMSF の相関係数は {r:.2f}（< 0.6）しかなく、柔軟性は収束していません。RMSF からの結論には、より長い計算か繰り返しの追加が必要です。",
+                 f"{key}: 전반부와 후반부 RMSF의 상관계수가 {r:.2f}(< 0.6)에 불과해 유연성이 수렴하지 않았습니다. RMSF에서 결론을 내리려면 더 긴 시뮬레이션이나 반복이 필요합니다.")]
+    if shift > 0.3:
+        out.append(S("note", f"{key}：後半段的 RMSF 平均高 {shift:.2f} Å（> 0.3 Å），模擬仍在取樣新的運動。",
+                     f"{key}: the second half is {shift:.2f} Å more flexible on average (> 0.3 Å), so new motions are still being sampled.",
+                     f"{key}：後半の RMSF は平均で {shift:.2f} Å 高く（> 0.3 Å）、新しい動きをまだサンプリングしています。",
+                     f"{key}: 후반부 RMSF가 평균 {shift:.2f} Å 높아(> 0.3 Å) 새로운 움직임을 아직 샘플링하고 있습니다."))
+    return out
+
+
+def overlap_coefficient(a, b, bins: int = 30) -> float:
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    lo, hi = float(min(a.min(), b.min())), float(max(a.max(), b.max()))
+    if hi <= lo:
+        return 1.0
+    ha, e = np.histogram(a, bins=bins, range=(lo, hi))
+    hb, _ = np.histogram(b, bins=e)
+    return float(np.minimum(ha / ha.sum(), hb / hb.sum()).sum())
+
+
+def classify_rmsd_halves(key: str, y) -> list[dict]:
+    y = np.asarray(y, float)
+    if len(y) < 20:
+        return []
+    a, b = y[: len(y) // 2], y[len(y) // 2:]
+    ov = overlap_coefficient(a, b)
+    ma, mb = float(a.mean()), float(b.mean())
+    txt = (f"前半段 {ma:.2f} Å、後半段 {mb:.2f} Å", f"first half {ma:.2f} Å, second half {mb:.2f} Å",
+           f"前半 {ma:.2f} Å、後半 {mb:.2f} Å", f"전반부 {ma:.2f} Å, 후반부 {mb:.2f} Å")
+    if ov >= 0.6:
+        return [S("good", f"{key}：兩半 RMSD 分佈的重疊係數 {ov:.2f}（≥ 0.6，{txt[0]}），取樣到同一組構形。",
+                  f"{key}: the RMSD distributions of the two halves overlap at {ov:.2f} (≥ 0.6, {txt[1]}), so both sampled the same conformations.",
+                  f"{key}：前半と後半の RMSD 分布の重なり係数は {ov:.2f}（≥ 0.6、{txt[2]}）で、同じ構造の集まりをサンプリングしています。",
+                  f"{key}: 두 절반의 RMSD 분포 겹침 계수는 {ov:.2f}(≥ 0.6, {txt[3]})로 같은 구조 집합을 샘플링했습니다.")]
+    if ov >= 0.3:
+        return [S("note", f"{key}：兩半 RMSD 分佈的重疊係數 {ov:.2f}（0.3 到 0.6，{txt[0]}），結構還在慢慢變化。",
+                  f"{key}: the RMSD distributions of the two halves overlap at {ov:.2f} (0.3–0.6, {txt[1]}). The structure is still drifting slowly.",
+                  f"{key}：前半と後半の RMSD 分布の重なり係数は {ov:.2f}（0.3〜0.6、{txt[2]}）で、構造はまだゆっくり変化しています。",
+                  f"{key}: 두 절반의 RMSD 분포 겹침 계수는 {ov:.2f}(0.3~0.6, {txt[3]})로 구조가 아직 천천히 변하고 있습니다.")]
+    return [S("caution", f"{key}：兩半 RMSD 分佈的重疊係數只有 {ov:.2f}（< 0.3，{txt[0]}），後半段到了新的構形，整段平均不能代表結構。只用後半段分析，或延長模擬。",
+              f"{key}: the RMSD distributions of the two halves overlap at only {ov:.2f} (< 0.3, {txt[1]}). The second half reached new "
+              "conformations and a whole-run average is not representative. Analyse the second half only or extend the run.",
+              f"{key}：前半と後半の RMSD 分布の重なり係数は {ov:.2f}（< 0.3、{txt[2]}）しかなく、後半は新しい構造に移っています。全体の平均は代表値にならないため、後半だけを解析するか計算を延ばしてください。",
+              f"{key}: 두 절반의 RMSD 분포 겹침 계수가 {ov:.2f}(< 0.3, {txt[3]})에 불과해 후반부가 새로운 구조로 옮겨 갔습니다. 전체 평균은 대표값이 되지 못하므로 후반부만 분석하거나 시뮬레이션을 늘리십시오.")]
+
+
+def cluster_windows(labels, n_windows: int = 10) -> tuple[np.ndarray, list[int]]:
+    """(windows × clusters) share of each cluster per window and the cluster ids (columns)."""
+    lab = np.asarray(labels, int)
+    ids = sorted(set(lab.tolist()))
+    parts = np.array_split(lab, min(n_windows, max(1, len(lab))))
+    P = np.array([[float((p == c).mean()) if len(p) else 0.0 for c in ids] for p in parts])
+    return P, ids
+
+
+def classify_cluster_timeline(key: str, labels) -> list[dict]:
+    lab = np.asarray(labels, int)
+    if len(lab) < 20:
+        return []
+    ids = sorted(set(lab.tolist()))
+    h1, h2, q4 = lab[: len(lab) // 2], lab[len(lab) // 2:], lab[3 * len(lab) // 4:]
+    d = {c: float((h2 == c).mean() - (h1 == c).mean()) for c in ids}
+    out = []
+    worst = max(d, key=lambda c: abs(d[c]))
+    if abs(d[worst]) <= 0.10:
+        out.append(S("good", f"{key}：各叢集在前後兩半的比例相差都在 10 個百分點以內（變化最大的是叢集 {worst + 1}，{abs(d[worst]) * 100:.0f} 個百分點），構形分佈穩定。",
+                     f"{key}: every cluster's share differs by at most 10 percentage points between the halves (largest change {abs(d[worst]) * 100:.0f} points, cluster {worst + 1}), so the distribution is stable.",
+                     f"{key}：各クラスターの割合の前半と後半の差はすべて 10 ポイント以内（最も変化したのはクラスター {worst + 1} の {abs(d[worst]) * 100:.0f} ポイント）で、構造の分布は安定しています。",
+                     f"{key}: 모든 클러스터 비율의 전후반 차이가 10 %p 이내(가장 크게 변한 것은 클러스터 {worst + 1}, {abs(d[worst]) * 100:.0f} %p)로 구조 분포가 안정적입니다."))
+    else:
+        out.append(S("note", f"{key}：叢集 {worst + 1} 的比例在後半段改變 {d[worst] * 100:+.0f} 個百分點（超過 10），構形的分佈還在移動。",
+                     f"{key}: cluster {worst + 1} changes its share by {d[worst] * 100:+.0f} percentage points in the second half (more than 10), so the distribution is still shifting.",
+                     f"{key}：クラスター {worst + 1} の割合が後半で {d[worst] * 100:+.0f} ポイント変わっており（10 超）、構造の分布はまだ動いています。",
+                     f"{key}: 클러스터 {worst + 1}의 비율이 후반부에 {d[worst] * 100:+.0f} %p 바뀌어(10 초과) 구조 분포가 아직 움직이고 있습니다."))
+    new = [c for c in ids if (h1 == c).mean() < 0.05 and (q4 == c).mean() >= 0.2]
+    if new:
+        z, e = _jz([c + 1 for c in new])
+        out.append(S("caution", f"{key}：叢集 {z} 在前半段幾乎沒有（< 5 %），最後四分之一卻占 20 % 以上，模擬還在探索新的狀態，沒有收斂。",
+                     f"{key}: cluster {e} is almost absent in the first half (< 5 %) but holds 20 % or more of the last quarter. The run is still exploring new states and has not converged.",
+                     f"{key}：クラスター {z} は前半にはほとんどなく（< 5 %）、最後の 4 分の 1 では 20 % 以上を占めます。計算はまだ新しい状態を探しており、収束していません。",
+                     f"{key}: 클러스터 {e}는 전반부에 거의 없지만(< 5 %) 마지막 4분의 1에서는 20 % 이상을 차지합니다. 시뮬레이션이 아직 새로운 상태를 탐색 중이며 수렴하지 않았습니다."))
+    sw = int((np.diff(lab) != 0).sum())
+    if len(ids) > 1:
+        out.append(S("note", f"{key}：{len(lab)} 幀中叢集切換 {sw} 次。",
+                     f"{key}: the cluster changes {sw} times over {len(lab)} frames.",
+                     f"{key}：{len(lab)} フレームの間にクラスターは {sw} 回切り替わりました。",
+                     f"{key}: {len(lab)}프레임 동안 클러스터가 {sw}번 바뀌었습니다."))
+    return out
+
+
+# --------------------------------------------------------------------------------------------- coarse-grained
+def classify_cg_membrane(name: str, summ: dict) -> list[dict]:
+    out = [S("note", f"{name}：這是粗粒化（Martini 3）模擬，每顆珠子約 4 個重原子，數值是珠子層級，不是全原子結果。",
+             f"{name}: this is a coarse-grained (Martini 3) simulation with about 4 heavy atoms per bead. The values are bead-level, not atomistic.",
+             f"{name}：これは粗視化（Martini 3）シミュレーションで、ビーズ 1 個はおよそ 4 個の重原子です。値はビーズ単位で、全原子の結果ではありません。",
+             f"{name}: 조립화(Martini 3) 시뮬레이션이며 비드 하나가 중원자 약 4개입니다. 값은 비드 단위이며 전원자 결과가 아닙니다.")]
+    out += classify_membrane_equil(name, summ.get("time_ns") or [], summ.get("apl_nm2") or [], summ.get("dpp_nm") or [], summ.get("reference"))
+    p2 = summ.get("p2") or {}
+    if p2:
+        m = float(np.mean(list(p2.values())))
+        out.append(S("good", f"{name}：鍵的序參數 P2 平均 {m:.2f}（0.1 到 0.6），脂肪鏈是流體相。",
+                     f"{name}: the mean bond order parameter P2 is {m:.2f} (0.1–0.6), so the tails are in the fluid phase.",
+                     f"{name}：結合の秩序パラメータ P2 の平均は {m:.2f}（0.1〜0.6）で、アシル鎖は流動相です。",
+                     f"{name}: 결합 질서 매개변수 P2 평균은 {m:.2f}(0.1~0.6)로 아실 사슬이 유동상입니다.")
+                   if 0.1 <= m <= 0.6 else
+                   S("caution", f"{name}：鍵的序參數 P2 平均 {m:.2f}（{'> 0.6，偏凝膠相' if m > 0.6 else '< 0.1，過於無序'}），請檢查溫度與組成。",
+                     f"{name}: the mean bond order parameter P2 is {m:.2f} ({'> 0.6, towards the gel phase' if m > 0.6 else '< 0.1, over-disordered'}). Check temperature and composition.",
+                     f"{name}：結合の秩序パラメータ P2 の平均は {m:.2f}（{'> 0.6、ゲル相寄り' if m > 0.6 else '< 0.1、無秩序すぎる'}）です。温度と組成を確認してください。",
+                     f"{name}: 결합 질서 매개변수 P2 평균은 {m:.2f}({'> 0.6, 겔상 쪽' if m > 0.6 else '< 0.1, 지나치게 무질서함'})입니다. 온도와 조성을 확인하십시오."))
+    return out

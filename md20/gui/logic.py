@@ -216,6 +216,11 @@ def pose_table(wf: Workflow, lang: str = "en") -> list[dict]:
                          "contacts": p["contacts"], "rmsd_ref": p["rmsd_ref"], "clash": p.get("clash", False),
                          "recommended": p["recommended"], "chosen": p["rank"] in chosen, "reason": e["reason"] if p["recommended"] else "",
                          "md_screen": _screen_label((screen.get(e["name"]) or {}).get(str(p["rank"])), lang)})
+    from .advanced import score_text
+    for name, v in sel.items():               # D-80 fold: complex: placed from the prediction, no docking entry, no score
+        if v.get("source") == "fold_complex" or v.get("score") is None:
+            rows.append({"entry": name, "rank": v.get("rank", 1), "score": score_text(None, lang), "cluster": "", "contacts": "",
+                         "rmsd_ref": None, "clash": False, "recommended": True, "chosen": True, "reason": "", "md_screen": ""})
     return rows
 
 
@@ -305,13 +310,22 @@ def parse_ligand_lines(text: str, lang: str = "en") -> list[dict]:
 def config_from_mode(*, mode: str, name: str, values: dict, pdb_id: str = "", receptor_file: str = "",
                      ligands_text: str = "", box_residue: str = "", box_center: str = "", box_size: str = "",
                      systems: list[str] | None = None, ph: float = 7.4, keep_hetero: str = "", goal: str = "teaching",
-                     library_file: str = "", lang: str = "en") -> dict:
+                     library_file: str = "", lang: str = "en", advanced: dict | None = None,
+                     quick_fold: list | set | None = None) -> dict:
     """Quick or pro form → workflow config.  `values` are the advisor parameters (already merged with the
-    recommendation); the GUI always asks before molecular dynamics (confirm_before_md)."""
+    recommendation); the GUI always asks before molecular dynamics (confirm_before_md).
+    `advanced`: membrane, folding and long-run settings of the professional form (gui/advanced.py);
+    `quick_fold`: peptide names ticked "fold this peptide" in quick mode."""
     from .. import advisor
+    from .advanced import apply_advanced, membrane_spec, defaults as adv_defaults
+    adv = {**adv_defaults(), **(advanced or {})}
+    mspec = membrane_spec(adv)
+    no_receptor = bool(mspec and mspec["type"] in ("surface", "bilayer"))      # membrane cases B and C (D-80)
     cfg = copy.deepcopy(example_config())
     cfg["name"] = safe_name(name or "workflow")
-    if pdb_id.strip():
+    if no_receptor:
+        cfg["receptor"] = {}
+    elif pdb_id.strip():
         cfg["receptor"] = {"pdb_id": pdb_id.strip().upper()}
     elif receptor_file:
         cfg["receptor"] = {"file": receptor_file}
@@ -360,6 +374,11 @@ def config_from_mode(*, mode: str, name: str, values: dict, pdb_id: str = "", re
         cfg.pop("screen", None)
     cfg["pose_choices"] = {}
     cfg["confirm_before_md"] = True
+    cfg = apply_advanced(cfg, adv, quick_fold=quick_fold)
+    if cfg["md"].get("membrane"):
+        cfg["binding"]["enabled"], cfg["binding"]["ligands"] = False, []     # gate `membrane binding`: not available yet
+        if no_receptor:
+            cfg.pop("screen", None)
     cfg["language"] = lang if lang in LANGS else "en"
     cfg["gui_mode"] = mode
     cfg["goal"] = goal

@@ -22,6 +22,7 @@ from . import docking_figs as DF
 from .figure_text import FIG
 from . import figure_text as FT
 from .html import _img, _esc, build_run_report
+from . import subsystem_report as SR
 from ..i18n import HTML_LANG, LANGS, colon, norm, paren, pick, stop
 
 
@@ -222,6 +223,9 @@ SECTION = {
                     "다만 샘플링이 충분해야 합니다. 즉 윈도우가 서로 겹치고 앞뒤 절반의 결과가 일치해야 합니다. 수렴하지 않았다면 정성적 비교에만 쓸 수 있습니다."),
     },
 }
+
+
+SECTION.update(SR.SUB_SECTIONS)        # D-82: structure prediction, membrane, long run, coarse-grained
 
 
 class Doc:
@@ -664,6 +668,11 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
             out += (f"<p class=muted>{_esc(tx(('系統推薦的理由', 'Reason for the recommendation', '推奨の理由', '추천 이유'), L))}"
                     f"{colon(L)}{_esc(e['reason'])}</p>")
     out += _geometry_table(doc, wf.state().get("multi_ligand") or {})
+    nos = SR.selection_rows(wf, L)                     # D-82: placed from a predicted complex, no docking entry
+    if nos:
+        out += doc.table([tx(("配體", "Ligand", "リガンド", "리간드"), L), tx(("分數（kcal mol⁻¹）", "Score (kcal mol⁻¹)", "スコア（kcal mol⁻¹）", "점수 (kcal mol⁻¹)"), L)],
+                         nos, ("不經對接、由預測複合物放置的胜肽", "Peptides placed from a predicted complex without docking",
+                               "ドッキングを経ずに予測複合体から置いたペプチド", "도킹 없이 예측 복합체에서 놓은 펩타이드"))
     if len(cmp_rows) >= 2:
         out += doc.figure_block(FG.ligand_compare(cmp_rows, doc.figdir / "docking_compare.png"), "ligand_compare", DF.classify_ligand_compare(cmp_rows))
     return _section(doc, doc.next(), "docking", params, out, doc.collected[start:])
@@ -1294,8 +1303,9 @@ def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None 
     vals = actual_values(wf)
     doc.user_keys = set(advisor.values_from_config(cfg))
     f = advisor.features_from_config(cfg)
-    body = [_design(doc, wf), _structure(doc, wf), _screen(doc, wf), _docking(doc, wf, vals, f, goal), _peptide(doc, wf),
-            _md(doc, wf, vals, f, goal), _binding(doc, wf, vals, f, goal)]
+    body = [_design(doc, wf), _structure(doc, wf), SR.fold_section(doc, wf), _screen(doc, wf), _docking(doc, wf, vals, f, goal),
+            _peptide(doc, wf), _md(doc, wf, vals, f, goal), SR.membrane_section(doc, wf), SR.longrun_section(doc, wf),
+            _binding(doc, wf, vals, f, goal), SR.cg_section(doc, wf)]
     # key findings: the same sentences the figures carry (cautions first), plus the peptide and structure notes
     st = wf.state()
     pool = I.peptide(st.get("cpp") or {}, st.get("peptide_access") or {}) + doc.collected + \
@@ -1323,8 +1333,8 @@ def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None 
             (f"<p class=meta>{_esc(tx(H['zh_note'], L))}</p>" if L != "zh" else ""),
             f"<div class=box><b>{_esc(tx(H['key_findings'], L))}</b>{_findings_html(key, L) or '<p class=muted>—</p>'}</div>",
             *body,
-            f"<h2>{n_meth}. {_esc(tx(H['methods'], L))}</h2><div class=methods>{_esc(methods_text(wf, vals, L))}</div>",
-            f"<h2>{n_lim}. {_esc(tx(H['limitations'], L))}</h2><ul>" + "".join(f"<li>{_esc(x)}</li>" for x in _limitations(doc, wf)) + "</ul>",
+            f"<h2>{n_meth}. {_esc(tx(H['methods'], L))}</h2><div class=methods>{_esc(methods_text(wf, vals, L) + SR.methods_sentences(wf, L))}</div>",
+            f"<h2>{n_lim}. {_esc(tx(H['limitations'], L))}</h2><ul>" + "".join(f"<li>{_esc(x)}</li>" for x in _limitations(doc, wf) + SR.limitations(wf, L)) + "</ul>",
             _viewer_section(wf, L),
             f"<h2>{_esc(tx(H['appendix_params'], L))}</h2>" + _param_table(doc, advisor.parameter_table(vals, f, goal, L),
                                                                          ("全部參數的採用值、本案例建議值與理由", "All parameters with the value used, the recommendation for this case and the reason",

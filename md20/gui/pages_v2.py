@@ -14,13 +14,15 @@ from nicegui import app, ui
 
 from .. import advisor
 from ..advisor import tx, PARAMS, QUICK_KEYS, GOALS, GROUPS, GROUP_ORDER
-from ..i18n import paren
+from ..i18n import paren, colon as colon_
 from ..project import Project
 from ..util import load_json, safe_name, atomic_write_json
 from ..workflow import Workflow
 from .app import STATE, RUNNER, lang, _, _header, _start, _upload_payload
 from .content import t, MODES, TEACHING, teaching_config
 from .logic import config_from_mode, list_workflows, parse_ligand_lines
+from . import advanced as A
+from ..i18n import pick
 
 LEVEL_STYLE = {"error": ("negative", "level_error"), "warning": ("warning", "level_warning"), "info": ("grey-7", "level_info")}
 
@@ -193,8 +195,20 @@ def new_default():
 
 
 @ui.page("/new/{mode}")
-def new_mode(mode: str):
-    _form("pro" if mode == "pro" else "quick")
+def new_mode(mode: str, expand: str = ""):
+    # ?expand=all opens every parameter group (tools/gui_preview.py screenshots the membrane and folding groups)
+    _form("pro" if mode == "pro" else "quick", expand_all=(expand == "all"))
+
+
+def _fold_engines() -> dict:
+    """Installed folding tools, probed once per GUI process (nvidia-smi and PATH lookups)."""
+    if "fold_engines" not in STATE:
+        try:
+            from ..build.fold import fold_status
+            STATE["fold_engines"] = fold_status().get("engines") or {}
+        except Exception:  # noqa: BLE001 — unknown: the form then says nothing about the tools
+            STATE["fold_engines"] = {}
+    return STATE["fold_engines"]
 
 
 def _widget(key: str, value, L: str, on_change):
@@ -212,12 +226,12 @@ def _widget(key: str, value, L: str, on_change):
     return ui.number(label, value=value, on_change=on_change, **{k: v for k, v in kw.items() if v is not None}).classes("w-full")
 
 
-def _form(mode: str):
+def _form(mode: str, expand_all: bool = False):
     L = lang()
     _header()
     pro = mode == "pro"
     state = {"goal": "teaching", "touched": set(), "updating": False, "receptor_file": "", "receptor_text": None,
-             "library_file": ""}
+             "library_file": "", "adv": A.defaults(), "quick_fold": set(), "quick_peps": None}
     widgets: dict = {}
     why_labels: dict = {}
     rec_labels: dict = {}
@@ -260,6 +274,7 @@ def _form(mode: str):
             ui.label(t("ligand_help", L)).classes("md20-why")
             ligs = ui.textarea(placeholder="LIG  CC(=O)Nc1ccc(O)cc1\nPEP  peptide:GGGGGKP").props("autogrow").classes("w-full font-mono")
             lig_err = ui.label("").classes("text-sm text-negative")
+            qf_box = ui.row().classes("w-full gap-3 items-center")       # quick mode: "fold this peptide" per peptide
             ligs.on("blur", lambda: refresh())
             ui.label(t("site", L)).classes("md20-section")
             with ui.row().classes("w-full gap-3 no-wrap"):
@@ -304,6 +319,7 @@ def _form(mode: str):
             ui.button(t("reset_rec", L), on_click=lambda: reset_all()).props("outline no-caps size=sm")
         keys = list(PARAMS) if pro else QUICK_KEYS
         param_box = ui.column().classes("w-full gap-2")
+        adv_box = ui.column().classes("w-full gap-2")
 
     with right:
         with ui.card().classes("w-full md20-card p-4"):
@@ -312,6 +328,13 @@ def _form(mode: str):
         with ui.card().classes("w-full md20-card p-4"):
             ui.label(t("estimate", L)).classes("md20-section")
             est_label = ui.label("").classes("text-sm")
+        with ui.card().classes("w-full md20-card p-4").props("data-testid=long-run") as lr_card:
+            ui.label(A.tx("long_run", L)).classes("md20-section")
+            lr_lines = ui.column().classes("w-full gap-1")
+            lr_confirm = ui.checkbox(A.tx("long_run_confirm", L), value=False,
+                                     on_change=lambda e: (state["adv"].__setitem__("long_run_confirmed", bool(e.value)), refresh()))
+            lr_note = ui.label(A.tx("long_run_note", L)).classes("md20-why")
+        lr_card.set_visibility(False)
         err = ui.label("").classes("text-negative text-sm")
         create_btn = ui.button(t("create_start", L), on_click=lambda: create()).props("color=primary no-caps size=lg").classes("w-full")
 
@@ -363,7 +386,7 @@ def _form(mode: str):
                 ks = [k for k in keys if g is None or PARAMS[k]["group"] == g]
                 if not ks:
                     continue
-                ctx = ui.expansion(tx(GROUPS[g], L), value=g in ("docking", "prod")).classes("w-full md20-card") if g else ui.card().classes("w-full md20-card p-4")
+                ctx = ui.expansion(tx(GROUPS[g], L), value=expand_all or g in ("docking", "prod")).classes("w-full md20-card") if g else ui.card().classes("w-full md20-card p-4")
                 with ctx:
                     for k in ks:
                         with ui.row().classes("w-full gap-3 no-wrap items-start py-1"):
@@ -372,6 +395,86 @@ def _form(mode: str):
                             with ui.column().classes("w-3/5 gap-0"):
                                 rec_labels[k] = ui.label("").classes("md20-changed")
                                 why_labels[k] = ui.label(rec[k]["why"]).classes("md20-why")
+
+    def adv_set(key, cast=None):
+        def h(e):
+            state["adv"][key] = cast(e.value) if (cast and e.value is not None) else e.value
+            refresh()
+        return h
+
+    def adv_row(widget_fn, help_key):
+        with ui.row().classes("w-full gap-3 no-wrap items-start py-1"):
+            with ui.column().classes("w-2/5 gap-0"):
+                widget_fn()
+            with ui.column().classes("w-3/5 gap-0"):
+                if help_key:
+                    ui.label(A.tx(help_key, L)).classes("md20-why")
+
+    def build_advanced():
+        """Professional mode: membrane and peptide-folding groups (gui/advanced.py writes them into the config)."""
+        adv = state["adv"]
+        adv_box.clear()
+        with adv_box:
+            with ui.expansion(A.tx("membrane", L), value=expand_all).classes("w-full md20-card").props("data-testid=group-membrane"):
+                ui.label(A.tx("membrane_help", L)).classes("md20-why")
+                adv_row(lambda: ui.select({k: pick(v, L) for k, v in A.MEMBRANE_TYPES.items()}, value=adv["membrane_type"],
+                                          label=A.tx("membrane_type", L), on_change=adv_set("membrane_type")).classes("w-full"), None)
+                adv_row(lambda: ui.select({k: pick(v, L) for k, v in A.LIPID_PRESETS.items()}, value=adv["lipids"],
+                                          label=A.tx("lipids", L), on_change=adv_set("lipids")).classes("w-full"), "lipids_help")
+                adv_row(lambda: ui.switch(A.tx("oriented", L), value=adv["oriented"], on_change=adv_set("oriented", bool)),
+                        "oriented_help")
+                adv_row(lambda: ui.number(A.tx("surface_distance", L) + paren("nm", L), value=adv["surface_distance_nm"],
+                                          min=0.0, max=5.0, step=0.1, on_change=adv_set("surface_distance_nm", float)).classes("w-full"),
+                        "surface_help")
+            with ui.expansion(A.tx("fold", L), value=expand_all).classes("w-full md20-card").props("data-testid=group-fold"):
+                ui.label(A.tx("fold_help", L)).classes("md20-why")
+                adv_row(lambda: ui.select({k: pick(v, L) for k, v in A.FOLD_MODES.items()}, value=adv["fold"],
+                                          label=A.tx("fold_mode", L), on_change=adv_set("fold")).classes("w-full"), None)
+                adv_row(lambda: ui.select({k: pick(v, L) for k, v in A.FOLD_ENGINES.items()}, value=adv["fold_engine"],
+                                          label=A.tx("fold_engine", L), on_change=adv_set("fold_engine")).classes("w-full"), None)
+
+                def seq_widget():
+                    w = ui.textarea(A.tx("fold_receptor_seq", L), value=adv["fold_receptor_seq"]).props("autogrow").classes("w-full font-mono")
+                    w.on("blur", lambda: (adv.__setitem__("fold_receptor_seq", w.value or ""), refresh()))
+                adv_row(seq_widget, "fold_receptor_help")
+                up_info = ui.label("").classes("md20-why")
+
+                async def got_fold(e):
+                    fname, data = await _upload_payload(e)
+                    if Path(fname).suffix.lower() not in (".pdb", ".cif", ".mmcif"):
+                        ui.notify(_("只接受 PDB 或 mmCIF 檔。", "Only PDB or mmCIF files are accepted.", "PDB か mmCIF のファイルだけを受け付けます。",
+                                    "PDB 또는 mmCIF 파일만 받습니다."), type="negative"); return
+                    dst = _uploads_dir() / f"{uuid.uuid4().hex[:8]}_{safe_name(Path(fname).stem)}{Path(fname).suffix.lower()}"
+                    dst.write_bytes(data)
+                    adv["fold_upload"] = str(dst)
+                    up_info.set_text(_("已上傳：", "Uploaded: ", "アップロード済み：", "업로드됨: ") + fname)
+                    refresh()
+                ui.upload(on_upload=got_fold, auto_upload=True, max_files=1, label=A.tx("fold_upload", L)).props(
+                    "accept=.pdb,.cif,.mmcif flat bordered color=blue-grey-7").classes("w-full")
+
+    def render_quick_fold(parsed):
+        """Quick mode: one "fold this peptide" checkbox next to each peptide ligand."""
+        names = A.peptide_names(parsed)
+        if names == state["quick_peps"]:
+            return
+        state["quick_peps"] = names
+        state["quick_fold"] &= set(names)
+        qf_box.clear()
+        with qf_box:
+            for n in names:
+                def toggle(e, n=n):
+                    (state["quick_fold"].add if e.value else state["quick_fold"].discard)(n)
+                    refresh()
+                ui.checkbox(f"{n}" + colon_(L) + A.tx("quick_fold", L), value=n in state["quick_fold"],
+                            on_change=toggle).props(f"data-testid=quick-fold-{n}")
+
+    def adv_values(for_checks: bool = False) -> dict:
+        """Pro: the whole group.  Quick: only the long-run confirmation; the ticked peptides go through quick_fold
+        (for the checks they count as "fold before docking", so a missing folding tool is reported)."""
+        if pro:
+            return state["adv"]
+        return {**A.defaults(), "fold": "dock" if (for_checks and state["quick_fold"]) else "off",
+                "long_run_confirmed": state["adv"]["long_run_confirmed"]}
 
     def refresh():
         f = features()
@@ -390,6 +493,23 @@ def _form(mode: str):
             state["updating"] = False
         vals = current_values(f)
         issues = advisor.check(vals, f, goal=state["goal"], lang=L)
+        draft = draft_cfg()
+        if not pro:
+            render_quick_fold(draft["ligands"])
+        issues += A.advanced_checks(adv_values(for_checks=True), ligands=draft["ligands"],
+                                    has_receptor=bool((pdb_id.value or "").strip() or state["receptor_file"]),
+                                    binding=bool(vals.get("binding")), solvent=vals.get("solvent", "explicit"),
+                                    production_ns=vals.get("production_ns"), fold_installed=_fold_engines(), lang=L)
+        order = {"error": 0, "warning": 1, "info": 2}
+        issues.sort(key=lambda i: order.get(i["level"], 3))
+        lr = A.long_run_view(vals, f, state["goal"], L)
+        lr_card.set_visibility(lr["show"])
+        lr_lines.clear()
+        with lr_lines:
+            for line in lr["lines"]:
+                ui.label(line).classes("text-sm")
+        lr_confirm.set_visibility(lr["needs_confirm"])
+        lr_note.set_visibility(lr["needs_confirm"])
         checks_box.clear()
         with checks_box:
             if not issues:
@@ -434,7 +554,7 @@ def _form(mode: str):
                                    box_residue=box_res.value or "", box_center=box_c.value or "", box_size=box_s.value or "",
                                    systems=list(systems.value or []), ph=float(ph.value or 7.4), keep_hetero=keep.value or "",
                                    goal=state["goal"], library_file=Path(state["library_file"]).name if state["library_file"] else "",
-                                   lang=L)
+                                   lang=L, advanced=adv_values(), quick_fold=set(state["quick_fold"]))
         except ValueError as exc:
             err.set_text(str(exc)); return
         proj = _project(project.value or "Projects")
@@ -454,6 +574,8 @@ def _form(mode: str):
         ui.navigate.to(f"/wf/{job.wf.project.dir.name}/{job.wf.name}")
 
     build_params()
+    if pro:
+        build_advanced()
     refresh()
 
 

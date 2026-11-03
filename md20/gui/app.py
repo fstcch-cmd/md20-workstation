@@ -50,6 +50,7 @@ STEP_TEXT = {"receptor_input": ("受體來源", "Receptor source", "受容体の
              "screen_library": ("篩選：化合物庫", "Screening: compound library", "スクリーニング：化合物ライブラリ", "스크리닝: 화합물 라이브러리"),
              "screen_docking": ("篩選：快速對接", "Screening: fast docking", "スクリーニング：高速ドッキング", "스크리닝: 빠른 도킹"),
              "screen_selection": ("篩選：選擇化合物", "Screening: compound selection", "スクリーニング：化合物の選択", "스크리닝: 화합물 선택"),
+             "fold": ("胜肽摺疊", "Peptide folding", "ペプチドの折りたたみ", "펩타이드 접힘"),
              "docking": ("分子對接", "Molecular docking", "分子ドッキング", "분자 도킹"),
              "pose_selection": ("姿勢選擇", "Pose selection", "ポーズの選択", "포즈 선택"),
              "md_confirm": ("確認進入分子動力學", "Confirm molecular dynamics", "分子動力学に進む確認", "분자동역학 진행 확인"),
@@ -201,6 +202,7 @@ def dashboard():
             ui.button(t("doctor_quick", L), on_click=lambda: do_doctor(False))
             ui.button(t("doctor_bench", L), on_click=lambda: do_doctor(True)).props("outline")
         drv_box = ui.column().classes("w-full gap-2")
+        _optional_tools(L)
 
         def render_drivers(rep):
             drv_box.clear()
@@ -260,6 +262,41 @@ def dashboard():
             ui.label(_("還沒有流程。到首頁選一種模式開始。", "No workflows yet. Choose a mode on the home page to start.",
                        "まだワークフローがありません。ホームでモードを選んで始めてください。",
                        "아직 워크플로가 없습니다. 홈에서 모드를 골라 시작하십시오.")).classes("text-gray-500")
+
+
+def _optional_tools(L: str):
+    """D-80: folding environment (setup-fold) and coarse-grained tools (setup-cg): installed or not, the exact install
+    command, and a button that shows the install plan.  Nothing is installed from the GUI."""
+    from .advanced import tool_rows, setup_preview, TOOL_TEXT
+    from ..build.fold import fold_status
+    from ..build.martini import availability
+    ui.separator()
+    ui.label(_("選用工具", "Optional tools", "追加のツール", "선택 도구")).classes("text-xl font-semibold")
+    try:
+        rows = tool_rows(fold_status(), availability(), L)
+    except Exception as exc:  # noqa: BLE001 — a broken probe must not take the status page down
+        ui.label(_("無法檢查選用工具：", "Could not check the optional tools: ", "追加のツールを確認できませんでした：",
+                   "선택 도구를 확인할 수 없습니다: ") + str(exc)).classes("text-negative text-sm")
+        return
+    for r in rows:
+        with ui.card().classes("w-full md20-card").props(f"data-testid=tool-{r['key']}"):
+            with ui.row().classes("items-center gap-2"):
+                ui.badge(r["status"], color="positive" if r["installed"] else "grey-7")
+                ui.label(r["title"]).classes("font-semibold")
+            ui.label(r["detail"]).classes("text-xs font-mono md20-muted")
+            ui.label(r["note"]).classes("text-sm")
+            ui.label(pick(TOOL_TEXT["install_cmd"], L) + colon(L)).classes("text-sm")
+            ui.label(r["command"]).classes("text-sm font-mono")
+            out = ui.label("").classes("text-xs font-mono whitespace-pre-wrap")
+
+            async def show(kind=r["key"], out=out):
+                from nicegui import run as nrun
+                try:
+                    lines = await nrun.io_bound(setup_preview, kind, lang())
+                except Exception as exc:  # noqa: BLE001
+                    lines = [f"{type(exc).__name__}: {exc}"]
+                out.set_text("\n".join(lines))
+            ui.button(pick(TOOL_TEXT["preview"], L), on_click=show).props(f"outline no-caps data-testid=preview-{r['key']}")
 
 
 def _start(wf: Workflow):
@@ -447,6 +484,10 @@ def workflow_page(project: str, name: str):
                            "系の構築、平衡化、本計算を行い、設定によっては数時間かかります。",
                            "분자 도킹과 포즈 선택이 끝났습니다. 포즈 표에서 선택된 포즈를 확인한 뒤 분자동역학으로 진행할지 결정하십시오. "
                            "계 구축, 평형화, 본 계산을 하며 설정에 따라 몇 시간 걸릴 수 있습니다.")).classes("text-sm")
+                from .advanced import selection_lines
+                sel = (wf.state()["steps"].get("pose_selection") or {}).get("selection") or {}
+                for line in selection_lines(sel, lang()):
+                    ui.label("• " + line).classes("text-sm")
 
                 def proceed():
                     job = RUNNER.get(wf)
@@ -489,6 +530,8 @@ def workflow_page(project: str, name: str):
 
         def pick_pose(e):
             row = e.args[1]
+            if isinstance(row.get("score"), str):          # placed from a predicted complex: there is no other pose to pick
+                return
             job = RUNNER.get(wf)
             if job and job.thread and job.thread.is_alive():
                 ui.notify(_("流程正在執行。請先暫停再改選姿勢，否則會和背景執行的流程互相覆寫狀態。",
