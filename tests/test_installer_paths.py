@@ -85,3 +85,11 @@ def test_vina_priority_follows_mode_on_windows(monkeypatch):   # D-70
     assert resources.child_creationflags("full") == subprocess.NORMAL_PRIORITY_CLASS
     assert resources.child_creationflags("balanced") == subprocess.NORMAL_PRIORITY_CLASS
     assert resources.child_creationflags("background") == subprocess.IDLE_PRIORITY_CLASS
+
+
+def test_desktop_gui_launcher_points_at_the_install():   # D-76
+    """A copy of MD20-GUI.cmd on the Desktop resolves %~dp0 to the Desktop and cannot find micromamba.exe."""
+    from pathlib import Path
+    s = (Path(__file__).resolve().parents[1] / "installer" / "install.ps1").read_text(encoding="utf-8-sig")
+    assert 'Copy-Item $Gui (Join-Path $Desktop' not in s
+    assert 'call `"$Gui`"' in s

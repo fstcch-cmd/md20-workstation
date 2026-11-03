@@ -7,6 +7,17 @@
 
 ## 2026-11-03
 
+### D-76　Windows 桌面的 MD20-GUI.cmd 打不開介面；發行 v0.1.0a5
+- 使用者回報（11/03 13:24）：GUI 打不開。筆電桌面的 `MD20-GUI.cmd` 內容是 `"%~dp0micromamba.exe" run -p "%~dp0envs\md20" md20 gui`。
+- 原因：安裝器（自 11/01 的 1b8117b 起）把 `%LOCALAPPDATA%\MD20\MD20-GUI.cmd` **原樣複製**到桌面；`%~dp0` 是「這個 .cmd 所在的資料夾」，
+  在桌面上就變成桌面，找不到 micromamba.exe 與環境，視窗一閃即關。CI 只檢查安裝目錄裡的啟動檔存在，從沒雙擊過桌面那一份，所以一直沒被發現。
+  先前筆電能開 GUI，是透過自測腳本或安裝目錄裡的啟動檔。
+- 決定：桌面啟動檔改為一行 `call "<安裝目錄>\MD20-GUI.cmd"`（絕對路徑；`-Encoding Default` 讓中文使用者名稱的路徑也正確）。
+  installer-windows（CI）與 verify-windows（發行）新增步驟：真的執行桌面啟動檔，等 http://127.0.0.1:8020 回 200 才算通過。macOS 的桌面啟動檔本來就用絕對路徑，不受影響。
+- 已安裝 a4 的人不必重裝：用 `%LOCALAPPDATA%\MD20\MD20-GUI.cmd` 開啟。
+- 證據：`tests/test_installer_paths.py::test_desktop_gui_launcher_points_at_the_install`；發行流程的桌面啟動檢查。
+- 版本：0.1.0a5（只改安裝器與 CI；程式碼與 a4 相同）。
+
 ### D-75　教學前清理舊文件：移到 `docs/archive/`，不刪除
 - 使用者要求（11/03 13:01）：清理舊的 Markdown，準備教學。
 - 決定：把已過時或只具歷史價值的文件**移到 `docs/archive/`**（交接快照、11/01 審查、筆電 session 守則、規格審查問答、被取代的第一版規格、a1–a3 發行說明、筆電 3PTB 重分析圖），

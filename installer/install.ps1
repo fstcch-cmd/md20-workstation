@@ -104,7 +104,14 @@ Set-Content -Encoding ASCII -Path $Gui -Value @(
   "`"%~dp0micromamba.exe`" run -p `"%~dp0envs\md20`" md20 gui",
   "pause")
 $Desktop = [Environment]::GetFolderPath("Desktop")
-if (Test-Path $Desktop) { Copy-Item $Gui (Join-Path $Desktop "MD20-GUI.cmd") -Force }
+# D-76: the desktop launcher must point at the installed one by absolute path.  A copy of $Gui does not work there:
+# its %~dp0 would then mean the Desktop folder, where micromamba.exe and envs\md20 do not exist (the window closes at once).
+# -Encoding Default (the ANSI code page cmd.exe reads) keeps a non-ASCII user name in the path intact.
+if (Test-Path $Desktop) {
+  Set-Content -Encoding Default -Path (Join-Path $Desktop "MD20-GUI.cmd") -Value @(
+    "@echo off",
+    "call `"$Gui`"")
+}
 Write-Host "[4/4] Doctor ..."
 & $Mamba run -p $Prefix md20 doctor
 Write-Host ""
