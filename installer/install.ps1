@@ -112,7 +112,8 @@ $Desktop = [Environment]::GetFolderPath("Desktop")
 # D-76: the desktop launcher must point at the installed one by absolute path.  A copy of $Gui does not work there:
 # its %~dp0 would then mean the Desktop folder, where micromamba.exe and envs\md20 do not exist (the window closes at once).
 # -Encoding Default (the ANSI code page cmd.exe reads) keeps a non-ASCII user name in the path intact.
-if (Test-Path $Desktop) {
+# MD20_NO_DESKTOP=1 (developer check, D-81): a side install must not repoint the user's desktop shortcut
+if ((Test-Path $Desktop) -and -not $env:MD20_NO_DESKTOP) {
   Set-Content -Encoding Default -Path (Join-Path $Desktop "MD20-GUI.cmd") -Value @(
     "@echo off",
     "call `"$Gui`"")
