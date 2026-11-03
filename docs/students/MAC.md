@@ -16,7 +16,7 @@ bash ~/Downloads/MD20-v0.1.0a3/Install-MD20.command
 
 ## 2. 每次使用
 - 圖形介面：**雙擊桌面的 `MD20-GUI.command`**，再用瀏覽器打開 http://127.0.0.1:8020 。**計算期間不要關掉那個終端機視窗**（關瀏覽器沒關係）；用完再關。
-  想邊算邊寫報告：介面右上角「資源用量」選「省資源」。
+  想邊算邊寫報告：介面右上角的資源選單（平常顯示「平衡（預設）」）改選「省資源：可同時寫報告」，下一個計算步驟起生效。
   （第一次若出現「無法打開」，在檔案上按右鍵 →「打開」→「打開」。）
 - 命令列（在終端機輸入）：
 
@@ -37,7 +37,7 @@ cd ~/Desktop
 sed -i '' 's/"tier": "teaching"/"tier": "classroom"/' trypsin.json
 ~/MD20/md20 pipeline run trypsin.json --project first_case
 ```
-- 第三行把等級改成 classroom（2 ns），Mac 上約 2–4 小時。筆電請**接電源**、不要讓它睡眠。
+- 第三行把等級改成 classroom（2 ns），Mac 上約 2–4 小時（估算，未實測）。專案名稱請用英文或數字。筆電請**接電源**、不要讓它睡眠。
 - 中途關掉終端機沒關係，**重打最後一行會從中斷處繼續**。
 - 結果在「文件／MD20_Projects／first_case」；打開裡面的 `report.html`。
 

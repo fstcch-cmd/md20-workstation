@@ -2,6 +2,7 @@
 
 狀態：**[已實作・待 CI]**（D-20，會診 §1 Q6）。真實 OpenMM 測試 `test_real_case_integration.py::test_3ptb_gbn2_implicit_solvent_short_md`
 在 openmm-stack 三個 OS 執行。
+> **2026-11-03 更新**：`test_3ptb_gbn2_implicit_solvent_short_md` 在 openmm-stack 真跑通過（81b72d9 起；c868014 全綠）。GBn2 只在 GPU 上較快（CPU 上 3PTB 很慢，見 STATUS）。
 
 ## 為什麼
 MD 成本約 80–90% 在水。筆電上唯一「真的快很多」又不需要截斷蛋白的選項是隱式溶劑：不加水與離子、無週期盒、無 PME，

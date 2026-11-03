@@ -1,24 +1,24 @@
 # MD20 開發交接檔(給新的 Claude Code session 接手用)
 
-> 最後更新:2026-11-01(第三個 session,見 §5–§6)。讀完這份就能無縫接續開發與 CI 監看。
+> 最後更新:2026-11-03(v0.1.0a3 發行後同步;§5–§6 為 2026-11-01 第三、四個 session 的紀錄)。讀完這份就能無縫接續開發與 CI 監看。
 > **重點:所有成果都在這個 repo + GitHub Actions 上,不在任何對話容器裡。** 新 session 只要 clone 本 repo 即可完整接手;正在跑的「虛擬機」就是 GitHub Actions CI,與 session 無關,不會因為舊對話結束而消失。
 
 ## 0. 新 session 第一步
-> **2026-11-02 之後：先讀 `docs/HANDOFF_2026-11-02.md`**（最新現況、CI、未完成事項與開場指令）；本檔其餘章節仍是一般說明。
+> **2026-11-02 之後：先讀 `docs/HANDOFF_2026-11-02.md`**（交接當時的現況與開場指令）；**2026-11-03 起 v0.1.0a3 已發行**，之後的現況以 `docs/STATUS.md` 開頭的「目前版本」、`docs/WORKBOARD.md` 與 `docs/DECISIONS.md`（最新在最上面，目前到 D-72）為準。本檔其餘章節仍是一般說明。
 
 1. 把 repo 加進 session 並 clone:`fstcch-cmd/md20-workstation`(需要 push 權限)。
 2. 讀這幾份:`docs/STATUS.md`(誠實三級現況)、本檔、`MD20_optimization_brief` 的規則(見 §4)、`docs/WORKFLOW.md`、`docs/TEACHING.md`。
 3. 看 CI 現況:`gh run list -R fstcch-cmd/md20-workstation -L 3`。**先確認最新一輪 openmm-stack 三個 OS 的結果**(Windows OpenCL 是使用者主力平台,必須綠)。
    - 單次指令:`gh run view <run_id> --json status,conclusion,jobs -q '"\(.status) \(.conclusion)", (.jobs[]|"\(.conclusion // .status) \(.name)")'`
    - 失敗細節 / 論文重現 JSON 在該 commit 留言:`gh api repos/fstcch-cmd/md20-workstation/commits/<sha>/comments --jq '.[].body'`
-4. 教學手冊已寫在 claude.ai 文件(非 repo 內):https://claude.ai/artifact/VL3P7wgbQBrPj4Ypd11pCG(九節,用兩篇論文當主線)。要改教材從這份文件改,不是 repo。
+4. 教材（非 repo 內）：v0.1.0a3 的「安裝與使用說明（Windows／macOS）」在 https://claude.ai/artifact/GPVgPN9TzaduFesmUovFoJ （十節）；較早的教學手冊 https://claude.ai/artifact/VL3P7wgbQBrPj4Ypd11pCG （九節，兩篇論文主線）。repo 內給學生的簡易步驟：`docs/students/WINDOWS.md`、`docs/students/MAC.md`。
 
 ## 1. repo 與帳號
 - GitHub:`fstcch-cmd/md20-workstation`,分支 `main`,暫時公開僅供 CI(README 已聲明保留權利)。
 - 擁有者:HCC Lab, NKUST(Chen-Che Hsieh)。
 - Commit 屬名(每次 commit 結尾加):
   ```
-  Co-Authored-By: Claude <noreply@anthropic.com>
+  Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   Claude-Session: <你這個 session 的連結>
   ```
   (新 session 會有自己的 session 連結,用自己的即可。)
@@ -32,11 +32,14 @@
 
 ## 3. CI 運作方式(怎麼看結果)
 - Workflow:`.github/workflows/ci.yml`,兩類工作:
-  - `pure-python`:3 OS × Py3.11/3.12,忽略 5 個重測檔;**這是必綠的門檻**。
+  - `pure-python`:3 OS × Py3.11/3.12,忽略重測檔;**這是必綠的門檻**。
+  - `installer-windows`、`installer-macos`:以 `git archive`(等同發行 ZIP)實際安裝 → doctor／demo／pipeline example。
   - `openmm-stack`:3 OS 真實 OpenMM+Vina 用 micromamba 建環境,跑同一套測試(約 20–30 分)。
   - `heavy`(Ubuntu,平行 3 個 job:workflow / pose-screen / metal,`MD20_HEAVY=1`):每組各自逾時、各自貼留言「CI heavy (<組>)」(D-19)。
   - `paper-docking`:兩篇論文的對接重現(數小時 Vina),獨立、`continue-on-error`,不阻擋;結果 JSON 貼留言。
-- `concurrency: cancel-in-progress` → **一 push 新 commit,舊 run 還在跑的工作會被 cancel**。所以看到舊 run 的 mac/ubuntu 是 `cancelled` 多半是被新 push 取消,不是失敗。要等完整結果,push 完就別再 push,讓它跑完(Ubuntu 重測約 15–25 分)。
+- main **不取消進行中的 run**(只有排隊中的 run 會被更新的 commit 取代;PR 才 cancel-in-progress)。舊紀錄裡的 `cancelled` 多半是改設定前被新 push 取消,不是失敗。完整一輪約 60–90 分鐘。
+- 只改 `docs/` 的 commit 不觸發 CI。
+- 發行:Actions →「Release (Windows and macOS installers)」→ Run workflow(tag `v0.1.0aN`),或 `gh workflow run release-windows.yml --ref main -f tag=v0.1.0aN`;先在乾淨 Windows 與 macOS runner 實裝驗證才建立 Release。
 - 看結果(單次指令,不要輪詢):
   ```
   gh run view <run_id> -R fstcch-cmd/md20-workstation --json status,conclusion,jobs \
@@ -103,7 +106,8 @@
 ## 8. 兩篇論文驗證/教學案例(`md20/validation/`)
 `md20 validate <case>` 產生設定 → `md20 pipeline run <file>`。
 - `hsieh2024`:J. Ethnopharmacol. 318 (2024) 116980,NF-κB RELA,六配體同時對接。論文標 PDB **1VKF 其實是 Thermotoga 蛋白**(≤188 aa),系統以殘基存在性判定正解為 **1VKX**。
-- `hsieh2025`:LWT 222 (2025) 117641,Keap1-BTB(4CXT),胜肽 **GGGGGKP**;淨電荷 +1,CPP 閘門會擋並建議改序列。
+- `hsieh2025`:LWT 222 (2025) 117641,Keap1-BTB(4CXT),胜肽 **GGGGGKP**;淨電荷 +1,CPP 科學限制**只提醒、不擋流程**(D-48),並建議替代序列。
+- `hsieh2024` 課堂／教學等級對接用 exhaustiveness 8,research 用論文的 32(D-71)。
 - 來源 PDF 由使用者上傳(JEP:S0378874123008486;LWT:S0023643825003251),需要時請使用者再附。
 
 ## 9. 常用指令
@@ -111,7 +115,8 @@
 md20 doctor                 # 硬體/環境診斷 + tier 建議
 md20 validate hsieh2024     # 產生論文驗證案例設定
 md20 pipeline run cfg.json  # docking→MD→binding 全流程(可續跑)
-md20 resume --all           # 續跑所有未完成工作流程
+md20 resume                 # 續跑所有未完成工作流程(--list 只列出)
+md20 --mode background ...  # 資源模式 background／balanced／full(D-68)
 md20 stamp verify <file>    # 查戳記
 md20 gui                    # NiceGUI 介面
 ```

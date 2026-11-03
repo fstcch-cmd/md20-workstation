@@ -2,7 +2,8 @@
 
 ```bash
 md20 pipeline example > my.json          # 產生範本（3PTB trypsin + benzamidine）
-md20 pipeline run my.json --project 課堂A # 執行；可隨時中斷，重跑同一指令即從中斷處接續
+md20 pipeline run my.json --project classA # 執行；可隨時中斷，重跑同一指令即從中斷處接續（專案名稱用英數字，D-67）
+md20 --mode background pipeline run my.json --project classA   # 資源模式：background／balanced（預設）／full（D-68）
 md20 gui                                  # 或用圖形介面（瀏覽器 http://127.0.0.1:8020）
 ```
 
@@ -29,19 +30,21 @@ md20 gui                                  # 或用圖形介面（瀏覽器 http:
 | `md.ionic_strength_molar` | 0.15（預設，生理）；0 = 只加中和離子（鹽本來就 < 1% 原子，省不了算力） |
 | `binding` | `{"enabled": true, "ligands": ["BEN"], "multi": true, "config": {...}}`；`docked_multi` 系統中每個配體會各自從共同口袋拉離（`multi:<配體>`）；config 見下 |
 
-`binding.config`（`BindingConfig`）：`pull_distance_nm`（1.5）、`pull_velocity_nm_per_ps`（0.01）、`k_pull`、`k_umbrella`（1000）、`target_overlap`（0.2）、`window_equil_ps`（10）、`window_prod_ps`（50）、`max_windows`（40）。
+`binding.config`（`BindingConfig`）：`pull_distance_nm`（1.5）、`pull_velocity_nm_per_ps`（**0.005**，D-63）、`k_pull`、`k_umbrella`（1000）、`target_overlap`（0.2）、`window_equil_ps`（10）、`window_prod_ps`（50；未指定時 teaching 自動用 500、research 2000，D-41）、`max_windows`（40）。
 
 ## 智慧化處理（每一項都寫進決策日誌）
 
 - **受體**：一律從原始檔重做；docking 處理過的 PDB 不回流 MD。編號跳號（chymotrypsin numbering）以 CA–CA 距離判斷，不誤判為缺失 loop。
 - **配體**：化學（鍵序、電荷）只取自 SMILES／SDF；pose 只提供座標，以子結構比對逐原子對應。對不上就停下來說明哪些原子，不猜。
 - **Pose 推薦**：最佳分數 1 kcal/mol 內、所屬 cluster 最大的 pose（Vina 分數誤差約 1–2 kcal/mol，搜尋重複找到的結合模式較可靠）；有晶體配體時同時報告 RMSD。
-- **simultaneous**：配體間最短距離 < 2 Å 的 joint pose 視為碰撞、不推薦。
+- **simultaneous**：配體間最短距離 < 2 Å 的 joint pose 視為碰撞、不推薦；進入 MD 前另查穿環、重疊與漂浮配體，自動選乾淨的 joint pose，必要時以剛體推移或軟核鬆弛修復，或一鍵排除指定配體（D-60、D-61、D-64）。
 - **docked_multi 由 independent 結果組成**：只有選定 pose 彼此距離 ≥ 2.5 Å 才允許，否則停下來請你改用 simultaneous 或改選 pose。
 - **短 MD 篩 pose（WP5）**：推薦 pose ＋ 其他通過對接保守條件、不同 cluster 的 pose 各跑一段短 MD；後段配體 RMSD ≤ 2.5 Å 且接觸殘基保留 ≥ 50% 才算穩定。推薦的穩定 → 維持；推薦的不穩定但別的穩定 → 自動改用並記錄；都不穩定或模擬失敗 → 停下來。短 MD 只排除會散開的 pose，不代表結合較強。
 - **金屬**：`bonded` 以晶體幾何建立諧和鍵／角、排除金屬–配位原子間非鍵結作用，並把配位的 Cys 改為 CYM、His 依配位的氮決定互變異構體（這是幾何模型，不是 MCPB.py/ZAFF 擬合參數）。少於 3 個蛋白配位原子、配體直接配位、His 兩個氮同時配位 → 停下來。`keep_nonbonded` 會加一個 production 也不解除的位置限制。
 - **MD**：watchdog 自動回滾＋縮小 dt；平衡未達標自動延長；電池／PAUSE 檔／時段在 chunk 邊界暫停。
-- **結合強度**：SMD 拉出配體 → 依 k、T、目標 overlap 自動規劃 window → 每個 window 可續跑 → WHAM/MBAR PMF ± bootstrap → ΔPMF（含 σ）與 ΔG° 估計（附限制說明）。
+- **結合強度**：SMD 拉出配體 → 依 k、T、目標 overlap 自動規劃 window（不連續處自動補窗）→ 每個 window 可續跑 → WHAM/MBAR PMF ± bootstrap → ΔPMF（含 σ）與 ΔG° 估計（附限制說明）。
+  PMF 必須涵蓋整段取樣距離（MBAR 沒涵蓋就改用 WHAM，兩者都沒涵蓋 → 標示未收斂，D-62）；PMF 末端未持平（上升 > kT）不輸出 ΔG°（D-65）。一維 COM PMF 對埋入口袋的配體會高估，只比較配體間趨勢。
+- **對接 CPU**：Vina 的 `--cpu` 依資源模式；每次對接記錄實際平均執行緒數（決策紀錄 `docking.run / cpu_use`，D-72）。
 - **多配體（WP9）**：共同口袋拉離前先檢查拉離路徑上有沒有其他配體（有就停下）；配體間比較只在同一情境內做，所有配體都有 tier 允許的 ΔG° 才給 ΔΔG°，否則給定性的 ΔΔPMF；差距 < 2σ 判為不可區分；同一配體「單獨 vs 共同口袋」的差值列為共存效應（趨勢，不是熱力學循環）。
 
 ## 金屬位點（`metal_policy` 與 `metal_params`）

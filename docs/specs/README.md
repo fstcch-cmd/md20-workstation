@@ -1,6 +1,6 @@
 # MD20 開發規格與構想（供外部審查）
 
-本資料夾是 MD20 單機教學版各子系統的**規格與設計理由**。寫給要審查設計的人（或更強的模型）：每份文件都說明
+本資料夾是 MD20 單機教學版各子系統的**規格與設計理由**（狀態更新至 2026-11-03、v0.1.0a3）。寫給要審查設計的人（或更強的模型）：每份文件都說明
 「要解決什麼問題 → 採用的原理 → 具體演算法與參數 → 目前狀態與證據 → 已知限制 → 想請審查者回答的問題」。
 
 狀態標記：
@@ -10,18 +10,21 @@
 
 | 文件 | 範圍 | 狀態 |
 |---|---|---|
-| [umbrella_adaptive.md](umbrella_adaptive.md) | 傘狀採樣智慧補窗（由粗到細）、每 window 各自的 k、即時覆蓋圖、手動補採樣 | 已實作・待 CI |
-| [restraints_freeze_truncation.md](restraints_freeze_truncation.md) | 分階段約束策略、凍結選項、口袋截斷模型、資源估算 | **設計中**（引擎掛鉤已加） |
-| [implicit_solvent.md](implicit_solvent.md) | 隱式溶劑 GBn2：組裝、protocol、閘門（金屬、結合計算擋下） | 已實作・待 CI |
-| [metal_sites.md](metal_sites.md) | 金屬 policy、幾何鍵結模型（含金屬中心與經金屬的 1-3/1-4 修正）、擬合參數（QM Hessian／MCPB.py／JSON）、QM 小模型輸入 | 部分已驗證・鋅配位仍待 CI（37bc6b1 那輪仍紅） |
+| [umbrella_adaptive.md](umbrella_adaptive.md) | 傘狀採樣智慧補窗（由粗到細）、每 window 各自的 k、即時覆蓋圖、手動補採樣；PMF 涵蓋與持平（D-62、D-65） | 已驗證（heavy workflow，c868014；筆電實跑） |
+| [restraints_freeze_truncation.md](restraints_freeze_truncation.md) | 分階段約束策略、凍結選項、口袋截斷模型、資源估算 | 分組約束已驗證（81b72d9）；凍結／截斷**設計中** |
+| [implicit_solvent.md](implicit_solvent.md) | 隱式溶劑 GBn2：組裝、protocol、閘門（金屬、結合計算擋下） | 已驗證（81b72d9 起） |
+| [metal_sites.md](metal_sites.md) | 金屬 policy、幾何鍵結模型（含金屬中心與經金屬的 1-3/1-4 修正）、擬合參數（QM Hessian／MCPB.py／JSON）、QM 小模型輸入 | 部分已驗證・鋅配位 heavy metal 自 c4b5de6 起綠，但平均鍵長在 0.3 Å 臨界（D-32／D-34） |
 | [gate_actions.md](gate_actions.md) | 三態閘門、GUI 一鍵決定、選項→設定修補、失效重跑 | 已驗證（GUI 伺服器測試）|
 | [viewer_interactions.md](viewer_interactions.md) | 離線 3D viewer、幾何互作標示、vdW 表面 | 已實作・純 Python 驗證（Chromium 繪圖測試在 CI 恆跳過，未驗證） |
-| [drivers.md](drivers.md) | 顯示卡驅動偵測→判定→一鍵下載官方驅動（不自動安裝）；`-Cuda` 不動驅動的替代路 | 已實作・查詢服務待真機 |
-| [solvent_box.md](solvent_box.md) | 水盒：菱形十二面體、tier padding（0.8／1.0）、下限閘門、離子強度可調——算力不浪費在水與鹽 | 已實作・待 CI |
-| [pbc_centering.md](pbc_centering.md) | 週期邊界歸零：蛋白鏈＋bonded 金屬為錨、配體／胜肽折回、歸零 DCD 輸出、視覺性解離閘門 | 已實作・待 CI |
-| [hts_screen.md](hts_screen.md) | 高通量前期篩選：Excel/CSV 化合物庫 → 自動下載 3D → 批次快速對接 → 排名圖 → 勾選進入正式對接/MD | 已實作・待 CI |
+| [drivers.md](drivers.md) | 顯示卡驅動偵測→判定→一鍵下載官方驅動（不自動安裝）；`-Cuda` 不動驅動的替代路 | 已實作・筆電 `drivers plan` 實測正常，下載未在真機用過 |
+| [solvent_box.md](solvent_box.md) | 水盒：菱形十二面體、tier padding（0.8／1.0）、下限閘門、離子強度可調——算力不浪費在水與鹽 | 已驗證（全流程 CI＋筆電） |
+| [pbc_centering.md](pbc_centering.md) | 週期邊界歸零：蛋白鏈＋bonded 金屬為錨、配體／胜肽折回、歸零 DCD 輸出、視覺性解離閘門 | 已驗證（全流程 CI＋筆電） |
+| [hts_screen.md](hts_screen.md) | 高通量前期篩選：Excel/CSV 化合物庫 → 自動下載 3D → 批次快速對接 → 排名圖 → 勾選進入正式對接/MD | 已驗證（`test_screen_integration` 三 OS，1634916 起含 Windows） |
 | [ci_validation.md](ci_validation.md) | CI 架構、重測、論文對接重現、hsieh2024 不可重現分析、這幾輪抓到的 bug | 進行中 |
 | [binding_funnel_restraints.md](binding_funnel_restraints.md) | 結合自由能的漏斗約束與標準態校正：沿拉離軸投影 CV、圓錐＋圓柱側向約束、解析 K_b；筆電 3PTB 證據（一維距離 PMF 高估 3 倍以上） | **設計中**（a3 不含；請審查 §5） |
+| [gui_v2.md](gui_v2.md) | GUI v2：四種模式、教學頁、依個案建議參數、雙語、進 MD 前確認 | 已實作・隨 v0.1.0a3 發行（CI 渲染；互動部分筆電確認） |
+| [multi_ligand.md](multi_ligand.md) | 多配體同時對接進 MD：穿環／重疊／漂浮檢查、剛體微調、軟核鬆弛、協同自由能熱力學循環 | 已驗證（CI openmm-stack；D-60、D-61、D-64） |
+| [report_language.md](report_language.md) | 報告用語規範與圖表 F1–F42：每種圖的怎麼讀、門檻與中英文句型 | 已實作（`figure_text.py`，測試檢查一致） |
 | [vina_cpu_use.md](vina_cpu_use.md) | Vina 執行檔的 CPU 使用：平行度上限、資源模式→--cpu／優先權／Windows QoS、每次執行的實際執行緒量測 | 已實作・待 Windows CI 與筆電實測 |
 | [REVIEW_QUESTIONS.md](REVIEW_QUESTIONS.md) | 彙整：最希望審查者挑戰的設計決定 | — |
 | [REVIEW_ANSWERS_2026-11-01.md](REVIEW_ANSWERS_2026-11-01.md) | **會診結果**：每個審查問題的回答、各規格沒寫到的科學缺口、下一個 session 的優先順序 | 待採納 |

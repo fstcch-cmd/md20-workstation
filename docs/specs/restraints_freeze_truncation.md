@@ -4,6 +4,7 @@
 （整條主鏈、指定殘基）；約束與凍結都要能智慧化建議，讓使用者直觀地降低運算資源；也允許整顆蛋白自由模擬。
 已加入的引擎掛鉤（D-23 起由 `make_protocol(restraints=…)` 使用）：`StageSpec.restraint_groups`（每組 [起, 迄] 倍率）、`StageSpec.freeze`，
 `chunks._apply_schedule` 會逐批設定 `msw_rs_<group>`；兩個新欄位在預設值時不進入 protocol 雜湊（進行中的 run 可續跑）。
+> **2026-11-03 更新**：分組約束 Reference 平台實算 `test_restraint_groups_openmm` 在 CI 真跑通過（81b72d9 起）。凍結與口袋截斷仍為設計。
 
 ## 1. 現況（已存在）
 - `add_position_restraints`：蛋白主鏈重原子 k = 1000、配體重原子 k = 500 kJ/mol/nm²；側鏈不約束。

@@ -12,7 +12,7 @@
 
 ## 2. 每次使用
 - 圖形介面：**雙擊桌面的 `MD20-GUI.cmd`**，瀏覽器會打開 http://127.0.0.1:8020 。**計算期間不要關掉那個黑色視窗**（關瀏覽器沒關係）；用完再關。
-- 想邊算邊寫報告：介面右上角「資源用量」選「省資源」。
+- 想邊算邊寫報告：介面右上角的資源選單（平常顯示「平衡（預設）」）改選「省資源：可同時寫報告」，下一個計算步驟起生效。
 - 命令列：按 `Win + R`，輸入 `cmd`，按 Enter，然後輸入：
 
 ```
@@ -25,12 +25,16 @@
 ```
 1 分鐘內跑完一個不需要計算的示範流程並產生報告，確認安裝正常。
 
-## 3. 第一個真實案例（胰蛋白酶＋苯甲脒，約 1–1.5 小時）
+## 3. 第一個真實案例（胰蛋白酶＋苯甲脒）
 ```
 cd %USERPROFILE%\Desktop
 %LOCALAPPDATA%\MD20\md20.cmd pipeline example > trypsin.json
+notepad trypsin.json
 %LOCALAPPDATA%\MD20\md20.cmd pipeline run trypsin.json --project first_case
 ```
+- 第三行打開記事本：把 `"tier": "teaching"` 改成 `"tier": "classroom"`（2 ns），存檔關閉。
+  RTX 4060 筆電上 classroom 約 75 分鐘；不改（teaching，10 ns）約 3 小時。沒有 NVIDIA 顯示卡會慢很多，請用 classroom。
+- 專案名稱請用英文或數字（中文名稱會變成看不懂的資料夾名）。
 - 筆電請**接電源**（用電池時會自動暫停）。
 - 中途關掉視窗沒關係，**重打最後一行會從中斷處繼續**。
 - 結果在「文件\MD20_Projects\first_case」；打開裡面的 `report.html`。

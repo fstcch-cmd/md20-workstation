@@ -2,6 +2,7 @@
 
 狀態：**[已實作・待 CI]**（2026-11-01，第三個 session）。純 Python 測試 14 個通過（`tests/test_adaptive_windows.py`、
 `tests/test_umbrella_manual.py`）；真實 OpenMM 的 SMD＋umbrella 路徑（`test_binding_integration`、全流程）待 CI。
+> **2026-11-03 更新**：真實路徑已跑過——heavy workflow（3PTB 全流程含 binding）在 c868014 全綠；筆電 RTX 4060 classroom 實跑 13 → 40 window（6 輪內連續）。後續修正見 D-62（PMF 涵蓋）、D-63（拉速 0.005）、D-65（末端持平）。補窗起始仍等距、未利用 SMD 力曲線（未做）。
 
 ## 1. 問題
 Colab 版與本專案舊版的 umbrella sampling 常出現**取樣不連續**：合併所有 window 的 CV 直方圖有空洞，WHAM/MBAR 把兩段

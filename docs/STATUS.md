@@ -1,7 +1,16 @@
-# MD20 單機教學版 — 狀態報告（2026-11-01，第四個 session）
+# MD20 單機教學版 — 狀態報告（最後更新 2026-11-03；本檔自 2026-11-01 起累積）
 
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
+
+## 目前版本：v0.1.0a3（2026-11-03 發行）
+- 發行：https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a3 （`MD20-Windows-v0.1.0a3.zip`、`MD20-macOS-v0.1.0a3.zip`；發行前在乾淨 Windows 與 macOS runner 實裝驗證通過）。
+- 發行的 main 包含 D-72（578c484）。**4bccdff（D-71）以前的程式 CI 15 個 job 全綠**；D-72（vina.exe HighQoS 標記與執行緒量測）的完整 CI 尚未確認，使用者 11/03 08:50 決定不等筆電驗證直接發行。
+- 真機（A 級）：MSI Cyborg 14／RTX 4060 Laptop／Windows 11，CUDA 601–613 ns/day；classroom 3PTB 全流程 76.5 分鐘（a1）；teaching 3PTB 重跑完成（a2 以前）並以全範圍 WHAM 重分析（D-62）。
+  GUI v2 的互動、教學一（六配體同時對接）完整跑完、macOS 真機**尚未**在實機確認。
+- 已知限制：一維 COM PMF 對埋入口袋的配體高估 3 倍以上（3PTB teaching −21 kcal/mol 對實驗約 −6.4），只比較趨勢；鋅鍵結模型平均鍵長在 0.3 Å 臨界；
+  vina.exe 在 Windows 混合核心上只用約 4 執行緒的原因判斷為 QoS（D-72），**未實測確認**。
+- 以下為歷次紀錄（由新到舊為主，保留原文）。
 
 CI 依據(`fstcch-cmd/md20-workstation`):
 - **11/02 下午（session_016gcJz8q2F6515MWPncJEZu）：週二交付版的新功能，目前等級**（CI 結果出來後更新）：
@@ -89,7 +98,7 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 
 ### C1. 論文驗證案例(教學背景用)
 - **hsieh2024**(NF-κB RELA,六配體同時對接):論文標 PDB 1VKF,但 1VKF 是 *Thermotoga* 蛋白;系統判定正解為 **1VKX**。
-- **hsieh2025**(Keap1-BTB 4CXT,胜肽 GGGGGKP):胞內標靶但淨電荷 +1,**CPP 閘門擋下並給替代設計**;「covalent bonding」實為凡得瓦接觸;盒子比整個 domain 還大(等同盲對接)。
+- **hsieh2025**(Keap1-BTB 4CXT,胜肽 GGGGGKP):胞內標靶但淨電荷 +1,**CPP 科學限制提醒並給替代設計**(D-48 起不擋流程);「covalent bonding」實為凡得瓦接觸;盒子比整個 domain 還大(等同盲對接)。
 目的是示範把關流程,不是逐位重現論文數字。
 
 **論文對接重現(CI `paper-docking`,ef32b48,exhaustiveness 8 縮減搜尋)——第一次跑完**:
@@ -110,7 +119,7 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 - **金屬鍵結模型**預設是晶體幾何的諧和鍵/角(電荷沿用力場)。**擬合參數**可由三種來源匯入(`metal_params`):QM Hessian(內建轉換,電荷仍沿用力場)、MCPB.py 輸出(含 RESP 電荷;二面角與金屬 LJ 不轉譯)、JSON。QM 計算本身(ORCA/Gaussian)在程式外執行;程式負責產生小模型輸入與檢查結果。配體直接配位金屬、少於 3 個蛋白配位原子一律 NEEDS_HUMAN。配位水被移除(位置開放,報告標註)。開殼層金屬的 QM 電荷/自旋不猜,需使用者指定。
 - **多配體 PMF**:共存效應是「單獨 vs 共同口袋」的趨勢比較,不是封閉的熱力學循環;拉離路徑被另一配體擋住時不計算。
 - **誤差**:σ 為 bootstrap(每個重抽樣 PMF 重算 ΔPMF/ΔG°)與 replica 標準誤取大者;不含力場誤差。
-- **ΔG°**:一維 COM 距離 PMF + 徑向積分,未做方向/構形限制校正;classroom 不輸出;research 需 ≥3 個**實際完成**的 replica + 半段收斂。
+- **ΔG°**:一維 COM 距離 PMF + 徑向積分,未做方向/構形限制校正(漏斗約束設計中,`docs/specs/binding_funnel_restraints.md`);classroom 不輸出;PMF 未涵蓋取樣範圍或末端未持平不輸出(D-62、D-65);research 需 ≥3 個**實際完成**的 replica + 半段收斂。
 - **3D viewer** 是自寫的 Canvas 2D(離線、無 WebGL):球棍 + Cα 骨架 + 口袋殘基,可旋轉/縮放/播放軌跡;互作為**純距離準則**(氫鍵不檢查角度,不是能量分解);「表面」是口袋原子 vdW 球近似,**不是**溶劑可及表面;沒有卡通。
 - **GUI 閘門一鍵決定**只涵蓋程式真的會執行的選項;換結構、改序列、MCPB.py/QM 參數、補長 loop 等仍需在程式外處理(卡片列為「需要在程式外處理」)。
 - **受體閘門的 human_choices**(修正):先前任何選擇都會讓閘門轉為已處理,但長 loop/未知殘基/重複原子名的選項並未實作(例如長 loop 仍被丟棄→主鏈斷裂);現在只接受 hetero groups 的移除/保留,其他選擇維持 NEEDS_HUMAN 並說明原因。「保留為參考配體」改為**不**留在 MD 受體中。
@@ -118,6 +127,8 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 
 ### C3. 平台
 - AMD GPU 走 OpenCL;Apple Silicon 走 CPU/OpenCL。
+- 資源模式(省資源／平衡／全速)同時決定 MD 的 CPU 執行緒／GPU 工作比例、Vina 的 `--cpu`、Windows 子程序優先權與 QoS(D-68、D-70、D-72)。
+- Windows:關閉 MD20 視窗會一併結束 vina.exe(Job Object,D-69)。
 - Vina:Windows 無 python bindings 時用官方執行檔(`md20 setup-vina`)。
 
 ---

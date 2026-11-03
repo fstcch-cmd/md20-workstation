@@ -9,7 +9,8 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
-| **D-72 調查 vina.exe 只用約 4 執行緒**（使用者 11/03 08:35）：原始碼確認 Vina 不限制；Windows QoS→HighQoS 標記＋每次執行量測；待 Windows CI 與筆電實測 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-03 08:40 | 其他 session 勿動 md20/docking/vina_cli.py、md20/env/winfix.py |
+| **D-73 全部文件與 v0.1.0a3 同步**（使用者 11/03 09:03）：完成，見 DECISIONS D-73 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-03 09:05 | 只改文件 |
+| **D-72 調查 vina.exe 只用約 4 執行緒**（使用者 11/03 08:35）：原始碼確認 Vina 不限制；Windows QoS→HighQoS 標記＋每次執行量測；已隨 v0.1.0a3 發行（使用者決定不做筆電實測） | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-03 08:40 | 其他 session 勿動 md20/docking/vina_cli.py、md20/env/winfix.py |
 | **接手（HANDOFF_2026-11-02 §0）＋週二交付**：D-62–D-71 完成；c868014 全綠；Windows＋macOS 發行流程與學生說明（docs/students/）；**a3 發行待使用者按 Run workflow**（本 session 無發行權限）；未決：vina.exe 多配體只用約 4 執行緒 | HANDOFF_2026-11-02／使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-02 20:45 | 可讀筆電檔案 |
 | **待判斷：預設拉離速度 0.01 → 0.005 nm ps⁻¹？**（使用者 11/02 14:58 指示：等筆電 teaching 重跑結果出來後由本 session 判斷並記錄）判斷依據：重跑的 SMD 振盪指標（D-45 smd_ringing）、窗口起始幀是否仍落在反彈點、PMF 井深是否回到合理範圍；降速代價為 SMD 時間加倍 | 使用者 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-02 14:58 | 結論寫入 DECISIONS（新條目）並更新 BindingConfig 預設 |
 | **週二交付（使用者 11/02 15:04）：GUI v2 四種模式（教學一、教學二、快速、專業）＋教學頁＋依個案建議參數＋雙語介面與報告**（D-47–D-52 已推；待 CI 與筆電實測，之後發行 v0.1.0a3） | 使用者 | session_016gcJz8q2F6515MWPncJEZu | 2026-11-02 15:04 | 其他 session 請勿動 md20/gui/、md20/advisor.py、md20/report/ |

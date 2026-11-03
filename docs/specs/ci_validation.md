@@ -19,7 +19,7 @@
 6. `setup-vina` 被 GitHub API 未登入限流（403）→ 帶 token + 固定版本 release 直接下載後備；CI 以 HEAD 驗證固定檔名存在。
 
 ## 論文驗證案例
-- **hsieh2025**（Keap1 4CXT，胜肽 GGGGGKP）：第 1 名 −5.91 kcal/mol（論文 −5.22），接觸殘基 recall 100%。CPP 閘門擋下（淨電荷 +1，胞內標靶）並給替代設計。
+- **hsieh2025**（Keap1 4CXT，胜肽 GGGGGKP）：第 1 名 −5.91 kcal/mol（論文 −5.22），接觸殘基 recall 100%。CPP 科學限制提醒（淨電荷 +1，胞內標靶；D-48 起不擋流程）並給替代設計。
 - **hsieh2024**（NF-κB，六配體同時對接）：論文印的 PDB 1VKF 是 *Thermotoga* 蛋白；以殘基存在性判定應為 1VKX（11 個報告殘基中 9 個存在）。
   在 1VKX 用論文盒子對接：聯合分數 −11.7（論文 −13.86），但六個配體全落在 563–634 號殘基一帶，與論文殘基 recall 0；
   系統拒絕推薦（口袋約 107 Å³ vs 六配體約 1386 Å³）。
@@ -40,3 +40,8 @@
 ## 想請審查者回答
 1. 論文重現用 exhaustiveness 8 是否足以下結論？要不要改成多 seed 的小 exhaustiveness 取最佳？
 2. 重測 62 分鐘：是否應拆成多個平行 job（全流程、篩 pose、金屬、PMF 各一）？
+
+## 2026-11-03 現況
+- CI 工作：pure-python ×6、openmm-stack ×3 OS、heavy ×3（workflow／pose-screen／metal）、paper-docking、installer-windows、**installer-macos**（D-66），共 15 個；c868014 與 4bccdff 全綠。
+- 發行流程 `release-windows.yml`（「Release (Windows and macOS installers)」）：打包 → verify-windows（含 CUDA dry-run solve）＋ verify-macos → publish；v0.1.0a3 於 2026-11-03 發行。
+- 只改 `docs/` 或 `*.md` 的 commit 不觸發 CI（`paths-ignore`）。

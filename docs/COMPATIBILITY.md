@@ -6,8 +6,8 @@
 |---|---|---|---|---|---|---|
 | 2026-11-02 | MSI Cyborg 14 A13VF（i7-13620H 10C/16T、16 GB RAM） | Windows 11 家用版 26200 | RTX 4060 Laptop 8 GB／566.14（CUDA 12.7）+ Intel UHD | **CUDA**（mixed，cuda-version 12.4，OpenMM 8.2.0） | **601–613** | v0.1.0a1 安裝失敗兩次：① `ocl-icd-system` 不存在（D-36）② 套件快取路徑 263 字元 > 260（D-38）。修正後（e9051ce）：安裝 2.6 min（環境已部分下載）、doctor OK（建議 tier research；classroom 2.3 ns ≈ 0.1 h）、`drivers plan` OK（不需更新）、demo OK、GUI http 200（3 s）。classroom 3PTB：**`pipeline run` rc=0，76.5 min**（apo＋docked BEN 兩個 run 都產出 report.html；自測 log `selftest_20261102_114651.log`，使用者 13:06 回報）；結果：redocking RMSD 0.38 Å（Vina −6.11）；backbone RMSD apo 0.87／holo 0.79 Å；BEN 全程留在口袋（末段 0.6 Å，Asp189／Ser190／Gly219 氫鍵候選 100%）；SMD 最大力 524 kJ/mol/nm、功 251 kJ/mol；umbrella 13 → 40 window（自動補窗 6 輪）；**ΔPMF 80.3 ± 1.0 kJ/mol，ΔG° 不輸出（not converged；classroom 本就不輸出）**——見 D-40 |
 | 2026-10-31 | 教師筆電 | Windows 10 | GTX 1060 4 GB（舊驅動）+ UHD 630 | OpenCL（GTX 1060） | 200 | CUDA 失敗 `INVALID_PTX`（驅動過舊）；殘留 `nvopencl.dll` 觸發 DLL 錯誤視窗（已改為靜默失敗） |
-| CI | GitHub windows-latest | Windows Server | 無 | CPU | 見 Actions artifact | 安裝路徑驗證 |
-| CI | GitHub macos-latest | macOS (arm64) | 無 | CPU | 見 Actions artifact | |
+| CI | GitHub windows-latest | Windows Server | 無 | CPU | 見 Actions artifact | 安裝路徑驗證（installer-windows、發行前 verify-windows） |
+| CI | GitHub macos-latest | macOS (arm64) | 無 | CPU | 見 Actions artifact | installer-macos、發行前 verify-macos（a3 起）；**尚無 Mac 真機紀錄** |
 | CI | GitHub ubuntu-latest | Ubuntu | 無 | CPU | 見 Actions artifact | 全流程（docking→MD→PMF）測試在此跑 |
 
 ## 安裝時已知問題與自動處理
@@ -36,18 +36,21 @@
 | 傘狀採樣 | 13 → 40 window、5 輪補窗後連續（上限 6 輪），延長 59 次 | 36.0 min |
 | 報告 | apo／docked 各一份 report.html | — |
 
-### 發現（待處理）
+### 發現與處置（2026-11-03 更新）
 1. **PMF 被截斷（a1，MBAR 路徑）**：40 個 window 取樣到 1.72 nm，但 `pmf.png` 只畫到 0.50 nm 且仍在上升；
    報告的 ΔPMF 80.3 ± 1.0 kJ/mol 只是截斷邊緣的值，不是井深。同一批樣本用 main 的 `pmf_from_windows`（WHAM）重算，PMF 涵蓋 0.16–1.83 nm。
    main 的 D-43（MBAR 未收斂時與 WHAM 交叉比對）可能已部分防護，但仍需在**有 pymbar 的機器**以 main 重跑確認；並應加閘門：PMF 有限值範圍未涵蓋取樣範圍 → NEEDS_HUMAN。
+   **→ 已處理（D-62）**：MBAR 未涵蓋取樣範圍時改用 WHAM，兩者都未涵蓋則標示未收斂；PMF 末端未持平不輸出 ΔG°（D-65）。
 2. **classroom tier 的結合自由能高估約 5 倍**：完整 radial PMF 在約 1.0 nm 後平台 125–134 kJ/mol → ΔG° ≈ −29.5 kcal/mol，實驗值約 −6.4 kcal/mol。
    原因判斷：window 只有 50 ps，配體被拉出時周圍水與 Asp189 鹽橋來不及鬆弛（取樣滯後）。a1 已正確**不輸出 ΔG°**；main 的 D-43 井深警示（9 個重原子上限約 57 kJ/mol）會標出此案例。
    classroom 的結合計算應明示「僅供示範流程，數值不可用」，或改為 teaching 等級再比較。
-3. 補窗效率差：初始 window 等距、k 一律 1000，未利用 SMD 力曲線（見使用者試算表「補窗效率」）。
-4. 外觀：doctor 顯示「Windows 10」與「NVIDIA NVIDIA」（D-39 已修）；pymbar 英文警告大量出現在 CMD（待處理）。
+   **→ teaching 重跑（500 ps window）全範圍仍約 −21 kcal/mol**：主因是一維 COM PMF 對埋入口袋配體的系統性高估，不只是取樣滯後；報告只比較趨勢，漏斗約束設計中（`docs/specs/binding_funnel_restraints.md`）。拉速改 0.005（D-63）。
+3. 補窗效率差：初始 window 等距、k 一律 1000，未利用 SMD 力曲線（見使用者試算表「補窗效率」）。**→ 未處理**（a3 仍是等距起始＋自動補窗）。
+4. 外觀：doctor 顯示「Windows 10」與「NVIDIA NVIDIA」（D-39 已修）；pymbar 英文警告大量出現在 CMD（D-43 起不再印到命令列）。
 
 ## 實機：教學一（hsieh2024，六配體同時對接）— MSI Cyborg 14／RTX 4060，a3 候選版（819c8ec），2026-11-03 夜間
 - 安裝（從 9173daf／819c8ec 本機副本）1 分鐘內完成；doctor CUDA；GUI 正常；切換語言不再重跑（D-67 修正後實測）。
 - 對接：exhaustiveness 32、六配體 simultaneous、資源模式全速。**00:12 開始，03:14 仍無輸出（> 3 小時）**。工作管理員：vina.exe CPU 約 24%（16 執行緒中約 4 個），
   優先順序「標準」、親和性 16 個全勾（D-70 更正）。關閉 GUI 視窗後舊 vina.exe 仍在跑（孤兒程序，D-69 修正）。
-- 結論：論文設定在學生筆電上不可行 → 課堂／教學等級改為 8（D-71）。vina.exe 多配體只用約 4 執行緒、以及 3 小時以上是否已卡住，**未查明**。
+- 結論：論文設定在學生筆電上不可行 → 課堂／教學等級改為 8（D-71）。3 小時以上是否已卡住未查明。
+- vina.exe 只用約 4 執行緒：讀 Vina 原始碼確認 Vina 本身不限制；判斷為 Windows 11 依視窗可見度給的 QoS 把子程序排到 4 個節能核心，a3 起標記 HighQoS 並記錄每次的實際執行緒數（D-72，**未實測確認**）。
