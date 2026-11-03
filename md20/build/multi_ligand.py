@@ -483,3 +483,33 @@ def piercings_in_pdb(pdb_path) -> list[dict]:
         for m in lig_mols:
             out += piercings(m, m.xyz, r, r.xyz) + piercings(r, r.xyz, m, m.xyz)
     return out
+
+
+def rank_for_md(poses: dict[int, list[Mol]], protein: Mol | None, scores: dict[int, float] | None = None) -> list[dict]:
+    """D-78: order joint poses by how safely they can enter MD, lowest risk first.
+
+    Every pose goes through the same check-and-nudge as the build (`resolve`).  Risk, compared in this order:
+      1. tier 0 = clean or fixed by a small rigid nudge with every ligand kept; 1 = fixed but a floating ligand leaves
+         the system; 2 = still overlapping or piercing after nudging (left to the soft-core relaxation at build time);
+      2. ligands lost (excluded as floating);
+      3. remaining overlaps plus ring piercings after the nudge;
+      4. ligands that had to be nudged (fewer changes to the docked pose is better);
+      5. the shortest remaining contact (longer is better);
+      6. the docking score (lower is better).
+    Returns [{rank, tier, status, lost, problems, min_overlap_A, score, culprit, adjusted}]."""
+    rows = []
+    for rank, mols in poses.items():
+        r = resolve(mols, protein)
+        per = r["per_ligand"]
+        problems = sum(len(v["overlaps"]) + len(v["piercings"]) for v in per.values())
+        dists = [o["d"] for v in per.values() for o in v["overlaps"]]
+        fixed = r["status"] in ("PASS", "AUTO_FIXED")
+        lost = len(r["auto_excluded"])
+        tier = 0 if fixed and not lost else (1 if fixed else 2)
+        rows.append({"rank": int(rank), "tier": tier, "status": r["status"], "lost": lost, "problems": problems,
+                     "min_overlap_A": round(min(dists), 2) if dists else None,
+                     "score": None if scores is None else scores.get(rank), "culprit": r["culprit"],
+                     "adjusted": sorted(r["adjusted"])})
+    rows.sort(key=lambda x: (x["tier"], x["lost"], x["problems"], len(x["adjusted"]), -(x["min_overlap_A"] or 99.0),
+                             x["score"] if x["score"] is not None else 0.0))
+    return rows

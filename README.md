@@ -5,7 +5,7 @@
 > © HCC Lab, National Kaohsiung University of Science and Technology. All rights reserved.
 > 本 repo 暫時公開，只供持續整合（CI）測試使用。沒有附授權，請勿重製、散布或用於其他用途。
 
-> **最新版本：[v0.1.0a6](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a6)**，2026-11-03 發行，含 Windows 與 macOS 安裝檔，是教學預覽版。
+> **最新版本：[v0.1.0a7](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a7)**，2026-11-03 發行，含 Windows 與 macOS 安裝檔，是教學預覽版。
 > 學生操作說明在 [`docs/students/WINDOWS.md`](docs/students/WINDOWS.md) 和 [`docs/students/MAC.md`](docs/students/MAC.md)，有繁中、English、日本語、한국어 四種版本。
 > 測試機的安裝與回報看 [`docs/WINDOWS_QUICKSTART.md`](docs/WINDOWS_QUICKSTART.md)。接手開發看 [`docs/HANDOFF.md`](docs/HANDOFF.md)，現況看 [`docs/STATUS.md`](docs/STATUS.md)。
 

@@ -199,3 +199,14 @@ def test_lone_ligand_away_from_protein_is_not_a_geometry_problem():
     far = ring("P01", (30.0, 0, 0))                    # e.g. a peptide built on its own chain, not docked
     r = ML.resolve([far], shell())
     assert r["status"] == "PASS"
+
+
+def test_rank_for_md_prefers_the_pose_that_can_be_repaired():   # D-78
+    prot = shell(r=(9.0, 13.0))
+    clean = [ring("A", (0, 0, 0)), ring("B", (0, 0, 3.6))]            # stacked, nothing to fix
+    pierced = [ring("A", (0, 0, 0)), rod("B", [0.2, 0, -0.77], [0.2, 0, 0.77])]   # a bond through the ring
+    rows = ML.rank_for_md({3: pierced, 1: clean}, prot, {1: -9.0, 3: -10.0})
+    assert [r["rank"] for r in rows] == [1, 3]            # the clean pose wins over a better score
+    assert rows[0]["tier"] == 0 and rows[0]["problems"] == 0
+    assert rows[-1]["problems"] > 0 and rows[-1]["tier"] == 2 and rows[-1]["culprit"] in ("A", "B")
+    assert all(set(r) >= {"tier", "problems", "lost", "status", "adjusted"} for r in rows)

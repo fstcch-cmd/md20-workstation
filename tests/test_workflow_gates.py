@@ -175,3 +175,44 @@ def test_oversized_box_is_a_notice_not_a_block(tmp_path):
     wf.cfg["box"] = {"center": [0, 0, 0], "size": [22, 22, 22]}
     wf._box_size_notice(_raw(tmp_path))
     assert "box size" not in wf.state()["advisories"]
+
+
+def _sdf(path, xyz):
+    """Minimal V2000 SDF of carbons in a ring (bonds i–i+1) for the multi-ligand geometry check."""
+    import numpy as np
+    xyz = np.asarray(xyz, float); n = len(xyz)
+    atoms = "".join(f"{x:10.4f}{y:10.4f}{z:10.4f} C   0  0  0  0  0  0  0  0  0  0  0  0\n" for x, y, z in xyz)
+    bonds = "".join(f"{i + 1:3d}{(i + 1) % n + 1:3d}  1  0\n" for i in range(n))
+    path.write_text(f"x\n  test\n\n{n:3d}{n:3d}  0  0  0  0  0  0  0  0999 V2000\n{atoms}{bonds}M  END\n$$$$\n")
+    return str(path)
+
+
+def test_all_joint_poses_clashing_takes_the_least_risk_pose(tmp_path):   # D-78
+    import types
+    import numpy as np
+    ang = np.linspace(0, 2 * np.pi, 7)[:-1]
+    ring = np.c_[1.39 * np.cos(ang), 1.39 * np.sin(ang), np.zeros(6)]
+    wf = _wf(tmp_path, md={"systems": ["apo", "docked_multi"], "tier": "classroom"})
+    # pose 1: B's ring is threaded through A (unfixable by a nudge); pose 2: B sits 1.9 Å above A (a small nudge clears it)
+    rod = np.array([[0.2, 0, -0.77], [0.2, 0, 0.77], [0.2, 0, 2.2], [0.2, 0, 3.6], [0.2, 1.4, 3.6], [0.2, 1.4, 2.2]])
+    sd = {"A": [_sdf(tmp_path / "a1.sdf", ring), _sdf(tmp_path / "a2.sdf", ring)],
+          "B": [_sdf(tmp_path / "b1.sdf", rod), _sdf(tmp_path / "b2.sdf", ring + [0, 0, 1.9])]}
+    poses = [{"rank": 1, "score": -10.0, "clash": True, "min_ll_distance": 0.2, "rejected": ["配體間 0.2 Å < 3.3（碰撞）"]},
+             {"rank": 2, "score": -9.6, "clash": True, "min_ll_distance": 1.9, "rejected": ["配體間 1.9 Å < 3.3（碰撞）"]}]
+    e = {"name": "joint", "ligands": ["A", "B"], "smiles": {"A": "c1ccccc1", "B": "c1ccccc1"}, "poses": poses,
+         "pose_sdfs": sd, "recommended_rank": None, "reason": "沒有任何 pose 通過保守條件，不自動選擇。"}
+    sel = wf.choose_poses(types.SimpleNamespace(mode="simultaneous", entries=[e]))
+    assert sel["ligands"]["A"]["rank"] == 2 and sel["ligands"]["B"]["rank"] == 2      # did not stop; lowest risk first
+    rows = wf.state()["least_risk_poses"]["joint"]
+    assert [r["rank"] for r in rows][0] == 2 and rows[0]["tier"] <= rows[1]["tier"]
+    last = [d for d in wf.dec.read() if d["stage"] == "workflow.pose"][-1]
+    assert last["kind"] == "auto_fixed" and "風險" in last["why"]
+
+
+def test_failed_redocking_still_stops(tmp_path):   # D-78: the docking setup itself is not trustworthy
+    import types
+    wf = _wf(tmp_path)
+    e = {"name": "joint", "ligands": ["A"], "poses": [{"rank": 1, "score": -5.0, "rejected": []}], "pose_sdfs": {"A": ["x"]},
+         "recommended_rank": None, "reason": "Redocking 自檢未通過：RMSD 4.0 Å > 2.0 Å"}
+    with pytest.raises(WorkflowBlocked):
+        wf.choose_poses(types.SimpleNamespace(mode="simultaneous", entries=[e]))

@@ -689,14 +689,23 @@ class Workflow:
         cache = self._pose_screen_cache(cache_path)
         for e in res.entries:
             n = len(e["poses"])
+            least = None
             if e.get("recommended_rank") is None and e["name"] not in user:
-                self._block("pose_selection",
-                            f"{e['name']}：系統沒有推薦任何 pose（{e.get('reason') or '無合格候選'}）。"
-                            f"請在 pose_choices 指定名次，或檢查盒子/口袋設定後重跑對接。")
-            rank = int(user.get(e["name"], e["recommended_rank"]))
+                # D-78: no joint pose passed the conservative rules.  When the trouble is geometry the build can repair
+                # and verify (ligands touching each other), take the pose with the lowest risk of entering MD instead
+                # of stopping; only a failed redocking self-check or unreadable poses still stop here.
+                least = self._least_risk_joint_pose(e) if res.mode == "simultaneous" else None
+                if least is None:
+                    self._block("pose_selection",
+                                f"{e['name']}：系統沒有推薦任何 pose（{e.get('reason') or '無合格候選'}）。"
+                                f"請在 pose_choices 指定名次，或檢查盒子/口袋設定後重跑對接。")
+            rank = least[0] if least else int(user.get(e["name"], e["recommended_rank"]))
             if not 1 <= rank <= n:
                 self._block("pose_selection", f"{e['name']} 只有 {n} 個 pose，無法選第 {rank} 名。")
-            why = e["reason"] if rank == e["recommended_rank"] else f"使用者改選第 {rank} 名（系統推薦第 {e['recommended_rank']} 名：{e['reason']}）"
+            if least:
+                why = least[1]
+            else:
+                why = e["reason"] if rank == e["recommended_rank"] else f"使用者改選第 {rank} 名（系統推薦第 {e['recommended_rank']} 名：{e['reason']}）"
             screen_info = None
             if e["name"] in user:
                 pass                                   # explicit human choice is never overridden by the screen
@@ -729,20 +738,75 @@ class Workflow:
                     why = dec["why"]
                 rank = dec["rank"]
             p = e["poses"][rank - 1]
-            if p.get("clash"):
-                self._block("pose_selection", f"{e['name']} 第 {rank} 名 joint pose 配體互相碰撞（最短 {p['min_ll_distance']} Å），請改選。")
+            if p.get("clash") and not least:
+                # D-78: a joint pose whose ligands touch is no longer a dead end.  The same geometry check, rigid nudge,
+                # soft-core relaxation and post-minimisation piercing check that guard every multi-ligand build decide
+                # whether it can enter MD; if none of them can untangle it, the build stops and names the ligand to exclude.
+                self.dec.record("workflow.pose", e["name"], f"rank {rank}（配體互相接觸）",
+                                f"第 {rank} 名聯合姿勢的配體最短距離 {p['min_ll_distance']} Å（< 2 Å，對接層判為碰撞）。"
+                                "不在這裡擋下：建模前的幾何檢查會先以剛體微調、必要時以軟核鬆弛解開，並在最小化後再檢查穿環；"
+                                "仍解不開才停下來請你決定排除哪個配體。報告會標註。",
+                                kind="human" if e["name"] in user else "auto_fixed")
             for lig in e["ligands"]:
                 sel["ligands"][lig] = {"rank": rank, "sdf": e["pose_sdfs"][lig][rank - 1], "score": p["score"],
                                        "rmsd_ref": p.get("rmsd_ref"), "entry": e["name"],
                                        "smiles": e["smiles"][lig] if isinstance(e["smiles"], dict) else e["smiles"],
                                        "md_screen": screen_info}
-            self.dec.record("workflow.pose", e["name"], f"rank {rank}", why, kind="human" if e["name"] in user else "auto")
+            self.dec.record("workflow.pose", e["name"], f"rank {rank}", why,
+                            kind="human" if e["name"] in user else ("auto_fixed" if least else "auto"))
         self._mark("pose_selection", selection=sel, choices_cfg=key)
         try:
             self._peptide_pose_access(sel)
         except Exception as exc:  # noqa: BLE001  (advisory check must never break pose selection)
             self.dec.record("peptide.access", "pose", "skipped", f"胜肽 pose 可及性檢查未完成：{type(exc).__name__}: {exc}")
         return sel
+
+    def _least_risk_joint_pose(self, e: dict) -> tuple[int, str, list] | None:
+        """D-78: when no joint pose passes the docking rules, the pose with the lowest risk of entering MD.
+
+        Ranking (general, not tied to a case): first the docking objections other than ligand–ligand contact
+        (score outside the window, shallow or surface contacts, ligands apart) — fewer is better; then
+        `multi_ligand.rank_for_md` (can the build's check-and-nudge clear it, ligands lost, problems left, ligands nudged,
+        closest contact, score).  None when the redocking self-check failed (the docking setup itself is not
+        trustworthy) or no pose file can be read."""
+        from .build import multi_ligand as ML
+        reason = e.get("reason") or ""
+        if "edocking" in reason:
+            return None
+        names = list(e.get("ligands") or [])
+        poses, scores = {}, {}
+        for p in e.get("poses") or []:
+            k = p["rank"] - 1
+            try:
+                poses[p["rank"]] = [ML.mol_from_sdf(e["pose_sdfs"][nm][k], nm) for nm in names]
+                scores[p["rank"]] = p["score"]
+            except Exception:  # noqa: BLE001
+                continue
+        if not poses:
+            return None
+        rec = (self.state()["steps"].get("receptor_docking") or {}).get("path")
+        around = np.vstack([m.xyz for ms in poses.values() for m in ms])
+        prot = ML.protein_near(rec, around) if rec and Path(rec).is_file() else None
+        rows = ML.rank_for_md(poses, prot, scores)
+        objections = {p["rank"]: [x for x in (p.get("rejected") or []) if "碰撞" not in x] for p in e["poses"]}
+        for r in rows:
+            r["docking_objections"] = objections.get(r["rank"], [])
+        rows.sort(key=lambda r: len(r["docking_objections"]))        # stable: geometry order kept within a group
+        st = self.state()
+        st["least_risk_poses"] = {**(st.get("least_risk_poses") or {}), e["name"]: rows}
+        atomic_write_json(st, self.state_path)
+        b = rows[0]
+        how = {0: "建模前的檢查可直接通過或以剛體微調解開，所有配體都保留",
+               1: "剛體微調可解開，但有配體在此姿勢下漂浮、會被排除",
+               2: "剛體微調解不開，要靠建模時的軟核鬆弛；若仍失敗會停下來請你決定排除哪個配體"}[b["tier"]]
+        top = "；".join(f"第 {r['rank']} 名（{['可直接或微調', '會排除漂浮配體', '需軟核鬆弛'][r['tier']]}，"
+                       f"剩餘問題 {r['problems']}，分數 {r['score']:.2f}）" for r in rows[:3])
+        why = (f"沒有聯合姿勢通過保守條件（{reason or '配體互相接觸'}）。不停在這裡，改依進入 MD 的風險排序所有姿勢，"
+               f"選第 {b['rank']} 名（{b['score']:.2f} kcal/mol）：{how}。排序依據依序為：對接層的其他疑點數、幾何能否解開、"
+               f"排除的配體數、微調後剩餘的重疊與穿環、需要微調的配體數、最短接觸距離、分數。前三名：{top}。"
+               "進入 MD 前仍會做幾何檢查、剛體微調、必要時軟核鬆弛，最小化後再查穿環；報告會標註這是低風險選擇而不是推薦。"
+               "若要用別的姿勢，在姿勢表點選即可。")
+        return b["rank"], why, rows
 
     def _docking_signature(self) -> str | None:
         from .util import sha256_file

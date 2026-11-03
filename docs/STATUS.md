@@ -3,7 +3,10 @@
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
-## 目前版本：v0.1.0a6（2026-11-03 13:4x 發行）
+## 目前版本：v0.1.0a7（2026-11-03 發行）
+- a6 的全部內容，加上 D-78：多配體同時對接所有聯合姿勢都碰撞時，改選進入 MD 風險最低的姿勢並繼續（純 Python 測試全過；真實多配體建模路徑在 CI openmm-stack）。
+
+## v0.1.0a6（2026-11-03 13:4x 發行）
 - https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a6 ——程式與 a4 相同，修正 Windows 啟動檔：桌面捷徑（D-76）與很長的 PATH（D-77）。
 - 發行前 verify-windows 真的執行桌面 `MD20-GUI.cmd`，PATH 加長到 10,104 字元，介面回 HTTP 200。
 - v0.1.0a5（只含 D-76）的發行在最後「建立 Release」被 GitHub 拒絕（403 Resource not accessible by integration），沒有發出；a6 同一步驟成功，原因未明。

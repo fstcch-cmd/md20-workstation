@@ -7,6 +7,24 @@
 
 ## 2026-11-03
 
+### D-78　多配體同時對接時所有聯合姿勢都碰撞：改選「進入 MD 風險最低」的姿勢，不再卡住；發行 v0.1.0a7
+- 使用者回報（11/03 14:06，截圖）：教學一（hsieh2024）9 個聯合姿勢全部標「碰撞」，流程停在姿勢選擇，課堂卡住；就算點選某一列也會被「請改選」擋下。
+  使用者要求：發現碰撞擋下沒錯，但要能合理、安全地進到 MD，提示哪個風險最低，**要通則，不是針對這個範例**。
+- 判斷：對接層的「碰撞」（配體間最短距離 < 2 Å）是保守的篩選，不是不能進 MD 的證明。MD20 在建模前本來就有一整套能修復並**驗證**的機制
+  （D-60 幾何檢查與剛體微調、D-61 軟核鬆弛、最小化後穿環檢查、漂浮配體自動移出）。在姿勢選擇就擋下，等於不讓這些機制有機會處理。
+  依「寧可擋也不要猜」，真正該擋的是無法修復或無法驗證的情況。
+- 決定（通則）：
+  1. 沒有聯合姿勢通過保守條件時，`Workflow._least_risk_joint_pose` 把**所有**聯合姿勢交給 `multi_ligand.rank_for_md` 排序，依序比較：
+     對接層的其他疑點數（分數窗口外、接觸太少、配體分開）→ 建模前的檢查與剛體微調能否解開（0 可直接或微調、1 會排除漂浮配體、2 需軟核）→
+     排除的配體數 → 微調後剩餘的重疊與穿環數 → 需要微調的配體數 → 最短接觸距離 → 對接分數。取第一名，決策記為 AUTO_FIXED，理由寫出排序依據與前三名；
+     排序表存在 `state["least_risk_poses"]`。
+  2. 使用者手動點選的碰撞姿勢不再被「請改選」擋下：記錄決策後交給建模前的幾何檢查。
+  3. 仍會停下的情況：redocking 自檢失敗（對接設定本身不可信）、姿勢檔讀不到、建模時軟核鬆弛也解不開（此時請使用者選擇排除哪個配體，原本的 D-60 閘門）。
+- 被否決：(a) 直接放寬碰撞門檻——會把真正穿插的姿勢當成正常；(b) 只在教學模式放行——使用者要通則；(c) 用分數最佳的碰撞姿勢——分數不反映能否安全進 MD。
+- 證據：`tests/test_multi_ligand_geometry.py::test_rank_for_md_prefers_the_pose_that_can_be_repaired`、
+  `tests/test_workflow_gates.py::test_all_joint_poses_clashing_takes_the_least_risk_pose`、`::test_failed_redocking_still_stops`；純 Python 測試全過。
+- 版本：使用者要求「第五版」發行；v0.1.0a5 的發行在 13:3x 被 GitHub 拒絕而沒有發出，v0.1.0a6 已發行，版本號必須遞增，所以這版是 **v0.1.0a7**。
+
 ### D-77　Windows 啟動檔遇到很長的 PATH 時失敗（The input line is too long）；發行 v0.1.0a6
 - 使用者回報（11/03 13:30，照片）：執行 `%LOCALAPPDATA%\MD20\MD20-GUI.cmd` 出現「The input line is too long. The syntax of the command is incorrect.」。
 - 原因（判斷）：`micromamba run` 在 Windows 以 cmd 腳本啟用環境，把環境的資料夾加到 PATH 前面；這台筆電裝過 conda、MGLTools、PyMOL 等，PATH 本來就很長，
