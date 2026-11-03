@@ -26,9 +26,9 @@
 | [multi_ligand.md](multi_ligand.md) | 多配體同時對接進 MD：穿環／重疊／漂浮檢查、剛體微調、軟核鬆弛、協同自由能熱力學循環 | 已驗證（CI openmm-stack；D-60、D-61、D-64） |
 | [report_language.md](report_language.md) | 報告用語規範與圖表 F1–F42：每種圖的怎麼讀、門檻與中英文句型 | 已實作（`figure_text.py`，測試檢查一致） |
 | [vina_cpu_use.md](vina_cpu_use.md) | Vina 執行檔的 CPU 使用：平行度上限、資源模式→--cpu／優先權／Windows QoS、每次執行的實際執行緒量測 | 已實作・待 Windows CI 與筆電實測 |
-| [REVIEW_QUESTIONS.md](REVIEW_QUESTIONS.md) | 彙整：最希望審查者挑戰的設計決定 | — |
-| [REVIEW_ANSWERS_2026-11-01.md](REVIEW_ANSWERS_2026-11-01.md) | **會診結果**：每個審查問題的回答、各規格沒寫到的科學缺口、下一個 session 的優先順序 | 待採納 |
-| docking.md、gui.md | **已被取代**的第一個 session 規格（模組名與頁面結構都和現況不符）；現況見 ../WORKFLOW.md、hts_screen.md、gate_actions.md | 歷史 |
+| [REVIEW_QUESTIONS.md](../archive/specs/REVIEW_QUESTIONS.md)（已封存） | 彙整：最希望審查者挑戰的設計決定 | — |
+| [REVIEW_ANSWERS_2026-11-01.md](../archive/specs/REVIEW_ANSWERS_2026-11-01.md)（已封存） | **會診結果**：每個審查問題的回答、各規格沒寫到的科學缺口、下一個 session 的優先順序 | 待採納 |
+| ../archive/specs/docking.md、gui.md | **已被取代**的第一個 session 規格（模組名與頁面結構都和現況不符）；現況見 ../WORKFLOW.md、hts_screen.md、gate_actions.md | 歷史 |
 
 ## 全專案共通原則（MD20_optimization_brief）
 1. **不新增 phase/step**，只強化既有邏輯。

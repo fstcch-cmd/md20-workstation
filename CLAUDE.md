@@ -1,6 +1,6 @@
 # CLAUDE.md — MD20 單機教學版工作站
 
-**接手前先讀 `docs/HANDOFF_2026-11-02.md`(最新交接:現況、未完成、下一步),再讀 `docs/HANDOFF.md`(一般說明)與 `docs/STATUS.md`(誠實現況)。** 以下是每次都要遵守的重點。
+**接手前先讀 `docs/STATUS.md`(開頭是目前版本與誠實現況)、`docs/WORKBOARD.md` 與 `docs/DECISIONS.md` 最上面幾條,再讀 `docs/HANDOFF.md`(一般說明)。舊的交接、審查與發行說明在 `docs/archive/`。** 以下是每次都要遵守的重點。
 
 ## 這個 repo 是什麼
 Docking → 建模 → OpenMM MD → SMD/傘狀採樣的單機教學版,給博士生在自己筆電上跑(Windows 優先)。擁有者 HCC Lab, NKUST。所有成果在本 repo + GitHub Actions CI 上。
@@ -36,7 +36,7 @@ Claude-Session: <本次 session 連結>
 `md20/util/stamp.py`;公鑰 `md20/util/owner_pub.pem` 在 repo,**私鑰不在 repo 也不該進 repo**(使用者離線保管)。`system.xml` 不可加註解(OpenMM 會讀不了)。
 
 ## 第四個 session 之後必知
-- 全面審查結果在 `docs/REVIEW_2026-11-01.md`(未修項目從那裡接)。HTS 篩選規格 `docs/specs/hts_screen.md`。
+- 2026-11-01 全面審查結果在 `docs/archive/REVIEW_2026-11-01.md`(未修項目從那裡接)。HTS 篩選規格 `docs/specs/hts_screen.md`。
 - `pipeline run` 會沿用 workflow config.json 的人工決定(`workflow.DECISION_KEYS`);新增閘門決定鍵要加進去。
 - CI main 不取消進行中的 run;看 summary 留言的 **skip 數**,SKIPPED 的整合測試不算通過。
 - PDB/PDBQT 的戳記必須純 ASCII(cp950 Windows 會崩)。

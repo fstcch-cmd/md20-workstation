@@ -4,7 +4,7 @@
 > **重點:所有成果都在這個 repo + GitHub Actions 上,不在任何對話容器裡。** 新 session 只要 clone 本 repo 即可完整接手;正在跑的「虛擬機」就是 GitHub Actions CI,與 session 無關,不會因為舊對話結束而消失。
 
 ## 0. 新 session 第一步
-> **2026-11-02 之後：先讀 `docs/HANDOFF_2026-11-02.md`**（交接當時的現況與開場指令）；**2026-11-03 起 v0.1.0a3 已發行**，之後的現況以 `docs/STATUS.md` 開頭的「目前版本」、`docs/WORKBOARD.md` 與 `docs/DECISIONS.md`（最新在最上面，目前到 D-72）為準。本檔其餘章節仍是一般說明。
+> **2026-11-02 之後：先讀 `docs/archive/HANDOFF_2026-11-02.md`**（交接當時的現況與開場指令）；**2026-11-03 起 v0.1.0a3 已發行**，之後的現況以 `docs/STATUS.md` 開頭的「目前版本」、`docs/WORKBOARD.md` 與 `docs/DECISIONS.md`（最新在最上面，目前到 D-72）為準。本檔其餘章節仍是一般說明。
 
 1. 把 repo 加進 session 並 clone:`fstcch-cmd/md20-workstation`(需要 push 權限)。
 2. 讀這幾份:`docs/STATUS.md`(誠實三級現況)、本檔、`MD20_optimization_brief` 的規則(見 §4)、`docs/WORKFLOW.md`、`docs/TEACHING.md`。
@@ -73,7 +73,7 @@
 - **第三個 session 看到的 CI(63d363b)**:Windows OpenCL 124 passed、macOS 126 passed,各僅 `test_gui_pages_render` 失敗(NiceGUI 在子行程讀到 `PYTEST_CURRENT_TEST` 就要求 `NICEGUI_SCREEN_TEST_PORT`);已在 `tests/test_gui_server.py` 把 `PYTEST_*` 從子行程環境移除。新 session 請看最新 commit 的 openmm-stack 三 OS 結果,全綠後把 STATUS 中「見 B」的項目升級。
 
 ## 5b. 第四個 session(2026-11-01):全面審查 + 高通量篩選
-- **先讀 `docs/REVIEW_2026-11-01.md`**:20 項發現,✅ 已修 14、❌/📝 未修 6(配體配位金屬閘門、pose 對應後備、`sampling/runner.py`、補窗門檻、供應鏈 pin、戳記簽章)。
+- **先讀 `docs/archive/REVIEW_2026-11-01.md`**:20 項發現,✅ 已修 14、❌/📝 未修 6(配體配位金屬閘門、pose 對應後備、`sampling/runner.py`、補窗門檻、供應鏈 pin、戳記簽章)。
 - **HTS 篩選**(`docs/specs/hts_screen.md`):`md20/docking/library.py`(Excel/CSV → PubChem/ChEMBL/RCSB 3D 下載、去鹽、尺寸過濾、去重)、
   `md20/docking/screen.py`(批次縮減搜尋對接、排名、圖、ECharts)、workflow 步驟 `screen_library → screen_docking → screen_selection`
   在 `docking_preflight` 之前;GUI「篩選」分頁勾選 → `actions.select_screen_ligands` 寫 `screen.select/next_mode`。

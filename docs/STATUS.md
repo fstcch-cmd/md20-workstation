@@ -32,12 +32,12 @@ CI 依據(`fstcch-cmd/md20-workstation`):
 - **第四個 session（審查 + HTS）**:純 Python 測試 **220 個本地全過**;以下皆 **待 CI**:(1)金屬鍵結模型補上經金屬的 1-3/1-4(37bc6b1 之後 CI 仍紅,見下);(2)引擎三個 watchdog/延長缺陷修正;(3)HTS 篩選整合測試;(4)缺口補建後主鏈連續性檢查。
   **更正先前聲稱**:「3D viewer 在 headless Chromium 實際繪圖」在 CI 三個 OS 都是 SKIPPED(playwright 不在環境裡),降為 B 級。
   37bc6b1 那輪 Ubuntu heavy 被下一個 push 取消前已印出 `test_bonded_zinc_ca2 FAILED`,所以「1-3 排除」並沒有修好鋅配位;本 session 加了 donor–donor 排除,待這輪確認。
-  全部發現與處置見 `docs/REVIEW_2026-11-01.md`。
+  全部發現與處置見 `docs/archive/REVIEW_2026-11-01.md`。
 - **c4b5de6（run 41309973844）heavy metal 全綠**:`test_metal_integration`（含 `test_bonded_zinc_ca2`）在 Ubuntu 真跑通過——鋅鍵結模型守住配位（經金屬 1-3/1-4 修正有效）。同輪 heavy workflow／pose-screen 因 `assemble.py` 漏 `import numpy` 失敗（D-24 已修，待下一輪）。
 - **v0.1.0a2 發行（2026-11-02 13:2x）**：https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a2 ——含 D-36（CUDA 環境可解）、D-37（不刪舊版）、D-38（260 字元路徑）、D-39（doctor 顯示）；verify-windows 含 CUDA dry-run 通過才發行。**v0.1.0a1 在 NVIDIA 機器上裝不起來，請改用 a2。**
 - **4bccdff（D-71，run 41501295929）main 15 個 job 全綠（2026-11-03 04:29 確認）＝ v0.1.0a3 發行候選**；筆電教學一對接（exhaustiveness 32）是否完成未知（筆電離線）。
 - **c868014（run 41495051284）main 15 個 job 全綠（2026-11-03 01:51 起）**：三 OS openmm-stack、installer-windows、**installer-macos**、三個 heavy（含 metal、pose-screen）、paper-docking、6 平台 pure-python。v0.1.0a3 發行候選。夜間修正 D-62–D-71（PMF 截斷與持平閘門、MBAR 暖啟動、拉速 0.005、軟核接受標準、GUI 穩定性、Mac 安裝、資源用量、Windows 子程序、教學一對接強度）。
-- **筆電 teaching 重跑與全範圍重分析（2026-11-02 22:00，本 session 直接讀筆電檔案）**：classroom 與 teaching 報告的 ΔPMF（80.3／80.6）**都是 PMF 在約 0.5 nm 被截斷的邊緣值**（a1／a2 的 MBAR 路徑；D-62）。同一批 window 樣本以 WHAM 重算全範圍：classroom 134、teaching **100 kJ/mol**（ΔG° −29.5／−21.2 kcal/mol，實驗約 −6.4）。已修：截斷改用 WHAM（D-62）、井深需末端持平否則不輸出 ΔG°（D-65）、預設拉速 0.005（D-63）。**一維 COM PMF 對埋入口袋的配體仍高估 3 倍以上**——只能比較配體間趨勢；方向／構形約束未做。圖：`docs/runs/2026-11-02_laptop_3ptb/`。
+- **筆電 teaching 重跑與全範圍重分析（2026-11-02 22:00，本 session 直接讀筆電檔案）**：classroom 與 teaching 報告的 ΔPMF（80.3／80.6）**都是 PMF 在約 0.5 nm 被截斷的邊緣值**（a1／a2 的 MBAR 路徑；D-62）。同一批 window 樣本以 WHAM 重算全範圍：classroom 134、teaching **100 kJ/mol**（ΔG° −29.5／−21.2 kcal/mol，實驗約 −6.4）。已修：截斷改用 WHAM（D-62）、井深需末端持平否則不輸出 ΔG°（D-65）、預設拉速 0.005（D-63）。**一維 COM PMF 對埋入口袋的配體仍高估 3 倍以上**——只能比較配體間趨勢；方向／構形約束未做。圖：`docs/archive/runs/2026-11-02_laptop_3ptb/`。
 - **第一次真 GPU 端到端（2026-11-02 13:06，使用者回報）**：MSI Cyborg 14／RTX 4060 Laptop，CUDA 601–613 ns/day；自測腳本全通過：安裝 2.6 min、doctor、drivers plan、demo、GUI（http 200）、**classroom 3PTB `pipeline run` rc=0（76.5 min，apo＋docked BEN 報告產出）**。報告：redocking 0.38 Å、配體留在口袋、補窗 13→40；**ΔPMF 80.3 kJ/mol 物理上偏大約 2–3 倍（實驗 ΔG ≈ −26 kJ/mol），ΔG° 被閘門擋下（正確）**，見 D-40；分析時 pymbar 的「Did not converge… max_delta = 0」為已收斂到機器精度的誤報（待改為只在真未收斂時提示）。
 - **發行 v0.1.0a1（Windows 安裝程式，2026-11-02 08:26 台灣時間）**：https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a1 ——這個 ZIP 在乾淨 Windows runner 上以 PS 5.1 解壓、雙擊入口安裝（CPU）、刪除解壓資料夾後 doctor／demo／pipeline example 通過（release run 41365326632）。GPU 路徑未經 CI。
 - **bb36a4b（run 41357112830）main 全部 job 綠——11/02 09:00 Windows 里程碑就緒**:Windows OpenCL **367 passed、5 skipped**（53 分鐘；skip 逐條核對，全是 MD20_HEAVY／MD20_PAPERS／playwright 設計內）、Ubuntu／macOS 367 passed;heavy workflow（含 binding）、pose-screen、metal、installer-windows、paper-docking、6 平台 pure-python 綠。保留風險:鋅鍵結模型平均鍵長偏移在 0.3 Å 臨界（上一輪 0.305 Å 紅、這輪綠），模型問題未修（D-32）;umbrella NaN 半步長重試路徑尚未被觸發驗證;真 GPU 路徑只能筆電驗證。
@@ -116,7 +116,7 @@ CI 依據(`fstcch-cmd/md20-workstation`):
   若是把 AutoDockTools 的**格點數 76×92×70 直接當 Vina 的 Å 填**,盒子 76×92×70 Å 會框到全部 9 個存在的報告殘基。盒子中心是 1VKX 的有效座標
   (距原子 0.48 Å),在 1VKF 中則落在蛋白外 39.6 Å——先前「中心來自其他座標系」的推論錯誤,已更正。
 
-### C0. 審查發現但本 session 未修(細節見 `docs/REVIEW_2026-11-01.md` §2)
+### C0. 審查發現但本 session 未修(細節見 `docs/archive/REVIEW_2026-11-01.md` §2)
 - 對接配體直接配位金屬不會被擋(金屬 policy 在配體加入前執行);`map_pose_onto_reference` 的 order 後備可能錯配;
   `sampling/runner.py` 未被使用但有錯(勿用);自適應補窗端點碰撞「假新增」與 `min_effective_samples` 門檻;
   Vina/micromamba 下載無 pin、無 sha256,環境未鎖定;戳記第三層是加密不是簽章,證明不了作者。

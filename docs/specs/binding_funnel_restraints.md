@@ -1,6 +1,6 @@
 # 結合自由能：漏斗（funnel）約束與標準態校正 —— 讓一維 PMF 可以和實驗比 **[設計中]**
 
-> 2026-11-02，session_016gcJz9hwPAMieHsNEctkzL。起因：筆電 3PTB 實測（`docs/runs/2026-11-02_laptop_3ptb/`、D-62–D-65）。
+> 2026-11-02，session_016gcJz9hwPAMieHsNEctkzL。起因：筆電 3PTB 實測（`docs/archive/runs/2026-11-02_laptop_3ptb/`、D-62–D-65）。
 > 本文件在**實作前**供審查；a3 發行時不含此功能。
 
 ## 1. 要解決的問題（證據）

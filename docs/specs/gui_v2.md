@@ -1,8 +1,8 @@
 # GUI v2：快速版／專業版＋合理性檢查（設計中，2026-11-02）
 
 狀態：**[設計中，原型審查]**。互動原型：https://claude.ai/artifact/JpJC545W7D8CnbuvUDf9q8（artboard「v2 Workbench」）。
-取代 `docs/specs/gui.md` 的頁面結構；後端（workflow、閘門、DecisionLog）不變。
-> **2026-11-03 更新**：已實作並隨 **v0.1.0a3** 發行（D-50–D-52、D-54、D-67、D-68）。CI 每頁兩種語言渲染截圖；筆電實際操作過教學模式一、語言切換（不再重跑）與資源用量選單。完整互動清單見 `docs/LAPTOP_SESSION.md`，尚未逐項確認。
+取代 `docs/archive/specs/gui.md` 的頁面結構；後端（workflow、閘門、DecisionLog）不變。
+> **2026-11-03 更新**：已實作並隨 **v0.1.0a3** 發行（D-50–D-52、D-54、D-67、D-68）。CI 每頁兩種語言渲染截圖；筆電實際操作過教學模式一、語言切換（不再重跑）與資源用量選單。完整互動清單見 `docs/archive/LAPTOP_SESSION.md`，尚未逐項確認。
 
 ## 使用者回饋（2026-11-02 14:27／14:30，原文要點）
 - 不能調 minimize／NVT／NPT 的步長、溫度梯度、約束參數；高通量、pose 選擇、多配體對接等詳細參數都看不到。舊版自由度大、報告圖表多，這版太少。

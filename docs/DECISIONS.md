@@ -7,6 +7,15 @@
 
 ## 2026-11-03
 
+### D-75　教學前清理舊文件：移到 `docs/archive/`，不刪除
+- 使用者要求（11/03 13:01）：清理舊的 Markdown，準備教學。
+- 決定：把已過時或只具歷史價值的文件**移到 `docs/archive/`**（交接快照、11/01 審查、筆電 session 守則、規格審查問答、被取代的第一版規格、a1–a3 發行說明、筆電 3PTB 重分析圖），
+  並更新所有現行文件與 CLAUDE.md 的連結；`docs/archive/README.md` 列出每個檔案是什麼。
+- 理由：專案規則要求不刪除歷史（判斷與證據要可追溯），移動同樣讓 `docs/` 只剩教學與開發會用到的文件；git 也保留完整歷史。
+- 被否決：直接刪除（違反「不刪歷史」，且 DECISIONS 舊條目引用這些檔案）。
+- 留在原處：學生 `docs/students/`、`README.md`、`docs/TEACHING.md`、`docs/WINDOWS_QUICKSTART.md`、`docs/WORKFLOW.md`、`docs/STATUS.md`、`docs/DECISIONS.md`、
+  `docs/COMPATIBILITY.md`、`docs/HANDOFF.md`、`docs/WORKBOARD.md`、`docs/specs/`（現行規格）、`docs/releases/v0.1.0a4.md`。
+
 ### D-74　介面、報告與學生文件改寫成人寫的語氣，並新增日文與韓文；發行 v0.1.0a4
 - 使用者要求（11/03 09:31）：用語太有 AI 感（AI 常用的斷句與符號），請改寫；新增日文與韓文。範圍（使用者在選項中選定）：
   改寫涵蓋介面、報告與學生文件；日韓文加到介面、報告與學生說明。09:50 追加：改完後自己進介面檢查，確認切換語系穩定、不會中斷任何工作，再發行第四版。
