@@ -21,6 +21,9 @@
 - 測試：`tests/test_cg_pure.py`（7 項，含流程到報告）；`tests/test_cg_integration.py`（CI 三個 OS 先 `md20 setup-cg --yes` 再跑三個真系統；`MD20_CG=1` 缺工具即失敗）。這也同時在 Windows CI 驗證 D-84 的 setup-cg 修正。
 - 另記：a11（7fda75c）CI 的 heavy pose-screen 失敗是 CPU 短 NPT 密度漂移未過驗收（隨機），與 D-84 改動無關；eb4faf8 同一測試通過。未處理，列為觀察。
 - 未驗證：筆電 GPU 速度與長時間穩定性；martini_openmm 在 CUDA 的精度。
+- **更正（11/04 01:50，CI c8f4399 的 Linux 結果）**：`setup-cg` 在 CI 成功（vermouth 0.15.0、insane 1.2.0、martini_openmm、4 個力場檔 SHA-256 都通過），martinize2 也把跨膜螺旋與胜肽轉好了；但 **insane 1.2.0（PyPI 最新）一啟動就失敗**：它 `import pkg_resources`，而 setuptools ≥ 81 已經沒有這個模組。上游已在 2026-10-15（d13df33）改用 importlib.resources，但還沒發新版。
+  修正：MD20 一律用自己的 Python 啟動 insane（`martini.INSANE_LAUNCH`），若沒有 pkg_resources 就先放一個只含 `resource_stream` 的替身（insane 只用這一個函式讀 lipids.dat），有真的就用真的。被否決：把環境的 setuptools 降到 < 81（會改動整個 MD20 環境）；改裝 GitHub 版（封存檔含 Windows 不允許的檔名，見 D-83）。
+  另：這也證實 PyPI 的 vermouth 0.15.0 仍用 pbr 安裝沒有副檔名的 `martinize2`，D-84 的推論成立。測試：`tests/test_martini.py::test_insane_shim_reads_package_data`。
 
 ### D-85　胜肽直接貼序列就自動摺疊：序列辨識、預設勾選、一鍵安裝；發行 v0.1.0a12
 - 使用者（11/03 16:46、23:15）：「最簡單的方式是使用者打入胜肽的序列在配體的欄裡面，這樣就可以自動做完所有的事情」；要今晚完成、更新教學敘述並發行。

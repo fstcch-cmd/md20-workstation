@@ -120,7 +120,7 @@
 1. 只取 ATOM（配體、金屬、水由 DecisionLog 記錄後移除）。
 2. 膜蛋白：沿用全原子的疏水帶掃描（`membrane.scan_orientation`）定方向；`oriented: true` 照原樣。不明確 → NEEDS_HUMAN。
 3. 二級結構用 mdtraj DSSP 算好傳給 `martinize2 -ss`，不用 `-dssp`：舊版 vermouth 的 `-dssp` 需要 mkdssp 執行檔，只有新版才退回 mdtraj；PyPI 版本無法在開發容器確認。
-4. insane：`-ff M3` 只在 `insane -h` 有這個選項時加（舊版沒有；M2 與 M3 的 POPC、POPE、POPG 珠子名相同）；舊版的離子名 `NA+`、`CL-` 在組拓撲時改成 M3 的 `NA`、`CL`。
+4. insane 一律以 MD20 的 Python 經 `INSANE_LAUNCH` 啟動（PyPI 1.2.0 需要 setuptools ≥ 81 已移除的 pkg_resources，見 D-86 更正）；`-ff M3` 只在 `insane -h` 有這個選項時加（舊版沒有；M2 與 M3 的 POPC、POPE、POPG 珠子名相同）；舊版的離子名 `NA+`、`CL-` 在組拓撲時改成 M3 的 `NA`、`CL`。
 5. 檢查：膜蛋白疏水帶（全原子中 |z| ≤ 1.5 nm 的殘基的 BB 珠）與 PO4 中心相差 > 0.3 nm → 以 `-dm` 平移重建一次（符號不明時兩個方向都試，取較小者），仍不符 → NEEDS_HUMAN；膜表面胜肽與磷酸平面距離 < 0.3 nm → NEEDS_HUMAN；拓撲與座標珠子數不同 → NEEDS_HUMAN。
 6. 脂質名稱必須在 Martini 3 磷脂檔的 moleculetype 裡（例如 Gram 陽性預設的 LYSPG、CL 不在 → NEEDS_HUMAN）；不對稱膜目前擋下。
 ### 9.4 模擬（`md20/engine/cg_run.py`）

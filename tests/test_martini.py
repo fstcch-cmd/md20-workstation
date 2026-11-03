@@ -21,8 +21,9 @@ def test_tool_table_records_verified_facts():
 def test_availability_needs_module_and_executable():
     a = _avail({"vermouth", "insane", "martini_openmm"}, {"martinize2"})       # insane module but no insane script
     assert a["vermouth"]["ok"] and a["martini_openmm"]["ok"] and a["martini_openmm"]["executable"] is None
-    assert not a["insane"]["ok"]
-    assert M.missing_tools(a) == ["insane"]
+    assert a["insane"]["ok"] and a["insane"]["argv"][1] == "-c"             # D-86: started through python (shim)
+    a = _avail({"insane", "martini_openmm"}, set())
+    assert M.missing_tools(a) == ["vermouth"]
     assert M.missing_tools(_avail(set())) == ["vermouth", "insane", "martini_openmm"]
 
 
@@ -101,3 +102,20 @@ def test_tool_argv_module_fallback_and_reason():
     assert M.missing_tools(a) == ["vermouth"]
     assert "找不到指令 martinize2" in M.why_missing(a)[0]
     assert "無法匯入" in M.why_missing(_avail({"insane", "martini_openmm", "martinize2"}))[0]
+
+
+def test_insane_shim_reads_package_data(tmp_path, monkeypatch):
+    """The stand-in pkg_resources.resource_stream reads a file next to the package, like insane/utils.py expects."""
+    import subprocess, sys
+    pkg = tmp_path / "insane"; pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "lipids.dat").write_text("M3.POPC 0\n")
+    (pkg / "utils.py").write_text("import pkg_resources\n"
+                                  "def first():\n    with pkg_resources.resource_stream(__name__, 'lipids.dat') as f:\n"
+                                  "        return f.readline().decode()\n")
+    (pkg / "cli.py").write_text("from . import utils\nimport sys\ndef cli():\n    print(utils.first().strip(), sys.argv[1:])\n    return 0\n")
+    code = M.INSANE_LAUNCH.replace("import pkg_resources", "import pkg_resources_absent_for_test")
+    r = subprocess.run([sys.executable, "-c", code, "-x", "6"], cwd=tmp_path, capture_output=True, text=True,
+                       env={"PYTHONPATH": str(tmp_path), "PATH": ""})
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "M3.POPC 0 ['-x', '6']"

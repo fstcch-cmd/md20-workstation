@@ -164,6 +164,31 @@ def tool_argv(exe: str, *, find_spec=importlib.util.find_spec, which=shutil.whic
     return None
 
 
+# D-86 (CI 11/04): insane 1.2.0 on PyPI imports pkg_resources, which setuptools ≥ 81 no longer ships, so its console
+# script dies on import.  Upstream replaced it with importlib.resources (d13df33, 2026-10-15) but has not released.
+# MD20 therefore always starts insane through this python with a stand-in for the one call it makes
+# (pkg_resources.resource_stream(__name__, file) in insane/utils.py).  A real pkg_resources is used when present.
+INSANE_LAUNCH = (
+    "import sys, types\n"
+    "try:\n    import pkg_resources\n"
+    "except ImportError:\n"
+    "    import importlib.resources as _r\n"
+    "    _m = types.ModuleType('pkg_resources')\n"
+    "    _m.resource_stream = lambda mod, name: _r.files(mod.rpartition('.')[0] or mod).joinpath(name).open('rb')\n"
+    "    sys.modules['pkg_resources'] = _m\n"
+    "from insane.cli import cli\n"
+    "sys.argv[0] = 'insane'\n"
+    "sys.exit(cli())\n")
+
+
+def insane_argv(find_spec=importlib.util.find_spec) -> list[str] | None:
+    try:
+        ok = find_spec("insane") is not None
+    except (ImportError, ValueError):
+        ok = False
+    return [sys.executable, "-c", INSANE_LAUNCH] if ok else None
+
+
 def availability(*, find_spec=importlib.util.find_spec, which=shutil.which, script_dirs: list[Path] | None = None) -> dict:
     """{tool: {"module": bool, "executable": bool | None, "argv": list | None, "ok": bool}}; injectable lookups."""
     out = {}
@@ -172,7 +197,8 @@ def availability(*, find_spec=importlib.util.find_spec, which=shutil.which, scri
             mod = find_spec(t["module"]) is not None
         except (ImportError, ValueError):
             mod = False
-        argv = None if t["executable"] is None else tool_argv(t["executable"], find_spec=find_spec, which=which,
+        argv = insane_argv(find_spec) if name == "insane" and mod else \
+            None if t["executable"] is None else tool_argv(t["executable"], find_spec=find_spec, which=which,
                                                                script_dirs=[] if script_dirs is None and which is not shutil.which else script_dirs)
         exe = None if t["executable"] is None else argv is not None
         out[name] = {"module": mod, "executable": exe, "argv": argv, "ok": mod and (exe is not False)}
