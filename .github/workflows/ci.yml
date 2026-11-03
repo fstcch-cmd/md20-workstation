@@ -95,10 +95,19 @@ jobs:
         # all three OS run the same suite (~20–30 min); MD20_HEAVY tests run in the parallel `heavy` jobs below.
         # A step timeout (unlike the job timeout) still lets the failure-log step post pytest.log.
         timeout-minutes: 90
-        env: { MD20_STACK: "1", MD20_CG: "1" }   # the full stack is expected here: a missing core package (or CG tool) is a FAILURE, not a skip
+        env: { MD20_STACK: "1" }   # the full stack is expected here: a missing core package is a FAILURE, not a skip
         run: |
           set -o pipefail
-          "$MAMBA_EXE" run -n md20 pytest -vv -rs --durations=15 2>&1 | tee pytest.log
+          "$MAMBA_EXE" run -n md20 pytest -vv -rs --durations=15 --ignore=tests/test_cg_integration.py 2>&1 | tee pytest.log
+      - name: Coarse-grained Martini 3 with the real tools (own process and timeout, D-86)
+        # separate from the main suite: in one process the CG runs pushed the suite past its 90 min step limit
+        if: always()
+        shell: bash -el {0}
+        timeout-minutes: 40
+        env: { MD20_CG: "1" }      # a missing CG tool is a FAILURE here, not a skip
+        run: |
+          set -o pipefail
+          "$MAMBA_EXE" run -n md20 pytest -vv -rs --durations=5 tests/test_cg_integration.py 2>&1 | tee -a pytest.log
       - name: Post failure log as commit comment
         if: failure() || cancelled()
         shell: bash

@@ -1859,6 +1859,10 @@ class Workflow:
                            should_pause=should_pause, progress_cb=progress_cb)
             runs[key] = {"status": r["status"], "run_dir": r["run_dir"], "production_ns": prod, "cg": True}
             self._mark("md_runs", runs=runs)
+            if r["status"] == "FAILED":
+                msg = f"{key}：{r.get('reason')}"
+                self._block("md_runs", msg, runs=runs, gates=[{"name": "cg minimise", "status": "NEEDS_HUMAN",
+                            "explanation": msg, "options": ["刪除 cg 資料夾後重跑（重新建模）", "改用全原子模擬（md.resolution: aa）"]}])
             if r["status"] == "PAUSED":
                 return {"status": "PAUSED", "state": self.state()}
         if self.cfg.get("binding", {}).get("enabled"):

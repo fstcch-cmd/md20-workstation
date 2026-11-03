@@ -24,6 +24,8 @@
 - **更正（11/04 01:50，CI c8f4399 的 Linux 結果）**：`setup-cg` 在 CI 成功（vermouth 0.15.0、insane 1.2.0、martini_openmm、4 個力場檔 SHA-256 都通過），martinize2 也把跨膜螺旋與胜肽轉好了；但 **insane 1.2.0（PyPI 最新）一啟動就失敗**：它 `import pkg_resources`，而 setuptools ≥ 81 已經沒有這個模組。上游已在 2026-10-15（d13df33）改用 importlib.resources，但還沒發新版。
   修正：MD20 一律用自己的 Python 啟動 insane（`martini.INSANE_LAUNCH`），若沒有 pkg_resources 就先放一個只含 `resource_stream` 的替身（insane 只用這一個函式讀 lipids.dat），有真的就用真的。被否決：把環境的 setuptools 降到 < 81（會改動整個 MD20 環境）；改裝 GitHub 版（封存檔含 Windows 不允許的檔名，見 D-83）。
   另：這也證實 PyPI 的 vermouth 0.15.0 仍用 pbr 安裝沒有副檔名的 `martinize2`，D-84 的推論成立。測試：`tests/test_martini.py::test_insane_shim_reads_package_data`。
+- **更正二（11/04 04:20，CI 8d6a651）**：insane 修正生效。三個真實 CG 系統在 **macOS、Windows 全部通過**（Windows：純膜 39 s、跨膜螺旋 95 s、膜表面胜肽 107 s），Linux 前兩項通過；Linux 的膜表面胜肽卡在 NVT 超過 15 分鐘。另外 Linux 與 Windows 的主測試步驟因總時間超過 90 分鐘被中止（CG 測試排在前面，之後的既有長測試 nacl_pmf 約 30 分鐘、gbn2 約 15 分鐘本來就接近上限）。
+  修正：CI 把 CG 測試移到獨立步驟（自己的程序、40 分鐘上限）；`run_cg` 每個階段結束就釋放 Simulation（各自持有平台 context 與執行緒）；最小化後能量不是有限值時回報 FAILED（閘門 `cg minimise`），不再往下跑。Linux 卡住的原因尚未確定（同一測試在 Windows 107 秒完成），下一輪 CI 觀察。
 
 ### D-85　胜肽直接貼序列就自動摺疊：序列辨識、預設勾選、一鍵安裝；發行 v0.1.0a12
 - 使用者（11/03 16:46、23:15）：「最簡單的方式是使用者打入胜肽的序列在配體的欄裡面，這樣就可以自動做完所有的事情」；要今晚完成、更新教學敘述並發行。

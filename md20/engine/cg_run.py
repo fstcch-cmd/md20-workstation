@@ -84,11 +84,16 @@ def run_cg(man: dict, run_dir: Path | str, *, platform_name: str = "CPU", proper
         sim.minimizeEnergy(maxIterations=5000, tolerance=1.0)
         e = sim.context.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
         prog["minimised_kj_mol"] = e
+        if not (e == e and abs(e) < 1e12):          # NaN or overflow: overlapping beads that minimisation cannot fix
+            _write(prog_path, prog)
+            return {"status": "FAILED", "progress": prog, "run_dir": str(rd),
+                    "reason": f"最小化後能量不是有限值（{e}），珠子可能重疊；請重建系統。"}
         sim.context.setVelocitiesToTemperature(temperature_k * unit.kelvin, seed)
         n = int(round(nvt_ns * 1e6 / NVT_DT_FS))
         sim.step(n)
         beat("nvt", n, n)
         sim.saveState(str(state_xml))
+        del sim
         prog["stage"] = "npt"
         _write(prog_path, prog)
     if prog["stage"] == "npt":
@@ -102,6 +107,7 @@ def run_cg(man: dict, run_dir: Path | str, *, platform_name: str = "CPU", proper
         st = sim.context.getState(getEnergy=True)
         v = st.getPeriodicBoxVectors(asNumpy=True).value_in_unit(unit.nanometer)
         prog["equilibrated_box_nm"] = [float(v[0][0]), float(v[1][1]), float(v[2][2])]
+        del sim, st
         prog["stage"] = "production"
         _write(prog_path, prog)
     if prog["stage"] == "production":
@@ -128,10 +134,10 @@ def run_cg(man: dict, run_dir: Path | str, *, platform_name: str = "CPU", proper
             _write(prog_path, prog)
             beat("production", done, total)
             if done < total and callable(should_pause) and should_pause():
-                for r in sim.reporters:
-                    if hasattr(r, "_out"):
-                        r._out.flush()
+                sim.reporters.clear()            # closes the DCD and CSV files before the context is released
+                del sim
                 return {"status": "PAUSED", "progress": prog, "run_dir": str(rd)}
+        sim.reporters.clear()
         del sim
         prog["stage"] = "done"
         _write(prog_path, prog)
