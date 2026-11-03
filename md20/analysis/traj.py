@@ -56,11 +56,13 @@ def load_production(run_dir: Path | str, topology_pdb: Path | str, *, stride: in
                     superpose: bool = True):
     """Production DCDs → one trajectory, re-centred (anchored on the protein) and Cα-superposed."""
     import mdtraj as md
+    from .stream import production_topology
     comp = load_json(Path(run_dir) / "stages" / "production" / "production_complete.json", {})
     dcds = (comp.get("result") or {}).get("dcd_paths") or []
     if not dcds:
         raise FileNotFoundError("production 沒有 DCD；請確認 stage 已完成且 write_dcd=True")
-    traj = md.load(dcds, top=str(topology_pdb), stride=stride)
+    top, _ = production_topology(run_dir, topology_pdb)       # solute-only DCDs (long runs) get a cut topology
+    traj = md.load(dcds, top=top, stride=stride)
     return center_trajectory(traj, metal_indices=metal_indices, superpose=superpose)
 
 
@@ -76,7 +78,9 @@ def export_centered(run_dir: Path | str, topology_pdb: Path | str, *, metal_indi
     dcds = (comp.get("result") or {}).get("dcd_paths") or []
     if not dcds:
         raise FileNotFoundError("production 沒有 DCD")
-    raw = md.load(dcds, top=str(topology_pdb), stride=stride)
+    from .stream import production_topology
+    top0, _ = production_topology(run_dir, topology_pdb)
+    raw = md.load(dcds, top=top0, stride=stride)
     raw_xyz_last = raw.xyz[-1].copy()
     cen = center_trajectory(raw, metal_indices=metal_indices, superpose=False, inplace=True)
     adir = run_dir / "analysis"; adir.mkdir(parents=True, exist_ok=True)
@@ -231,6 +235,26 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
                 ligand_groups: dict[str, list[int]] | None = None, metal_indices: list[int] | None = None,
                 decisions=None) -> dict:
     run_dir = Path(run_dir)
+    # long runs (docs/specs/long_timescale.md): solute-only DCDs renumber atoms; a trajectory too large for memory
+    # is read with a stride here and at full resolution by the streaming pass below
+    from .stream import production_info, production_topology, remap_groups, remap_indices, dcd_frame_count, \
+        choose_stride, stream_production_metrics
+    full_groups, full_metals = ligand_groups, metal_indices
+    pinfo = production_info(run_dir)
+    if pinfo["dcd_atoms"] == "solute":
+        _, subset = production_topology(run_dir, topology_pdb)
+        ligand_groups, metal_indices = remap_groups(ligand_groups, subset), remap_indices(metal_indices, subset)
+    auto_stride = 1
+    if stride == 1 and pinfo["dcds"] and pinfo.get("dcd_atom_count"):
+        n_fr = sum(dcd_frame_count(p, int(pinfo["dcd_atom_count"])) for p in pinfo["dcds"])
+        auto_stride = choose_stride(n_fr, int(pinfo["dcd_atom_count"]))
+        if auto_stride > 1:
+            stride = auto_stride
+            if decisions is not None:
+                decisions.record("analysis.memory", "stride", auto_stride,
+                                 f"production 約 {n_fr:,} 幀、每幀 {pinfo['dcd_atom_count']:,} 個原子，整份讀進記憶體超過上限；"
+                                 f"一般分析改為每 {auto_stride} 幀取一幀，RMSD、RMSF 與接觸頻率另以分段串流讀取全部幀"
+                                 "（analysis/stream_metrics.json）。", kind="auto_fixed")
     traj = load_production(run_dir, topology_pdb, stride=stride, metal_indices=metal_indices)
     m = compute_metrics(traj, ligand_groups)
     adir = run_dir / "analysis"
@@ -240,6 +264,14 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
     except Exception as exc:  # noqa: BLE001 — the centred export is a convenience; metrics above are already imaged
         cen = {"error": f"{type(exc).__name__}: {exc}"}
     m["pbc"] = cen
+    if auto_stride > 1:
+        m["stride"] = auto_stride
+        try:
+            sm = stream_production_metrics(run_dir, topology_pdb, ligand_groups=full_groups, metal_indices=full_metals)
+            m["stream_metrics_file"] = str(adir / "stream_metrics.json")
+            m["stream_n_frames"] = sm["n_frames"]
+        except Exception as exc:  # noqa: BLE001 — the strided metrics above remain; the failure is recorded
+            m["stream_error"] = f"{type(exc).__name__}: {exc}"
     for name, chk in (cen.get("pbc_checks") or {}).items():
         if chk.get("pbc_artifact") and decisions is not None:
             decisions.record("analysis.pbc", name, "visual wrap artefact corrected",

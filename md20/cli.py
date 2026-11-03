@@ -6,6 +6,9 @@
   md20 run --project P --case CASE [--tier teaching|classroom|research] [--fake]
   md20 status --project P                       stage of every case / run
   md20 demo [--dir DIR]                         end-to-end demo with the Fake backend (no OpenMM needed)
+  md20 fold SEQUENCE [--receptor-seq S] [--engine E] [--out DIR]   predicted structure (D-80)
+  md20 setup-fold [--engine omegafold|boltz|esmfold] [--yes]       install a folding tool (plan first)
+  md20 setup-cg [--yes]                         install martinize2, insane, martini_openmm (plan first)
 """
 from __future__ import annotations
 
@@ -318,6 +321,90 @@ def cmd_setup_vina(a):
     return 0
 
 
+def cmd_fold(a):
+    """D-80: sequence → predicted structure (md20/build/fold.py)."""
+    from .build import fold as F
+    seqs = list(a.receptor_seq or []) + [a.sequence]
+    out = Path(a.out) if a.out else Path.cwd() / f"fold_{a.sequence[:12]}"
+    try:
+        r = F.fold(seqs, engine=a.engine, out_dir=out, upload=a.upload, msa_server=a.msa_server, device=a.device,
+                   accept_low=a.accept_low)
+    except F.FoldError as exc:
+        _p(f"無法摺疊：{exc}")
+        if exc.options:
+            _p("選項：" + " / ".join(exc.options))
+        return 2
+    for n in r.notes:
+        _p("說明：" + n["zh"])
+    if r.status == "SKIPPED_SHORT":
+        return 0
+    _p(f"工具：{r.engine}（{r.device or '-'}），{r.runtime_s:.0f} 秒")
+    _p(f"結構：{r.pdb_path}（胜肽 chain {r.peptide_chain}；B 因子 = pLDDT）")
+    _p(f"平均 pLDDT：{r.mean_plddt}" + (f"；ipTM：{r.iptm:.2f}" if r.iptm is not None else ""))
+    for g in r.gates.get("gates", []):
+        _p(f"[{g['status']}] {g['name']}：{g['explanation']}")
+        if g.get("options"):
+            _p("  選項：" + " / ".join(g["options"]))
+    return 1 if r.status == "NEEDS_HUMAN" else 0
+
+
+def cmd_setup_fold(a):
+    """D-80: install a folding tool into its own environment.  Prints the plan; runs only with --yes."""
+    import subprocess
+    from .build import fold as F
+    st = F.fold_status()
+    _p(f"顯示卡記憶體：{st['gpu_vram_mb']} MB；摺疊環境：{st['fold_env']}")
+    _p("已安裝：" + "、".join(f"{k} {'有' if v else '無'}" for k, v in st["engines"].items()))
+    plan = F.setup_plan(a.engine)
+    if not plan["ok"]:
+        _p(f"無法安裝：{plan['problem']}")
+        return 2
+    _p(f"將安裝 {a.engine} 到 {plan['prefix']}（與 md20 環境分開；原因見 docs/specs/structure_prediction.md §3）：")
+    for i, step in enumerate(plan["steps"], 1):
+        _p(f"  {i}. {step['what']}\n     $ " + " ".join(step["cmd"]))
+    _p(f"第一次預測時還會下載：{plan['first_run_download']}")
+    if not a.yes:
+        _p("這是預覽，沒有安裝任何東西。確認後加 --yes 執行。")
+        return 0
+    for step in plan["steps"]:
+        _p("$ " + " ".join(step["cmd"]))
+        rc = subprocess.call(step["cmd"])
+        if rc != 0:
+            _p(f"失敗（結束碼 {rc}），已停止。")
+            return rc
+    _p("安裝完成：" + ("可用" if F.engine_available(a.engine) else "找不到執行檔，請檢查上面的輸出"))
+    return 0 if F.engine_available(a.engine) else 1
+
+
+def cmd_setup_cg(a):
+    """Martini 3 coarse-grained tools (docs/specs/long_timescale.md §3) into the current environment with pip.
+    Prints what it will install; runs only with --yes."""
+    import subprocess
+    from .build import martini as M
+    av = M.availability()
+    _p("已安裝：" + "、".join(f"{k} {'有' if v['ok'] else '無'}" for k, v in av.items()))
+    _p(f"將以 pip 安裝到目前的環境（{sys.executable}）：")
+    for k in ("vermouth", "insane", "martini_openmm"):
+        t = M.TOOLS[k]
+        _p(f"  - {k}（{t['license']}；{t['source']}）")
+    cmds = M.install_plan()
+    for c in cmds:
+        _p("     $ " + " ".join(c))
+    _p(f"Martini 3 力場檔（{M.FF_CORE} 等）不在這些套件裡，需要另外從 {M.FF_URL} 下載。")
+    if not a.yes:
+        _p("這是預覽，沒有安裝任何東西。確認後加 --yes 執行。")
+        return 0
+    for c in cmds:
+        _p("$ " + " ".join(c))
+        rc = subprocess.call(c)
+        if rc != 0:
+            _p(f"失敗（結束碼 {rc}），已停止。")
+            return rc
+    miss = M.missing_tools(M.availability())
+    _p("安裝完成。" if not miss else f"安裝後仍找不到：{'、'.join(miss)}，請檢查上面的輸出。")
+    return 0 if not miss else 1
+
+
 def cmd_stamp(a):
     from .util import stamp as st
     if a.action == "keygen":
@@ -434,6 +521,18 @@ def main(argv=None) -> int:
     stp = sub.add_parser("stamp", help="檢查／解開 HCC Lab 戳記"); stp.add_argument("action", choices=["verify", "decrypt", "keygen"])
     stp.add_argument("files", nargs="*"); stp.add_argument("--key"); stp.add_argument("--out", default="."); stp.set_defaults(fn=cmd_stamp)
     sv = sub.add_parser("setup-vina", help="下載 AutoDock Vina 執行檔（Windows）"); sv.set_defaults(fn=cmd_setup_vina)
+    fo = sub.add_parser("fold", help="由序列預測胜肽結構（OmegaFold、ESMFold、Boltz-2、ColabFold 或上傳）")
+    fo.add_argument("sequence"); fo.add_argument("--receptor-seq", action="append", help="受體序列（可重複；給了就預測複合物）")
+    fo.add_argument("--engine", default="auto", choices=["auto", "omegafold", "esmfold", "boltz", "colabfold", "upload"])
+    fo.add_argument("--upload", help="AlphaFold Server、ColabFold 等的 PDB 或 mmCIF"); fo.add_argument("--out")
+    fo.add_argument("--msa-server", action="store_true", help="Boltz 用 MMseqs2 公開伺服器建 MSA（會把序列送出）")
+    fo.add_argument("--device", choices=["cuda", "cpu"]); fo.add_argument("--accept-low", action="store_true")
+    fo.set_defaults(fn=cmd_fold)
+    sf = sub.add_parser("setup-fold", help="安裝結構預測工具到獨立環境（先顯示計畫，加 --yes 才執行）")
+    sf.add_argument("--engine", default="omegafold", choices=["omegafold", "boltz", "esmfold"])
+    sf.add_argument("--yes", action="store_true"); sf.set_defaults(fn=cmd_setup_fold)
+    scg = sub.add_parser("setup-cg", help="安裝粗粒化 Martini 3 工具（vermouth、insane、martini_openmm；先顯示計畫，加 --yes 才執行）")
+    scg.add_argument("--yes", action="store_true"); scg.set_defaults(fn=cmd_setup_cg)
     rp = sub.add_parser("report"); rp.add_argument("--project", required=True); rp.add_argument("--case", required=True)
     rp.add_argument("--run"); rp.add_argument("--bundle", action="store_true"); rp.set_defaults(fn=cmd_report)
     m = sub.add_parser("demo"); m.add_argument("--dir"); m.set_defaults(fn=cmd_demo)

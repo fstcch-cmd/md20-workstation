@@ -7,6 +7,25 @@
 
 ## 2026-11-03
 
+### D-81　D-80 第一階段實作：一鍵摺疊、膜系統、長時間模擬（程式與純 Python 測試；真實引擎待 CI 與筆電）
+- 使用者（11/03 14:35）：全力開發，在沙盒驗證，開放筆電調適；15:06：筆電只驗證關鍵項目，不跑長時間運算。
+- **一鍵摺疊**（`md20/build/fold.py`，規格 `structure_prediction.md` §7）：引擎 omegafold／esmfold／boltz／colabfold／upload，`auto` 依可用性與顯示卡記憶體；
+  pLDDT 閘門（≥70 PASS、50–70 AUTO_FIXED、<50 NEEDS_HUMAN）、ipTM < 0.5 提醒、< 10 殘基不摺疊。
+  `md20 setup-fold` 裝在**獨立環境** `envs/md20-fold`（OmegaFold 不支援 Python 3.11；Boltz 會把 numpy、scipy、gemmi 降版而破壞 OpenMM 與對接套件），預設只列計畫，`--yes` 才安裝。
+  對接預測的胜肽時**固定主鏈 φ／ψ**（Meeko `rigidify_bonds_smarts`），否則 Vina 每次搜尋都重抽扭轉角，預測的摺疊會丟失。
+  `fold: "complex"`：受體＋胜肽複合物；有實際受體時以序列比對後相同殘基的 Cα 做 Kabsch 疊合，只取胜肽姿勢（Cα RMSD > 2.0 Å → NEEDS_HUMAN），只有序列時用預測受體並標註；跳過對接直接進 MD。
+- **膜系統**（`md20/build/membrane.py`、`md20/analysis/membrane.py`，規格 `membrane.md`）：疏水帶掃描定向（合成資料 20 個種子皆在 8° 內、不誤判可溶蛋白）、
+  脂質組成預設、OpenMM `addMembrane`（POPC、POPE、DLPC、DLPE、DMPC、DOPC、DPPC，自 OpenMM 原始碼確認）、膜表面接觸擺放、`MonteCarloMembraneBarostat`、
+  頭基 z 約束在既有 NVT／NPT 內分段釋放、分析（每脂質面積、厚度、密度剖面、S_CD、插入深度、接觸與停留時間、傾角）。
+  Lipid17／21 沒有心磷脂與 lysyl-PG，**格蘭氏陽性菌預設目前一律擋下**（需要 CHARMM36 路徑）；DPPC 在 310 K 為凝膠相，擋下。混合膜的格點排列器未驗證（CI 測試標 xfail）。
+  膜系統的結合自由能暫時擋下（閘門 `membrane binding`）。
+- **長時間模擬**（`md20/engine/longrun.py`、`md20/analysis/stream.py`、`md20/build/martini.py`，規格 `long_timescale.md`）：> 100 ns 才規劃（不改變既有 protocol 雜湊）；
+  > 1 µs 需 `md.long_run_confirmed`、> 10 µs 拒絕、磁碟不足擋下；只存溶質的 DCD、舊分段狀態清除、串流分析；Martini 3 工具檢查與指令計畫、`md20 setup-cg`。
+  影響：已在進行中、長度 > 100 ns 的舊工作會因雜湊改變而重跑（教學 10 ns、研究 100 ns 不受影響）。
+- 驗證：容器內完整測試全過、i18n 掃描 0；需要 OpenMM、RDKit、GPU 的測試在 CI 與筆電（筆電只做關鍵短測，使用者 15:06）。
+- 未決（各規格檔列出）：力場組合（ff14SB＋Lipid17 或 CHARMM36m＋CHARMM36）、格蘭氏陽性菌脂質比例出處、martini_openmm 授權寫法不一致（LICENSE 為 LGPL-3.0、README 為 GPL v3）、
+  Martini 3 力場檔來源、OmegaFold 在 torch 2.x 與 Windows、Boltz 在 8 GB 顯示卡。
+
 ### D-80　專業版：建膜、輸入序列一鍵摺疊、微秒級模擬——先寫規格
 - 使用者要求（11/03 14:32）：專業版要能到微秒級以上；建膜功能要完備；整合輕量版 AlphaFold，輸入序列一鍵摺疊胜肽；
   雖然不能穿膜，但使用者可能只要做膜表面接觸。

@@ -33,7 +33,9 @@ def make_backend_factory(case, protocol, *, fake: bool = False, platform=None, r
         b = OpenMMBackend(sys_xml, top, platform_name=platform.name, platform_properties=props,
                              timestep_fs=dt, temperature_k=spec.temperature_k, friction_per_ps=spec.friction_per_ps,
                              ensemble=spec.ensemble, pressure_bar=spec.pressure_bar,
-                             barostat_interval_steps=spec.barostat_interval_steps, hmr=protocol.hmr, seed=spec.seed)
+                             barostat_interval_steps=spec.barostat_interval_steps, hmr=protocol.hmr, seed=spec.seed,
+                             trajectory_atoms=getattr(spec, "trajectory_atoms", "all"),
+                             barostat=getattr(spec, "barostat", "isotropic"))
         if duty is not None:
             _step = b.step
 

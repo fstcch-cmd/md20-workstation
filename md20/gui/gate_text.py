@@ -438,6 +438,15 @@ GATES: dict[str, tuple[T4, T4]] = {
          "Docking and pose selection are complete. Confirm before the long simulation starts.",
          "分子ドッキングとポーズ選択が終わりました。長いシミュレーションを始める前に確認してください。",
          "분자 도킹과 포즈 선택이 끝났습니다. 긴 시뮬레이션을 시작하기 전에 확인하십시오.")),
+    "long run": (       # engine/longrun.py, docs/specs/long_timescale.md
+        ("長時間模擬", "Long simulation", "長時間シミュレーション", "장시간 시뮬레이션"),
+        ("正式模擬很長，或硬碟空間不夠。開始前請確認天數與硬碟用量，或改用較省空間的存檔方式。",
+         "The production run is very long, or the disk is too small. Confirm the days and disk use before it starts, "
+         "or save the trajectory in a way that needs less space.",
+         "本計算がとても長いか、ディスクの空きが足りません。開始前に日数とディスク使用量を確認するか、容量の少ない保存方法に"
+         "してください。",
+         "본 계산이 매우 길거나 디스크 공간이 부족합니다. 시작하기 전에 일수와 디스크 사용량을 확인하거나, 공간을 덜 쓰는 "
+         "저장 방식으로 바꾸십시오.")),
     "library": (
         ("化合物庫", "Compound library", "化合物ライブラリ", "화합물 라이브러리"),
         ("無法讀取化合物庫。",
@@ -468,6 +477,32 @@ GATES: dict[str, tuple[T4, T4]] = {
          "The structure did not pass a validity check.",
          "構造が妥当性のチェックを通りませんでした。",
          "구조가 타당성 검사를 통과하지 못했습니다.")),
+    # D-80 structure prediction (md20/build/fold.py)
+    "fold": (
+        ("結構預測", "Structure prediction", "構造予測", "구조 예측"),
+        ("胜肽的結構預測無法執行，或結果需要你決定。",
+         "The peptide structure prediction could not run, or its result needs your decision.",
+         "ペプチドの構造予測を実行できないか、結果について判断が必要です。",
+         "펩타이드 구조 예측을 실행할 수 없거나 결과에 결정이 필요합니다.")),
+    "fold confidence": (
+        ("預測可信度（pLDDT）", "Prediction confidence (pLDDT)", "予測の信頼度（pLDDT）", "예측 신뢰도(pLDDT)"),
+        ("平均 pLDDT 70 以上可信，50 到 70 偏低（MD 會檢查），低於 50 不可信。預測結構不是實驗結構。",
+         "Mean pLDDT of 70 or more is reliable, 50 to 70 is low (MD checks it), below 50 is not reliable. A predicted structure is not an experimental one.",
+         "平均 pLDDT が 70 以上なら信頼でき、50 から 70 は低め（MD で確認）、50 未満は信頼できません。予測構造は実験構造ではありません。",
+         "평균 pLDDT 70 이상은 신뢰할 수 있고 50에서 70은 낮으며(MD로 확인) 50 미만은 신뢰할 수 없습니다. 예측 구조는 실험 구조가 아닙니다.")),
+    "fold placement": (
+        ("胜肽姿勢放進受體", "Peptide pose in the receptor", "受容体へのペプチドのポーズ配置", "수용체에 펩타이드 포즈 배치"),
+        ("預測的受體以 Cα 疊合到實際受體，只取胜肽姿勢。Cα RMSD 超過 2 Å 時，胜肽可能不在正確位置。",
+         "The predicted receptor is superposed onto the actual receptor on Cα atoms and only the peptide pose is taken. "
+         "With a Cα RMSD above 2 Å the peptide may be in the wrong place.",
+         "予測した受容体を Cα で実際の受容体に重ね、ペプチドのポーズだけを使います。Cα RMSD が 2 Å を超えると、ペプチドが正しい位置にないかもしれません。",
+         "예측한 수용체를 Cα로 실제 수용체에 겹치고 펩타이드 포즈만 사용합니다. Cα RMSD가 2 Å를 넘으면 펩타이드가 올바른 위치에 있지 않을 수 있습니다.")),
+    "fold interface": (
+        ("預測介面（ipTM）", "Predicted interface (ipTM)", "予測された界面（ipTM）", "예측 계면(ipTM)"),
+        ("科學限制提醒。ipTM 低於 0.5 時，預測的受體與胜肽介面不可信，請用 MD 與對接交叉檢查。",
+         "Scientific limitation notice. With ipTM below 0.5 the predicted receptor and peptide interface is not reliable. Cross-check it with MD and docking.",
+         "科学的な制約の注意です。ipTM が 0.5 未満のとき、予測された受容体とペプチドの界面は信頼できません。MD とドッキングで確かめてください。",
+         "과학적 한계 안내입니다. ipTM이 0.5 미만이면 예측된 수용체와 펩타이드 계면은 신뢰할 수 없습니다. MD와 도킹으로 교차 확인하십시오.")),
 }
 
 # Chinese option text (stored in config.json and the DecisionLog) → (en, ja, ko)
@@ -573,6 +608,21 @@ OPTIONS: dict[str, tuple[str, str, str]] = {
     "重新匯出 docking pose": ("Export the docking pose again", "ドッキングのポーズを出力し直す", "도킹 포즈 다시 내보내기"),
     "重新以 pH 質子化（Dimorphite-DL）": ("Re-protonate for the pH", "pH に合わせてプロトン化し直す", "pH에 맞춰 다시 양성자화"),
     "檢查 chain ID 與殘基編號": ("Check chain identifiers and residue numbers", "鎖 ID と残基番号を確認する", "사슬 식별자와 잔기 번호 확인"),
+    # D-80 structure prediction
+    "不使用預測結構，改用延伸構形（fold: false）": ("Do not use a predicted structure, use the extended build",
+                                    "予測構造を使わず、伸びた構造を使う", "예측 구조를 쓰지 않고 펼쳐진 구조 사용"),
+    "改用其他摺疊工具（fold_engine）": ("Use another folding tool", "別のフォールディングツールを使う", "다른 폴딩 도구 사용"),
+    "上傳預測結構（fold_upload）": ("Upload a predicted structure (AlphaFold Server, ColabFold)",
+                             "予測構造をアップロードする（AlphaFold Server、ColabFold）", "예측 구조 업로드(AlphaFold Server, ColabFold)"),
+    "仍使用這個預測結構（fold_accept_low: true）": ("Use this predicted structure anyway (labelled in the report)",
+                                       "それでもこの予測構造を使う（レポートに明記）", "그래도 이 예측 구조 사용(보고서에 표시)"),
+    "安裝摺疊工具（md20 setup-fold）": ("Install a folding tool (md20 setup-fold)", "フォールディングツールをインストールする（md20 setup-fold）",
+                                  "폴딩 도구 설치(md20 setup-fold)"),
+    "fold_engine: boltz": ("Use Boltz-2", "Boltz-2 を使う", "Boltz-2 사용"),
+    "仍使用這個胜肽姿勢（fold_accept_rmsd: true）": ("Use this peptide pose anyway (labelled in the report)",
+                                         "それでもこのペプチドのポーズを使う（レポートに明記）", "그래도 이 펩타이드 포즈 사용(보고서에 표시)"),
+    "改用對接（fold: true）": ("Dock the predicted peptide instead", "予測したペプチドをドッキングに切り替える", "예측한 펩타이드를 도킹으로 전환"),
+    "提供完整受體序列（fold_receptor_seq）": ("Give the full receptor sequence", "受容体の完全な配列を指定する", "수용체 전체 서열 입력"),
 }
 OPTIONS.update({   # free-text hints of the decision inputs
     "文獻（DOI）或自有實驗數據的簡述": ("Literature (DOI) or a short description of your own data",
@@ -615,6 +665,17 @@ PREFIX: list[tuple[str, tuple[str, str, str]]] = [
     ("metal_policy: {", ("Metal model:", "金属モデル：", "금속 모델:")),
     ("metal_policy:", ("Metal model:", "金属モデル：", "금속 모델:")),
     ("仍要繼續", ("Continue anyway (labelled in the report)", "それでも続ける（レポートに明記）", "그래도 계속(보고서에 표시)")),
+    ("md.long_run_confirmed: true", ("Confirm the days and disk use, and start", "日数とディスク使用量を確認して開始する",
+                                     "일수와 디스크 사용량을 확인하고 시작")),
+    ("md.production_ns:", ("Shorten the production run to (ns):", "本計算の長さを短くする（ns）：", "본 계산 길이 줄이기(ns):")),
+    ("md.long_run.solute_only: true", ("Save the solute only (no water, no counter-ions)", "溶質だけを保存する（水と対イオンは保存しない）",
+                                       "용질만 저장(물과 반대 이온은 저장하지 않음)")),
+    ("md.long_run.target_gb:", ("Trajectory size limit (GB):", "トラジェクトリの上限（GB）：", "궤적 크기 상한(GB):")),
+    ("縮短 md.production_ns", ("Shorten the production run, or move the project folder to a larger disk and try again",
+                             "本計算を短くするか、プロジェクトフォルダを容量の大きいディスクに移して再試行する",
+                             "본 계산을 줄이거나 프로젝트 폴더를 더 큰 디스크로 옮긴 뒤 다시 시도")),
+    ("改用粗粒化 Martini 3", ("Use coarse-grained Martini 3 instead (md20 setup-cg)", "粗視化 Martini 3 を使う（md20 setup-cg）",
+                          "조립화 Martini 3 사용(md20 setup-cg)")),
 ]
 
 
@@ -655,3 +716,92 @@ def option_text(option: str, lang: str) -> str:
                 return text + ("" if text.endswith("：") else " ") + rest
             return text
     return option
+
+
+# D-80 membrane systems (md20/build/membrane.py, md20/analysis/membrane.py, docs/specs/membrane.md)
+GATES.update({
+    "membrane type": (
+        ("膜系統類型", "Membrane system type", "膜系の種類", "막 계 종류"),
+        ("膜系統的類型和輸入不一致。protein 是膜蛋白，surface 是膜表面的胜肽或小分子，bilayer 是純膜。",
+         "The membrane system type does not match the input. protein is a membrane protein, surface is a peptide or "
+         "small molecule on the membrane surface, bilayer is lipids only.",
+         "膜系の種類と入力が合っていません。protein は膜タンパク質、surface は膜表面のペプチドか低分子、bilayer は脂質だけの膜です。",
+         "막 계 종류와 입력이 맞지 않습니다. protein은 막단백질, surface는 막 표면의 펩타이드나 저분자, bilayer는 지질만 있는 막입니다.")),
+    "membrane composition": (
+        ("脂質組成", "Lipid composition", "脂質組成", "지질 조성"),
+        ("脂質組成無法使用，或比例已換算成分率。",
+         "The lipid composition cannot be used, or its ratios were converted to fractions.",
+         "脂質組成が使えないか、比率を分率に換算しました。",
+         "지질 조성을 쓸 수 없거나, 비율을 분율로 환산했습니다.")),
+    "membrane phase": (
+        ("膜的相", "Membrane phase", "膜の相", "막의 상"),
+        ("模擬溫度接近或低於主要脂質的相轉變溫度，膜會變成凝膠相。請提高溫度或換脂質。",
+         "The temperature is near or below the main lipid's phase transition, so the membrane would turn into a gel. "
+         "Raise the temperature or choose another lipid.",
+         "温度が主な脂質の相転移温度に近いか低いため、膜がゲル相になります。温度を上げるか脂質を変えてください。",
+         "온도가 주요 지질의 상전이 온도에 가깝거나 낮아 막이 겔 상이 됩니다. 온도를 올리거나 지질을 바꾸십시오.")),
+    "membrane force field": (
+        ("脂質力場", "Lipid force field", "脂質の力場", "지질 역장"),
+        ("這個組成裡有脂質在 Amber 脂質力場中沒有參數，不能和蛋白力場一起使用。",
+         "Some lipids in this composition have no parameters in the Amber lipid force field used with the protein.",
+         "この組成には、タンパク質と一緒に使う Amber 脂質力場にパラメータがない脂質があります。",
+         "이 조성에는 단백질과 함께 쓰는 Amber 지질 역장에 매개변수가 없는 지질이 있습니다.")),
+    "membrane builder": (
+        ("建膜方式", "Membrane builder", "膜の作成方法", "막 생성 방식"),
+        ("建膜方式的說明，或建膜所需的脂質模板不足。",
+         "How the membrane is built, or lipid templates needed to build it are missing.",
+         "膜の作り方の説明か、膜を作るための脂質テンプレートが足りません。",
+         "막을 만드는 방식에 대한 안내이거나, 막을 만드는 데 필요한 지질 템플릿이 없습니다.")),
+    "membrane orientation": (
+        ("膜中方向", "Orientation in the membrane", "膜内での向き", "막 안에서의 방향"),
+        ("膜蛋白在膜中的方向。已定向的結構照原樣使用，否則由疏水帶掃描決定。疏水帶不明顯時需要你決定。",
+         "How the membrane protein sits in the membrane. An oriented structure is used as is, otherwise a hydrophobic-belt "
+         "scan decides. If the belt is unclear, you decide.",
+         "膜タンパク質の膜内での向きです。向きをそろえた構造はそのまま使い、そうでなければ疎水性ベルトの探索で決めます。ベルトがはっきりしない場合は判断が必要です。",
+         "막단백질이 막 안에서 놓이는 방향입니다. 방향을 맞춘 구조는 그대로 쓰고, 아니면 소수성 띠 탐색으로 정합니다. 띠가 분명하지 않으면 결정이 필요합니다.")),
+    "membrane surface placement": (
+        ("膜表面的起始位置", "Starting position above the membrane", "膜表面での初期位置", "막 표면의 시작 위치"),
+        ("胜肽或小分子放在上層磷原子平面上方指定的距離，起始時不接觸頭基。",
+         "The peptide or small molecule starts a set distance above the upper phosphate plane, not touching the head groups.",
+         "ペプチドか低分子を上側のリン原子面から指定の距離だけ離して置き、最初は頭部基に触れません。",
+         "펩타이드나 저분자를 위쪽 인 원자 평면에서 정한 거리만큼 위에 놓아, 처음에는 머리 부분에 닿지 않습니다.")),
+    "membrane implicit solvent": (
+        ("膜與隱式溶劑", "Membrane and implicit solvent", "膜と陰溶媒", "막과 암시적 용매"),
+        ("膜系統需要顯式水。隱式溶劑無法表示脂質頭基和水的作用。",
+         "Membrane systems need explicit water. Implicit solvent cannot describe how lipid head groups interact with water.",
+         "膜系には陽溶媒の水が必要です。陰溶媒では脂質の頭部基と水の相互作用を表せません。",
+         "막 계에는 명시적 물이 필요합니다. 암시적 용매로는 지질 머리 부분과 물의 상호작용을 나타낼 수 없습니다.")),
+    "membrane equilibration": (
+        ("膜平衡驗收", "Membrane equilibration check", "膜の平衡化チェック", "막 평형 점검"),
+        ("檢查每個脂質的面積、膜厚度、疏水核心中的水，以及蛋白是否留在膜中。不合格時先延長平衡一次。",
+         "Checks the area per lipid, the bilayer thickness, water in the hydrophobic core and whether the protein stays "
+         "in the membrane. If a check fails, equilibration is extended once.",
+         "脂質 1 分子あたりの面積、膜の厚さ、疎水性コア中の水、タンパク質が膜に残っているかを確認します。不合格なら平衡化を 1 回延長します。",
+         "지질당 면적, 막 두께, 소수성 중심부의 물, 단백질이 막 안에 남아 있는지를 확인합니다. 통과하지 못하면 평형화를 한 번 연장합니다.")),
+    "membrane binding": (
+        ("膜系統的結合自由能", "Binding free energy in a membrane", "膜系の結合自由エネルギー", "막 계의 결합 자유 에너지"),
+        ("膜系統還不能做 SMD 與傘狀採樣。拉離方向可能穿過脂雙層，結果不可信。",
+         "SMD and umbrella sampling are not available for membrane systems yet. The pulling path may cross the bilayer, "
+         "so the result would not be reliable.",
+         "膜系ではまだ SMD とアンブレラサンプリングを行えません。引き離しの経路が脂質二重膜を横切ることがあり、結果を信頼できません。",
+         "막 계에서는 아직 SMD와 엄브렐라 샘플링을 할 수 없습니다. 당김 경로가 지질 이중층을 지날 수 있어 결과를 믿을 수 없습니다.")),
+})
+OPTIONS.update({
+    "使用 CHARMM-GUI 建好的系統（尚未支援匯入）": ("Use a system built with CHARMM-GUI (import not supported yet)",
+                                     "CHARMM-GUI で作った系を使う（読み込みは未対応）", "CHARMM-GUI로 만든 계 사용(가져오기는 아직 지원하지 않음)"),
+    "下載 OPM 定向結構後重新上傳": ("Download the oriented structure from OPM and upload it again",
+                         "OPM から向きをそろえた構造をダウンロードして再アップロードする", "OPM에서 방향을 맞춘 구조를 받아 다시 업로드"),
+    "再延長平衡（md.stage_overrides.npt.length_ps）": ("Extend equilibration again", "平衡化をもう一度延長する", "평형화 다시 연장"),
+    "檢查脂質組成與溫度": ("Check the lipid composition and the temperature", "脂質組成と温度を確認する", "지질 조성과 온도 확인"),
+})
+PREFIX += [
+    ("md.membrane.lipids:", ("Membrane lipids:", "膜の脂質：", "막 지질:")),
+    ("md.membrane.type:", ("Membrane system type:", "膜系の種類：", "막 계 종류:")),
+    ("md.membrane.temperature_k:", ("Temperature (K):", "温度（K）：", "온도(K):")),
+    ("md.membrane.templates_dir", ("Provide a folder with one template PDB per lipid", "脂質ごとに 1 つのテンプレート PDB を入れたフォルダを指定する",
+                                   "지질마다 템플릿 PDB 하나가 든 폴더 지정")),
+    ("md.membrane.oriented", ("The structure is already oriented (OPM)", "構造は向きをそろえ済み（OPM）", "구조는 이미 방향을 맞춤(OPM)")),
+    ("md.membrane.surface_distance_nm:", ("Starting distance above the membrane (nm):", "膜からの初期距離（nm）：",
+                                          "막 위 시작 거리(nm):")),
+    ("md.membrane.surface_orientation:", ("Starting orientation:", "初期の向き：", "시작 방향:")),
+]

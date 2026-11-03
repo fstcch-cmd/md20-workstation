@@ -216,7 +216,10 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                     nonbonded_cutoff_nm: float = 1.0, forcefield_files: tuple[str, ...] = AMBER_PROTEIN,
                     flat_bottom: bool | None = None, metal_policy: dict | None = None, ph: float = 7.4,
                     metal_params: dict | None = None, solvent: str = "explicit", ions: dict | None = None,
-                    ligand_metal: str | None = None, accept_geometry: bool = False) -> BuildResult:
+                    ligand_metal: str | None = None, accept_geometry: bool = False,
+                    membrane: dict | None = None) -> BuildResult:
+    """`membrane` = md.membrane (docs/specs/membrane.md): the bilayer replaces the water box; receptor_pdb may be None
+    for a solute-only surface system (case B) or a pure bilayer (case C, no ligands either)."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     report = GateReport()
@@ -227,12 +230,29 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
         res = BuildResult(status=NEEDS_HUMAN, gates=GateReport([Gate("openmm", NEEDS_HUMAN, f"缺少 openmm：{exc}")]).to_dict())
         atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")
         return res
-    pdb = app.PDBFile(str(receptor_pdb))
-    modeller = app.Modeller(pdb.topology, pdb.positions)
+    mplan, membrane_info = None, {}
+    if membrane:
+        from .membrane import plan_membrane
+        mplan, mrep = plan_membrane(membrane, has_solute=receptor_pdb is not None or bool(ligands), solvent=solvent)
+        for g in mrep.gates:
+            report.add(g)
+            if decisions and g.status != PASS:
+                decisions.record("build.membrane", g.name, g.status, g.explanation,
+                                 kind="human" if g.status == NEEDS_HUMAN else "auto_fixed")
+        if not report.ok:
+            res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict(), solvent=solvent)
+            atomic_write_json({**res.to_dict(), "membrane": {"plan": mplan.to_dict() if mplan else None}}, out_dir / "build_manifest.json")
+            return res
+        forcefield_files = tuple(forcefield_files) + tuple(f for f in mplan.forcefield_files if f not in forcefield_files)
+    if receptor_pdb is not None:
+        pdb = app.PDBFile(str(receptor_pdb))
+        modeller = app.Modeller(pdb.topology, pdb.positions)
+    else:
+        modeller = app.Modeller(app.Topology(), unit.Quantity([], unit.nanometer))
     ff = app.ForceField(*forcefield_files)
     from .metal import apply_metal_policy, add_metal_forces, site_gates
     metal_plans = apply_metal_policy(modeller, ff, metal_policy, ph=ph, metal_params=metal_params,
-                                     qm_dir=out_dir / "metal_qm")
+                                     qm_dir=out_dir / "metal_qm") if receptor_pdb is not None else []
     for g in site_gates(metal_plans):
         report.add(g)
         if decisions and g.status != PASS:
@@ -330,12 +350,28 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
             res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict(), solvent=solvent)
             atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")
             return res
+        if mplan is not None:
+            # the bilayer (with its water and ions) replaces the water box (md20/build/membrane.py)
+            from . import membrane as MB
+            try:
+                if mplan.type == "bilayer":
+                    modeller, membrane_info = MB.build_bilayer(ff, mplan, ion_spec=ion_spec, report=report, decisions=decisions)
+                else:
+                    membrane_info = MB.add_membrane(modeller, ff, mplan, ion_spec=ion_spec, report=report, decisions=decisions)
+            except Exception as exc:  # noqa: BLE001
+                report.add(Gate("membrane builder", NEEDS_HUMAN, f"建膜失敗：{type(exc).__name__}: {exc}",
+                                options=["md.membrane.lipids: mammalian", "回報給老師"]))
+            if not report.ok:
+                res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict(), solvent=solvent)
+                atomic_write_json({**res.to_dict(), "membrane": membrane_info}, out_dir / "build_manifest.json")
+                return res
         shape = {"cube": "cube", "dodecahedron": "dodecahedron", "octahedron": "octahedron"}[box_shape]
-        modeller.addSolvent(ff, model=water_model, padding=padding_nm * unit.nanometer, boxShape=shape,
-                            positiveIon=ion_spec["positive"], negativeIon=ion_spec["negative"],
-                            ionicStrength=ion_spec["concentration_molar"] * unit.molar, neutralize=ion_spec["neutralize"])
+        if mplan is None:
+            modeller.addSolvent(ff, model=water_model, padding=padding_nm * unit.nanometer, boxShape=shape,
+                                positiveIon=ion_spec["positive"], negativeIon=ion_spec["negative"],
+                                ionicStrength=ion_spec["concentration_molar"] * unit.molar, neutralize=ion_spec["neutralize"])
         ionic_strength_molar = ion_spec["concentration_molar"]
-        if decisions:
+        if decisions and mplan is None:
             vecs = modeller.topology.getPeriodicBoxVectors()
             vol = abs(float(np.linalg.det(np.array([[v.x, v.y, v.z] for v in vecs])))) if vecs else 0.0
             n_w = sum(1 for r in modeller.topology.residues() if r.name in {"HOH", "WAT"})
@@ -378,6 +414,10 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                         options=["metal_params 改為不套用電荷（charges: false）", "確認 MCPB 模型的質子化狀態"]))
     restr = add_position_restraints(system, modeller.topology, modeller.positions, ligand_resnames=lig_names,
                                     ligand_atom_indices=lig_index_set)
+    if membrane_info.get("head_atom_indices"):
+        from .membrane import add_headgroup_restraints
+        restr["lipid_head"] = add_headgroup_restraints(system, modeller.topology, modeller.positions,
+                                                       membrane_info["head_atom_indices"])
     if lm_contacts and ligand_metal == "restrain":
         # atom indices are stable: solvent and ions are appended after the contacts were measured (D-53)
         from .metal import add_ligand_metal_restraints
@@ -449,7 +489,8 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                       restraints={**restr, "metals": {"plans": metal_plans, **metal_info}} if metal_plans else restr,
                       gates=report.to_dict(), solvent=solvent,
                       hashes={"system_xml": sha256_file(sys_xml), "topology_pdb": sha256_file(top_pdb)})
-    atomic_write_json({**res.to_dict(), "created_at": now_iso(), **({"implicit_solvent": gb_info} if implicit else {})},
+    atomic_write_json({**res.to_dict(), "created_at": now_iso(), **({"implicit_solvent": gb_info} if implicit else {}),
+                       **({"membrane": membrane_info} if membrane_info else {})},
                       out_dir / "build_manifest.json")
     return res
 

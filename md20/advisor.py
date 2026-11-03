@@ -761,6 +761,23 @@ def check(values: dict, f: CaseFeatures, *, goal: str = "teaching", budget_hours
                       f"Publication usually needs 50 ns or more. Reviewers are likely to question {prod:g} ns.",
                       f"論文発表には通常 50 ns 以上が必要です。{prod:g} ns では査読で指摘されやすくなります。",
                       f"논문 발표에는 보통 50 ns 이상이 필요합니다. {prod:g} ns는 심사에서 지적받기 쉽습니다.", 100.0))
+    if prod > 100:
+        # long runs (engine/longrun.py): days, disk and the save interval the run will use; > 1 µs needs a confirmation
+        lp = long_run_plan(v, f)
+        line = lp["summary"]
+        if prod > 10000:
+            out.append(_i("error", "production_ns", f"正式模擬上限是 10000 ns（10 µs）。{line[0]}",
+                          f"The production limit is 10000 ns (10 µs). {line[1]}",
+                          f"本計算の上限は 10000 ns（10 µs）です。{line[2]}",
+                          f"본 계산 상한은 10000 ns(10 µs)입니다. {line[3]}", 10000.0))
+        elif prod > 1000:
+            out.append(_i("warning", "production_ns", f"超過 1 µs，開始前會請你確認。{line[0]}",
+                          f"Longer than 1 µs, so you will be asked to confirm before it starts. {line[1]}",
+                          f"1 µs を超えるため、開始前に確認を求めます。{line[2]}",
+                          f"1 µs를 넘으므로 시작 전에 확인을 요청합니다. {line[3]}"))
+        else:
+            out.append(_i("info", "production_ns", f"長時間模擬。{line[0]}", f"Long simulation. {line[1]}",
+                          f"長時間シミュレーションです。{line[2]}", f"장시간 시뮬레이션입니다. {line[3]}"))
     if goal == "publication" and int(v["replicas"]) < 3:
         out.append(_i("warning", "replicas", "只跑一次無法報告標準差。發表等級建議至少 3 次獨立重複。",
                       "A single run gives no standard deviation. Publication grade needs at least three replicas.",
@@ -920,8 +937,32 @@ def estimate_hours(values: dict, f: CaseFeatures, goal: str = "teaching") -> dic
         n_win = math.ceil(float(v["pull_distance_nm"]) / 0.08) * 1.4      # initial windows plus adaptive refinement
         bind_ns = (smd_ps + n_win * (float(v["window_equil_ps"]) + float(v["window_prod_ps"]))) / 1000
         bind_h = bind_ns * f.n_ligands / speed * 24
-    return {"atoms": atoms, "ns_per_day": round(speed, 1), "md_hours": round(md_h, 1), "binding_hours": round(bind_h, 1),
-            "total_hours": round(md_h + bind_h, 1), "systems": systems}
+    out = {"atoms": atoms, "ns_per_day": round(speed, 1), "md_hours": round(md_h, 1), "binding_hours": round(bind_h, 1),
+           "total_hours": round(md_h + bind_h, 1), "systems": systems}
+    if float(v["production_ns"]) > 100:        # long runs: days and disk (engine/longrun.py)
+        lp = long_run_plan(values, f, goal)
+        out.update({"days": round(out["total_hours"] / 24.0, 1), "disk_gb": lp["total_gb"],
+                    "trajectory_interval_ps": lp["trajectory_interval_ps"], "solute_only": lp["solute_only"]})
+    return out
+
+
+def long_run_plan(values: dict, f: CaseFeatures, goal: str = "teaching", *, disk_free_gb: float | None = None) -> dict:
+    """Plan for the production stage with these values (engine/longrun.py): days, disk, save interval, gates.
+    `summary` is a (zh, en, ja, ko) line for the form."""
+    from .engine.longrun import plan_long_run, summary_text
+    v = {**recommended_values(f, goal), **{k: x for k, x in values.items() if x is not None}}
+    solvent = v.get("solvent", "explicit")
+    atoms = system_atoms(f, float(v["padding_nm"]), solvent)
+    solute = (f.n_residues or 300) * 16 if solvent == "explicit" else None
+    bench = {"ns_per_day": f.ns_per_day, "n_atoms": f.bench_atoms, "timestep_fs": f.bench_dt_fs} if f.ns_per_day else None
+    systems = 1 + (f.n_ligands if v.get("docking_mode", f.docking_mode) == "independent" else 1)
+    plan = plan_long_run(n_atoms=atoms, production_ns=float(v["production_ns"]), timestep_fs=float(v["timestep_fs"]),
+                         bench=bench, n_solute_atoms=solute, disk_free_gb=disk_free_gb, confirmed=True,
+                         replicas=int(v["replicas"]) * systems,
+                         base_trajectory_ps=float(v.get("trajectory_interval_ps") or 20.0))
+    d = plan.to_dict()
+    d["summary"] = summary_text(plan)
+    return d
 
 
 def parameter_table(values: dict, f: CaseFeatures, goal: str = "teaching", lang: str = "en",

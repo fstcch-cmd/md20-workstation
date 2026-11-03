@@ -83,6 +83,8 @@ def _verify_chunks(progress: dict, stage_dir: Path) -> tuple[list[dict], int, Pa
             break
         ok = True
         for role, rec in (row.get("artifacts") or {}).items():
+            if rec.get("pruned"):        # state deliberately removed (keep_chunk_states); a later chunk carries on
+                continue
             if role in {"state", "log"} and not verify_cheap_fingerprint(rec["path"], rec):
                 ok = False
                 break
@@ -91,7 +93,33 @@ def _verify_chunks(progress: dict, stage_dir: Path) -> tuple[list[dict], int, Pa
         valid.append(row)
         completed = int(row["end_local_step"])
         last_state = Path(row["artifacts"]["state"]["path"])
+    # resume needs a state on disk: drop trailing chunks whose state was pruned (only reachable when a kept state is
+    # damaged, since pruning never touches the newest chunks)
+    while valid and (valid[-1].get("artifacts") or {}).get("state", {}).get("pruned"):
+        valid.pop()
+        completed = int(valid[-1]["end_local_step"]) if valid else 0
+        last_state = Path(valid[-1]["artifacts"]["state"]["path"]) if valid else None
     return valid, completed, last_state
+
+
+def _prune_chunk_states(chunks: list[dict], keep: int, progress_path: Path, progress: dict) -> None:
+    """keep_chunk_states > 0 (long runs, engine/longrun.py): delete the State XML and checkpoint of chunks older than
+    the newest `keep`.  The progress file is written *before* the files are deleted, so a crash in between leaves
+    extra files, never a non-pruned record without its file."""
+    if keep <= 0 or len(chunks) <= keep:
+        return
+    doomed = []
+    for row in chunks[:-keep]:
+        for role in ("state", "checkpoint"):
+            rec = (row.get("artifacts") or {}).get(role)
+            if rec and not rec.get("pruned"):
+                rec["pruned"] = True
+                doomed.append(rec["path"])
+    if not doomed:
+        return
+    atomic_write_json(progress, progress_path)
+    for p in doomed:
+        Path(p).unlink(missing_ok=True)
 
 
 def run_stage(stage_dir: Path | str, spec: StageSpec, make_backend: BackendFactory, *, identity: dict,
@@ -203,6 +231,11 @@ def run_stage(stage_dir: Path | str, spec: StageSpec, make_backend: BackendFacto
                 atomic_write_json({**identity, "status": "RUNNING", "stage": name, "total_steps": total,
                                    "completed_local_steps": completed, "chunks": chunks,
                                    "watchdog_events": events, "updated_at": now_iso()}, progress_path)
+                if getattr(spec, "keep_chunk_states", 0):
+                    _prune_chunk_states(chunks, int(spec.keep_chunk_states), progress_path,
+                                        {**identity, "status": "RUNNING", "stage": name, "total_steps": total,
+                                         "completed_local_steps": completed, "chunks": chunks,
+                                         "watchdog_events": events, "updated_at": now_iso()})
                 shutil.rmtree(tmp, ignore_errors=True)
                 if dt != spec.timestep_fs:
                     # one clean chunk at the reduced timestep: restore the protocol timestep

@@ -131,9 +131,10 @@ DECISION_KEYS: tuple[tuple[str, ...], ...] = (
     ("pose_choices",), ("human_choices",), ("structure_override",), ("metal_policy",), ("metal_params",), ("peptide_policy",),
     ("docking", "skip_redock"), ("box", "allow_blind"), ("binding", "manual_windows"),
     ("screen", "select"), ("screen", "next_mode"), ("screen", "allow_partial"), ("md_confirmed",), ("ligand_metal",),
-    ("multi_ligand",),
+    ("multi_ligand",), ("md", "long_run_confirmed"), ("md", "long_run"),
 )
-LIGAND_DECISION_KEYS = ("cpp_override", "cpp_evidence", "target_location")
+LIGAND_DECISION_KEYS = ("cpp_override", "cpp_evidence", "target_location", "fold_accept_low", "fold_upload", "fold_engine",
+                        "fold_accept_rmsd", "fold_receptor_seq")
 
 
 def _get_path(d: dict, path: tuple) -> tuple[bool, object]:
@@ -455,6 +456,123 @@ class Workflow:
         atomic_write_json(st, self.state_path)
         return peptide_smiles(seq, l.get("termini", "charged"))
 
+    def _fold_peptide(self, l: dict) -> str | None:
+        """D-80: `ligands[i].fold: true` → predict the peptide's structure before docking (md20/build/fold.py).
+
+        Returns the SDF used as the docking input (backbone kept rigid in Vina, side chains flexible), or None when the
+        peptide is too short to fold (the extended build is used).  Results go to state["fold"][name] for the report.
+        Not available or pLDDT < 50 → NEEDS_HUMAN with options; nothing falls back silently."""
+        from .build import fold as F
+        name = l["name"]
+        seq = F.clean(l["sequence"], name)
+        req = {"sequence": seq, "engine": l.get("fold_engine") or "auto", "upload": l.get("fold_upload") or "",
+               "accept_low": bool(l.get("fold_accept_low"))}
+        st = self.state()
+        old = (st.get("fold") or {}).get(name) or {}
+        if old.get("request") == req and old.get("docking_sdf") and Path(old["docking_sdf"]).is_file():
+            return old["docking_sdf"]
+        out = self.dir / "fold" / safe_name(name)
+        opts = [F.OPT_INSTALL, F.OPT_UPLOAD, F.OPT_NO_FOLD]
+        try:
+            res = F.fold(seq, engine=req["engine"], out_dir=out, upload=req["upload"] or None, accept_low=req["accept_low"])
+        except F.FoldError as exc:
+            gate = {"name": "fold", "status": "NEEDS_HUMAN", "explanation": str(exc), "options": exc.options or opts,
+                    "evidence": {"text": exc.text, "sequence": seq}}
+            self._record_fold(name, {"request": req, "status": "NEEDS_HUMAN", "error": exc.text})
+            self._block("fold", f"{name}：{exc}", gates=[gate], ligand=name)
+        if res.status == "SKIPPED_SHORT":
+            self.dec.record("build.fold", name, "not folded (short)",
+                            f"{name} 只有 {len(seq)} 個殘基（少於 {F.MIN_FOLD_RESIDUES}），單獨存在時通常沒有穩定結構；"
+                            "不摺疊，沿用由序列建立的延伸構形，由對接搜尋改變構形，報告會說明。")
+            self._record_fold(name, {"request": req, **res.to_dict()})
+            return None
+        if res.status == "NEEDS_HUMAN":
+            self._record_fold(name, {"request": req, **res.to_dict()})
+            gates = [g for g in res.gates["gates"] if g["status"] == "NEEDS_HUMAN"]
+            self._block("fold", f"{name}：{gates[0]['explanation']}", gates=gates, ligand=name)
+        sdf, notes = F.docking_sdf(res, out / f"{safe_name(name)}_predicted.sdf")
+        why = (f"{name} 以 {res.engine} 預測結構（平均 pLDDT {res.mean_plddt}，閘門 {res.status}"
+               + (f"，ipTM {res.iptm:.2f}" if res.iptm is not None else "") +
+               "）。預測結構當作對接的起始構形：Vina 每次搜尋都會把可旋轉鍵隨機化，所以主鏈 φ/ψ 設為不可旋轉以保留預測的摺疊，"
+               "側鏈仍可轉動。這是預測，不是實驗結構；之後的 MD 會檢查它是否穩定。")
+        self.dec.record("build.fold", name, f"{res.engine} pLDDT {res.mean_plddt}", why,
+                        kind="human" if req["accept_low"] and (res.mean_plddt or 0) < F.PLDDT_LOW else "auto_fixed"
+                        if res.status == "AUTO_FIXED" else "auto")
+        self._record_fold(name, {"request": req, **res.to_dict(), "docking_sdf": str(sdf),
+                                 "rigid_backbone": True, "notes": res.notes + notes})
+        return str(sdf)
+
+    def _fold_complex(self, l: dict, raw: Path, smiles: str) -> str:
+        """D-80 `ligands[i].fold: "complex"`: fold receptor + peptide together, superpose the predicted receptor onto the
+        actual receptor (sequence alignment, Kabsch on matched Cα) and take only the peptide pose; that pose goes to MD
+        without docking.  Cα RMSD > 2 Å, too few matched Cα, low pLDDT or no engine → NEEDS_HUMAN with options."""
+        from .build import fold as F
+        name = l["name"]
+        seq = F.clean(l["sequence"], name)
+        excl = set(self.cfg["receptor"].get("exclude_chains", []))
+        given = l.get("fold_receptor_seq")
+        if given:
+            rec_seqs, rec_notes = [F.clean(x, f"{name} receptor") for x in ([given] if isinstance(given, str) else given)], []
+        else:
+            rec_seqs, _, rec_notes = F.receptor_sequences(raw, exclude_chains=excl)
+        req = {"mode": "complex", "sequence": seq, "receptor": rec_seqs, "engine": l.get("fold_engine") or "auto",
+               "upload": l.get("fold_upload") or "", "accept_low": bool(l.get("fold_accept_low")),
+               "accept_rmsd": bool(l.get("fold_accept_rmsd")), "reference": str(raw)}
+        old = ((self.state().get("fold") or {}).get(name)) or {}
+        if old.get("request") == req and old.get("complex_pose") and Path(old["complex_pose"]).is_file():
+            return old["complex_pose"]
+        out = self.dir / "fold" / safe_name(name)
+        try:
+            res = F.fold(rec_seqs + [seq], engine=req["engine"], out_dir=out, upload=req["upload"] or None,
+                         accept_low=req["accept_low"])
+            pl = None if res.status == "NEEDS_HUMAN" else F.place_peptide(res, out, reference=raw, exclude_chains=excl,
+                                                                        accept_rmsd=req["accept_rmsd"])
+        except F.FoldError as exc:
+            gate = {"name": "fold", "status": "NEEDS_HUMAN", "explanation": str(exc),
+                    "options": exc.options or [F.OPT_INSTALL, F.OPT_UPLOAD, F.OPT_DOCK],
+                    "evidence": {"text": exc.text, "sequence": seq}}
+            self._record_fold(name, {"request": req, "status": "NEEDS_HUMAN", "error": exc.text})
+            self._block("fold", f"{name}：{exc}", gates=[gate], ligand=name)
+        rec = {"request": req, **res.to_dict(), "placement": pl.to_dict() if pl else None,
+               "notes": res.notes + rec_notes + (pl.notes if pl else [])}
+        bad = [g for g in res.gates.get("gates", []) + ((pl.gates.get("gates", []) if pl else []))
+               if g["status"] == "NEEDS_HUMAN"]
+        if bad:
+            self._record_fold(name, rec)
+            self._block("fold", f"{name}：{bad[0]['explanation']}", gates=bad, ligand=name)
+        sdf, map_notes = F.docking_sdf(res, out / f"{safe_name(name)}_complex_pose.sdf",
+                                       transform=pl.transform if pl.receptor_source == "actual" else None)
+        rec.update({"complex_pose": str(sdf), "smiles": smiles, "notes": rec["notes"] + map_notes})
+        why = (f"{name} 以 {res.engine} 預測受體＋胜肽複合物（胜肽平均 pLDDT {res.mean_plddt}"
+               + (f"，ipTM {res.iptm:.2f}" if res.iptm is not None else "") + "）。"
+               + (f"預測的受體以序列比對配對 {pl.n_matched} 個 Cα，Kabsch 疊合到實際受體，Cα RMSD {pl.rmsd_ca} Å"
+                  f"（門檻 {F.SUP_MAX_RMSD} Å），只取胜肽姿勢放進實際受體；" if pl.receptor_source == "actual"
+                  else "沒有實際受體結構，直接使用預測的受體（標註為預測）；")
+               + "此胜肽不經對接，姿勢直接進入建模與 MD。這是預測，不是實驗結構，MD 會檢查姿勢是否穩定。")
+        human = (req["accept_rmsd"] and (pl.rmsd_ca or 0) > F.SUP_MAX_RMSD) or (req["accept_low"] and (res.mean_plddt or 0) < F.PLDDT_LOW)
+        self.dec.record("build.fold", name, f"complex {res.engine} → MD (RMSD {pl.rmsd_ca})", why,
+                        kind="human" if human else "auto_fixed")
+        self._record_fold(name, rec)
+        return str(sdf)
+
+    def _complex_picks(self, sel: dict) -> None:
+        """Add the peptides placed from a predicted complex to the pose selection (no docking entry, no score)."""
+        fold = self.state().get("fold") or {}
+        for l in self.cfg.get("ligands") or []:
+            if l.get("fold") != "complex":
+                continue
+            rec = fold.get(l["name"]) or {}
+            if not rec.get("complex_pose") or not Path(rec["complex_pose"]).is_file():
+                self._block("pose_selection", f"{l['name']}：fold: complex 的胜肽姿勢不存在，請重跑對接步驟。")
+            sel["ligands"][l["name"]] = {"rank": 1, "sdf": rec["complex_pose"], "score": None, "rmsd_ref": None,
+                                         "entry": l["name"], "smiles": rec.get("smiles", ""), "md_screen": None,
+                                         "source": "fold_complex"}
+
+    def _record_fold(self, name: str, rec: dict) -> None:
+        st = self.state()
+        st.setdefault("fold", {})[name] = rec
+        atomic_write_json(st, self.state_path)
+
     def _peptide_pose_access(self, sel: dict) -> None:
         """After pose selection: does each peptide pose reach the site or lie on the surface? (advisory, D-48)"""
         from .build.peptide import peptide_pose_access, peptide_access_gate
@@ -653,15 +771,30 @@ class Workflow:
                 except ValueError:
                     ref = ""
             smi = l.get("smiles", "")
+            sdf, rigid = l.get("sdf", ""), False
             if l.get("sequence"):
                 smi = self._peptide_preflight(l, box)
-            ligs.append(LigandInput(name=l["name"], smiles=smi, sdf=l.get("sdf", ""), reference_pose=ref,
+                if l.get("fold") == "complex":
+                    self._fold_complex(l, raw, smi)         # D-80: predicted complex → pose straight to MD, no docking
+                    continue
+                if l.get("fold"):
+                    folded = self._fold_peptide(l)          # D-80: predicted structure as the starting conformation
+                    if folded:
+                        sdf, rigid = folded, True
+            ligs.append(LigandInput(name=l["name"], smiles=smi, sdf=sdf, reference_pose=ref,
                                     protonation=l.get("protonation") or dcfg.get("protonation", "auto"),
-                                    ph=float(self.cfg.get("ph", 7.4))))
+                                    ph=float(self.cfg.get("ph", 7.4)), rigid_backbone=rigid))
         exh = dcfg.get("exhaustiveness", 16)
         if any(l.get("sequence") for l in self.cfg["ligands"]) and exh < 32:
             self.dec.record("docking.setup", "exhaustiveness", 32, f"胜肽配體自由度高，exhaustiveness 由 {exh} 自動提高到 32。")
             exh = 32
+        if not ligs:                                        # every ligand came from a complex prediction (D-80)
+            res = DockingResult(mode=dcfg.get("mode", "independent"), receptor_pdbqt="", box=box.to_dict(),
+                                params={"skipped": "all ligands placed from a predicted complex (fold: complex)"})
+            out.mkdir(parents=True, exist_ok=True)
+            atomic_write_json(res.to_dict(), out / "docking_results.json")
+            self._mark("docking", result=str(out / "docking_results.json"), mode=res.mode)
+            return res
         res = dock(clean, ligs, box, out, mode=dcfg.get("mode", "independent"),
                    scoring=dcfg.get("scoring", "vina"), exhaustiveness=exh,
                    n_poses=dcfg.get("n_poses", 9), seed=dcfg.get("seed", 2026), decisions=self.dec, progress_cb=progress_cb)
@@ -754,6 +887,7 @@ class Workflow:
                                        "md_screen": screen_info}
             self.dec.record("workflow.pose", e["name"], f"rank {rank}", why,
                             kind="human" if e["name"] in user else ("auto_fixed" if least else "auto"))
+        self._complex_picks(sel)                           # D-80: peptides placed from a predicted complex
         self._mark("pose_selection", selection=sel, choices_cfg=key)
         try:
             self._peptide_pose_access(sel)
@@ -1097,6 +1231,7 @@ class Workflow:
                        box_shape=self.cfg.get("md", {}).get("box_shape", "dodecahedron"),
                        ionic_strength_molar=float(self.cfg.get("md", {}).get("ionic_strength_molar", 0.15)),
                        ions=self.cfg.get("md", {}).get("ions") or None,
+                       membrane=self.cfg.get("md", {}).get("membrane") or None,      # docs/specs/membrane.md
                        human_choices=self.cfg.get("human_choices") or None,   # receptor gate choices apply to the MD build too
                        ligand_metal=self.cfg.get("ligand_metal") or None,
                        accept_geometry=bool((self.cfg.get("multi_ligand") or {}).get("accept_geometry")))
@@ -1148,6 +1283,10 @@ class Workflow:
             if self._solvent() == "gbn2":
                 from .engine.protocol import implicit_solvent_protocol
                 proto = implicit_solvent_protocol(proto)
+            if md.get("membrane"):
+                from .engine.protocol import membrane_protocol
+                from .build.membrane import membrane_temperature
+                proto = membrane_protocol(proto, temperature_k=membrane_temperature(md["membrane"]))
             if md.get("stage_overrides"):
                 from .engine.protocol import RESTRAINT_STRATEGIES
                 npt_factor = float(RESTRAINT_STRATEGIES[self._restraint_strategy()].get("npt_length_factor", 1.0))
@@ -1155,6 +1294,7 @@ class Workflow:
                     for k, v in md["stage_overrides"].get(st.name, {}).items():
                         # an NPT length is the *base* length; the gentle strategy still doubles it (D-49)
                         setattr(st, k, float(v) * npt_factor if (st.name == "npt" and k == "length_ps") else v)
+            self._plan_long_run(key, case, proto, runs)
             group = runs.get(key, {}).get("group_id") or f"wf_{self.name}_{key}"
             summary = run_replicas(case, proto, make_factory(case, proto), n=proto.replicas, should_pause=should_pause,
                                    progress_cb=progress_cb, group_id=group)
@@ -1170,6 +1310,44 @@ class Workflow:
                 reason = next((r.get("reason") for r in summary["runs"] if r["status"] == "NEEDS_HUMAN"), "")
                 self._block("md_runs", f"{key} 的 MD 需要人工決定：{reason}", runs=runs)
         return runs
+
+    def _plan_long_run(self, key: str, case, proto, runs: dict) -> None:
+        """Production > 100 ns (or an md.long_run block): save interval, log interval, chunk length and disk check
+        (engine/longrun.py, docs/specs/long_timescale.md).  > 1 µs waits for md.long_run_confirmed."""
+        from .engine.longrun import needs_plan, plan_long_run, apply_plan, record_plan
+        md = self.cfg.get("md", {})
+        lr = md.get("long_run") or {}
+        prod = next((s for s in getattr(proto, "stages", []) if s.name == "production"), None)
+        if prod is None or not needs_plan(prod.length_ps / 1000.0, lr):
+            return
+        bm = load_json(case.build_dir / "build_manifest.json", {})
+        n_atoms = int(bm.get("n_atoms") or 0)
+        if n_atoms <= 0:
+            self._block("md_runs", f"{key}：正式模擬 {prod.length_ps / 1000:g} ns 需要先估計硬碟用量，但 build 沒有原子數。"
+                        "請重新建模後再試。", runs=runs)
+        solute = int(bm.get("n_protein_atoms") or 0) + int(bm.get("n_ligand_atoms") or 0)
+        free = None
+        try:
+            import shutil as _sh
+            free = _sh.disk_usage(case.dir).free / 1e9
+            # space this case's runs already use counts as available: a resumed run must not block on its own files
+            free += sum(p.stat().st_size for p in (case.dir / "runs").rglob("*") if p.is_file()) / 1e9
+        except OSError:
+            pass
+        plan = plan_long_run(n_atoms=n_atoms, production_ns=prod.length_ps / 1000.0, timestep_fs=prod.timestep_fs,
+                             ns_per_day=md.get("ns_per_day"), bench=md.get("benchmark"),
+                             n_solute_atoms=solute or None, solute_only=lr.get("solute_only"),
+                             target_gb=float(lr.get("target_gb") or 20.0), disk_free_gb=free,
+                             confirmed=bool(md.get("long_run_confirmed")), replicas=proto.replicas,
+                             base_trajectory_ps=prod.trajectory_interval_ps, base_report_ps=prod.report_interval_ps,
+                             base_checkpoint_ps=prod.checkpoint_interval_ps)
+        if plan.blocked:
+            msg = f"{key}：" + plan.message_zh()
+            ev = {k: v for k, v in plan.to_dict().items() if k not in ("issues", "decisions", "stage_overrides")}
+            self._block("md_runs", msg, runs=runs, gates=[{"name": "long run", "status": "NEEDS_HUMAN", "explanation": msg,
+                                                           "options": plan.options(), "evidence": ev}])
+        apply_plan(proto, plan)
+        record_plan(plan, self.dec, stage=f"workflow.md.{key}")
 
     def analyse(self, runs: dict) -> dict:
         from .analysis.traj import analyse_run, compare_runs
@@ -1265,6 +1443,11 @@ class Workflow:
             msg = ("隱式溶劑（GBn2）不做 SMD／傘狀採樣：拉離過程的去溶劑化能障在連續介質模型下會失真，PMF 與 ΔG° 不可信。")
             self._block("binding", msg, gates=[{"name": "implicit solvent + binding", "status": "NEEDS_HUMAN", "explanation": msg,
                                                 "options": ["md.solvent: explicit（顯式水，重建並重跑 MD）", "binding.enabled: false（只做 MD）"]}])
+        if (self.cfg.get("md") or {}).get("membrane"):
+            msg = ("膜系統還沒有 SMD／傘狀採樣：拉離方向可能穿過脂雙層，拉離時也沒有膜專用的壓力耦合，PMF 與 ΔG° 不可信"
+                   "（docs/specs/membrane.md §6，沿膜法線的 PMF 尚未實作）。")
+            self._block("binding", msg, gates=[{"name": "membrane binding", "status": "NEEDS_HUMAN", "explanation": msg,
+                                                "options": ["binding.enabled: false（只做 MD）"]}])
         # keep every finished target even when the step itself was paused or reopened (manual resampling of one
         # target must not recompute the others)
         results = {k: v for k, v in ((self.state()["steps"].get("binding") or {}).get("results") or {}).items()

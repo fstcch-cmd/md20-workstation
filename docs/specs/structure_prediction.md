@@ -1,6 +1,6 @@
 # Spec: 結構預測（輸入序列一鍵摺疊）
 
-狀態：**[設計中]**（2026-11-03，D-80）。使用者要求：整合輕量版 AlphaFold，使用者只要輸入胜肽序列就能一鍵摺疊。
+狀態：**[已實作，未實機驗證]**（2026-11-03，D-80；設計 2026-11-03，實作見 §7）。使用者要求：整合輕量版 AlphaFold，使用者只要輸入胜肽序列就能一鍵摺疊。
 
 ## 1. 現況
 胜肽（`peptide:序列`）由序列建出延伸構形，交給 Vina 柔性對接；Vina 只在約 8 個殘基、32 個可旋轉鍵以內可靠。沒有結構預測。
@@ -34,3 +34,94 @@ AlphaFold 3 的權重限非商業且需申請，不能內建。
 ## 6. 想請審查者回答
 - 預設工具選 OmegaFold 是否恰當？胜肽（10–40 aa）上的準確度是否有文獻比較？
 - pLDDT 門檻是否適用於短胜肽？
+
+## 7. 實作（2026-11-03）
+程式：`md20/build/fold.py`；命令列 `md20 fold`、`md20 setup-fold`（`md20/cli.py`）；流程掛點 `Workflow._fold_peptide`（`md20/workflow.py`）；
+Vina 主鏈固定 `LigandInput.rigid_backbone`（`md20/docking/run.py`）；閘門標題與選項翻譯 `md20/gui/gate_text.py`；測試 `tests/test_fold.py`。
+
+### 7.1 介面
+`fold(sequences, engine="auto", out_dir, upload=None, confidence_json=None, peptide_index=-1, msa_server=False, device=None, accept_low=False) → FoldResult`。
+`sequences` 是一條序列或清單（受體在前、胜肽在最後），鏈依序命名 A、B、C。`FoldResult`：`pdb_path`（一律轉成 PDB，B 因子＝pLDDT 0–100）、
+`per_residue_plddt`（胜肽鏈）、`mean_plddt`（胜肽鏈，閘門用這個）、`complex_plddt`、`iptm`、`engine`、`device`、`runtime_s`、`status`、`gates`、
+`notes`（四種語言 dict）、`provenance`（"predicted" 或 "predicted (uploaded)"，不會是實驗結構）。結果另存 `out_dir/fold_result.json`。
+失敗一律丟 `FoldError`（`.text` 四種語言、`.options`），找不到工具是 `FoldUnavailable`。
+
+### 7.2 各工具的呼叫方式（已讀原始碼查證，2026-11-03 的 main 分支）
+| 工具 | 呼叫 | 輸出與信心值 |
+|---|---|---|
+| OmegaFold | `omegafold input.fasta outdir --device cuda\|cpu` | `outdir/<FASTA 標頭>.pdb`；B 因子＝confidence×100（`omegafold/__main__.py`）；殘基從 0 編號、沒有 OXT、沒有氫 |
+| ESMFold | `esm-fold -i fasta -o dir --chunk-size 64 [--cpu-only]`（fair-esm），否則 HF transformers `EsmForProteinFolding.infer_pdb`（MD20 寫一個小腳本以 `python -I` 執行） | B 因子＝pLDDT×100；若檔案是 0–1 會自動乘 100 並註明 |
+| Boltz-2 | `boltz predict md20fold.yaml --out_dir D --output_format pdb --accelerator gpu\|cpu [--use_msa_server]` | `D/boltz_results_md20fold/predictions/md20fold/md20fold_model_0.pdb`（B 因子＝pLDDT×100），`confidence_md20fold_model_0.json`（`iptm`、`complex_plddt` 0–1） |
+| ColabFold | `colabfold_batch input.fasta D --num-models 1`（複合物以 `受體:胜肽` 一行） | `*_unrelaxed_rank_001_*.pdb`、`*_scores_rank_001_*.json`（`plddt`、`ptm`、`iptm`） |
+| 上傳 | PDB 或 mmCIF（AlphaFold Server、ColabFold、Boltz 的輸出） | B 因子；ipTM 只依工具自己的檔名找對應的 JSON（AF Server `x_model_0.cif`→`x_summary_confidences_0.json`；ColabFold `unrelaxed`→`scores`；Boltz `confidence_x_model_0.json`），找不到就不填 |
+
+Boltz 預設 `msa: empty`（單序列模式，不把序列送出去）並在 notes 註明受體準確度較低；`--msa-server` 才使用 MMseqs2 公開伺服器（序列會送出，未發表序列要注意）。
+
+### 7.3 自動選擇（`engine="auto"`）
+顯示卡記憶體由 `md20.env.hardware._nvidia()`（nvidia-smi）讀取；這幾個工具在 AMD 與 Apple 顯示卡上改用 CPU。
+- 單一胜肽：OmegaFold（≥ 4 GB 用 GPU，否則 CPU 並註明）→ ESMFold（≥ 8 GB）→ Boltz（≥ 8 GB）→ ColabFold → ESMFold CPU → `FoldUnavailable`。
+- 受體＋胜肽：Boltz（≥ 8 GB；總長 > 600 殘基且 < 16 GB 時提醒可能記憶體不足）→ ColabFold → `FoldUnavailable`（選項：安裝、上傳、不摺疊）。
+- 記憶體門檻取自 §2 的文件數字，**尚未在 RTX 4060（8 GB）實測**。
+
+### 7.4 閘門（與 §4 相同）
+`fold confidence`：胜肽鏈平均 pLDDT ≥ 70 PASS；50–70 AUTO_FIXED（diff：低可信度預測，以 MD 檢驗）；< 50 NEEDS_HUMAN，選項
+「不使用預測結構，改用延伸構形（fold: false）」「改用其他摺疊工具（fold_engine）」「上傳預測結構（fold_upload）」「仍使用這個預測結構（fold_accept_low: true）」。
+選了最後一項時 AUTO_FIXED 並在 DecisionLog 記為 human。`fold interface`（只有複合物且有 ipTM）：< 0.5 為 advisory（不阻擋），≥ 0.5 PASS。
+`fold`（流程層）：工具不可用或執行失敗時 NEEDS_HUMAN。
+
+### 7.5 短胜肽
+單獨胜肽 < 10 殘基不摺疊，回傳 `status="SKIPPED_SHORT"` 與說明，流程沿用既有由序列建立的延伸構形，由 Vina 搜尋改變構形
+（Vina 每次搜尋會隨機化所有可旋轉鍵，等於在搜尋中取樣構形；沒有另外做多個起始構形的集合）。**精修**：此規則只用在單獨胜肽；
+複合物預測與使用者上傳的結構即使短也照讀，因為結合狀態的構形可以由複合物預測得到，上傳則是使用者自己的選擇。
+
+### 7.6 流程掛點與對接
+設定 `ligands: [{"name": "PEP", "sequence": "...", "fold": true, "fold_engine": "auto", "fold_upload": "...", "fold_accept_low": false}]`。
+`run_docking` 在 CPP 與口袋檢查之後呼叫 `_fold_peptide`：預測結果存在 `state["fold"][名稱]`（含 request、pLDDT、閘門、notes、docking_sdf），同一請求再跑時沿用。
+`fold_accept_low`、`fold_upload`、`fold_engine` 已加入 `LIGAND_DECISION_KEYS`，`pipeline run` 重跑時保留。
+預測結構以 `MolFromSequence` 模板（與 `md20/build/peptide.py` 相同的原子）加上預測座標寫成 SDF，當作 `LigandInput.sdf`。
+**關鍵判斷**：只把預測結構當「起始構形」對 Vina 沒有意義，因為 Vina 每次 Monte Carlo 搜尋開始時會把位置、方向與所有可旋轉扭轉角隨機化，
+預測的摺疊會被打散。所以 `rigid_backbone=True`：Meeko 以 `rigidify_bonds_smarts=["[#7]-[#6X4]-[#6X3](=[#8])"]×2`、索引 (0,1)、(1,2)
+（0 起算，已讀 Meeko `bondtyper.py` 確認）把每個殘基的 φ（N–CA）與 ψ（CA–C）設為不可旋轉，側鏈仍可轉。Meeko 不支援此參數時直接報錯，不退回柔性。
+附帶好處：可旋轉鍵大幅減少，回到 Vina 較可靠的範圍。之後建模仍走 `prepare_peptide`（ff14SB、獨立 chain），MD 檢查預測是否穩定。
+被否決：(a) 把預測結構當起始構形但不固定主鏈（理由如上）；(b) 預測結構直接當受體的一部分（失去對接搜尋）。
+
+原子對應：依殘基順序與標準原子名，Ile `CD`→`CD1`、`OT1/OT2`→`O/OXT` 視為同一原子並註明；缺 C 端 OXT 時以 C、O、CA 幾何補上（1.25 Å，在 O–C–CA 平面外側二等分方向）；
+其他缺原子一律 `FoldError`，不猜。
+
+### 7.7 安裝（`md20 setup-fold`）
+**與原規劃不同**：不裝進 md20 環境，而是裝到獨立環境 `<root>/envs/md20-fold`（Python 3.10；可用 `MD20_FOLD_ENV` 指定）。理由（已讀原始碼）：
+- OmegaFold 的 `setup.py` 只接受 Python 3.8–3.10，其他版本直接 `raise Exception`；md20 環境是 Python 3.11，所以 `pip install git+…OmegaFold` 在 md20 環境一定失敗。
+  它還把 torch 1.12.0+cu113 的 wheel 網址寫死在相依套件裡，因此用 `--no-deps` 安裝，torch 另外裝。
+- Boltz 2.2.1 鎖定 `numpy<2`、`scipy==1.13.1`、`gemmi==0.6.5`、`rdkit>=2024.3.2` 等，裝進 md20 環境會降級 OpenMM 與對接用到的套件。
+- MD20 以外部程式呼叫這些工具（subprocess），所以環境分開沒有成本。
+`md20 setup-fold [--engine omegafold|boltz|esmfold]` 先列出已安裝狀態、每一步指令、大小與第一次預測時會下載的權重，**只有加 `--yes` 才執行**。
+步驟：`micromamba create -p <prefix> python=3.10 pip` → `pip install torch`（有 NVIDIA 時 `--index-url …/whl/cu121`）→ 工具本身。
+找 micromamba：`MAMBA_EXE`、PATH、`<root>/micromamba.exe`、`<root>/bin/micromamba`。PyTorch 不加進 `environment/*.yml`。
+大小（約，未實測）：PyTorch CUDA 約 2.5 GB；OmegaFold 權重約 3 GB（`~/.cache/omegafold_ckpt`）；Boltz-2 權重數 GB（`~/.boltz`）；ESMFold 約 8 GB（`~/.cache/huggingface`）。
+
+### 7.8 驗證狀態
+- 容器內（純 Python，`tests/test_fold.py`）：PDB 與 mmCIF 解析、0–1 B 因子換算、自動選擇、三態閘門、ipTM 提醒、短胜肽規則、上傳與信心檔對應、
+  OXT 補位與缺原子不猜、安裝計畫、命令列、流程掛點（假工具、阻擋、使用者接受、快取、重跑保留決定）。
+- CI（openmm-stack，有 RDKit 與 Meeko）：`test_docking_sdf_from_prediction`（模板原子名與預測座標對應）、`test_rigid_backbone_reduces_torsions`（TORSDOF 減少）。
+- 尚未驗證：任何真實工具的執行（CI 沒有 GPU 也沒裝工具；`test_omegafold_real` 在沒有 omegafold 時跳過）、RTX 4060 的記憶體門檻、
+  OmegaFold 在 torch 2.x 下是否正常（它用了 `torch.utils.hipify.hipify_python.str2bool`）、Boltz 在 Windows 的安裝、§5 的 RMSD 比較。
+
+### 7.9 複合物直接進 MD（`fold: "complex"`，協調者 2026-11-03 決定）
+- 決定：有實際受體結構（晶體或上傳）時，把預測的受體疊合到實際受體，只取預測的胜肽姿勢放進實際受體；只有受體序列時用預測的受體並標註為預測。
+- `place_peptide(result, out_dir, reference=受體檔, accept_rmsd=False)`：每條預測受體鏈以 Needleman–Wunsch 全域比對（相同 +2、不同 −1、缺口 −2）
+  配對到實際結構中最相符的鏈（每條實際鏈只用一次），只取**相同殘基**的 Cα 配對，Kabsch 疊合（含反射修正）。
+  閘門 `fold placement`：Cα RMSD ≤ 2.0 Å PASS；> 2.0 Å NEEDS_HUMAN（選項：仍使用這個胜肽姿勢（fold_accept_rmsd: true）、改用對接（fold: true）、
+  上傳預測結構、提供完整受體序列（fold_receptor_seq））；配對 Cα < 20 個 NEEDS_HUMAN。沒有實際受體時 AUTO_FIXED，受體檔第一行標 PREDICTED。
+  另記錄口袋 Cα RMSD（胜肽 10 Å 內的配對 Cα，只當證據）與胜肽和受體最近重原子距離（< 1.5 Å 時註明由建模的最小化處理）。
+- 流程：`ligands: [{"name": "PEP", "sequence": "...", "fold": "complex"}]`。受體序列預設由 `fetch_receptor` 的受體檔取（排除 `exclude_chains`），
+  結構有缺口（Cα–Cα > 4.2 Å）時註明並建議以 `fold_receptor_seq`（字串或清單）提供完整序列。`run_docking` 對這個胜肽呼叫 `_fold_complex` 後不送進 Vina；
+  所有配體都是 complex 時不執行對接，寫一份空的 docking 結果。`choose_poses` 以 `_complex_picks` 加入 `{"rank": 1, "score": None, "source": "fold_complex"}`，
+  之後走同一條建模路徑（`prepare_peptide`、ff14SB、獨立 chain）與 MD。胜肽 SDF 由 `docking_sdf(result, path, transform=(R, t))` 寫出。
+  `fold_accept_rmsd`、`fold_receptor_seq` 加入 `LIGAND_DECISION_KEYS`。DecisionLog `build.fold` 記錄配對數、RMSD、門檻與「不經對接」。
+- 測試：比對與 Kabsch（已知旋轉還原）、正確疊合（缺 N 端 3 殘基、鏈名不同）、雜訊 RMSD > 2 Å 阻擋與使用者接受、無關受體、無受體、缺口提示、流程掛點，
+  以及 CI 的 `test_docking_sdf_with_transform`。
+- 限制：疊合用整條受體的 Cα；受體構形變化大（例如 loop 移動）時整體 RMSD 會超過 2 Å，即使口袋相符（看證據中的口袋 RMSD 再決定是否接受）。
+
+### 7.10 未決
+- GUI：輸入序列一鍵摺疊的按鈕、「電腦狀態」頁顯示 `fold_status()`、NEEDS_HUMAN 選項的一鍵寫回（`md20/gui/actions.py`）都還沒做。
+- 報告：`state["fold"]` 已存，報告還沒有顯示（須標註「預測」）。

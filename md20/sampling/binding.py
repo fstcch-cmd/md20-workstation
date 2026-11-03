@@ -114,6 +114,11 @@ def build_pulling_system(system, positions_nm: np.ndarray, anchor: np.ndarray, l
         f = system.getForce(i)
         if isinstance(f, mm.MonteCarloBarostat):
             f.setFrequency(0)
+        if isinstance(f, mm.CustomExternalForce) and f.getName() == "msw_lipid_head_restraints":
+            # membrane builds: the head-group z reference is the build geometry, stale after NPT; off while pulling
+            for g in range(f.getNumGlobalParameters()):
+                if f.getGlobalParameterName(g) == "msw_rs_lipid_head":
+                    f.setGlobalParameterDefaultValue(g, 0.0)
         if isinstance(f, mm.CustomExternalForce) and f.getName() == "msw_position_restraints":
             # pulling/umbrella: only the backbone keeps a (weak, master-scaled) restraint.  The ligand must be free
             # and so must the side chains (a pocket that cannot rearrange biases the PMF).  Older builds have no

@@ -40,6 +40,13 @@ class StageSpec:
     # auto-extension keeps the ramp/restraint schedule of the *original* length: a +50 ps extension must not pull
     # released restraints back up or the thermostat target back down (schedule fraction = time / schedule_length_ps)
     schedule_length_ps: float | None = None
+    # long runs (engine/longrun.py): "solute" writes only non-water, non-counter-ion atoms to the DCD; keep_chunk_states
+    # > 0 deletes the State XML and checkpoint of all but the newest N chunks (0 = keep every chunk, the default)
+    trajectory_atoms: str = "all"
+    keep_chunk_states: int = 0
+    # membrane systems (docs/specs/membrane.md): "membrane" = MonteCarloMembraneBarostat (xy isotropic, z free, zero
+    # surface tension) in NPT stages; "isotropic" = MonteCarloBarostat (default, omitted from the hash)
+    barostat: str = "isotropic"
 
     def steps(self) -> int:
         return max(1, int(round(self.length_ps * 1000.0 / self.timestep_fs)))
@@ -58,6 +65,12 @@ def _stage_dict(s: StageSpec) -> dict:
         d.pop("freeze", None)
     if d.get("schedule_length_ps") is None:
         d.pop("schedule_length_ps", None)
+    if d.get("trajectory_atoms", "all") == "all":
+        d.pop("trajectory_atoms", None)
+    if not d.get("keep_chunk_states"):
+        d.pop("keep_chunk_states", None)
+    if d.get("barostat", "isotropic") == "isotropic":
+        d.pop("barostat", None)
     return d
 
 
@@ -201,4 +214,29 @@ def implicit_solvent_protocol(proto: Protocol) -> Protocol:
             st.ensemble = "NVT"
             st.accept = {k: v for k, v in (st.accept or {}).items() if k != "density_cv"}
     out.notes = (out.notes + " " if out.notes else "") + "隱式溶劑（GBn2）：無週期盒，全部 NVT。"
+    return out
+
+
+# lipid head-group z restraint (build/membrane.add_headgroup_restraints, group parameter msw_rs_lipid_head): held
+# through heating, released over NPT together with the protein, off in production
+MEMBRANE_HEAD_SCHEDULE = {"nvt": [1.0, 1.0], "npt": [1.0, 0.0], "production": [0.0, 0.0]}
+
+
+def membrane_protocol(proto: Protocol, *, temperature_k: float | None = None) -> Protocol:
+    """Membrane systems: NPT stages use the membrane barostat, the lipid head-group group joins the restraint schedule,
+    and (when given) every stage runs at the membrane temperature (above the lipids' phase transition).  No stage is
+    added: the release happens in the existing NVT/NPT stages.  Only used for membrane builds, so other protocols and
+    their hashes are unchanged."""
+    import copy
+    out = copy.deepcopy(proto)
+    for st in out.stages:
+        if st.ensemble == "NPT":
+            st.barostat = "membrane"
+        sched = MEMBRANE_HEAD_SCHEDULE.get(st.name)
+        if sched is not None and (st.restraint_groups or st.name != "production"):
+            st.restraint_groups = {**(st.restraint_groups or {}), "lipid_head": list(sched)}
+        if temperature_k is not None and st.ensemble != "MIN":
+            st.temperature_k = float(temperature_k)
+    out.notes = (out.notes + " " if out.notes else "") + "膜系統：NPT 用 MonteCarloMembraneBarostat（xy 等向、z 獨立、表面張力 0），" \
+        "脂質頭基 z 約束隨蛋白一起在 NPT 解除" + (f"，溫度 {temperature_k:g} K。" if temperature_k is not None else "。")
     return out

@@ -96,7 +96,8 @@ class OpenMMBackend:
                  platform_properties: dict | None = None, timestep_fs: float = 2.0,
                  temperature_k: float = 300.0, friction_per_ps: float = 1.0, ensemble: str = "NVT",
                  pressure_bar: float = 1.0, barostat_interval_steps: int = 25, hmr: bool = False,
-                 constraint_tolerance: float = 1e-6, seed: int = 0):
+                 constraint_tolerance: float = 1e-6, seed: int = 0, trajectory_atoms: str = "all",
+                 barostat: str = "isotropic"):
         import openmm as mm
         from openmm import app, unit, XmlSerializer
         self.mm, self.app, self.unit = mm, app, unit
@@ -106,6 +107,7 @@ class OpenMMBackend:
         self.info: dict = {"hmr": False}
         if hmr:
             self._apply_hmr()
+        self._baro_cls = mm.MonteCarloMembraneBarostat if barostat == "membrane" else mm.MonteCarloBarostat
         self._configure_barostat(ensemble.upper() == "NPT", pressure_bar, temperature_k, barostat_interval_steps)
         self.integrator = mm.LangevinMiddleIntegrator(temperature_k * unit.kelvin, friction_per_ps / unit.picosecond,
                                                       timestep_fs * unit.femtoseconds)
@@ -116,6 +118,15 @@ class OpenMMBackend:
         self.platform_name = self.sim.context.getPlatform().getName()
         self.n_atoms = self.system.getNumParticles()
         self._ensemble = ensemble.upper()
+        # long runs (engine/longrun.py): DCD with the solute only; the same residue-name rule is used by the analysis
+        self.dcd_atom_subset = None
+        if trajectory_atoms == "solute":
+            from .longrun import solute_atom_indices
+            subset = solute_atom_indices([a.residue.name for a in self.topology.atoms()])
+            if 0 < len(subset) < self.n_atoms:
+                self.dcd_atom_subset = subset
+        self.info["dcd_atoms"] = "solute" if self.dcd_atom_subset else "all"
+        self.info["dcd_atom_count"] = len(self.dcd_atom_subset) if self.dcd_atom_subset else self.n_atoms
 
     # -- setup helpers
     def _apply_hmr(self, h_mass_amu: float = 3.0):
@@ -125,19 +136,28 @@ class OpenMMBackend:
     def _barostats(self):
         mm = self.mm
         return [self.system.getForce(i) for i in range(self.system.getNumForces())
-                if isinstance(self.system.getForce(i), mm.MonteCarloBarostat)]
+                if isinstance(self.system.getForce(i), (mm.MonteCarloBarostat, mm.MonteCarloMembraneBarostat))]
 
     def _configure_barostat(self, enabled: bool, pressure_bar: float, temperature_k: float, freq: int):
         mm, unit = self.mm, self.unit
         bars = self._barostats()
         if len(bars) > 1:
             raise RuntimeError("System 含多個 MonteCarloBarostat；拒絕猜測。")
+        if bars and not isinstance(bars[0], self._baro_cls):
+            raise RuntimeError(f"System 內的壓力耦合是 {type(bars[0]).__name__}，但這個階段要求 {self._baro_cls.__name__}；拒絕猜測。")
         if not bars:
             if not enabled:
                 return
-            bar = mm.MonteCarloBarostat(pressure_bar * unit.bar, temperature_k * unit.kelvin, int(freq))
+            if self._baro_cls is mm.MonteCarloMembraneBarostat:
+                # membrane: x and y scaled together, z independently, zero surface tension (docs/specs/membrane.md §5)
+                bar = mm.MonteCarloMembraneBarostat(pressure_bar * unit.bar, 0.0 * unit.bar * unit.nanometer,
+                                                    temperature_k * unit.kelvin, mm.MonteCarloMembraneBarostat.XYIsotropic,
+                                                    mm.MonteCarloMembraneBarostat.ZFree, int(freq))
+            else:
+                bar = mm.MonteCarloBarostat(pressure_bar * unit.bar, temperature_k * unit.kelvin, int(freq))
             self.system.addForce(bar)
             bars = [bar]
+        self.info["barostat"] = type(bars[0]).__name__
         bar = bars[0]
         bar.setDefaultPressure(pressure_bar * unit.bar)
         bar.setDefaultTemperature(temperature_k * unit.kelvin)
@@ -151,14 +171,14 @@ class OpenMMBackend:
         self.integrator.setTemperature(kelvin * self.unit.kelvin)
         if self._ensemble == "NPT":
             try:
-                self.sim.context.setParameter(self.mm.MonteCarloBarostat.Temperature(), kelvin)
+                self.sim.context.setParameter(self._baro_cls.Temperature(), kelvin)
             except Exception:  # noqa: BLE001
                 pass
 
     def set_pressure(self, bar: float, kelvin: float) -> None:
         if self._ensemble == "NPT":
-            self.sim.context.setParameter(self.mm.MonteCarloBarostat.Pressure(), bar)
-            self.sim.context.setParameter(self.mm.MonteCarloBarostat.Temperature(), kelvin)
+            self.sim.context.setParameter(self._baro_cls.Pressure(), bar)
+            self.sim.context.setParameter(self._baro_cls.Temperature(), kelvin)
 
     def set_global_parameter(self, name: str, value: float) -> bool:
         if name in self.sim.context.getParameters():
@@ -186,7 +206,19 @@ class OpenMMBackend:
                                   potentialEnergy=True, kineticEnergy=True, totalEnergy=True, temperature=True,
                                   volume=periodic, density=periodic, speed=True, totalSteps=int(total_steps), separator="\t"))
         if dcd_path is not None:
-            self.sim.reporters.append(app.DCDReporter(str(dcd_path), int(dcd_steps), enforcePeriodicBox=periodic))
+            rep = None
+            if self.dcd_atom_subset:
+                try:
+                    rep = app.DCDReporter(str(dcd_path), int(dcd_steps), enforcePeriodicBox=periodic,
+                                          atomSubset=self.dcd_atom_subset)
+                except TypeError:        # an OpenMM without atomSubset: whole system, recorded for the analysis
+                    self.dcd_atom_subset = None
+                    self.info.update({"dcd_atoms": "all", "dcd_atom_count": self.n_atoms,
+                                      "dcd_atoms_note": "DCDReporter has no atomSubset in this OpenMM"})
+            if rep is not None:
+                self.sim.reporters.append(rep)
+            else:
+                self.sim.reporters.append(app.DCDReporter(str(dcd_path), int(dcd_steps), enforcePeriodicBox=periodic))
 
     def stop_reporters(self) -> None:
         for r in self.sim.reporters:
@@ -268,7 +300,8 @@ class FakeBackend:
         self._rng = random.Random(seed)
         self._nan_at = nan_at_step
         self._params: dict[str, float] = {"msw_restraint_scale": 1.0, "msw_rs_backbone": 1.0,
-                                           "msw_rs_sidechain": 1.0, "msw_rs_ligand": 1.0}
+                                           "msw_rs_sidechain": 1.0, "msw_rs_ligand": 1.0,
+                                           "msw_rs_lipid_head": 1.0}
         self._log = None
         self._report_steps = 1000
         self._dcd = None

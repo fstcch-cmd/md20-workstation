@@ -31,6 +31,7 @@ class LigandInput:
     sdf: str = ""                      # SDF with bond orders (preferred when available)
     reference_pose: str = ""           # optional crystal pose (PDB/SDF) for RMSD
     reference_resname: str = ""        # or: HETATM residue name inside the receptor file
+    rigid_backbone: bool = False       # peptide with a predicted fold (D-80): backbone φ/ψ fixed, side chains flexible
 
 
 @dataclass
@@ -89,9 +90,23 @@ def _ligand_mol(lig: LigandInput):
     return mol
 
 
-def _meeko_pdbqt(mol) -> str:
+# backbone N–CA (φ) and CA–C (ψ) of every residue; Meeko indices are 0-based positions in the SMARTS match
+BACKBONE_RIGID_SMARTS = ["[#7]-[#6X4]-[#6X3](=[#8])", "[#7]-[#6X4]-[#6X3](=[#8])"]
+BACKBONE_RIGID_INDICES = [(0, 1), (1, 2)]
+
+
+def _meeko_pdbqt(mol, rigid_backbone: bool = False) -> str:
     from meeko import MoleculePreparation
-    prep = MoleculePreparation()
+    if rigid_backbone:
+        # D-80: Vina randomises every rotatable torsion at the start of each search, so a predicted fold survives
+        # docking only when its backbone torsions are not rotatable.  No silent fallback if Meeko lacks the option.
+        try:
+            prep = MoleculePreparation(rigidify_bonds_smarts=BACKBONE_RIGID_SMARTS,
+                                       rigidify_bonds_indices=BACKBONE_RIGID_INDICES)
+        except TypeError as exc:
+            raise RuntimeError(f"此版本 Meeko 不支援 rigidify_bonds_smarts，無法固定預測結構的主鏈：{exc}") from exc
+    else:
+        prep = MoleculePreparation()
     try:  # meeko ≥ 0.5
         from meeko import PDBQTWriterLegacy
         setups = prep.prepare(mol)
@@ -212,7 +227,7 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
         if decisions and (protonation[lig.name]["changes"] or protonation[lig.name]["ambiguous"]):
             decisions.record("docking.protonation", lig.name, protonation[lig.name]["net_charge_after"],
                              protonation[lig.name]["why"], changes=protonation[lig.name]["changes"])
-        pdbqts[lig.name] = _meeko_pdbqt(mol)
+        pdbqts[lig.name] = _meeko_pdbqt(mol, rigid_backbone=lig.rigid_backbone)
         (lig_dir / f"{lig.name}.pdbqt").write_text(pdbqts[lig.name], encoding="utf-8")
         from rdkit import Chem
         from ..util.stamp import stamp_rdkit_mol

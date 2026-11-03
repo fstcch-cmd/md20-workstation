@@ -100,6 +100,16 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
         return None
     if name == "ligand–metal coordination" and option.startswith("ligand_metal: restrain"):
         return _act(option, [{"path": ["ligand_metal"], "value": "restrain"}], "md_cases")
+    if name == "long run":              # engine/longrun.py: > 1 µs, disk space, trajectory size
+        if option.startswith("md.long_run_confirmed: true"):
+            return _act(option, [{"path": ["md", "long_run_confirmed"], "value": True}], "md_runs")
+        if option.startswith("md.long_run.solute_only: true"):
+            return _act(option, [{"path": ["md", "long_run", "solute_only"], "value": True}], "md_runs")
+        m = re.match(r"md\.(production_ns|long_run\.target_gb):\s*([0-9.]+)", option)
+        if m:
+            path = ["md", "production_ns"] if m.group(1) == "production_ns" else ["md", "long_run", "target_gb"]
+            return _act(option, [{"path": path, "value": float(m.group(2))}], "md_runs")
+        return None
     if name == "confirm MD" and option.startswith("進入分子動力學"):
         return _act(option, [{"path": ["md_confirmed"], "value": True}], "md_confirm")
     if name == "redocking" and option.startswith("docking.skip_redock"):
