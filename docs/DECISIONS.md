@@ -36,6 +36,7 @@
   vina 子程序 qos＝high）；`tests/test_installer_paths.py::test_vina_executable_always_gets_cpu`（改用 `_run_measured`）。
 - 相關檔案：`md20/env/winfix.py`、`md20/env/resources.py`（`child_eco_qos`）、`md20/docking/vina_cli.py`、`md20/docking/run.py`、`docs/specs/docking.md`。
 - 未決：筆電實測確認（需要使用者在新版上再跑一次對接）。
+- **使用者決定（11/03 08:50）**：直接定案，不做筆電驗證、不再監控，推上 GitHub 後發行 v0.1.0a3。D-72 以「推測＋每次執行量測」狀態出貨；學生電腦上的實際執行緒數會寫在報告決策紀錄，若顯示偏低再更正。
 
 ## 2026-11-02
 
