@@ -22,6 +22,7 @@
 | [hts_screen.md](hts_screen.md) | 高通量前期篩選：Excel/CSV 化合物庫 → 自動下載 3D → 批次快速對接 → 排名圖 → 勾選進入正式對接/MD | 已實作・待 CI |
 | [ci_validation.md](ci_validation.md) | CI 架構、重測、論文對接重現、hsieh2024 不可重現分析、這幾輪抓到的 bug | 進行中 |
 | [binding_funnel_restraints.md](binding_funnel_restraints.md) | 結合自由能的漏斗約束與標準態校正：沿拉離軸投影 CV、圓錐＋圓柱側向約束、解析 K_b；筆電 3PTB 證據（一維距離 PMF 高估 3 倍以上） | **設計中**（a3 不含；請審查 §5） |
+| [vina_cpu_use.md](vina_cpu_use.md) | Vina 執行檔的 CPU 使用：平行度上限、資源模式→--cpu／優先權／Windows QoS、每次執行的實際執行緒量測 | 已實作・待 Windows CI 與筆電實測 |
 | [REVIEW_QUESTIONS.md](REVIEW_QUESTIONS.md) | 彙整：最希望審查者挑戰的設計決定 | — |
 | [REVIEW_ANSWERS_2026-11-01.md](REVIEW_ANSWERS_2026-11-01.md) | **會診結果**：每個審查問題的回答、各規格沒寫到的科學缺口、下一個 session 的優先順序 | 待採納 |
 | docking.md、gui.md | **已被取代**的第一個 session 規格（模組名與頁面結構都和現況不符）；現況見 ../WORKFLOW.md、hts_screen.md、gate_actions.md | 歷史 |

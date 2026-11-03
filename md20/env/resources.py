@@ -160,3 +160,9 @@ def child_creationflags(mode: str | None = None) -> int:
     import subprocess
     m = mode or current_mode()
     return subprocess.IDLE_PRIORITY_CLASS if m == "background" else subprocess.NORMAL_PRIORITY_CLASS
+
+
+def child_eco_qos(mode: str | None = None) -> bool:
+    """D-72: CPU-heavy helpers (Vina) run EcoQoS only in background mode; balanced and full are tagged HighQoS so that
+    Windows 11 does not move them to the efficiency cores while the MD20 window is hidden behind the browser."""
+    return (mode or current_mode()) == "background"

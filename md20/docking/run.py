@@ -226,9 +226,16 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
 
     def run_vina(ligand_strings):
         if vina_exe is not None:
-            from .vina_cli import run_vina_cli
-            return run_vina_cli(vina_exe, str(rec_pdbqt), ligand_strings, box.center, box.size, scoring=scoring,
-                                exhaustiveness=exhaustiveness, n_poses=n_poses, energy_range=energy_range, seed=seed, cpu=cpu)
+            from .vina_cli import run_vina_cli, cpu_use_note
+            st: dict = {}
+            r = run_vina_cli(vina_exe, str(rec_pdbqt), ligand_strings, box.center, box.size, scoring=scoring,
+                             exhaustiveness=exhaustiveness, n_poses=n_poses, energy_range=energy_range, seed=seed,
+                             cpu=cpu, stats=st)
+            params.setdefault("vina_runs", []).append(st)   # D-72: measured CPU use, kept with the result
+            if decisions:
+                why, held_back = cpu_use_note(st)   # a speed note, not a scientific gate: results are unaffected
+                decisions.record("docking.run", "cpu_use", st.get("effective_threads"), why, held_back=held_back, **st)
+            return r
         v = Vina(sf_name=scoring, cpu=int(cpu), seed=int(seed), verbosity=0)
         v.set_receptor(str(rec_pdbqt))
         v.set_ligand_from_string(ligand_strings if len(ligand_strings) > 1 else ligand_strings[0])

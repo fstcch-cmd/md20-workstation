@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-11-03
+
+### D-72　vina.exe 只用約 4 執行緒：Vina 本身不限制，是 Windows 11 的 QoS 把它排到節能核心（推測，附量測）
+- 使用者要求（11/03 08:35）：調查 D-68／D-70／D-71 留下的「多配體對接 vina.exe 只用約 4 個 CPU 執行緒（約 24%）」。
+- **讀原始碼的結論（AutoDock-Vina main，`src/lib/vina.cpp` `global_search`、`parallel_mc.cpp`、`parallel.h`）**：
+  Vina 的平行只有一處——蒙地卡羅搜尋開 `--cpu` 條執行緒，分配 `exhaustiveness` 個互相獨立的工作（含多配體時也一樣，每個工作複製整個模型）；
+  格點圖計算（`cache::populate`）與最後的精修是單執行緒。`--cpu 16`、exhaustiveness 32 時搜尋階段應該 16 條全忙。
+  所以 **D-70 更正中「限制來自 vina.exe 本身」是錯的**（見下方更正），程式裡沒有任何會把多配體對接限制在 4 條的機制。
+- **最可能的原因（推測，待筆電驗證）**：Microsoft 文件〈Quality of Service〉：擁有視窗的程序**及其子孫**依視窗狀態取得 QoS——
+  前景 High、可見未聚焦 Medium、**最小化或完全被遮住 Low**；Low 在混合架構上排到**節能核心**（文件寫「用電池時」，
+  但多份實測回報插電時最小化視窗的程式也只跑 E-core）。MD20 的 GUI 是從主控台視窗啟動的 Python，vina.exe 是它的子孫；
+  學生看的是瀏覽器，主控台視窗被蓋住或最小化 → vina.exe 被降為 Low QoS。i7-13620H 有 4 個 E-core＝16 執行緒的 25%，
+  與觀察的 23.7%／24.5% 一致；優先順序「標準」、親和性全勾也不影響 QoS，與使用者 00:20 的檢查一致。
+- 決定：
+  1. `winfix.set_power_throttling()`：vina.exe 一啟動就以 `SetProcessInformation(ProcessPowerThrottling)` 明確標記——
+     平衡／全速為 **HighQoS**（ControlMask＝EXECUTION_SPEED、StateMask＝0；文件：明確標記的程序取代依視窗判定的等級），
+     省資源為 **EcoQoS**（使用者選了省資源，本來就該留在節能核心、讓出效能核心寫報告）。
+  2. **量測而不是猜**：`vina_cli._run_measured` 記錄每次 Vina 的 CPU 秒數／牆鐘秒數＝實際平均執行緒數
+     （Windows `GetProcessTimes`、其他 `getrusage`），連同要求的執行緒、exhaustiveness 寫入對接結果 `params.vina_runs` 與 DecisionLog `docking.run/cpu_use`。
+     實際值低於上限 min(--cpu, exhaustiveness) 的一半且執行超過 2 分鐘時，`why` 直接寫出可能原因與處理方式。這是速度提示，不是閘門：對接結果不受影響。
+- 附帶說明（不是錯誤）：D-71 課堂 exhaustiveness 8 在 16 執行緒筆電上**最多只會用 8 條**（約 50%），這是 Vina 的設計；
+  在 16 執行緒機器上改 16 的牆鐘時間大致相同（一輪即完成），但不同學生電腦執行緒數不同，若依機器調整，同一題各人結果會不同——
+  為了課堂可重現，**暫不自動調整**，留給使用者決定。
+- 被否決：(a) 把 vina.exe 親和性綁到 P-core——要辨識核心型別、各機型不同，且 QoS 仍可能覆蓋；(b) 要求學生把主控台視窗留在前景——
+  可作為暫時的手動驗證，但不能當解法；(c) 改用 `--batch` 或逐一對接——平行度相同，且換掉教學一的科學問題（D-71 已否決）。
+- 驗證方法（使用者可在 1 分鐘內做）：對接進行中把 MD20 的黑色主控台視窗**切到前景**，看工作管理員 vina.exe 是否從約 25% 升到接近 100%；
+  再最小化，看是否掉回 25%。新版會在報告的決策紀錄顯示「實際平均 X 條執行緒」，X 接近 16（全速）即確認修正有效。若仍約 4，本推測錯誤，在此更正。
+- 證據：`tests/test_vina_cpu_use.py`（子程序量測：忙碌約 1 條、閒置約 0 條；判讀文字；Windows CI 上 `SetProcessInformation` 回傳成功、
+  vina 子程序 qos＝high）；`tests/test_installer_paths.py::test_vina_executable_always_gets_cpu`（改用 `_run_measured`）。
+- 相關檔案：`md20/env/winfix.py`、`md20/env/resources.py`（`child_eco_qos`）、`md20/docking/vina_cli.py`、`md20/docking/run.py`、`docs/specs/docking.md`。
+- 未決：筆電實測確認（需要使用者在新版上再跑一次對接）。
+
 ## 2026-11-02
 
 ### D-71　教學一（多配體同時對接）的課堂搜尋強度改為 8；研究等級保留論文的 32
@@ -15,7 +47,7 @@
   這是課堂可行性的取捨，不是說 8 和 32 一樣好：搜尋強度低時聯合姿勢的分數較不穩定，報告仍會標明實際使用的值。
 - 被否決：先逐一對接（independent）再同時對接——更快，但教學一的科學重點正是「六個一起放進口袋能不能共同佔位」；改模式等於換題目。
 - 證據：`tests/test_gui_stability.py::test_teaching_one_docks_at_classroom_effort_and_research_keeps_the_paper`。
-- 未決：本次筆電對接最終耗時（若完成）補記於此；vina.exe 多配體時只用約 4 執行緒的根因。
+- 未決：本次筆電對接最終耗時（若完成）補記於此；vina.exe 多配體時只用約 4 執行緒的根因（→ D-72：Windows QoS，待實測確認）。
 
 ### D-70　Windows 混合架構 CPU：Vina 的優先權依資源模式設定（低優先權被排到節能核心）
 - 事實（筆電 2026-11-03 00:12，D-68 的 `--cpu` 已生效、資源模式「全速」）：vina.exe 仍是 **24.5%**、記憶體 1,445 MB，與 23:50 幾乎相同。
@@ -30,6 +62,9 @@
   CPU 仍約 24%。所以「低優先權被排到 E-core」的推測**錯誤**；限制來自 vina.exe 本身（多配體同時對接時實際只跑約 4 個執行緒），
   不是 Windows 排程。依模式設定子程序優先權仍保留（省資源模式需要它，對平衡／全速無害），但它**不能**解決這個問題。
   後續：查 Vina 1.2 多配體對接的平行度，必要時調整教學一的對接策略（見 HANDOFF 未決）。
+- **更正（2026-11-03，D-72）**：讀 Vina 原始碼後，Vina 本身沒有把多配體對接限制在 4 條執行緒的機制（搜尋階段開滿 min(--cpu, exhaustiveness) 條）。
+  「限制來自 vina.exe 本身」的判斷錯誤。上面原本的推測方向（Windows 把它排到 E-core）可能是對的，但機制不是優先權，而是**依視窗可見度決定的 QoS**；
+  處理見 D-72。
 
 
 ### D-69　Windows：關掉 MD20 視窗時，子程式（vina.exe）必須一起結束

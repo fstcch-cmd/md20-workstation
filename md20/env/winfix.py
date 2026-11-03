@@ -112,3 +112,52 @@ def kill_children_on_exit() -> bool:
         return True
     except Exception:  # noqa: BLE001 — never stop MD20 from starting because of this
         return False
+
+
+def set_power_throttling(handle=None, *, eco: bool) -> bool:
+    """Windows 11: tag a process HighQoS (eco=False) or EcoQoS (eco=True) — D-72.
+
+    Windows gives a process the QoS of the window it descends from: when the MD20 console window is minimised or
+    hidden behind the browser, the GUI and the vina.exe it starts drop to "Low" QoS, which hybrid CPUs run on the
+    efficiency cores — on the laptop's i7-13620H that is 4 of 16 threads (the ~25 % seen in Task Manager however
+    --cpu, priority and affinity were set).  An explicit tag through SetProcessInformation(ProcessPowerThrottling)
+    replaces the visibility-based level.  `handle` = a process handle (Popen._handle); None = this process.
+    Returns True when the tag was set; False elsewhere or when the call is unavailable (Windows 10 < 1709)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.GetCurrentProcess.argtypes = []
+        k32.SetProcessInformation.restype = wintypes.BOOL
+        k32.SetProcessInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+
+        class STATE(ctypes.Structure):     # PROCESS_POWER_THROTTLING_STATE
+            _fields_ = [("Version", wintypes.ULONG), ("ControlMask", wintypes.ULONG), ("StateMask", wintypes.ULONG)]
+
+        st = STATE(1, 0x1, 0x1 if eco else 0x0)   # CURRENT_VERSION, EXECUTION_SPEED; StateMask 0 = HighQoS
+        h = k32.GetCurrentProcess() if handle is None else wintypes.HANDLE(int(handle))
+        return bool(k32.SetProcessInformation(h, 4, ctypes.byref(st), ctypes.sizeof(st)))   # ProcessPowerThrottling
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def process_cpu_seconds(handle) -> float | None:
+    """User + kernel CPU seconds of a (possibly finished) Windows process, from GetProcessTimes; None elsewhere."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.GetProcessTimes.restype = wintypes.BOOL
+        k32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+        t = [wintypes.FILETIME() for _ in range(4)]
+        if not k32.GetProcessTimes(wintypes.HANDLE(int(handle)), *[ctypes.byref(x) for x in t]):
+            return None
+        ticks = lambda ft: (ft.dwHighDateTime << 32) | ft.dwLowDateTime   # noqa: E731  (100 ns units)
+        return (ticks(t[2]) + ticks(t[3])) / 1e7
+    except Exception:  # noqa: BLE001
+        return None

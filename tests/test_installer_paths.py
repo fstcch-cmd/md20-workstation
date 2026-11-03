@@ -60,12 +60,12 @@ def test_vina_executable_always_gets_cpu(monkeypatch, tmp_path):   # D-68
     from md20.docking import vina_cli
     seen = {}
 
-    def fake_run(cmd, **kw):
+    def fake_run(cmd, timeout, flags, eco):
         seen["cmd"] = cmd
         out = cmd[cmd.index("--out") + 1]
         open(out, "w").write("MODEL 1\nREMARK VINA RESULT:    -6.100      0.000      0.000\nENDMDL\n")
-        return subprocess.CompletedProcess(cmd, 0, "", "")
-    monkeypatch.setattr(vina_cli.subprocess, "run", fake_run)
+        return subprocess.CompletedProcess(cmd, 0, "", ""), {"wall_s": 1.0, "cpu_s": 1.0, "effective_threads": 1.0}
+    monkeypatch.setattr(vina_cli, "_run_measured", fake_run)
     from md20.env.resources import plan
     for mode in ("background", "balanced", "full"):
         monkeypatch.setenv("MD20_RESOURCE_MODE", mode)
