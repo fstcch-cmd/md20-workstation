@@ -133,6 +133,7 @@ DECISION_KEYS: tuple[tuple[str, ...], ...] = (
     ("screen", "select"), ("screen", "next_mode"), ("screen", "allow_partial"), ("md_confirmed",), ("ligand_metal",),
     ("multi_ligand",), ("md", "long_run_confirmed"), ("md", "long_run"),
     ("md", "membrane", "oriented"),        # gate `membrane orientation` one-click choice (D-80)
+    ("md", "resolution"), ("md", "membrane", "surface_distance_nm"),   # coarse-grained gates (D-86)
 )
 LIGAND_DECISION_KEYS = ("cpp_override", "cpp_evidence", "target_location", "fold_accept_low", "fold_upload", "fold_engine",
                         "fold_accept_rmsd", "fold_receptor_seq")
@@ -1704,6 +1705,8 @@ class Workflow:
             "options": ["進入分子動力學（md_confirmed）", "先改選姿勢（在姿勢表點選後再回來確認）"]}])
 
     def _run(self, make_factory: Callable, platform, *, should_pause=None, progress_cb=None) -> dict:
+        if (self.cfg.get("md") or {}).get("resolution") == "cg":
+            return self._run_cg(platform, should_pause=should_pause, progress_cb=progress_cb)
         if self.membrane_only_type():
             return self._run_membrane_only(make_factory, platform, should_pause=should_pause, progress_cb=progress_cb)
         raw = self.fetch_receptor()
@@ -1746,6 +1749,141 @@ class Workflow:
         rep = build_workflow_report(self)
         self._mark("report", path=str(rep))
         return {"status": "COMPLETE", "report": str(rep), "binding": bind, "analysis": ana}
+
+
+    # ------------------------------------------------------------------ coarse-grained Martini 3 (D-86)
+    def cg_kind(self) -> str:
+        m = (self.cfg.get("md") or {}).get("membrane") or {}
+        return {"protein": "protein", "surface": "surface", "bilayer": "bilayer"}.get(m.get("type"), "water")
+
+    def _cg_block(self, step: str, exc) -> None:
+        g = {"name": f"cg {exc.code}", "status": "NEEDS_HUMAN", "explanation": exc.text[0], "text": list(exc.text),
+             "options": exc.options, "evidence": exc.evidence}
+        self._block(step, f"粗粒化：{exc.text[0]}", gates=[g])
+
+    def _cg_lipids(self) -> dict:
+        from .build.membrane import resolve_composition
+        m = (self.cfg.get("md") or {}).get("membrane") or {}
+        comp, gates = resolve_composition(m.get("lipids") or "mammalian")
+        bad = [g for g in gates if g.status == "NEEDS_HUMAN"]
+        if bad:
+            self._block("md_cases", "粗粒化膜組成：" + bad[0].explanation, gates=[g.to_dict() for g in bad])
+        up, lo = comp.get("upper") or {}, comp.get("lower") or {}
+        if up != lo:
+            msg = "粗粒化目前只建對稱的脂雙層（上下層相同組成）。"
+            self._block("md_cases", msg, gates=[{"name": "cg asymmetric", "status": "NEEDS_HUMAN", "explanation": msg,
+                                                 "options": ["md.membrane.lipids: {POPC: 1}", "改用全原子模擬（md.resolution: aa）"]}])
+        return {k: max(1, round(float(v) * 100)) for k, v in up.items() if float(v) > 0}
+
+    def build_cg_cases(self) -> dict:
+        """One CG system per solute (surface), or one system (protein, bilayer, water).  Kept in
+        state["coarse_grained"][key]["build"]; a finished build is reused when its inputs did not change."""
+        from .build.cg_system import build_cg_system, CGBuildError
+        kind = self.cg_kind()
+        md = self.cfg.get("md") or {}
+        mem = md.get("membrane") or {}
+        st = self.state()
+        cgs = st.get("coarse_grained") or {}
+        jobs: list[tuple[str, dict]] = []
+        if kind in ("protein", "water"):
+            if not self.cfg.get("receptor"):
+                self._block("md_cases", "粗粒化的膜蛋白或水中蛋白需要受體結構。", gates=[{
+                    "name": "cg no_solute", "status": "NEEDS_HUMAN", "explanation": "粗粒化的膜蛋白或水中蛋白需要受體結構。",
+                    "options": ["md.membrane.type: bilayer", "輸入 PDB 編號或上傳結構"]}])
+            if self.cfg.get("ligands"):
+                self.dec.record("workflow.cg", "ligands", "not simulated",
+                                "粗粒化只模擬蛋白與膜；配體沒有通用的 Martini 3 參數，不放進系統，也不做對接（報告會說明）。", kind="auto")
+            raw = self.fetch_receptor()
+            clean = self.prepare_docking_receptor(raw)
+            jobs.append(("cg_" + kind, {"protein_pdb": str(clean)}))
+        elif kind == "surface":
+            ligs = self.cfg.get("ligands") or []
+            small = [l["name"] for l in ligs if not l.get("sequence")]
+            if small or not ligs:
+                msg = (f"粗粒化的膜表面接觸只支援胜肽；{', '.join(small)} 是小分子，Martini 3 沒有通用參數。" if small else
+                       "膜表面接觸要有一個胜肽。")
+                self._block("md_cases", msg, gates=[{"name": "cg small molecule", "status": "NEEDS_HUMAN", "explanation": msg,
+                                                     "options": ["改用全原子模擬（md.resolution: aa）", "移除小分子配體"]}])
+            bdir = self.dir / "cg" / "solutes"
+            for i, l in enumerate(ligs):
+                rec = self._membrane_solute(l, bdir, i)
+                jobs.append((f"cg_surface_{l['name']}", {"protein_pdb": rec.pdb_path}))
+        else:
+            jobs.append(("cg_bilayer", {}))
+        lipids = self._cg_lipids() if kind != "water" else None
+        built = {}
+        for key, j in jobs:
+            req = {"kind": kind, "lipids": lipids, "salt": float((md.get("ions") or {}).get("concentration_molar", 0.15)),
+                   "surface_distance_nm": float(mem.get("surface_distance_nm", 1.0)), "oriented": bool(mem.get("oriented")),
+                   **j}
+            old = (cgs.get(key) or {})
+            if old.get("request") == req and old.get("build") and Path(old["build"].get("system_xml", "")).is_file():
+                built[key] = old["build"]
+                continue
+            try:
+                man = build_cg_system(self.dir / "cg" / key, kind=kind, protein_pdb=j.get("protein_pdb"), lipids=lipids,
+                                      salt_molar=req["salt"], surface_distance_nm=req["surface_distance_nm"],
+                                      oriented=req["oriented"], decisions=self.dec)
+            except CGBuildError as exc:
+                self._cg_block("md_cases", exc)
+            st = self.state()
+            st.setdefault("coarse_grained", {})[key] = {"request": req, "build": man, "plan": man.get("plan"),
+                                                        "settings": man.get("settings")}
+            atomic_write_json(st, self.state_path)
+            built[key] = man
+        self._mark("md_cases", cg=sorted(built))
+        return built
+
+    def _run_cg(self, platform, *, should_pause=None, progress_cb=None) -> dict:
+        """D-86: build → CG MD → analysis → report.  No docking and no binding free energy (bead level)."""
+        from .engine.cg_run import run_cg
+        from .analysis.cg import analyse_cg
+        built = self.build_cg_cases()
+        md = self.cfg.get("md") or {}
+        prod = float(md.get("production_ns") or 200.0)
+        pname = getattr(platform, "name", None) or str(platform or "CPU")
+        props = dict(getattr(platform, "properties", None) or {})
+        runs = dict((self._done("md_runs") or {}).get("runs", {}))
+        for key, man in built.items():
+            if (runs.get(key) or {}).get("status") == "COMPLETE" and runs[key].get("production_ns") == prod:
+                continue
+            if pname == "FAKE":
+                r = {"status": "COMPLETE", "run_dir": str(self.dir / "cg" / key / "run")}
+            else:
+                temp = 310.0
+                if md.get("membrane"):
+                    from .build.membrane import membrane_temperature
+                    temp = membrane_temperature(md["membrane"])
+                r = run_cg(man, self.dir / "cg" / key / "run", platform_name=pname, properties=props, temperature_k=temp,
+                           production_ns=prod, save_ps=max(20.0, prod * 1000 / 5000), chunk_ns=min(50.0, max(1.0, prod / 20)),
+                           should_pause=should_pause, progress_cb=progress_cb)
+            runs[key] = {"status": r["status"], "run_dir": r["run_dir"], "production_ns": prod, "cg": True}
+            self._mark("md_runs", runs=runs)
+            if r["status"] == "PAUSED":
+                return {"status": "PAUSED", "state": self.state()}
+        if self.cfg.get("binding", {}).get("enabled"):
+            self.dec.record("workflow.cg", "binding", "not computed",
+                            "粗粒化模擬只到珠子層級，不計算結合自由能（傘狀採樣與 MBAR 要全原子系統）。", kind="auto")
+        st = self.state()
+        summ = {}
+        for key, man in built.items():
+            rd = Path(runs[key]["run_dir"])
+            if not (rd / "production.dcd").is_file():
+                continue
+            try:
+                out = analyse_cg(man, rd, decisions=self.dec)
+            except Exception as exc:  # noqa: BLE001 — the report still states what was run
+                self.dec.record("analysis.cg", key, "failed", f"粗粒化分析失敗：{type(exc).__name__}: {exc}。", kind="auto")
+                continue
+            st = self.state()
+            st.setdefault("coarse_grained", {}).setdefault(key, {})["membrane_file"] = out["file"]
+            atomic_write_json(st, self.state_path)
+            summ[key] = {"cg_analysis_file": out["file"]}
+        self._mark("analysis", cg=summ)
+        from .report.workflow_report import build_workflow_report
+        rep = build_workflow_report(self)
+        self._mark("report", path=str(rep))
+        return {"status": "COMPLETE", "report": str(rep), "analysis": summ}
 
 
 # ---------------------------------------------------------------------- resume support (WP11)

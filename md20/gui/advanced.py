@@ -25,6 +25,11 @@ MEMBRANE_TYPES = {
                 "膜表面への接触：ペプチドか低分子を膜の上に置く", "막 표면 접촉: 펩타이드나 저분자를 막 위에 둠"),
     "bilayer": ("純膜：只有脂雙層", "Bilayer only: lipids, water and ions", "膜のみ：脂質二重膜だけ", "막만: 지질 이중층만"),
 }
+RESOLUTIONS = {
+    "aa": ("全原子（預設）", "All-atom (default)", "全原子（既定）", "전원자(기본)"),
+    "cg": ("粗粒化 Martini 3（微秒以上，珠子層級）", "Coarse-grained Martini 3 (microseconds and longer, bead level)",
+           "粗視化 Martini 3（マイクロ秒以上、ビーズ単位）", "조립화 Martini 3(마이크로초 이상, 비드 단위)"),
+}
 LIPID_PRESETS = {
     "mammalian": ("哺乳類細胞膜（POPC）", "Mammalian cell membrane (POPC)", "哺乳類の細胞膜（POPC）", "포유류 세포막(POPC)"),
     "bacterial": ("細菌內膜（POPE 75 %、POPG 25 %）", "Bacterial inner membrane (POPE 75 %, POPG 25 %)",
@@ -54,11 +59,25 @@ FOLD_ENGINES = {
     "upload": ("上傳預測結構", "Upload a predicted structure", "予測構造をアップロード", "예측 구조 업로드"),
 }
 ADV_DEFAULTS = {"membrane_type": "none", "lipids": "mammalian", "oriented": False, "surface_distance_nm": 1.0,
-                "fold": "off", "fold_engine": "auto", "fold_receptor_seq": "", "fold_upload": "", "long_run_confirmed": False}
+                "fold": "off", "fold_engine": "auto", "fold_receptor_seq": "", "fold_upload": "", "long_run_confirmed": False,
+                "resolution": "aa"}
 LONG_RUN_CONFIRM_NS = 1000.0          # > 1 µs needs md.long_run_confirmed (engine/longrun.py)
 
 TEXT = {
     "membrane": ("膜系統", "Membrane", "膜系", "막 계"),
+    "resolution": ("模擬解析度", "Resolution", "分解能", "해상도"),
+    "resolution_help": ("粗粒化把約 4 個重原子併成一顆珠子，時間步 20 fs，同一台筆電可以跑到微秒以上，用來看膜蛋白在膜裡的"
+                        "排列、胜肽貼上膜的過程與膜的變化。代價是沒有氫鍵與原子細節，也不做對接和結合自由能；小分子配體不會放進系統。",
+                        "Coarse-graining merges about four heavy atoms into one bead and uses a 20 fs time step, so the same "
+                        "laptop reaches microseconds and longer. Use it to see how a membrane protein sits in the bilayer, how "
+                        "a peptide lands on a membrane, and how the membrane responds. The cost: no hydrogen bonds or atomic "
+                        "detail, no docking and no binding free energy; small-molecule ligands are left out.",
+                        "粗視化では重原子およそ 4 個を 1 個のビーズにまとめ、時間刻みは 20 fs です。同じノート PC でマイクロ秒以上"
+                        "まで計算でき、膜タンパク質の膜内での配置、ペプチドが膜に付く過程、膜の変化を見るのに使います。代わりに"
+                        "水素結合や原子の細部はなく、ドッキングと結合自由エネルギーも行いません。低分子リガンドは系に入れません。",
+                        "조립화는 중원자 약 4개를 비드 하나로 묶고 시간 간격 20 fs를 씁니다. 같은 노트북으로 마이크로초 이상 계산할 수 "
+                        "있어 막단백질이 막 안에 놓이는 모습, 펩타이드가 막에 붙는 과정, 막의 변화를 보는 데 씁니다. 대신 수소 결합과 "
+                        "원자 수준의 세부는 없고 도킹과 결합 자유 에너지도 하지 않습니다. 저분자 리간드는 계에 넣지 않습니다."),
     "membrane_help": ("膜蛋白、抗菌胜肽或藥物與細胞膜的作用需要脂雙層。膜取代水盒，溫度預設 310 K。"
                       "膜系統目前不做結合自由能。",
                       "Membrane proteins, and peptides or drugs acting on a cell membrane, need a lipid bilayer. The bilayer "
@@ -206,6 +225,13 @@ def apply_advanced(cfg: dict, adv: dict, *, quick_fold: set | list | None = None
         seqs = receptor_sequences(adv.get("fold_receptor_seq") or "")
         if mode == "complex" and seqs:
             l["fold_receptor_seq"] = seqs[0] if len(seqs) == 1 else seqs
+    if adv.get("resolution") == "cg":
+        md["resolution"] = "cg"
+        out["ligands"] = [l for l in out.get("ligands") or [] if l.get("sequence")] if (spec or {}).get("type") == "surface" \
+            else ([] if spec and spec["type"] == "bilayer" else out.get("ligands") or [])
+        out.setdefault("binding", {})["enabled"] = False
+    else:
+        md.pop("resolution", None)
     if adv.get("long_run_confirmed"):
         md["long_run_confirmed"] = True
     else:
@@ -218,7 +244,8 @@ def _issue(level: str, key: str, label: tuple, text: tuple, lang: str, suggestio
 
 
 def advanced_checks(adv: dict, *, ligands: list[dict], has_receptor: bool, binding: bool, solvent: str = "explicit",
-                    production_ns: float | None = None, fold_installed: dict | None = None, lang: str = "en") -> list[dict]:
+                    production_ns: float | None = None, fold_installed: dict | None = None, lang: str = "en",
+                    cg_ready: bool | None = None) -> list[dict]:
     """Issues for the right-hand panel (same shape as advisor.check).  error blocks the start button."""
     from ..build.membrane import plan_membrane
     from .gate_text import gate_title, gate_general
@@ -311,6 +338,39 @@ def advanced_checks(adv: dict, *, ligands: list[dict], has_receptor: bool, bindi
                               "このコンピューターにはフォールディングツールがないため、折りたたみの段階で止まります。"
                               "パソコンの状態のページで「今すぐインストール」を押してください。",
                               "이 컴퓨터에는 폴딩 도구가 없어 접힘 단계에서 멈춥니다. 컴퓨터 상태 페이지에서 '지금 설치'를 누르십시오."), lang))
+    if adv.get("resolution") == "cg":
+        rl = TEXT["resolution"]
+        t = (spec or {}).get("type")
+        small = [l["name"] for l in ligands or [] if not l.get("sequence")]
+        if t in (None, "protein") and not has_receptor:
+            out.append(_issue("error", "resolution", rl, ("粗粒化的蛋白系統需要受體。請輸入 PDB 編號或上傳結構，或改成純膜。",
+                              "A coarse-grained protein system needs a receptor. Enter a PDB ID or upload a structure, or "
+                              "choose the bilayer only.", "粗視化のタンパク質の系には受容体が必要です。PDB ID を入力するか構造を"
+                              "アップロードしてください。または膜のみを選んでください。",
+                              "조립화 단백질 계에는 수용체가 필요합니다. PDB ID를 입력하거나 구조를 올리십시오. 또는 막만을 고르십시오."), lang))
+        if t == "surface" and not peps:
+            out.append(_issue("error", "resolution", rl, ("粗粒化的膜表面接觸要有一個胜肽（小分子沒有通用的 Martini 3 參數）。",
+                              "The coarse-grained membrane surface system needs a peptide (small molecules have no general "
+                              "Martini 3 parameters).", "粗視化の膜表面への接触にはペプチドが必要です（低分子には汎用の Martini 3 "
+                              "パラメータがありません）。", "조립화 막 표면 접촉에는 펩타이드가 필요합니다(저분자에는 범용 Martini 3 "
+                              "매개변수가 없습니다)."), lang))
+        if small and t != "bilayer":
+            out.append(_issue("info", "resolution", rl, ("小分子配體不會放進粗粒化系統，也不做對接：" + ", ".join(small),
+                              "Small-molecule ligands are left out of the coarse-grained system and are not docked: " + ", ".join(small),
+                              "低分子リガンドは粗視化の系に入れず、ドッキングもしません：" + ", ".join(small),
+                              "저분자 리간드는 조립화 계에 넣지 않고 도킹도 하지 않습니다: " + ", ".join(small)), lang))
+        if binding:
+            out.append(_issue("info", "resolution", rl, ("粗粒化不計算結合自由能，結合強度計算會自動關閉。",
+                              "Binding free energy is not computed for coarse-grained runs; it is turned off automatically.",
+                              "粗視化では結合自由エネルギーを計算しないので、結合の強さの計算は自動でオフになります。",
+                              "조립화에서는 결합 자유 에너지를 계산하지 않으므로 결합 세기 계산은 자동으로 꺼집니다."), lang))
+        if cg_ready is False:
+            out.append(_issue("warning", "resolution", rl, ("這台電腦還沒有安裝粗粒化工具，流程會在建模時停下來。到電腦狀態頁按「一鍵安裝」。",
+                              "The coarse-grained tools are not installed on this computer, so the workflow will stop at the "
+                              "build. Press Install now on the computer status page.",
+                              "このコンピューターには粗視化ツールがないため、構築の段階で止まります。パソコンの状態のページで"
+                              "「今すぐインストール」を押してください。",
+                              "이 컴퓨터에는 조립화 도구가 없어 구축 단계에서 멈춥니다. 컴퓨터 상태 페이지에서 '지금 설치'를 누르십시오."), lang))
     if production_ns and float(production_ns) > LONG_RUN_CONFIRM_NS and not adv.get("long_run_confirmed"):
         out.append(_issue("warning", "long_run", TEXT["long_run"], TEXT["long_run_note"], lang))
     return out
@@ -366,11 +426,12 @@ TOOL_TEXT = {
                     "the model weights (several GB).",
                     "別の環境にインストールするので、MD20 本体には影響しません。最初の予測でモデルの重み（数 GB）をダウンロードします。",
                     "별도 환경에 설치하므로 MD20 자체는 바뀌지 않습니다. 첫 예측 때 모델 가중치(수 GB)를 내려받습니다."),
-    "cg_detail": ("以 pip 裝進 MD20 的環境。Martini 3 力場檔要另外從 cgmartini.nl 下載。",
-                  "Installed into MD20's environment with pip. The Martini 3 force-field files must be downloaded separately "
-                  "from cgmartini.nl.",
-                  "pip で MD20 の環境にインストールします。Martini 3 の力場ファイルは cgmartini.nl から別にダウンロードします。",
-                  "pip로 MD20 환경에 설치합니다. Martini 3 역장 파일은 cgmartini.nl에서 따로 내려받아야 합니다."),
+    "cg_detail": ("以 pip 裝進 MD20 的環境，並下載 Martini 3 力場檔（約 16 MB）。不需要另外找檔案。",
+                  "Installed into MD20's environment with pip, together with the Martini 3 force-field files (about 16 MB). "
+                  "Nothing else needs to be downloaded by hand.",
+                  "pip で MD20 の環境にインストールし、Martini 3 の力場ファイル（約 16 MB）も一緒にダウンロードします。"
+                  "手作業で集めるファイルはありません。",
+                  "pip로 MD20 환경에 설치하고 Martini 3 역장 파일(약 16 MB)도 함께 내려받습니다. 따로 구할 파일은 없습니다."),
     "plan_title": ("安裝時會依序執行", "The install runs these commands in order", "インストール時に次のコマンドを順に実行します",
                    "설치할 때 다음 명령을 차례로 실행합니다"),
     "plan_problem": ("現在無法安裝", "It cannot be installed right now", "今はインストールできません", "지금은 설치할 수 없습니다"),
@@ -391,7 +452,8 @@ TOOL_TEXT = {
 }
 
 
-def tool_rows(fold_status: dict, cg_avail: dict, lang: str, *, platform: str | None = None) -> list[dict]:
+def tool_rows(fold_status: dict, cg_avail: dict, lang: str, *, platform: str | None = None,
+              ff_ready: bool | None = None) -> list[dict]:
     """Rows for the computer-status page: what is installed and the exact command to install it."""
     cmd = md20_command(platform)
     fe = fold_status.get("engines") or {}
@@ -404,9 +466,14 @@ def tool_rows(fold_status: dict, cg_avail: dict, lang: str, *, platform: str | N
                 "note": pick(TOOL_TEXT["fold_detail"], lang),
                 "command": f"{cmd} setup-fold --engine omegafold --yes"}
     ok = [k for k, v in cg_avail.items() if v.get("ok")]
-    cg_row = {"key": "cg", "title": pick(TOOL_TEXT["cg"], lang), "installed": len(ok) == len(cg_avail) and bool(cg_avail),
-              "status": pick(TOOL_TEXT["installed" if len(ok) == len(cg_avail) and cg_avail else "missing"], lang),
-              "detail": ", ".join(f"{k} {'✓' if v.get('ok') else '✗'}" for k, v in cg_avail.items()),
+    if ff_ready is None:
+        from ..build.martini import forcefield_ready
+        ff_ready = forcefield_ready()
+    cg_ok = len(ok) == len(cg_avail) and bool(cg_avail) and bool(ff_ready)
+    cg_row = {"key": "cg", "title": pick(TOOL_TEXT["cg"], lang), "installed": cg_ok,
+              "status": pick(TOOL_TEXT["installed" if cg_ok else "missing"], lang),
+              "detail": ", ".join(f"{k} {'✓' if v.get('ok') else '✗'}" for k, v in cg_avail.items())
+                        + f", Martini 3 force field {'✓' if ff_ready else '✗'}",
               "note": pick(TOOL_TEXT["cg_detail"], lang), "command": f"{cmd} setup-cg --yes"}
     return [fold_row, cg_row]
 

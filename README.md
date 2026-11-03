@@ -5,7 +5,7 @@
 > © HCC Lab, National Kaohsiung University of Science and Technology. All rights reserved.
 > 本 repo 暫時公開，只供持續整合（CI）測試使用。沒有附授權，請勿重製、散布或用於其他用途。
 
-> **最新版本：[v0.1.0a12](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a12)**，2026-11-03 發行，含 Windows 與 macOS 安裝檔，是教學預覽版。
+> **最新版本：[v0.1.0a13](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a13)**，2026-11-03 發行，含 Windows 與 macOS 安裝檔，是教學預覽版。
 > 學生操作說明在 [`docs/students/WINDOWS.md`](docs/students/WINDOWS.md) 和 [`docs/students/MAC.md`](docs/students/MAC.md)，有繁中、English、日本語、한국어 四種版本。
 > 測試機的安裝與回報看 [`docs/WINDOWS_QUICKSTART.md`](docs/WINDOWS_QUICKSTART.md)。接手開發看 [`docs/HANDOFF.md`](docs/HANDOFF.md)，現況看 [`docs/STATUS.md`](docs/STATUS.md)。
 
@@ -58,6 +58,7 @@ md20 pipeline example --screen   # 含篩選的全流程範本：100–500 個�
 - **輸入序列一鍵摺疊**：在快速模式的配體欄直接貼胜肽序列（例如 `MEL GIGAVLKVLTTGLPALISWIKRKRQQ`），10 個殘基以上會自動先預測結構再對接；命令列 `md20 fold <序列>`。摺疊工具需另外安裝一次（數 GB）：雙擊 `Install-Folding.cmd`（macOS `Install-Folding.command`），或在介面「電腦狀態」頁按「一鍵安裝」。規格：`docs/specs/structure_prediction.md`。
 - **膜系統**：膜蛋白、膜表面接觸（胜肽或分子在膜上方，不穿膜）、純膜。在專業模式的「膜」群組設定。規格：`docs/specs/membrane.md`。
 - **長時間模擬**：專業模式最長 10 µs；超過 100 ns 會先列出天數與硬碟用量，超過 1 µs 要確認。粗粒化工具：`md20 setup-cg --yes`。規格：`docs/specs/long_timescale.md`。
+- **粗粒化 Martini 3**：專業模式「膜系統」群組的「模擬解析度」選粗粒化，可以跑膜蛋白、膜表面胜肽、純膜或水中蛋白到微秒以上，報告標註珠子層級。工具與力場檔一次安裝：「電腦狀態」頁一鍵安裝或 `md20 setup-cg --yes`。規格：`docs/specs/long_timescale.md` §9。
 
 ## 架構
 

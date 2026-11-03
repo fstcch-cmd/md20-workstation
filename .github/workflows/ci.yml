@@ -82,6 +82,11 @@ jobs:
           set -o pipefail
           "$MAMBA_EXE" run -n md20 python -m pip install --no-cache-dir "openmmforcefields>=0.14" "meeko>=0.5" gemmi -e . 2>&1 | tee -a env.log
           "$MAMBA_EXE" run -n md20 md20 setup-vina 2>&1 | tee -a env.log
+      - name: Coarse-grained tools (md20 setup-cg, D-84/D-86) — the same command students run
+        shell: bash -el {0}
+        run: |
+          set -o pipefail
+          "$MAMBA_EXE" run -n md20 md20 setup-cg --yes 2>&1 | tee -a env.log
       - name: Doctor (CPU platform)
         shell: bash -el {0}
         run: '"$MAMBA_EXE" run -n md20 md20 doctor --seconds 5 || true'
@@ -90,7 +95,7 @@ jobs:
         # all three OS run the same suite (~20–30 min); MD20_HEAVY tests run in the parallel `heavy` jobs below.
         # A step timeout (unlike the job timeout) still lets the failure-log step post pytest.log.
         timeout-minutes: 90
-        env: { MD20_STACK: "1" }   # the full stack is expected here: a missing core package is a FAILURE, not a skip
+        env: { MD20_STACK: "1", MD20_CG: "1" }   # the full stack is expected here: a missing core package (or CG tool) is a FAILURE, not a skip
         run: |
           set -o pipefail
           "$MAMBA_EXE" run -n md20 pytest -vv -rs --durations=15 2>&1 | tee pytest.log

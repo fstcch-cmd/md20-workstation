@@ -41,6 +41,85 @@ FF_CORE = "martini_v3.0.0.itp"
 FF_FILES = {"core": FF_CORE, "phospholipids": "martini_v3.0.0_phospholipids_v1.itp",
             "solvents": "martini_v3.0.0_solvents_v1.itp", "ions": "martini_v3.0.0_ions_v1.itp"}
 FF_URL = "https://cgmartini.nl"
+# D-86: the four Martini 3.0.0 files come from martini_openmm's own protein-in-POPC test system (tests/1j4n_en_m3/openmm)
+# at the commit pip installs, checked by SHA-256.  Using the files its tests compare against GROMACS keeps the force
+# field and the OpenMM implementation from the same, tested source.  (The tutorial's copy of martini_v3.0.0.itp differs
+# only by a trailing blank line.)
+FF_SOURCE = {
+    "zip": "https://github.com/maccallumlab/martini_openmm/archive/216e62b26c4ee6cea7ed21e20ec84fffe97a101c.zip",
+    "member_dir": "martini_openmm-216e62b26c4ee6cea7ed21e20ec84fffe97a101c/tests/1j4n_en_m3/openmm/",
+    "sha256": {
+        "martini_v3.0.0.itp": "0ecbf0ff334b2ec21dc5e3151aca42167b977bc2aed41eb2a44bd8c997754894",
+        "martini_v3.0.0_phospholipids_v1.itp": "21fb2eb6d8a1d48854d179dc71981c1210f608486efb3e6644347391ba9cf392",
+        "martini_v3.0.0_solvents_v1.itp": "e6a78414b317c38a1a816eded4aee6082a5da1ed229a126359f0cc92314dcb4e",
+        "martini_v3.0.0_ions_v1.itp": "c7ec26bcd272f0e127d67515097e8cc88979e7e0cf5373baa0f410edeb125e68",
+    },
+}
+
+
+def default_ff_dir() -> Path:
+    """Where `md20 setup-cg` puts the Martini 3 files: inside MD20's own environment (removed with it)."""
+    return Path(sys.prefix) / "share" / "md20" / "martini3"
+
+
+def install_forcefield(dest: Path | None = None, *, fetch=None) -> dict:
+    """Download the pinned martini_openmm archive and extract the four Martini 3 itp files, each checked by SHA-256.
+    `fetch(url) -> bytes` can be injected for tests.  Raises ValueError on a checksum mismatch (nothing is kept)."""
+    import hashlib
+    import io
+    import zipfile
+    dest = Path(dest) if dest else default_ff_dir()
+    if fetch is None:
+        import urllib.request
+
+        def fetch(url):
+            with urllib.request.urlopen(url, timeout=300) as r:      # noqa: S310 — fixed https URL
+                return r.read()
+    data = fetch(FF_SOURCE["zip"])
+    out = {}
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        for name, want in FF_SOURCE["sha256"].items():
+            blob = z.read(FF_SOURCE["member_dir"] + name)
+            got = hashlib.sha256(blob).hexdigest()
+            if got != want:
+                raise ValueError(f"{name} 的 SHA-256 不符（{got}），沒有安裝。")
+            out[name] = blob
+    dest.mkdir(parents=True, exist_ok=True)
+    for name, blob in out.items():
+        (dest / name).write_bytes(blob)
+    return {"dir": str(dest), "files": sorted(out), "source": FF_SOURCE["zip"]}
+
+
+def forcefield_ready(ff_dir: Path | None = None) -> bool:
+    d = Path(ff_dir) if ff_dir else default_ff_dir()
+    return all((d / f).is_file() for f in FF_SOURCE["sha256"])
+
+
+def itp_molecule_names(path: Path | str) -> set[str]:
+    """Names of every [ moleculetype ] in an itp file (to check that the chosen lipids exist in Martini 3)."""
+    names, take = set(), False
+    for raw in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.split(";", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("["):
+            take = line.strip("[] ").replace(" ", "").lower() == "moleculetype"
+            continue
+        if take:
+            names.add(line.split()[0])
+            take = False
+    return names
+
+
+def dssp_string(pdb: Path | str) -> str:
+    """Secondary structure per residue for martinize2 -ss, computed with mdtraj (DSSP codes; coil for blanks).
+    Passing -ss avoids depending on which vermouth version has the mdtraj fallback behind -dssp."""
+    import mdtraj
+    t = mdtraj.load_pdb(str(pdb))
+    prot = t.topology.select("protein")
+    t = t.atom_slice(prot)
+    codes = mdtraj.compute_dssp(t, simplified=False)[0]
+    return "".join("C" if c in (" ", "NA", "") else str(c) for c in codes)
 
 # simulation constants of the martini_openmm tutorial (tutorial/run.py) and Martini 3 practice
 CG_TIMESTEP_FS = 20.0
@@ -137,37 +216,54 @@ class CGPlan:
         return asdict(self)
 
 
-def plan_cg_membrane(protein_pdb: str | Path, workdir: str | Path, *, lipids: dict | None = None,
+def plan_cg_membrane(protein_pdb: str | Path | None, workdir: str | Path, *, lipids: dict | None = None,
                      box_nm: tuple = (10.0, 10.0, 10.0), salt_molar: float = 0.15, forcefield_dir: str | Path | None = None,
-                     elastic: bool = True, avail: dict | None = None) -> CGPlan:
-    """Command plan for protein + bilayer.  `lipids` {name: relative amount} (default POPC); `forcefield_dir` holds the
-    Martini 3 itp files.  Nothing is executed."""
-    lipids = lipids or {"POPC": 1}
+                     elastic: bool = True, avail: dict | None = None, membrane: bool = True, memshift_nm: float = 0.0,
+                     ss: str | None = None, insane_ff: bool = True) -> CGPlan:
+    """Command plan.  `protein_pdb` None → no protein (bilayer or water only); `membrane` False → protein in water;
+    `memshift_nm` > 0 puts the protein that far above the membrane centre (surface contact, insane -dm);
+    `ss` (one DSSP letter per residue) → martinize2 -ss instead of -dssp; `lipids` {name: relative amount}
+    (default POPC); `forcefield_dir` holds the Martini 3 itp files (default: where setup-cg puts them).
+    Nothing is executed."""
+    lipids = (lipids or {"POPC": 1}) if membrane else {}
     wd = Path(workdir)
     avail = availability() if avail is None else avail
     missing = missing_tools(avail)
-    ff_dir = Path(forcefield_dir) if forcefield_dir else None
-    need_ff = [FF_FILES["core"], FF_FILES["phospholipids"], FF_FILES["solvents"]] + \
+    if protein_pdb is None:
+        missing = [m for m in missing if m != "vermouth"]
+    ff_dir = Path(forcefield_dir) if forcefield_dir else default_ff_dir()
+    need_ff = [FF_FILES["core"]] + ([FF_FILES["phospholipids"]] if lipids else []) + [FF_FILES["solvents"]] + \
               ([FF_FILES["ions"]] if salt_molar > 0 else [])
-    missing_ff = [f for f in need_ff if ff_dir is None or not (ff_dir / f).is_file()]
+    missing_ff = [f for f in need_ff if not (ff_dir / f).is_file()]
     m2_cmd = (avail.get("vermouth") or {}).get("argv") or ["martinize2"]
     ins_cmd = (avail.get("insane") or {}).get("argv") or ["insane"]
-    m2 = [*m2_cmd, "-f", str(protein_pdb), "-x", str(wd / "protein_cg.pdb"), "-o", str(wd / "protein.top"),
-          "-ff", "martini3001", "-ignh", "-dssp"]
-    if elastic:
-        m2 += ["-elastic"] + [x for kv in ELASTIC.items() for x in kv]
+    steps = []
+    if protein_pdb is not None:
+        m2 = [*m2_cmd, "-f", str(protein_pdb), "-x", str(wd / "protein_cg.pdb"), "-o", str(wd / "protein.top"),
+              "-ff", "martini3001", "-ignh"] + (["-ss", ss] if ss else ["-dssp"])
+        if elastic:
+            m2 += ["-elastic"] + [x for kv in ELASTIC.items() for x in kv]
+        steps.append({"name": "martinize2", "kind": "exec", "argv": m2,
+                      "outputs": ["protein_cg.pdb", "protein.top", "molecule_*.itp"]})
     x, y, z = (f"{float(v):g}" for v in box_nm)
-    ins = [*ins_cmd, "-f", str(wd / "protein_cg.pdb"), "-o", str(wd / "system.gro"), "-p", str(wd / "insane.top"),
-           "-pbc", "rectangular", "-x", x, "-y", y, "-z", z, "-center", "-sol", "W"]
+    ins = [*ins_cmd] + (["-f", str(wd / "protein_cg.pdb")] if protein_pdb is not None else []) + \
+          ["-o", str(wd / "system.gro"), "-p", str(wd / "insane.top"), "-pbc", "rectangular", "-x", x, "-y", y, "-z", z,
+           "-sol", "W"]
+    if insane_ff:
+        ins += ["-ff", "M3"]
+    if protein_pdb is not None:
+        ins += ["-center"]
+        if memshift_nm:
+            ins += ["-dm", f"{float(memshift_nm):g}"]
     for name, amount in lipids.items():
         ins += ["-l", f"{name}:{amount:g}" if isinstance(amount, (int, float)) else f"{name}:{amount}"]
     if salt_molar > 0:
         ins += ["-salt", f"{float(salt_molar):g}"]
-    steps = [
-        {"name": "martinize2", "kind": "exec", "argv": m2, "outputs": ["protein_cg.pdb", "protein.top", "molecule_*.itp"]},
+    steps += [
         {"name": "insane", "kind": "exec", "argv": ins, "outputs": ["system.gro", "insane.top"]},
         {"name": "compose_topology", "kind": "python", "call": "md20.build.martini.compose_topology",
-         "inputs": ["insane.top", "molecule_*.itp", *need_ff], "outputs": ["system.top"]},
+         "inputs": ["insane.top"] + (["molecule_*.itp"] if protein_pdb is not None else []) + need_ff,
+         "outputs": ["system.top"]},
         {"name": "martini_openmm", "kind": "python", "call": "md20.build.martini.build_openmm_system",
          "inputs": ["system.gro", "system.top"], "outputs": ["system.xml"],
          "settings": {"epsilon_r": CG_EPSILON_R, "cutoff_nm": CG_CUTOFF_NM, "timestep_fs": CG_TIMESTEP_FS,
@@ -184,13 +280,23 @@ def plan_cg_membrane(protein_pdb: str | Path, workdir: str | Path, *, lipids: di
     if missing_ff:
         names = ", ".join(missing_ff)
         issues.append({"code": "forcefield_files", "zh": f"找不到 Martini 3 力場檔：{names}。",
-                       "text": (f"找不到 Martini 3 力場檔：{names}。請從 {FF_URL} 下載後放進同一個資料夾。",
-                                f"Martini 3 force-field files are missing: {names}. Download them from {FF_URL} and put "
-                                "them in one folder.",
-                                f"Martini 3 の力場ファイルがありません：{names}。{FF_URL} からダウンロードし、同じフォルダに置いて"
-                                "ください。",
-                                f"Martini 3 역장 파일이 없습니다: {names}. {FF_URL}에서 내려받아 한 폴더에 넣으십시오."),
-                       "options": [f"cg.forcefield_dir: <資料夾>（放 {FF_CORE} 等檔案）", "改用全原子模擬"]})
+                       "text": (f"找不到 Martini 3 力場檔：{names}。執行 md20 setup-cg --yes（或在電腦狀態頁按一鍵安裝）會一併下載。",
+                                f"Martini 3 force-field files are missing: {names}. Run md20 setup-cg --yes (or press Install "
+                                "now on the computer status page); it downloads them too.",
+                                f"Martini 3 の力場ファイルがありません：{names}。md20 setup-cg --yes を実行する（またはパソコンの状態の"
+                                "ページで「今すぐインストール」を押す）と一緒にダウンロードされます。",
+                                f"Martini 3 역장 파일이 없습니다: {names}. md20 setup-cg --yes를 실행하면(또는 컴퓨터 상태 페이지에서 "
+                                "'지금 설치'를 누르면) 함께 내려받습니다."),
+                       "options": ["執行 md20 setup-cg --yes（會一併下載力場檔）", f"cg.forcefield_dir: <資料夾>（放 {FF_CORE} 等檔案）", "改用全原子模擬"]})
+    if lipids and not missing_ff:
+        known = itp_molecule_names(ff_dir / FF_FILES["phospholipids"])
+        bad = [k for k in lipids if k not in known]
+        if bad:
+            names = ", ".join(bad)
+            issues.append({"code": "lipid_not_in_martini3", "zh": f"Martini 3 磷脂檔沒有這些脂質：{names}。",
+                           "text": (f"Martini 3 磷脂檔沒有這些脂質：{names}。", f"The Martini 3 phospholipid file has no {names}.",
+                                    f"Martini 3 のリン脂質ファイルに {names} がありません。", f"Martini 3 인지질 파일에 {names}이(가) 없습니다."),
+                           "options": ["md.membrane.lipids: {POPC: 1}", "改用全原子模擬"]})
     return CGPlan(status="NEEDS_HUMAN" if issues else "PASS", workdir=str(wd), steps=steps, missing=missing,
                   missing_ff=missing_ff, issues=issues)
 

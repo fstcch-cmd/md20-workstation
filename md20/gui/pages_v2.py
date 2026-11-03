@@ -211,6 +211,17 @@ def _fold_engines() -> dict:
     return STATE["fold_engines"]
 
 
+def _cg_ready() -> bool | None:
+    """D-86: coarse-grained tools and force field present (probed once per GUI process)."""
+    if "cg_ready" not in STATE:
+        try:
+            from ..build.martini import availability, missing_tools, forcefield_ready
+            STATE["cg_ready"] = not missing_tools(availability()) and forcefield_ready()
+        except Exception:  # noqa: BLE001
+            STATE["cg_ready"] = None
+    return STATE["cg_ready"]
+
+
 def _widget(key: str, value, L: str, on_change):
     p = PARAMS[key]
     label = advisor.param_label(key, L) + (paren(p["unit"], L) if p["unit"] else "")
@@ -417,6 +428,9 @@ def _form(mode: str, expand_all: bool = False):
         with adv_box:
             with ui.expansion(A.tx("membrane", L), value=expand_all).classes("w-full md20-card").props("data-testid=group-membrane"):
                 ui.label(A.tx("membrane_help", L)).classes("md20-why")
+                adv_row(lambda: ui.select({k: pick(v, L) for k, v in A.RESOLUTIONS.items()}, value=adv.get("resolution", "aa"),
+                                          label=A.tx("resolution", L), on_change=adv_set("resolution")).props(
+                                              "data-testid=resolution-select").classes("w-full"), "resolution_help")
                 adv_row(lambda: ui.select({k: pick(v, L) for k, v in A.MEMBRANE_TYPES.items()}, value=adv["membrane_type"],
                                           label=A.tx("membrane_type", L), on_change=adv_set("membrane_type")).classes("w-full"), None)
                 adv_row(lambda: ui.select({k: pick(v, L) for k, v in A.LIPID_PRESETS.items()}, value=adv["lipids"],
@@ -503,7 +517,8 @@ def _form(mode: str, expand_all: bool = False):
         issues += A.advanced_checks(adv_values(for_checks=True), ligands=draft["ligands"],
                                     has_receptor=bool((pdb_id.value or "").strip() or state["receptor_file"]),
                                     binding=bool(vals.get("binding")), solvent=vals.get("solvent", "explicit"),
-                                    production_ns=vals.get("production_ns"), fold_installed=_fold_engines(), lang=L)
+                                    production_ns=vals.get("production_ns"), fold_installed=_fold_engines(), lang=L,
+                                    cg_ready=_cg_ready() if adv_values().get("resolution") == "cg" else None)
         order = {"error": 0, "warning": 1, "info": 2}
         issues.sort(key=lambda i: order.get(i["level"], 3))
         lr = A.long_run_view(vals, f, state["goal"], L)

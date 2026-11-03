@@ -90,7 +90,7 @@
 | insane | `insane` 1.2.0（setup.py；相依 numpy、simopt ≥ 0.4.0） | console script `insane = insane.cli:cli`；`-ff` 預設 `M3` | GPL-2.0-or-later | github.com/Tsjerk/Insane e23a501（2026-10-19） |
 | martini_openmm | `martini_openmm` 0.1（只有 setup.py） | `MartiniTopFile(top, periodicBoxVectors=, defines=, epsilon_r=15).create_system(nonbonded_cutoff=1.1 nm)` | LICENSE 檔是 LGPL-3.0，README 寫 GPL v3（不一致，待問作者） | github.com/maccallumlab/martini_openmm 216e62b（2025-12-10） |
 - martini_openmm 教學（tutorial/run.py）：Langevin 310 K、摩擦 10 ps⁻¹、步長 20 fs、ε_r 15、截斷 1.1 nm。README 的限制：Martini 2 膽固醇要換拓樸；itp 裡不能有算式。
-- Martini 3 力場檔（`martini_v3.0.0.itp`、`martini_v3.0.0_phospholipids_v1.itp`、`martini_v3.0.0_solvents_v1.itp`、`martini_v3.0.0_ions_v1.itp`）**不在任何 pip 套件裡**；
+- Martini 3 力場檔（`martini_v3.0.0.itp`、`martini_v3.0.0_phospholipids_v1.itp`、`martini_v3.0.0_solvents_v1.itp`、`martini_v3.0.0_ions_v1.itp`）**不在任何 pip 套件裡**（更正 D-86：`setup-cg` 從 martini_openmm 同一 commit 的封存檔取出，見 §9.2）；
   檔名與 M3 分子名（W、NA、CL）取自 martini_openmm 的測試系統（tests/popc_m3、tests/1k6u_en_m3）。insane 自己寫的拓樸只 include `martini.itp`，所以 MD20 自己組 `system.top`。
 - 安裝用 GitHub 的 archive zip（`…/archive/<commit>.zip`）而不是 `git+https`：學生的 Windows 筆電通常沒有 git。這個容器連不到 PyPI 與 codeload，**安裝本身沒有在這裡驗證**。
 
@@ -104,7 +104,37 @@
 
 ### 7.3 還沒做
 - 沒有接上 workflow（沒有 `cg` 設定區塊與 CG protocol）；沒有 backmapping；小分子 Auto_Martini 路徑。
+  - 更正（D-86，11/04）：已接上 workflow（`md.resolution: "cg"`，見 §9）；backmapping 與小分子仍未做。
 - CI 不安裝 vermouth、insane、martini_openmm；`test_martini_openmm_builds_a_system` 需要 `MD20_CG_TEST_DIR`（例如 martini_openmm 的 tests/popc_m3/openmm 複本），目前一律跳過。
+
+## 9. 粗粒化接上流程（D-86，2026-11-04 凌晨，使用者：「粗粒化的部分也需要一起做」）
+### 9.1 使用方式
+- 設定 `md.resolution: "cg"`；系統種類沿用 `md.membrane.type`：`protein`（膜蛋白）、`surface`（胜肽在膜上方）、`bilayer`（純膜），沒有 membrane 就是蛋白在水中（`water`）。
+- GUI：專業模式「膜系統」群組的「模擬解析度」。選粗粒化時小分子配體移出設定、結合自由能關閉（`apply_advanced`），右側檢查列出原因；工具或力場檔缺少時提醒到電腦狀態頁一鍵安裝。
+- 不新增流程步驟：建模記在 `md_cases`、模擬 `md_runs`、分析 `analysis`、報告 `report`（`Workflow._run_cg`）。
+### 9.2 安裝（`md20 setup-cg --yes`）
+- pip：vermouth、insane（PyPI）、martini_openmm（固定 commit 封存檔）。
+- **力場檔**：下載同一個 martini_openmm 封存檔，取出 `tests/1j4n_en_m3/openmm/` 的 4 個 Martini 3.0.0 檔（martini_openmm 用它們和 GROMACS 比對能量與力），逐檔 SHA-256 檢查後放到 `<環境>/share/md20/martini3`；任一檔不符就全部不寫。
+  被否決：從 cgmartini.nl 下載（網址與壓縮檔格式改過多次、沒有固定版本）；把檔案放進 MD20 repo（授權由 Martini 團隊管理，不重新散布）。
+### 9.3 建模（`md20/build/cg_system.py`）
+1. 只取 ATOM（配體、金屬、水由 DecisionLog 記錄後移除）。
+2. 膜蛋白：沿用全原子的疏水帶掃描（`membrane.scan_orientation`）定方向；`oriented: true` 照原樣。不明確 → NEEDS_HUMAN。
+3. 二級結構用 mdtraj DSSP 算好傳給 `martinize2 -ss`，不用 `-dssp`：舊版 vermouth 的 `-dssp` 需要 mkdssp 執行檔，只有新版才退回 mdtraj；PyPI 版本無法在開發容器確認。
+4. insane：`-ff M3` 只在 `insane -h` 有這個選項時加（舊版沒有；M2 與 M3 的 POPC、POPE、POPG 珠子名相同）；舊版的離子名 `NA+`、`CL-` 在組拓撲時改成 M3 的 `NA`、`CL`。
+5. 檢查：膜蛋白疏水帶（全原子中 |z| ≤ 1.5 nm 的殘基的 BB 珠）與 PO4 中心相差 > 0.3 nm → 以 `-dm` 平移重建一次（符號不明時兩個方向都試，取較小者），仍不符 → NEEDS_HUMAN；膜表面胜肽與磷酸平面距離 < 0.3 nm → NEEDS_HUMAN；拓撲與座標珠子數不同 → NEEDS_HUMAN。
+6. 脂質名稱必須在 Martini 3 磷脂檔的 moleculetype 裡（例如 Gram 陽性預設的 LYSPG、CL 不在 → NEEDS_HUMAN）；不對稱膜目前擋下。
+### 9.4 模擬（`md20/engine/cg_run.py`）
+- 最小化 5000 次 → NVT 0.2 ns（10 fs，insane 放好的珠子初始接觸較近）→ NPT `equil_ns`（20 fs；膜用 MonteCarloMembraneBarostat XY 等向、Z 自由、表面張力 0；水盒用 MonteCarloBarostat）→ 正式模擬 20 fs。
+- 每段（`chunk_ns`，預設正式長度的 1/20，介於 1 到 50 ns）寫 State XML 與 `progress.json`，暫停或關閉後從最後一段接續；跨平台可接續（State XML）。
+- 存檔間隔：約 5000 幀（下限 20 ps）。
+### 9.5 分析與報告（`md20/analysis/cg.py`）
+- 膜：每脂質面積（含蛋白時包含蛋白截面，標註偏大）、PO4–PO4 厚度、尾鏈鍵序參數 P2；參考值只比 POPC 面積（Martini 3 依它參數化），厚度不和全原子 P–P 比。
+- 蛋白：BB 珠 RMSD；膜表面：胜肽到磷酸平面的距離與 0.7 nm 內接觸的幀比例。
+- 報告沿用 D-82 的粗粒化章節（參數表、建模步驟表、膜平衡圖、P2），加上蛋白 RMSD 與接觸的解讀句；全部標註「珠子層級，不是全原子」。
+### 9.6 驗證
+- 純 Python：`tests/test_cg_pure.py`（力場 SHA-256、計畫變體、GUI 設定、流程從建模到報告，重的三步以假函式代替）。
+- 真工具：`tests/test_cg_integration.py` 在 CI openmm-stack（Windows、macOS、Linux）先跑 `md20 setup-cg --yes`，再建三個小系統（POPC 純膜、跨膜螺旋、膜表面胜肽）各跑數千步 CPU；`MD20_CG=1` 讓缺工具變成失敗而不是跳過。結果見發行說明與 STATUS。
+- 未驗證：筆電 GPU 上的速度（µs/天）與長時間穩定性；martini_openmm 在 CUDA 平台的精度設定（教學用 double，MD20 用平台預設）。
 
 ## 8. 未決問題
 - 1 µs 以上是否也要把 chunk 上限放寬到 2 小時（每段損失換較少檔案）？目前 1 小時。

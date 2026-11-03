@@ -7,6 +7,21 @@
 
 ## 2026-11-03
 
+### D-86　粗粒化 Martini 3 接成一鍵流程（安裝含力場檔、建模、模擬、分析、報告、介面）；發行 v0.1.0a13
+- 使用者（11/03 23:32）：「粗粒化的部分也需要一起做」（接在 D-85 一鍵摺疊之後，同一晚完成並發行）。
+- 之前：只有 `plan_cg_membrane` 列計畫、`setup-cg` 裝套件；力場檔要自己去 cgmartini.nl 找；沒有接流程。
+- 決定（細節 `docs/specs/long_timescale.md` §9）：
+  1. `md.resolution: "cg"`，系統種類沿用 `md.membrane.type`（protein、surface、bilayer；沒有膜 = 水中蛋白）。不新增流程步驟。
+  2. `setup-cg` 一併下載力場檔：取自 martini_openmm 同一 commit 的測試系統 `tests/1j4n_en_m3/openmm`（它用來和 GROMACS 比對），逐檔 SHA-256。
+  3. 二級結構用 mdtraj DSSP 傳 `-ss`，不依賴 vermouth 版本的 `-dssp` 行為；insane 的 `-ff M3` 依說明文字判斷是否支援；舊版離子名改成 M3 名稱。
+  4. 自動檢查：疏水帶與膜中心（0.3 nm，自動平移重建一次）、膜表面距離（0.3 nm）、珠子數一致、脂質在 M3 檔裡；不對稱膜、小分子、缺受體一律 NEEDS_HUMAN。
+  5. 模擬：最小化 → NVT 0.2 ns（10 fs）→ NPT（膜 barostat）→ 20 fs 正式，State XML 分段可續跑與暫停。
+  6. 報告沿用 D-82 粗粒化章節，加 RMSD 與接觸解讀；全部標「珠子層級」。
+- 被否決：cgmartini.nl 下載（無固定版本）；把力場檔放進 repo（不重新散布）；`insane -orient`（與 MD20 全原子的疏水帶判定不一致，改用同一套掃描）；新增 `cg` 流程步驟（違反「不新增 phase/step」）。
+- 測試：`tests/test_cg_pure.py`（7 項，含流程到報告）；`tests/test_cg_integration.py`（CI 三個 OS 先 `md20 setup-cg --yes` 再跑三個真系統；`MD20_CG=1` 缺工具即失敗）。這也同時在 Windows CI 驗證 D-84 的 setup-cg 修正。
+- 另記：a11（7fda75c）CI 的 heavy pose-screen 失敗是 CPU 短 NPT 密度漂移未過驗收（隨機），與 D-84 改動無關；eb4faf8 同一測試通過。未處理，列為觀察。
+- 未驗證：筆電 GPU 速度與長時間穩定性；martini_openmm 在 CUDA 的精度。
+
 ### D-85　胜肽直接貼序列就自動摺疊：序列辨識、預設勾選、一鍵安裝；發行 v0.1.0a12
 - 使用者（11/03 16:46、23:15）：「最簡單的方式是使用者打入胜肽的序列在配體的欄裡面，這樣就可以自動做完所有的事情」；要今晚完成、更新教學敘述並發行。
 - 之前的狀況（如實回報給使用者）：要寫 `peptide:` 前綴、要手動勾「先摺疊」、要另外在終端機跑 `md20 setup-fold`。

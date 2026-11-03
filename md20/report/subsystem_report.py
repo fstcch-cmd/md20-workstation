@@ -621,6 +621,7 @@ def cg_section(doc, wf) -> str:
             out += doc.figure_block(FG.cg_membrane_plot(d, doc.figdir / f"cg_membrane_{name}.png"), "cg_membrane", FT.classify_cg_membrane(name, d), name + " (CG)")
             out += _membrane_figures(doc, name, d, cg=True)
         extra += I.coarse_grained(name, rec)
+        extra += I.coarse_grained_results(name, d)
     if trs:
         out = doc.table([tx(("粗粒化系統", "CG system", "粗視化の系", "조립화 시스템"), L), tx(("步驟", "Step", "段階", "단계"), L),
                          tx(("類型", "Kind", "種類", "유형"), L), tx(("產出", "Outputs", "出力", "출력"), L)], trs,

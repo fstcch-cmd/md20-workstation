@@ -27,7 +27,7 @@ def test_availability_needs_module_and_executable():
 
 
 def test_plan_not_installed_is_needs_human(tmp_path):
-    p = M.plan_cg_membrane(tmp_path / "prot.pdb", tmp_path / "cg", avail=_avail(set()))
+    p = M.plan_cg_membrane(tmp_path / "prot.pdb", tmp_path / "cg", avail=_avail(set()), forcefield_dir=tmp_path / "no_ff")
     assert p.status == "NEEDS_HUMAN"
     codes = {i["code"] for i in p.issues}
     assert codes == {"not_installed", "forcefield_files"}
@@ -39,6 +39,7 @@ def test_plan_ready_and_argv(tmp_path):
     ff = tmp_path / "ff"; ff.mkdir()
     for f in M.FF_FILES.values():
         (ff / f).write_text("; itp\n")
+    (ff / M.FF_FILES["phospholipids"]).write_text("[ moleculetype ]\nPOPC 1\n[ atoms ]\n[moleculetype]\n; c\nPOPG 1\n")
     all_tools = {"vermouth", "insane", "martini_openmm", "martinize2"}      # module and script names
     p = M.plan_cg_membrane(tmp_path / "prot.pdb", tmp_path / "cg", lipids={"POPC": 3, "POPG": 1}, box_nm=(12, 12, 11),
                            salt_molar=0.15, forcefield_dir=ff, avail=_avail(all_tools))

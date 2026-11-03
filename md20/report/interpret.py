@@ -489,3 +489,33 @@ def coarse_grained(name: str, rec: dict) -> list[dict]:
                      f"{name}：粗視化ツールと Martini 3 の力場ファイルがそろっており、計画した {len(plan.get('steps') or [])} 段階を実行できます。",
                      f"{name}: 조립화 도구와 Martini 3 역장 파일이 모두 있어 계획한 {len(plan.get('steps') or [])}단계를 실행할 수 있습니다."))
     return out
+
+
+def coarse_grained_results(name: str, d: dict) -> list[dict]:
+    """D-86: protein backbone-bead RMSD and, for surface systems, how often the peptide touched the phosphate beads."""
+    out = []
+    r = d.get("protein_rmsd_nm") or []
+    if r:
+        last = float(r[-1])
+        lvl = "good" if last < 0.4 else "caution"
+        out.append(F(lvl, f"{name}：蛋白骨架珠相對第一幀的 RMSD 最後為 {last:.2f} nm（彈性網路固定三級結構，大於 0.4 nm 表示整體形狀改變，請看軌跡）。",
+                     f"{name}: the backbone-bead RMSD from the first frame ends at {last:.2f} nm (the elastic network holds the "
+                     "tertiary structure; above 0.4 nm the overall shape has changed, so look at the trajectory).",
+                     f"{name}：最初のフレームに対する骨格ビーズの RMSD は最後に {last:.2f} nm です（弾性ネットワークが三次構造を固定"
+                     "します。0.4 nm を超えると全体の形が変わっているので、軌跡を確認してください）。",
+                     f"{name}: 첫 프레임 대비 골격 비드 RMSD는 마지막에 {last:.2f} nm입니다(탄성 네트워크가 삼차 구조를 고정하며 "
+                     "0.4 nm를 넘으면 전체 모양이 바뀐 것이므로 궤적을 확인하십시오)."))
+    if "contact_frac" in d:
+        c = float(d["contact_frac"])
+        dz = d.get("solute_dz_nm") or [0.0]
+        out.append(F("note", f"{name}：胜肽有 {c:.0%} 的幀與磷酸珠距離在 0.7 nm 內；最後離磷酸平面 {float(dz[-1]):.2f} nm。"
+                     "粗粒化的接觸是珠子層級，不能說明個別氫鍵或鹽橋。",
+                     f"{name}: the peptide was within 0.7 nm of the phosphate beads in {c:.0%} of the frames and ended "
+                     f"{float(dz[-1]):.2f} nm from the phosphate plane. Coarse-grained contacts are bead-level and say nothing "
+                     "about individual hydrogen bonds or salt bridges.",
+                     f"{name}：ペプチドはフレームの {c:.0%} でリン酸ビーズから 0.7 nm 以内にあり、最後はリン酸の面から "
+                     f"{float(dz[-1]):.2f} nm でした。粗視化の接触はビーズ単位で、個々の水素結合や塩橋はわかりません。",
+                     f"{name}: 펩타이드는 프레임의 {c:.0%}에서 인산 비드와 0.7 nm 이내에 있었고 마지막에는 인산 평면에서 "
+                     f"{float(dz[-1]):.2f} nm 떨어져 있었습니다. 조립화 접촉은 비드 단위라 개별 수소 결합이나 염다리는 알 수 없습니다."))
+    return out
+

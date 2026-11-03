@@ -417,7 +417,7 @@ def cmd_setup_cg(a):
     cmds = M.install_plan()
     for c in cmds:
         _p("     $ " + " ".join(c))
-    _p(f"Martini 3 力場檔（{M.FF_CORE} 等）不在這些套件裡，需要另外從 {M.FF_URL} 下載。")
+    _p(f"另外下載 Martini 3 力場檔（{M.FF_CORE} 等 4 個，取自 martini_openmm 固定版本的測試系統，以 SHA-256 檢查）到 {M.default_ff_dir()}。")
     if not a.yes:
         _p("這是預覽，沒有安裝任何東西。確認後加 --yes 執行。")
         return 0
@@ -427,6 +427,16 @@ def cmd_setup_cg(a):
         if rc != 0:
             _p(f"失敗（結束碼 {rc}），已停止。")
             return rc
+    if M.forcefield_ready():
+        _p("Martini 3 力場檔已在：" + str(M.default_ff_dir()))
+    else:
+        _p("$ 下載 Martini 3 力場檔 ...")
+        try:
+            r = M.install_forcefield()
+            _p("力場檔：" + "、".join(r["files"]) + " → " + r["dir"])
+        except Exception as exc:  # noqa: BLE001
+            _p(f"力場檔下載失敗：{exc}")
+            return 4
     miss = M.missing_tools(M.availability())
     if miss:
         _p(f"安裝後仍找不到：{'、'.join(miss)}。")
