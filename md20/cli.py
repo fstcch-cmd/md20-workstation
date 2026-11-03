@@ -401,7 +401,13 @@ def cmd_setup_cg(a):
             _p(f"失敗（結束碼 {rc}），已停止。")
             return rc
     miss = M.missing_tools(M.availability())
-    _p("安裝完成。" if not miss else f"安裝後仍找不到：{'、'.join(miss)}，請檢查上面的輸出。")
+    if miss:
+        _p(f"安裝後仍找不到：{'、'.join(miss)}。")
+        for line in M.why_missing(M.availability()):
+            _p("  - " + line)
+        _p(f"  （使用的 Python：{sys.executable}）")
+    else:
+        _p("安裝完成。")
     return 0 if not miss else 1
 
 

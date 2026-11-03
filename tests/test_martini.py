@@ -46,7 +46,7 @@ def test_plan_ready_and_argv(tmp_path):
     names = [s["name"] for s in p.steps]
     assert names == ["martinize2", "insane", "compose_topology", "martini_openmm"]
     m2 = p.steps[0]["argv"]
-    assert m2[0] == "martinize2" and m2[m2.index("-ff") + 1] == "martini3001" and "-elastic" in m2 and "-dssp" in m2
+    assert m2[0].endswith("martinize2") and m2[m2.index("-ff") + 1] == "martini3001" and "-elastic" in m2 and "-dssp" in m2
     ins = p.steps[1]["argv"]
     assert ins[ins.index("-x") + 1] == "12" and ins[ins.index("-z") + 1] == "11"
     assert ["-l", "POPC:3"] == ins[ins.index("-l"):ins.index("-l") + 2] and "POPG:1" in ins
@@ -79,3 +79,24 @@ def test_install_plan_and_cli_preview_installs_nothing(capsys, monkeypatch):
     assert main(["setup-cg"]) == 0
     out = capsys.readouterr().out
     assert "vermouth" in out and "insane" in out and "martini_openmm" in out and "--yes" in out
+
+
+def test_tool_argv_finds_script_off_path(tmp_path):
+    """Laptop 11/03: pip put martinize2 in <env>/Scripts, which was not on PATH."""
+    (tmp_path / "martinize2.exe").write_text("")
+    argv = M.tool_argv("martinize2", which=lambda e: None, find_spec=lambda m: None, script_dirs=[tmp_path])
+    assert argv == [str(tmp_path / "martinize2.exe")]
+    (tmp_path / "insane").write_text("#!python\n")                        # extension-less script → run with python
+    argv = M.tool_argv("insane", which=lambda e: None, find_spec=lambda m: None, script_dirs=[tmp_path])
+    assert argv[1] == str(tmp_path / "insane")
+
+
+def test_tool_argv_module_fallback_and_reason():
+    argv = M.tool_argv("martinize2", which=lambda e: None, script_dirs=[],
+                       find_spec=lambda m: object() if m == "vermouth.bin.martinize2" else None)
+    assert argv[1] == "-c" and "from vermouth.bin.martinize2 import entry" in argv[2]
+    assert M.tool_argv("martinize2", which=lambda e: None, script_dirs=[], find_spec=lambda m: None) is None
+    a = _avail({"vermouth", "insane", "martini_openmm"}, {"insane"})
+    assert M.missing_tools(a) == ["vermouth"]
+    assert "找不到指令 martinize2" in M.why_missing(a)[0]
+    assert "無法匯入" in M.why_missing(_avail({"insane", "martini_openmm", "martinize2"}))[0]

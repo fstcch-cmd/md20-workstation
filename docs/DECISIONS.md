@@ -7,6 +7,13 @@
 
 ## 2026-11-03
 
+### D-84　`setup-cg` 裝完說找不到 vermouth：改成不靠 PATH 找 martinize2；發行 v0.1.0a11
+- 現象（使用者筆電 18:08）：`md20 setup-cg --yes` 三個 pip 都成功，最後卻顯示「安裝後仍找不到：vermouth」。
+- 原因判斷：檢查要求 `martinize2` 指令在 PATH 上（`shutil.which`）。pip 把它放在環境的 Scripts 資料夾；舊版 vermouth 以 pbr `scripts` 安裝成沒有副檔名的檔案，Windows 的 `which` 只認 PATHEXT（.exe 等），找不到。insane 用 console_scripts（有 .exe）所以通過。未在筆電上直接確認是哪一種，屬推論。
+- 決定：`tool_argv()` 依序找 PATH → 目前 Python 的 Scripts/bin（.exe、-script.py、無副檔名，後兩者用該 Python 執行）→ 模組入口（vermouth.bin.martinize2:entry、insane.cli:cli，入口名稱從兩個專案原始碼讀到）。建膜計畫的指令用找到的路徑。
+- `setup-cg` 失敗時改成逐項說明「套件無法匯入」或「套件在但找不到指令」，並印出使用的 Python。
+- 測試：tests/test_martini.py 新增兩項。待使用者在筆電重跑 `md20 setup-cg --yes` 確認。
+
 ### D-83　筆電開發版驗證（11/03 15:37–15:57）抓到四個問題並修正；發行 v0.1.0a10
 - 結果（`MD20-DevCheck.cmd`，main edd9167，C:\MD20dev）：安裝 10.1 分鐘、doctor CUDA（RTX 4060 Laptop、驅動 566.14）、摺疊單元測試、Martini 單元測試通過；以下失敗：
   1. **建膜**：`Modeller.addMembrane() got an unexpected keyword argument 'platform'`——筆電的 OpenMM 8.2 沒有這個參數（從 OpenMM 主幹原始碼查到的參數較新）。修正：依函式簽名決定是否傳。

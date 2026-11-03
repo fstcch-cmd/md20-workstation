@@ -51,16 +51,65 @@ CG_FRICTION_PER_PS = 10.0
 ELASTIC = {"-ef": "700", "-el": "0.5", "-eu": "0.9"}
 
 
-def availability(*, find_spec=importlib.util.find_spec, which=shutil.which) -> dict:
-    """{tool: {"module": bool, "executable": bool | None, "ok": bool}}; injectable lookups for tests."""
+# Python entry points used when the console script cannot be found (laptop 11/03: `martinize2` was not on PATH after
+# `md20 setup-cg` although vermouth installed).  Running the module with the env's own python avoids PATH entirely.
+ENTRY = {"martinize2": ("vermouth.bin.martinize2", "entry"), "insane": ("insane.cli", "cli")}
+
+
+def _script_dirs() -> list[Path]:
+    """Where pip puts console scripts for the running interpreter (Windows: <env>/Scripts, otherwise <env>/bin)."""
+    base = Path(sys.executable).parent
+    return [base / "Scripts", base, base / "bin"]
+
+
+def tool_argv(exe: str, *, find_spec=importlib.util.find_spec, which=shutil.which,
+              script_dirs: list[Path] | None = None) -> list[str] | None:
+    """Command prefix that runs `exe`: on PATH, else in the env's script folder, else the module entry point with this
+    python.  None when none of them exists."""
+    hit = which(exe)
+    if hit:
+        return [hit]
+    for d in (_script_dirs() if script_dirs is None else script_dirs):
+        for name in (exe + ".exe", exe + "-script.py", exe):
+            f = d / name
+            if f.is_file():
+                return [str(f)] if name.endswith(".exe") else [sys.executable, str(f)]
+    mod, fn = ENTRY.get(exe, (None, None))
+    if mod:
+        try:
+            ok = find_spec(mod) is not None
+        except (ImportError, ValueError):
+            ok = False
+        if ok:
+            return [sys.executable, "-c", f"import sys; from {mod} import {fn}; sys.argv[0] = {exe!r}; sys.exit({fn}())"]
+    return None
+
+
+def availability(*, find_spec=importlib.util.find_spec, which=shutil.which, script_dirs: list[Path] | None = None) -> dict:
+    """{tool: {"module": bool, "executable": bool | None, "argv": list | None, "ok": bool}}; injectable lookups."""
     out = {}
     for name, t in TOOLS.items():
         try:
             mod = find_spec(t["module"]) is not None
         except (ImportError, ValueError):
             mod = False
-        exe = None if t["executable"] is None else bool(which(t["executable"]))
-        out[name] = {"module": mod, "executable": exe, "ok": mod and (exe is not False)}
+        argv = None if t["executable"] is None else tool_argv(t["executable"], find_spec=find_spec, which=which,
+                                                               script_dirs=[] if script_dirs is None and which is not shutil.which else script_dirs)
+        exe = None if t["executable"] is None else argv is not None
+        out[name] = {"module": mod, "executable": exe, "argv": argv, "ok": mod and (exe is not False)}
+    return out
+
+
+def why_missing(avail: dict) -> list[str]:
+    """One line per missing tool saying whether the Python package or its command is what is missing."""
+    out = []
+    for k, v in avail.items():
+        if v["ok"]:
+            continue
+        if not v["module"]:
+            out.append(f"{k}：Python 套件無法匯入（pip 安裝可能失敗，請看上面的錯誤）")
+        else:
+            out.append(f"{k}：套件已安裝，但找不到指令 {TOOLS[k]['executable']}")
     return out
 
 
@@ -101,12 +150,14 @@ def plan_cg_membrane(protein_pdb: str | Path, workdir: str | Path, *, lipids: di
     need_ff = [FF_FILES["core"], FF_FILES["phospholipids"], FF_FILES["solvents"]] + \
               ([FF_FILES["ions"]] if salt_molar > 0 else [])
     missing_ff = [f for f in need_ff if ff_dir is None or not (ff_dir / f).is_file()]
-    m2 = ["martinize2", "-f", str(protein_pdb), "-x", str(wd / "protein_cg.pdb"), "-o", str(wd / "protein.top"),
+    m2_cmd = (avail.get("vermouth") or {}).get("argv") or ["martinize2"]
+    ins_cmd = (avail.get("insane") or {}).get("argv") or ["insane"]
+    m2 = [*m2_cmd, "-f", str(protein_pdb), "-x", str(wd / "protein_cg.pdb"), "-o", str(wd / "protein.top"),
           "-ff", "martini3001", "-ignh", "-dssp"]
     if elastic:
         m2 += ["-elastic"] + [x for kv in ELASTIC.items() for x in kv]
     x, y, z = (f"{float(v):g}" for v in box_nm)
-    ins = ["insane", "-f", str(wd / "protein_cg.pdb"), "-o", str(wd / "system.gro"), "-p", str(wd / "insane.top"),
+    ins = [*ins_cmd, "-f", str(wd / "protein_cg.pdb"), "-o", str(wd / "system.gro"), "-p", str(wd / "insane.top"),
            "-pbc", "rectangular", "-x", x, "-y", y, "-z", z, "-center", "-sol", "W"]
     for name, amount in lipids.items():
         ins += ["-l", f"{name}:{amount:g}" if isinstance(amount, (int, float)) else f"{name}:{amount}"]
