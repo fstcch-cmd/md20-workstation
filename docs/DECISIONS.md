@@ -7,6 +7,19 @@
 
 ## 2026-11-03
 
+### D-80　專業版：建膜、輸入序列一鍵摺疊、微秒級模擬——先寫規格
+- 使用者要求（11/03 14:32）：專業版要能到微秒級以上；建膜功能要完備；整合輕量版 AlphaFold，輸入序列一鍵摺疊胜肽；
+  雖然不能穿膜，但使用者可能只要做膜表面接觸。
+- 決定：依專案規則先寫三份規格供審查，再分階段實作（每階段要 CI 與實機驗證）：
+  `docs/specs/membrane.md`、`structure_prediction.md`、`long_timescale.md`。
+- 查證摘要（實作前再確認版本與授權）：OmegaFold（Apache-2.0，單序列）、ESMFold（MIT，完整模型約需 16–24 GB 顯示卡記憶體）、
+  Boltz-2（MIT，可預測蛋白＋胜肽複合物，複合物常需 16 GB 以上）、ColabFold（需要 MSA 伺服器與 Linux／WSL）；AlphaFold 3 權重限非商業，不內建。
+  Martini 2／3 已有 OpenMM 實作（MacCallum et al., Biophys J 2023）。
+- 初步選擇：單獨胜肽預設 OmegaFold；受體＋胜肽用 Boltz-2，記憶體不足時改用上傳或遠端；全原子膜用 OpenMM 建膜（單一中性磷脂）或 MD20 格點排列器（混合膜）；
+  微秒以上的膜現象走 Martini 3 粗粒化。
+- 被否決：把 AlphaFold2 本體（需要 MSA 資料庫，數百 GB）裝在學生筆電；宣稱全原子膜蛋白可在筆電上常規跑到數微秒（估計需 1–3 週／µs）。
+- 未決：力場組合（Lipid21 或 CHARMM36）、格蘭氏陽性菌膜比例與出處、OmegaFold 在短胜肽上的準確度——列在各規格「想請審查者回答」。
+
 ### D-79　高通量篩選的範例 Excel 上傳後卡住：改成可直接試跑的範例；發行 v0.1.0a8
 - 使用者回報（11/03 14:16）：高通量篩選示範的 Excel 上傳「怪怪的」。
 - 原因：範例同時示範六種化合物來源（smiles、pubchem_cid、inchikey、chembl_id、ccd、sdf），其中 `my_compound` 指向不存在的 `my_compound.sdf`，

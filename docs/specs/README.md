@@ -25,6 +25,9 @@
 | [gui_v2.md](gui_v2.md) | GUI v2：四種模式、教學頁、依個案建議參數、雙語、進 MD 前確認 | 已實作・隨 v0.1.0a3 發行（CI 渲染；互動部分筆電確認） |
 | [multi_ligand.md](multi_ligand.md) | 多配體同時對接進 MD：穿環／重疊／漂浮檢查、剛體微調、軟核鬆弛、協同自由能熱力學循環 | 已驗證（CI openmm-stack；D-60、D-61、D-64） |
 | [report_language.md](report_language.md) | 報告用語規範與圖表 F1–F42：每種圖的怎麼讀、門檻與中英文句型 | 已實作（`figure_text.py`，測試檢查一致） |
+| [membrane.md](membrane.md) | 膜系統：膜蛋白、膜表面接觸、純膜；定向、建膜、膜專用流程、分析 | **設計中**（D-80） |
+| [structure_prediction.md](structure_prediction.md) | 輸入序列一鍵摺疊（OmegaFold、ESMFold、Boltz-2、ColabFold、上傳）與 pLDDT 閘門 | **設計中**（D-80） |
+| [long_timescale.md](long_timescale.md) | 微秒級以上：全原子長時間模擬的儲存與續跑、粗粒化 Martini 3 | **設計中**（D-80） |
 | [vina_cpu_use.md](vina_cpu_use.md) | Vina 執行檔的 CPU 使用：平行度上限、資源模式→--cpu／優先權／Windows QoS、每次執行的實際執行緒量測 | 已實作・待 Windows CI 與筆電實測 |
 | [REVIEW_QUESTIONS.md](../archive/specs/REVIEW_QUESTIONS.md)（已封存） | 彙整：最希望審查者挑戰的設計決定 | — |
 | [REVIEW_ANSWERS_2026-11-01.md](../archive/specs/REVIEW_ANSWERS_2026-11-01.md)（已封存） | **會診結果**：每個審查問題的回答、各規格沒寫到的科學缺口、下一個 session 的優先順序 | 待採納 |
