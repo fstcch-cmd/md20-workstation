@@ -211,10 +211,17 @@ class OpenMMBackend:
                 try:
                     rep = app.DCDReporter(str(dcd_path), int(dcd_steps), enforcePeriodicBox=periodic,
                                           atomSubset=self.dcd_atom_subset)
-                except TypeError:        # an OpenMM without atomSubset: whole system, recorded for the analysis
-                    self.dcd_atom_subset = None
-                    self.info.update({"dcd_atoms": "all", "dcd_atom_count": self.n_atoms,
-                                      "dcd_atoms_note": "DCDReporter has no atomSubset in this OpenMM"})
+                except TypeError:
+                    # OpenMM < 8.3 has no atomSubset (laptop, OpenMM 8.2): mdtraj's DCD reporter writes the subset;
+                    # only when that is missing too does the whole system go to the DCD (recorded for the analysis)
+                    try:
+                        from mdtraj.reporters import DCDReporter as _MdtrajDCD
+                        rep = _MdtrajDCD(str(dcd_path), int(dcd_steps), atomSubset=list(self.dcd_atom_subset))
+                        self.info["dcd_atoms_note"] = "mdtraj DCDReporter (OpenMM DCDReporter has no atomSubset)"
+                    except Exception:  # noqa: BLE001
+                        self.dcd_atom_subset = None
+                        self.info.update({"dcd_atoms": "all", "dcd_atom_count": self.n_atoms,
+                                          "dcd_atoms_note": "DCDReporter has no atomSubset in this OpenMM"})
             if rep is not None:
                 self.sim.reporters.append(rep)
             else:

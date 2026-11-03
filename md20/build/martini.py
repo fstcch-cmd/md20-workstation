@@ -27,7 +27,7 @@ TOOLS = {
                  "pip": "vermouth", "source": "https://github.com/marrink-lab/vermouth-martinize",
                  "commit": "a9b62eed6eec028c486ab6369a13cdd9c31f4561"},
     "insane": {"module": "insane", "executable": "insane", "license": "GPL-2.0-or-later",
-               "pip": "https://github.com/Tsjerk/Insane/archive/e23a501036c683f2652fe07a66ba941195d7b8f6.zip",
+               "pip": "insane",   # PyPI: the GitHub archive has test files whose names are invalid on Windows (laptop 11/03)
                "source": "https://github.com/Tsjerk/Insane", "commit": "e23a501036c683f2652fe07a66ba941195d7b8f6"},
     "martini_openmm": {"module": "martini_openmm", "executable": None,
                        "license": "LGPL-3.0 (LICENSE file; README says GPL v3)",

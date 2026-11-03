@@ -796,10 +796,13 @@ def add_membrane(modeller, forcefield, plan: MembranePlan, *, ion_spec: dict, re
         # modeller.py); setting it is how the water layer above a surface solute is made thick enough
         size = xyz.max(0) - xyz.min(0)
         modeller.topology.setUnitCellDimensions(Vec3(float(size[0]) + 2 * pad, float(size[1]) + 2 * pad, max(0.1, lz - 2 * pad)) * unit.nanometer)
-        modeller.addMembrane(forcefield, lipidType=lipid, membraneCenterZ=0.0 * unit.nanometer,
-                             minimumPadding=pad * unit.nanometer, positiveIon=ion_spec["positive"],
-                             negativeIon=ion_spec["negative"], ionicStrength=ion_spec["concentration_molar"] * unit.molar,
-                             neutralize=ion_spec["neutralize"], platform=platform)
+        kw = dict(lipidType=lipid, membraneCenterZ=0.0 * unit.nanometer, minimumPadding=pad * unit.nanometer,
+                  positiveIon=ion_spec["positive"], negativeIon=ion_spec["negative"],
+                  ionicStrength=ion_spec["concentration_molar"] * unit.molar, neutralize=ion_spec["neutralize"])
+        import inspect
+        if "platform" in inspect.signature(modeller.addMembrane).parameters:   # OpenMM ≥ 8.3 only (laptop 8.2: no)
+            kw["platform"] = platform
+        modeller.addMembrane(forcefield, **kw)
         info["builder"] = "openmm_addmembrane"
     else:
         _grid_membrane(modeller, forcefield, plan, ion_spec=ion_spec, lz=lz, report=report, info=info)

@@ -272,7 +272,7 @@ def test_setup_plan_separate_env(tmp_path):
     cmds = [" ".join(s["cmd"]) for s in plan["steps"]]
     assert plan["ok"] and "create" in cmds[0] and "python=3.10" in cmds[0]
     assert "download.pytorch.org/whl/cu121" in cmds[1]
-    assert "--no-deps git+https://github.com/HeliXonProtein/OmegaFold.git" in cmds[2]
+    assert "--no-deps https://github.com/HeliXonProtein/OmegaFold/archive/refs/heads/main.zip" in cmds[2]   # no git on Windows laptops
     assert "omegafold_ckpt" in plan["first_run_download"]
     mac = F.setup_plan("boltz", vram_mb=0, platform="darwin", micromamba="/mm", prefix=tmp_path / "fe")
     assert "whl/cu121" not in " ".join(mac["steps"][1]["cmd"]) and mac["steps"][2]["cmd"][-1] == "boltz"

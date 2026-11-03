@@ -42,7 +42,7 @@ Claude-Session: <本次 session 連結>
 - PDB/PDBQT 的戳記必須純 ASCII(cp950 Windows 會崩)。
 
 ## 現況與還沒做
-**v0.1.0a9 已發行（2026-11-03，Windows＋macOS，四種語言；新增摺疊、膜、長時間，初步）**；決策到 D-82（四種語言：英、繁中、日、韓；文字規範 `docs/specs/writing_style.md`）。給學生的步驟在 `docs/students/`；專案名稱用英數字（D-67）。
+**v0.1.0a10 已發行（2026-11-03，Windows＋macOS，四種語言；新增摺疊、膜、長時間，初步）**；決策到 D-83（四種語言：英、繁中、日、韓；文字規範 `docs/specs/writing_style.md`）。給學生的步驟在 `docs/students/`；專案名稱用英數字（D-67）。
 WP5、WP9、WP13、金屬 policy/幾何鍵結模型已實作(真實驗證狀態見 `docs/STATUS.md`)。
 GUI 閘門一鍵決定(`md20/gui/actions.py`)、3D 互作/vdW 表面、金屬擬合參數(`md20/build/metal_params.py`:QM Hessian 內建轉換/MCPB.py 轉譯/JSON,附 QM 小模型輸入產生)已實作。
 還沒做:配體直接配位金屬的參數化(目前只有 D-53 距離約束後備)、受體長 loop 等選項的自動處理、漏斗約束 ΔG°(設計中)、D-72 筆電實測。細節見 `docs/HANDOFF.md` §6。

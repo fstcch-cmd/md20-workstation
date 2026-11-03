@@ -1115,7 +1115,7 @@ def place_peptide(r: FoldResult, out_dir: Path | str, *, reference: Path | str |
 # Approximate sizes (from the projects' documentation and wheel sizes; not measured on the laptop yet).
 # Plan texts are Chinese: they are command-line output (docs/specs/writing_style.md §3).
 SETUP = {
-    "omegafold": {"pip": ["--no-deps", "git+https://github.com/HeliXonProtein/OmegaFold.git", "biopython"],
+    "omegafold": {"pip": ["--no-deps", "https://github.com/HeliXonProtein/OmegaFold/archive/refs/heads/main.zip", "biopython"],
                   "download": "OmegaFold 權重 release1.pt（約 3 GB，未實測）到 ~/.cache/omegafold_ckpt",
                   "license": "Apache-2.0"},
     "boltz": {"pip": ["boltz"],

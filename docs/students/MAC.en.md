@@ -5,11 +5,11 @@
 You need macOS 12 or later (Apple Silicon M1–M4 or Intel), at least 8 GB of free disk space and an internet connection. Macs have no CUDA, so MD20 computes on OpenCL or the CPU. That is slower than an NVIDIA laptop. **Use the classroom tier for class cases.**
 
 ## 1. Install (once, about 15–30 minutes)
-1. Download `MD20-macOS-v0.1.0a9.zip` and double-click it in Downloads to unzip it. You get the folder `MD20-v0.1.0a9`.
+1. Download `MD20-macOS-v0.1.0a10.zip` and double-click it in Downloads to unzip it. You get the folder `MD20-v0.1.0a10`.
 2. Open Terminal (search for Terminal in Launchpad), paste the line below and press Enter.
 
 ```
-bash ~/Downloads/MD20-v0.1.0a9/Install-MD20.command
+bash ~/Downloads/MD20-v0.1.0a10/Install-MD20.command
 ```
    - The installation is finished when Terminal ends with "完成 Done.". If you see an error, copy the text in Terminal and send it to your instructor.
    - The program is installed in the `MD20` folder in your home folder. You can delete the downloaded folder afterwards.

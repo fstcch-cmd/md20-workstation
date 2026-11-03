@@ -7,6 +7,15 @@
 
 ## 2026-11-03
 
+### D-83　筆電開發版驗證（11/03 15:37–15:57）抓到四個問題並修正；發行 v0.1.0a10
+- 結果（`MD20-DevCheck.cmd`，main edd9167，C:\MD20dev）：安裝 10.1 分鐘、doctor CUDA（RTX 4060 Laptop、驅動 566.14）、摺疊單元測試、Martini 單元測試通過；以下失敗：
+  1. **建膜**：`Modeller.addMembrane() got an unexpected keyword argument 'platform'`——筆電的 OpenMM 8.2 沒有這個參數（從 OpenMM 主幹原始碼查到的參數較新）。修正：依函式簽名決定是否傳。
+  2. **只存溶質的軌跡**：OpenMM 8.2 的 `DCDReporter` 沒有 `atomSubset`，退回存整個系統。修正：改用 mdtraj 的 DCD reporter 寫子集，兩者都沒有才存整個系統並記錄。
+  3. **`setup-fold`**：`pip install git+https://…` 需要 git，學生筆電通常沒有。修正：改用 GitHub 封存 zip。
+  4. **`setup-cg`**：insane 的 GitHub 封存含 Windows 不允許的測試檔名（WinError 123）。修正：改用 PyPI 的 `insane`。
+- 教訓：外部函式庫的 API 以主幹原始碼查證不夠，要以安裝包實際的版本（環境檔解出的 OpenMM 8.2）為準。
+- 摺疊在 GPU 上的實測因安裝失敗未執行；a10 發行後以同一腳本重測。a9 已發行但含上述問題，請用 a10。
+
 ### D-82　D-80 第二階段：介面、工作流程與報告接上三個新子系統；發行 v0.1.0a9
 - 使用者要求：驗證後所有說明與介面一同更正（14:38）；圖表要更多更豐富、報告專業、四種語言（15:09）；15:50：在使用量用盡前推上 GitHub 並發行新版。
 - 介面（`md20/gui/advanced.py` 等）：專業模式的膜、胜肽摺疊、長時間模擬（> 1 µs 確認框與規劃卡）；快速模式的「摺疊這個胜肽」；電腦狀態頁的安裝狀態與只預覽的安裝計畫；新閘門的一鍵決定。
