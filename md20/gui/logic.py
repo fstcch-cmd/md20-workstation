@@ -246,7 +246,7 @@ def list_workflows(projects_dir: Path) -> list[dict]:
             steps = st.get("steps", {})
             last = max(steps.items(), key=lambda kv: kv[1].get("at", ""), default=(None, {}))
             out.append({"project": pdir.name, "workflow": w.name, "last_step": last[0] or "—", "status": last[1].get("status", "—"),
-                        "updated": st.get("updated_at", "")})
+                        "updated": to_local(st.get("updated_at", ""))})
     return out
 
 

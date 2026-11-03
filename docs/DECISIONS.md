@@ -27,6 +27,10 @@
   CI `gui-preview` 的 `stability.txt` 與截圖（gui-preview 分支）。
 - 版本：0.1.0a4（`pyproject.toml`、`md20/__init__.py`），發行說明 `docs/releases/v0.1.0a4.md`。
 - 未決：日韓文未經母語者校對；3D 檢視器以外的舊版 v1 表單函式仍有中文。
+- 介面檢查結果（CI gui-preview，bffc0e9）：`stability.txt` = OK——計算中切換 zh→ja→ko→en，每次離開再回來並再按開始：始終只啟動 1 次，進度 13→22→30→38 持續增加，只有一個流程。
+  我逐張看了日文與韓文截圖（首頁、教學二、專業模式、流程頁）：文字完整、無亂碼或缺字，資源選單與語言選單顯示正確。發現兩個問題並修正：
+  (1) 空表格顯示 Quasar 的英文「No data available」（Quasar 語言在伺服器啟動時固定）→ 每個表格設 `no-data-label`；
+  (2) 首頁「最近的流程」的時間是 UTC 原始字串、步驟與狀態是程式代碼（md_cases、PASS）→ 改為本機時間與所選語言的名稱。
 
 ### D-73　全部文件與 v0.1.0a3 同步
 - 使用者要求（11/03 09:03）：遍歷 GitHub 上所有文件，全部更新為與最新版一致。

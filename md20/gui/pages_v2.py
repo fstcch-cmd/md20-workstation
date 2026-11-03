@@ -80,8 +80,13 @@ def home():
                     {"name": "last_step", "label": t("step", L), "field": "last_step", "align": "left"},
                     {"name": "status", "label": t("status", L), "field": "status", "align": "left"},
                     {"name": "updated", "label": t("time", L), "field": "updated", "align": "left"}]
-            tbl = ui.table(columns=cols, rows=[{**r, "key": f"{r['project']}/{r['workflow']}"} for r in rows[-20:][::-1]],
-                           row_key="key").classes("w-full md20-card")
+            from .app import STEP_TEXT, STATUS_TEXT, no_data
+            from ..i18n import pick
+            shown = [{**r, "key": f"{r['project']}/{r['workflow']}",
+                      "last_step": pick(STEP_TEXT[r["last_step"]], L) if r["last_step"] in STEP_TEXT else r["last_step"],
+                      "status": pick(STATUS_TEXT[r["status"]], L) if r["status"] in STATUS_TEXT else r["status"]}
+                     for r in rows[-20:][::-1]]
+            tbl = ui.table(columns=cols, rows=shown, row_key="key").props(no_data()).classes("w-full md20-card")
             tbl.on("rowClick", lambda e: ui.navigate.to(f"/wf/{e.args[1]['project']}/{e.args[1]['workflow']}"))
 
 

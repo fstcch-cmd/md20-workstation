@@ -133,6 +133,14 @@ STATUS_COLOR = {"PASS": "positive", "COMPLETE": "positive", "RUNNING": "primary"
                 "NEEDS_HUMAN": "negative", "ERROR": "negative"}
 
 
+NO_DATA = ("沒有資料", "No data", "データがありません", "데이터가 없습니다")
+
+
+def no_data() -> str:
+    """Quasar's empty-table text follows the language chosen at server start; set it per table instead (D-74)."""
+    return f'no-data-label="{pick(NO_DATA, lang())}"'
+
+
 def _platform():
     if STATE["platform"] is None:
         STATE["platform"] = choose_platform()
@@ -246,7 +254,7 @@ def dashboard():
                 (("project", _("專案", "Project", "プロジェクト", "프로젝트")), ("workflow", _("流程", "Workflow", "ワークフロー", "워크플로")),
                  ("last_step", _("最後步驟", "Last step", "最後のステップ", "마지막 단계")), ("status", t("status", L)),
                  ("updated", _("更新時間", "Updated", "更新日時", "업데이트")))]
-        tbl = ui.table(columns=cols, rows=rows, row_key="workflow").classes("w-full")
+        tbl = ui.table(columns=cols, rows=rows, row_key="workflow").props(no_data()).classes("w-full")
         tbl.on("rowClick", lambda e: ui.navigate.to(f"/wf/{e.args[1]['project']}/{e.args[1]['workflow']}"))
         if not rows:
             ui.label(_("還沒有流程。到首頁選一種模式開始。", "No workflows yet. Choose a mode on the home page to start.",
@@ -467,7 +475,7 @@ def workflow_page(project: str, name: str):
                                    **({"style": "white-space: normal; max-width: 560px"} if k == "message" else {})}
                                   for k, l in (("step", t("step", L)), ("status", t("status", L)), ("at", t("time", L)),
                                                ("message", t("message", L)))],
-                         rows=[], row_key="key").props("dense flat").classes("w-full md20-card")
+                         rows=[], row_key="key").props("dense flat").props(no_data()).classes("w-full md20-card")
         ui.label(t("poses", L)).classes("font-semibold")
         poses = ui.table(columns=[{"name": k, "label": l, "field": k, "align": "left"} for k, l in
                                   (("entry", _("配體", "Ligand", "リガンド", "리간드")), ("rank", _("名次", "Rank", "順位", "순위")),
@@ -476,7 +484,7 @@ def workflow_page(project: str, name: str):
                                    ("contacts", _("接觸殘基數", "Contacts", "接触残基数", "접촉 잔기 수")),
                                    ("rmsd_ref", _("與晶體的 RMSD（Å）", "RMSD to crystal (Å)", "結晶との RMSD（Å）", "결정 대비 RMSD(Å)")),
                                    ("md_screen", _("短模擬篩選", "Short-MD screen", "短い MD による選別", "짧은 MD 선별")),
-                                   ("tag", ""))], rows=[], row_key="key").props("dense flat").classes("w-full md20-card")
+                                   ("tag", ""))], rows=[], row_key="key").props("dense flat").props(no_data()).classes("w-full md20-card")
         reason = ui.markdown("")
 
         def pick_pose(e):
@@ -525,7 +533,7 @@ def workflow_page(project: str, name: str):
                                              ("cluster_size", _("叢集大小", "Cluster size", "クラスターサイズ", "클러스터 크기")),
                                              ("contacts", _("接觸殘基數", "Contacts", "接触残基数", "접촉 잔기 수")),
                                              ("recommendation_status", _("推薦", "Recommendation", "推奨", "추천")), ("tag", ""))],
-                                   rows=[], row_key="key", selection="multiple", pagination=25).classes("w-full")
+                                   rows=[], row_key="key", selection="multiple", pagination=25).props(no_data()).classes("w-full")
 
 
                 def bar_click(e):
