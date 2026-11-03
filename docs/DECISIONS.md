@@ -18,6 +18,7 @@
 - 被否決：繞過 micromamba 直接執行 envs\md20\python.exe——要自己重建環境啟用時的 PATH 與變數，改動較大；在發行前時間有限。
 - 證據：`tests/test_installer_paths.py::test_windows_launchers_start_from_a_short_path`；發行流程的長 PATH 桌面啟動檢查。
 - v0.1.0a5（只含 D-76）在發現本問題時已在發行中，未取消（取消 CI 曾被拒絕）；請一律用 a6。
+- 結果：a5 的發行在建立 Release 時被 GitHub 拒絕（403），沒有發出；**a6 發行成功**（release run 41584490507），verify-windows 以 10,104 字元的 PATH 雙擊桌面啟動檔，介面回 200。
 
 ### D-76　Windows 桌面的 MD20-GUI.cmd 打不開介面；發行 v0.1.0a5
 - 使用者回報（11/03 13:24）：GUI 打不開。筆電桌面的 `MD20-GUI.cmd` 內容是 `"%~dp0micromamba.exe" run -p "%~dp0envs\md20" md20 gui`。

@@ -3,6 +3,11 @@
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
+## 目前版本：v0.1.0a6（2026-11-03 13:4x 發行）
+- https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a6 ——程式與 a4 相同，修正 Windows 啟動檔：桌面捷徑（D-76）與很長的 PATH（D-77）。
+- 發行前 verify-windows 真的執行桌面 `MD20-GUI.cmd`，PATH 加長到 10,104 字元，介面回 HTTP 200。
+- v0.1.0a5（只含 D-76）的發行在最後「建立 Release」被 GitHub 拒絕（403 Resource not accessible by integration），沒有發出；a6 同一步驟成功，原因未明。
+
 ## v0.1.0a4（2026-11-03 12:5x 發行）
 - https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a4 （Windows、macOS 安裝檔；發行前 verify-windows 與 verify-macos 實裝驗證通過）。
 - 發行點 49e2eae：CI 15 個 job 中 14 個綠（含三 OS 中的 Ubuntu、macOS openmm-stack 與 heavy workflow）；**Windows openmm-stack 在發行時仍在跑**，
