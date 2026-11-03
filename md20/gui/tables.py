@@ -6,16 +6,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable
 
+from ..i18n import pick, cjk, colon, paren
 from ..util import load_json
 
-NAV = [  # (label, route) — left drawer, in workflow order
-    ("Doctor", "/"),
-    ("專案", "/projects"),
-    ("Docking", "/docking"),
-    ("建模", "/build"),
-    ("執行", "/run"),
-    ("報告", "/report"),
-    ("決策日誌", "/decisions"),
+NAV = [  # (label in zh, en, ja, ko; route) for the left drawer, in workflow order
+    (("診斷", "Check", "診断", "진단"), "/"),
+    (("專案", "Projects", "プロジェクト", "프로젝트"), "/projects"),
+    (("分子對接", "Molecular docking", "分子ドッキング", "분자 도킹"), "/docking"),
+    (("建模", "System building", "系の構築", "시스템 구축"), "/build"),
+    (("執行", "Run", "実行", "실행"), "/run"),
+    (("報告", "Report", "レポート", "보고서"), "/report"),
+    (("決策紀錄", "Decision log", "判断の記録", "결정 기록"), "/decisions"),
 ]
 
 STATUS_COLOR = {"PASS": "positive", "AUTO_FIXED": "warning", "NEEDS_HUMAN": "negative",
@@ -23,10 +24,36 @@ STATUS_COLOR = {"PASS": "positive", "AUTO_FIXED": "warning", "NEEDS_HUMAN": "neg
                 "COMPLETE": "positive", "RUNNING": "info", "PAUSED": "warning", "QUEUED": "grey",
                 "INTERRUPTED": "negative", "CREATED": "grey", "BUILT": "positive"}
 
-STATUS_LABEL = {"PASS": "通過", "AUTO_FIXED": "已自動修正", "NEEDS_HUMAN": "需要你決定",
-                "OK": "正常", "WARN": "注意", "FAIL": "失敗"}
+STATUS_LABEL = {"PASS": ("通過", "Passed", "合格", "통과"),
+                "AUTO_FIXED": ("已自動修正", "Corrected automatically", "自動で修正済み", "자동 수정됨"),
+                "NEEDS_HUMAN": ("需要你決定", "Needs your decision", "判断が必要", "결정 필요"),
+                "OK": ("正常", "OK", "正常", "정상"), "WARN": ("注意", "Warning", "注意", "주의"),
+                "FAIL": ("失敗", "Failed", "失敗", "실패")}
 
-RUN_STAGES = [("minimize", "能量最小化"), ("nvt", "NVT 升溫"), ("npt", "NPT 平衡"), ("production", "Production")]
+RUN_STAGES = [("minimize", ("能量最小化", "Energy minimisation", "エネルギー最小化", "에너지 최소화")),
+              ("nvt", ("升溫（NVT）", "Heating (NVT)", "加熱（NVT）", "가열(NVT)")),
+              ("npt", ("定壓平衡（NPT）", "Pressure equilibration (NPT)", "定圧平衡化（NPT）", "정압 평형(NPT)")),
+              ("production", ("正式模擬", "Production", "本計算", "본 시뮬레이션"))]
+
+SOURCE_LABEL = {"受體": ("受體", "Receptor", "受容体", "수용체"), "配體": ("配體", "Ligand", "リガンド", "리간드"),
+                "組裝": ("組裝", "Assembly", "組み立て", "조립")}
+
+
+def nav(lang: str = "zh") -> list[tuple[str, str]]:
+    return [(pick(label, lang), route) for label, route in NAV]
+
+
+def status_label(status: str, lang: str = "zh") -> str:
+    s = str(status or "")
+    return pick(STATUS_LABEL[s], lang) if s in STATUS_LABEL else s
+
+
+def source_label(source: str, lang: str = "zh") -> str:
+    """Row source in the interface language.  The source itself ("受體", "配體 BEN", "組裝") is an internal key."""
+    head, _, rest = source.partition(" ")
+    if head in SOURCE_LABEL:
+        return (pick(SOURCE_LABEL[head], lang) + (f" {rest}" if rest else "")).strip()
+    return source
 
 
 def color_for(status: str | None) -> str:
@@ -37,8 +64,10 @@ def color_for(status: str | None) -> str:
 
 
 # ---- gates ---------------------------------------------------------------------------
-def gate_rows(report: dict | Any, source: str = "") -> list[dict]:
-    """GateReport (object or its `to_dict()`) → rows with status colour, joined diff and options."""
+def gate_rows(report: dict | Any, source: str = "", lang: str = "zh") -> list[dict]:
+    """GateReport (object or its `to_dict()`) → rows with status colour, joined diff and options.
+
+    `source` stays an internal key (human_choices_from reads it); `source_label` is the text to show."""
     if report is None:
         return []
     if hasattr(report, "to_dict"):
@@ -52,27 +81,28 @@ def gate_rows(report: dict | Any, source: str = "") -> list[dict]:
         rows.append({
             "id": f"{source}:{g.get('name', i)}:{i}",
             "source": source,
+            "source_label": source_label(source, lang),
             "name": g.get("name", ""),
             "status": status,
-            "status_label": STATUS_LABEL.get(status, status),
+            "status_label": status_label(status, lang),
             "color": color_for(status),
             "explanation": g.get("explanation", ""),
             "diff": "\n".join(str(d) for d in (g.get("diff") or [])),
             "n_diff": len(g.get("diff") or []),
             "options": list(g.get("options") or []),
-            "options_text": " / ".join(g.get("options") or []),
+            "options_text": ("、" if cjk(lang) else ", ").join(g.get("options") or []),
         })
     return rows
 
 
-def build_summary_gate_rows(summary: dict | None) -> list[dict]:
-    """All gates of a `build_case` summary: receptor → each ligand → assembly."""
+def build_summary_gate_rows(summary: dict | None, lang: str = "zh") -> list[dict]:
+    """All gates of a `build_case` summary: receptor, then each ligand, then assembly."""
     if not summary:
         return []
-    rows = gate_rows((summary.get("receptor") or {}).get("gates"), "受體")
+    rows = gate_rows((summary.get("receptor") or {}).get("gates"), "受體", lang)
     for lig in summary.get("ligands") or []:
-        rows += gate_rows(lig.get("gates"), f"配體 {lig.get('name', '')}".strip())
-    rows += gate_rows((summary.get("assembly") or {}).get("gates"), "組裝")
+        rows += gate_rows(lig.get("gates"), f"配體 {lig.get('name', '')}".strip(), lang)
+    rows += gate_rows((summary.get("assembly") or {}).get("gates"), "組裝", lang)
     return rows
 
 
@@ -114,7 +144,7 @@ def merge_choices(old: dict | None, new: dict) -> dict:
 
 
 # ---- doctor --------------------------------------------------------------------------
-def finding_rows(report: Any) -> list[dict]:
+def finding_rows(report: Any, lang: str = "zh") -> list[dict]:
     findings = getattr(report, "findings", None)
     if findings is None and isinstance(report, dict):
         findings = report.get("findings", [])
@@ -122,7 +152,7 @@ def finding_rows(report: Any) -> list[dict]:
     for i, f in enumerate(findings or []):
         d = f if isinstance(f, dict) else {"item": f.item, "severity": f.severity, "detail": f.detail, "fix": f.fix}
         rows.append({"id": i, "item": d.get("item", ""), "severity": d.get("severity", ""),
-                     "severity_label": STATUS_LABEL.get(d.get("severity", ""), d.get("severity", "")),
+                     "severity_label": status_label(d.get("severity", ""), lang),
                      "color": color_for(d.get("severity")), "detail": d.get("detail", ""), "fix": d.get("fix", "")})
     return rows
 
@@ -173,16 +203,18 @@ def run_rows(case) -> list[dict]:
     return rows
 
 
-def stage_badges(run) -> list[dict]:
+def stage_badges(run, lang: str = "zh") -> list[dict]:
     """Per-stage acceptance from `<stage>_complete.json` (file truth)."""
     out = []
-    for name, label in RUN_STAGES:
+    not_run = pick(("未執行", "Not run", "未実行", "실행 안 됨"), lang)
+    for name, labels in RUN_STAGES:
+        label = pick(labels, lang)
         d = load_json(Path(run.dir) / "stages" / name / f"{name}_complete.json", {})
         status = d.get("status") or ("RUNNING" if (Path(run.dir) / "stages" / name / f"{name}_running.json").is_file() else "")
         acc = (d.get("acceptance") or {}).get("status", "")
-        text = f"{label}：{STATUS_LABEL.get(status, status) or '未執行'}"
+        text = f"{label}{colon(lang)}{status_label(status, lang) or not_run}"
         if acc:
-            text += f"（驗收 {acc}）"
+            text += paren(pick((f"驗收 {acc}", f"acceptance {acc}", f"合格判定 {acc}", f"합격 판정 {acc}"), lang), lang)
         out.append({"stage": name, "label": label, "status": status or "NOT_RUN", "acceptance": acc,
                     "text": text, "color": color_for(status) if status else "grey"})
     return out
@@ -194,15 +226,18 @@ def queue_rows(jobs: Iterable[dict]) -> list[dict]:
              "reason": j.get("reason", "")} for j in jobs]
 
 
-def progress_text(hb: dict | None) -> str:
+def progress_text(hb: dict | None, lang: str = "zh") -> str:
     if not hb:
-        return "尚無進度"
+        return pick(("還沒有進度", "No progress yet", "まだ進捗はありません", "아직 진행 상황이 없습니다"), lang)
     total = hb.get("total_steps") or 0
     done = hb.get("completed_local_steps") or 0
     pct = 100.0 * done / total if total else 0.0
     t = hb.get("temperature_k")
     t_txt = f"{t:.1f} K" if isinstance(t, (int, float)) else "—"
-    return (f"[{hb.get('stage', '?')}] chunk {hb.get('chunk', '?')} · {done:,}/{total:,} steps ({pct:.1f}%) · "
+    chunk, steps = hb.get("chunk", "?"), f"{done:,}/{total:,}"
+    head = pick((f"區段 {chunk} · {steps} 步", f"chunk {chunk} · {steps} steps", f"区切り {chunk} · {steps} ステップ",
+                 f"구간 {chunk} · {steps} 스텝"), lang)
+    return (f"[{hb.get('stage', '?')}] {head}{paren(f'{pct:.1f}%', lang)} · "
             f"T={t_txt} · dt={hb.get('timestep_fs', '?')} fs · {hb.get('elapsed_s', 0)} s")
 
 

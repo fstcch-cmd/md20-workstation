@@ -22,15 +22,19 @@ from . import docking_figs as DF
 from .figure_text import FIG
 from . import figure_text as FT
 from .html import _img, _esc, build_run_report
+from ..i18n import HTML_LANG, LANGS, colon, norm, paren, pick, stop
 
 
 def _restrained_tag(summary: dict, lang: str = "zh") -> str:
-    """D-23: RMSD measured under a production restraint is not evidence of stability — say so next to the number."""
+    """D-23: RMSD measured under a production restraint is not evidence of stability, so say so next to the number."""
     r = (summary or {}).get("restrained_production") or {}
     if not r:
         return ""
-    return (f"<br><small>（受約束：{_esc(', '.join(r))}；低 RMSD 不代表結構穩定）</small>" if lang == "zh" else
-            f"<br><small>(restrained: {_esc(', '.join(r))}; a low RMSD is not evidence of stability)</small>")
+    g = _esc(", ".join(r))
+    return "<br><small>" + pick((f"（受約束：{g}。RMSD 低不代表結構穩定）",
+                                 f"(restrained: {g}. A low RMSD is not evidence of stability)",
+                                 f"（拘束あり：{g}。RMSD が低くても構造が安定とは言えません）",
+                                 f"(구속됨: {g}. RMSD가 낮아도 구조가 안정하다는 뜻은 아닙니다)"), lang) + "</small>"
 
 
 def _fmt(x, nd: int = 2) -> str:
@@ -63,97 +67,159 @@ details{margin:.6rem 0}summary{cursor:pointer;color:var(--accent)}pre{font-size:
 """
 
 H = {  # fixed headings and labels
-    "title": ("分子模擬專案報告", "Molecular Simulation Project Report"),
-    "project": ("專案", "Project"), "workflow": ("流程", "Workflow"), "generated": ("產生時間", "Generated"),
-    "key_findings": ("重點摘要", "Key findings"), "what": ("這一步是什麼", "What this step is"),
-    "meaning": ("科學意義", "Scientific meaning"), "params": ("使用的參數", "Parameters used"),
-    "results": ("結果", "Results"), "interpretation": ("結果解釋", "Interpretation"),
-    "parameter": ("參數", "Parameter"), "value": ("採用值", "Value used"), "recommended": ("本案例建議值", "Recommended for this case"),
-    "reason": ("理由", "Reason"), "changed": ("使用者修改", "changed by user"),
-    "figure": ("圖", "Figure"), "table": ("表", "Table"),
-    "methods": ("方法（可直接用於報告）", "Methods (ready to use in a report)"),
-    "limitations": ("限制與注意事項", "Limitations and caveats"),
-    "appendix_params": ("附錄 A　完整參數表", "Appendix A  Complete parameter table"),
-    "appendix_log": ("附錄 B　決策紀錄", "Appendix B  Decision log"),
-    "appendix_cfg": ("附錄 C　設定檔", "Appendix C  Configuration file"),
-    "zh_note": ("", "Some automatic explanations and the decision log are recorded in Traditional Chinese and are shown as recorded."),
-    "not_run": ("此步驟未執行。", "This step was not run."),
-    "how_to_read": ("如何判讀", "How to read"), "in_project": ("本專案的結果", "In this project"),
-    "synthesis_ok": ("數據支持以下結論：", "The data support the following:"),
-    "synthesis_caution": ("以下結果需要保守看待：", "The following results call for caution:"),
+    "title": ("分子模擬專案報告", "Molecular Simulation Project Report", "分子シミュレーション プロジェクトレポート", "분자 시뮬레이션 프로젝트 보고서"),
+    "project": ("專案", "Project", "プロジェクト", "프로젝트"), "workflow": ("流程", "Workflow", "ワークフロー", "워크플로"),
+    "generated": ("產生時間", "Generated", "作成日時", "생성 시각"),
+    "key_findings": ("重點摘要", "Key findings", "主な結果", "주요 결과"),
+    "what": ("這一步是什麼", "What this step is", "このステップの内容", "이 단계의 내용"),
+    "meaning": ("科學意義", "Scientific meaning", "科学的な意味", "과학적 의미"),
+    "params": ("使用的參數", "Parameters used", "使用したパラメータ", "사용한 매개변수"),
+    "results": ("結果", "Results", "結果", "결과"), "interpretation": ("結果解釋", "Interpretation", "結果の解釈", "결과 해석"),
+    "parameter": ("參數", "Parameter", "パラメータ", "매개변수"), "value": ("採用值", "Value used", "使用値", "사용값"),
+    "recommended": ("本案例建議值", "Recommended for this case", "このケースの推奨値", "이 사례의 권장값"),
+    "reason": ("理由", "Reason", "理由", "이유"), "changed": ("使用者修改", "changed by user", "ユーザーが変更", "사용자 변경"),
+    "figure": ("圖", "Figure", "図", "그림"), "table": ("表", "Table", "表", "표"),
+    "methods": ("方法（可直接用於報告）", "Methods (ready to use in a report)", "方法（そのまま報告書に使えます）", "방법 (보고서에 바로 사용 가능)"),
+    "limitations": ("限制與注意事項", "Limitations and caveats", "限界と注意点", "한계와 주의 사항"),
+    "appendix_params": ("附錄 A　完整參數表", "Appendix A  Complete parameter table", "付録 A　全パラメータ表", "부록 A  전체 매개변수 표"),
+    "appendix_log": ("附錄 B　決策紀錄", "Appendix B  Decision log", "付録 B　判断の記録", "부록 B  결정 기록"),
+    "appendix_cfg": ("附錄 C　設定檔", "Appendix C  Configuration file", "付録 C　設定ファイル", "부록 C  설정 파일"),
+    "zh_note": ("", "Some automatic explanations and the decision log were recorded in Traditional Chinese and are shown as recorded.",
+                "自動説明の一部と判断の記録は繁体字中国語で記録されており、そのまま表示しています。",
+                "일부 자동 설명과 결정 기록은 번체 중국어로 기록되어 있어 그대로 표시합니다."),
+    "not_run": ("此步驟未執行。", "This step was not run.", "このステップは実行されていません。", "이 단계는 실행되지 않았습니다."),
+    "how_to_read": ("如何判讀", "How to read", "読み方", "읽는 법"),
+    "in_project": ("本專案的結果", "In this project", "このプロジェクトの結果", "이 프로젝트의 결과"),
+    "synthesis_ok": ("數據支持以下結論。", "The data support the following.", "データから次のことが言えます。", "데이터로 다음을 말할 수 있습니다."),
+    "synthesis_caution": ("以下結果要保守看待。", "Read the following results with caution.", "次の結果は慎重に解釈してください。",
+                          "다음 결과는 신중하게 해석해야 합니다."),
 }
 
 SECTION = {
     "design": {
-        "title": ("研究設計", "Study design"),
-        "what": ("定義研究的標靶蛋白、配體與要回答的問題，並決定模擬哪些系統。",
-                 "Defines the target protein, the ligands and the question, and which systems are simulated."),
-        "meaning": ("同時模擬「蛋白單獨」與「蛋白與配體」可以把配體造成的變化與蛋白本身的熱擾動分開；沒有對照組，RMSD 或柔性的變化無法歸因於配體。",
-                    "Simulating the protein alone alongside the complex separates the ligand's effect from the protein's own "
-                    "thermal motion; without that reference, changes in RMSD or flexibility cannot be attributed to the ligand."),
+        "title": ("研究設計", "Study design", "研究デザイン", "연구 설계"),
+        "what": ("定義標靶蛋白、配體與要回答的問題，並決定模擬哪些系統。",
+                 "Defines the target protein, the ligands and the question, and which systems are simulated.",
+                 "標的タンパク質、リガンド、答えたい問いを決め、どの系をシミュレーションするかを決めます。",
+                 "표적 단백질, 리간드, 답하려는 질문을 정하고 어떤 시스템을 시뮬레이션할지 결정합니다."),
+        "meaning": ("同時模擬蛋白單獨與蛋白加配體，才能把配體造成的變化和蛋白本身的熱擾動分開。沒有這個對照，RMSD 或柔性的變化無法歸因於配體。",
+                    "Simulating the protein alone next to the complex separates the ligand's effect from the protein's own "
+                    "thermal motion. Without that reference, a change in RMSD or flexibility cannot be attributed to the ligand.",
+                    "タンパク質単独とリガンド複合体を両方シミュレーションすると、リガンドによる変化とタンパク質自身の熱ゆらぎを区別できます。"
+                    "この対照がなければ、RMSD や柔軟性の変化をリガンドの効果とは言えません。",
+                    "단백질 단독과 리간드 복합체를 함께 시뮬레이션해야 리간드에 의한 변화와 단백질 자체의 열 요동을 구분할 수 있습니다. "
+                    "이 대조가 없으면 RMSD나 유연성의 변화를 리간드 때문이라고 할 수 없습니다."),
     },
     "structure": {
-        "title": ("受體結構準備與可信度", "Receptor preparation and structure validity"),
-        "what": ("下載或讀入受體結構，移除結晶添加物與水，補齊缺失原子，依 pH 加氫，並檢查解析度、物種與口袋完整性。",
-                 "The receptor is fetched or read, crystallisation additives and water are removed, missing atoms are added, "
-                 "hydrogens are placed for the chosen pH, and resolution, species and pocket completeness are checked."),
-        "meaning": ("所有後續結果都建立在這個結構上：錯的 PDB 編號、缺失的口袋殘基或錯誤的質子化狀態，會讓對接與模擬給出看似合理但沒有意義的數字。",
-                    "Every later result rests on this structure: a wrong identifier, missing pocket residues or a wrong "
-                    "protonation state produce numbers that look reasonable but mean nothing."),
+        "title": ("受體結構準備與可信度", "Receptor preparation and structure validity", "受容体構造の準備と信頼性", "수용체 구조 준비와 신뢰성"),
+        "what": ("下載或讀入受體結構，移除結晶添加物與水，補齊缺失原子，依 pH 加氫，再檢查解析度、物種與口袋是否完整。",
+                 "The receptor is fetched or read in. Crystallisation additives and water are removed, missing atoms are added "
+                 "and hydrogens are placed for the chosen pH. Then resolution, species and pocket completeness are checked.",
+                 "受容体構造を取得または読み込み、結晶化添加物と水を除き、欠けた原子を補い、pH に合わせて水素を付けます。"
+                 "そのうえで分解能、生物種、ポケットが欠けていないかを確認します。",
+                 "수용체 구조를 내려받거나 읽어 들이고 결정화 첨가물과 물을 제거한 뒤 빠진 원자를 채우고 pH에 맞춰 수소를 붙입니다. "
+                 "그다음 분해능, 생물종, 포켓이 온전한지 확인합니다."),
+        "meaning": ("後面所有結果都建立在這個結構上。PDB 編號錯了、口袋殘基缺失或質子化狀態不對，對接與模擬都會給出看起來合理、其實沒有意義的數字。",
+                    "Every later result rests on this structure. A wrong PDB identifier, missing pocket residues or a wrong "
+                    "protonation state give docking and simulation numbers that look reasonable but mean nothing.",
+                    "以降の結果はすべてこの構造に基づきます。PDB ID の誤り、ポケット残基の欠落、プロトン化状態の誤りがあると、"
+                    "ドッキングもシミュレーションももっともらしいだけで意味のない数値を出します。",
+                    "이후의 모든 결과는 이 구조를 바탕으로 합니다. PDB ID가 틀리거나 포켓 잔기가 빠졌거나 양성자화 상태가 잘못되면 "
+                    "도킹과 시뮬레이션 모두 그럴듯하지만 의미 없는 숫자를 냅니다."),
     },
     "screen": {
-        "title": ("高通量前期篩選", "High-throughput pre-screening"),
-        "what": ("以較低的搜尋強度快速對接化合物庫中的每個分子，依分數與配體效率排名，由使用者選出進入正式對接的化合物。",
-                 "Every compound in the library is docked quickly at reduced search effort and ranked by score and ligand "
-                 "efficiency; the user selects which compounds go on to full docking."),
-        "meaning": ("篩選分數只用來剔除明顯不合的化合物，不是結合自由能；分數差距小於 1 kcal mol⁻¹ 時名次沒有統計意義。",
-                    "Screening scores only remove clear misfits and are not binding free energies; differences below "
-                    "1 kcal mol⁻¹ carry no statistical meaning."),
+        "title": ("高通量前期篩選", "High-throughput pre-screening", "ハイスループット事前スクリーニング", "고처리량 사전 스크리닝"),
+        "what": ("用較低的搜尋強度快速對接化合物庫裡的每個分子，依分數與配體效率排名，再由使用者選出要進入正式對接的化合物。",
+                 "Every compound in the library is docked quickly at a lower exhaustiveness and ranked by score and ligand "
+                 "efficiency. The user then picks the compounds that go on to full docking.",
+                 "化合物ライブラリの各分子を低い探索の徹底度（exhaustiveness）で素早くドッキングし、スコアとリガンド効率で順位を付けます。"
+                 "本ドッキングに進める化合物はユーザーが選びます。",
+                 "화합물 라이브러리의 각 분자를 낮은 탐색 강도(exhaustiveness)로 빠르게 도킹하고 점수와 리간드 효율로 순위를 매깁니다. "
+                 "본 도킹으로 넘길 화합물은 사용자가 고릅니다."),
+        "meaning": ("篩選分數只用來剔除明顯不合適的化合物，它不等於結合自由能。分數差距小於 1 kcal mol⁻¹ 時，名次沒有統計意義。",
+                    "Screening scores only remove clear misfits. They are not binding free energies, and a difference below "
+                    "1 kcal mol⁻¹ has no statistical meaning.",
+                    "スクリーニングのスコアは明らかに合わない化合物を除くためのもので、結合自由エネルギーではありません。"
+                    "スコア差が 1 kcal mol⁻¹ 未満なら、順位に統計的な意味はありません。",
+                    "스크리닝 점수는 명백히 맞지 않는 화합물을 걸러내는 용도이며 결합 자유 에너지가 아닙니다. "
+                    "점수 차이가 1 kcal mol⁻¹ 미만이면 순위에 통계적 의미가 없습니다."),
     },
     "docking": {
-        "title": ("分子對接與姿勢選擇", "Molecular docking and pose selection"),
-        "what": ("在結合位搜尋區內以 AutoDock Vina 產生配體姿勢，依分數、叢集大小與接觸殘基選出進入模擬的姿勢。",
-                 "AutoDock Vina generates ligand poses inside the search box; the pose taken into simulation is chosen from "
-                 "score, cluster size and contact residues."),
-        "meaning": ("對接提供合理的起始結合模式，但分數是經驗評分函數，誤差約 1 到 2 kcal mol⁻¹，也不含蛋白柔性與溶劑效應；結合是否穩定要由分子動力學判斷。",
-                    "Docking provides a plausible starting binding mode, but the score is an empirical function with an "
-                    "error of about 1–2 kcal mol⁻¹ and no protein flexibility or solvent; whether binding is stable is "
-                    "decided by molecular dynamics."),
+        "title": ("分子對接與姿勢選擇", "Molecular docking and pose selection", "分子ドッキングとポーズの選択", "분자 도킹과 포즈 선택"),
+        "what": ("在結合位的搜尋區內用 AutoDock Vina 產生配體姿勢，再依分數、叢集大小與接觸殘基選出要進入模擬的姿勢。",
+                 "AutoDock Vina generates ligand poses inside the search box. The pose taken into simulation is chosen from "
+                 "score, cluster size and contact residues.",
+                 "結合部位の探索ボックス内で AutoDock Vina によりリガンドのポーズを生成し、スコア、クラスターの大きさ、接触残基からシミュレーションに使うポーズを選びます。",
+                 "결합 부위의 탐색 상자 안에서 AutoDock Vina로 리간드 포즈를 만들고 점수, 클러스터 크기, 접촉 잔기를 보고 시뮬레이션에 쓸 포즈를 고릅니다."),
+        "meaning": ("對接給出合理的起始結合模式。它的分數是經驗評分函數，誤差約 1 到 2 kcal mol⁻¹，也沒有考慮蛋白柔性與溶劑。結合穩不穩定要看分子動力學。",
+                    "Docking gives a plausible starting binding mode. The score comes from an empirical function with an error "
+                    "of about 1 to 2 kcal mol⁻¹ and leaves out protein flexibility and solvent. Molecular dynamics decides "
+                    "whether the binding is stable.",
+                    "ドッキングはもっともらしい初期の結合様式を与えます。スコアは経験的な関数によるもので、誤差は約 1〜2 kcal mol⁻¹ あり、"
+                    "タンパク質の柔軟性と溶媒は考慮されていません。結合が安定かどうかは分子動力学で判断します。",
+                    "도킹은 그럴듯한 초기 결합 모드를 줍니다. 점수는 경험적 함수에서 나오며 오차가 약 1~2 kcal mol⁻¹이고 단백질 유연성과 용매를 고려하지 않습니다. "
+                    "결합이 안정한지는 분자동역학으로 판단합니다."),
     },
     "peptide": {
-        "title": ("胜肽配體的科學限制", "Scientific limitations of the peptide ligand"),
-        "what": ("對胜肽配體檢查兩件事：作用標靶在細胞內時胜肽能否穿膜，以及選用的姿勢是否真正進入結合位。",
-                 "Two checks for a peptide ligand: whether it can cross the cell membrane when the target is intracellular, "
-                 "and whether the chosen pose actually enters the binding site."),
-        "meaning": ("胜肽大且柔軟，對接幾乎總能找到貼在蛋白表面的姿勢；若胜肽到不了標靶或沒有進入活性位，結合計算的生物學解釋就不成立。"
-                    "這些是提醒而非阻擋，因為研究目的可能本來就是表面結合或體外試驗。",
-                    "Peptides are large and flexible, and docking nearly always finds a pose on the protein surface; if the "
-                    "peptide cannot reach the target or does not enter the site, the biological reading of the binding "
-                    "calculation fails. These are notices rather than blocks, because surface binding or an in vitro assay "
-                    "may be the actual aim."),
+        "title": ("胜肽配體的科學限制", "Scientific limitations of the peptide ligand", "ペプチドリガンドの科学的な限界", "펩타이드 리간드의 과학적 한계"),
+        "what": ("胜肽配體要檢查兩件事。標靶在細胞內時，胜肽能不能穿膜。選用的姿勢有沒有真的進入結合位。",
+                 "A peptide ligand gets two checks. If the target is intracellular, can the peptide cross the cell membrane? "
+                 "And does the chosen pose actually enter the binding site?",
+                 "ペプチドリガンドでは 2 点を確認します。標的が細胞内にある場合にペプチドが膜を通過できるか、そして選んだポーズが本当に結合部位に入っているかです。",
+                 "펩타이드 리간드는 두 가지를 확인합니다. 표적이 세포 안에 있을 때 펩타이드가 막을 통과할 수 있는지, 그리고 고른 포즈가 실제로 결합 부위에 들어가 있는지입니다."),
+        "meaning": ("胜肽大又柔軟，對接幾乎總能找到貼在蛋白表面的姿勢。如果胜肽到不了標靶，或沒有進入活性位，結合計算在生物學上的解釋就站不住。"
+                    "這兩項只提醒、不擋流程，因為研究目的可能本來就是表面結合或體外試驗。",
+                    "Peptides are large and flexible, and docking nearly always finds a pose on the protein surface. If the "
+                    "peptide cannot reach the target or does not enter the site, the binding calculation has no biological "
+                    "reading. Both checks only warn and never stop the workflow, because surface binding or an in vitro "
+                    "assay may be the actual aim.",
+                    "ペプチドは大きく柔らかいため、ドッキングではほぼ必ずタンパク質表面に貼り付いたポーズが見つかります。"
+                    "ペプチドが標的に届かない、または活性部位に入らない場合、結合計算の生物学的な解釈は成り立ちません。"
+                    "研究の目的が表面での結合や in vitro 試験である場合もあるため、この 2 項目は注意を出すだけでワークフローは止めません。",
+                    "펩타이드는 크고 유연해서 도킹하면 거의 항상 단백질 표면에 붙은 포즈를 찾습니다. 펩타이드가 표적에 닿지 못하거나 활성 부위에 들어가지 않으면 "
+                    "결합 계산의 생물학적 해석이 성립하지 않습니다. 연구 목적이 표면 결합이나 in vitro 시험일 수도 있으므로 이 두 항목은 알림만 하고 워크플로를 멈추지 않습니다."),
     },
     "md": {
-        "title": ("分子動力學", "Molecular dynamics"),
-        "what": ("把蛋白與配體放入水盒並加鹽，經能量最小化、升溫、定壓平衡後進行正式模擬，再分析主鏈 RMSD、殘基柔性（RMSF）、配體在口袋內的位移與接觸頻率。",
+        "title": ("分子動力學", "Molecular dynamics", "分子動力学", "분자동역학"),
+        "what": ("把蛋白與配體放進水盒並加鹽，依序做能量最小化、升溫與定壓平衡，再跑正式模擬。之後分析主鏈 RMSD、殘基柔性（RMSF）、配體在口袋內的位移與接觸頻率。",
                  "Protein and ligand are placed in a water box with salt, minimised, heated and equilibrated at constant "
-                 "pressure, then simulated in production; the analysis covers backbone RMSD, residue flexibility (RMSF), "
-                 "ligand displacement in the pocket and contact frequencies."),
-        "meaning": ("模擬檢驗對接姿勢在有溫度、溶劑與蛋白柔性時是否站得住：配體離開口袋代表對接分數不能作為結合證據；"
-                    "蛋白單獨與複合物的柔性差異指出受配體影響的區域。",
-                    "Simulation tests whether the docked pose holds with temperature, solvent and protein flexibility: a "
-                    "ligand that leaves the pocket means the docking score is not evidence of binding, and the difference in "
-                    "flexibility between protein alone and complex points to the regions the ligand affects."),
+                 "pressure, and then run in production. The analysis covers backbone RMSD, residue flexibility (RMSF), "
+                 "ligand displacement in the pocket and contact frequencies.",
+                 "タンパク質とリガンドを水ボックスに入れて塩を加え、エネルギー最小化、昇温、定圧平衡化を行ってから本計算を実行します。"
+                 "その後、主鎖 RMSD、残基の柔軟性（RMSF）、ポケット内でのリガンドの変位、接触頻度を解析します。",
+                 "단백질과 리간드를 물 상자에 넣고 염을 더한 뒤 에너지 최소화, 승온, 정압 평형화를 거쳐 본 시뮬레이션을 실행합니다. "
+                 "이후 주사슬 RMSD, 잔기 유연성(RMSF), 포켓 안에서의 리간드 변위와 접촉 빈도를 분석합니다."),
+        "meaning": ("模擬檢驗對接姿勢在有溫度、溶劑與蛋白柔性時站不站得住。配體離開口袋，代表對接分數不能當作結合的證據。"
+                    "蛋白單獨與複合物的柔性差異，指出受配體影響的區域。",
+                    "Simulation tests whether the docked pose holds once temperature, solvent and protein flexibility are "
+                    "present. A ligand that leaves the pocket means the docking score is not evidence of binding. The "
+                    "difference in flexibility between protein alone and complex points to the regions the ligand affects.",
+                    "シミュレーションでは、温度、溶媒、タンパク質の柔軟性がある条件でドッキングポーズが保たれるかを確かめます。"
+                    "リガンドがポケットから離れた場合、ドッキングスコアは結合の証拠になりません。"
+                    "タンパク質単独と複合体の柔軟性の差から、リガンドの影響を受ける領域がわかります。",
+                    "시뮬레이션은 온도, 용매, 단백질 유연성이 있는 조건에서 도킹 포즈가 유지되는지 확인합니다. "
+                    "리간드가 포켓을 떠나면 도킹 점수는 결합의 증거가 될 수 없습니다. "
+                    "단백질 단독과 복합체의 유연성 차이는 리간드의 영향을 받는 영역을 보여 줍니다."),
     },
     "binding": {
-        "title": ("結合自由能（SMD 與傘狀採樣）", "Binding free energy (SMD and umbrella sampling)"),
-        "what": ("以導向分子動力學（SMD）把配體沿解離路徑拉出口袋，取路徑上的構形作為傘狀採樣窗口，以 MBAR 合併得到自由能剖面（PMF），再加體積修正得到標準結合自由能。",
-                 "Steered molecular dynamics (SMD) pulls the ligand out along a dissociation path; configurations along the "
-                 "path start umbrella-sampling windows, which MBAR combines into a free-energy profile (PMF); a volume "
-                 "correction gives the standard binding free energy."),
-        "meaning": ("PMF 的井深反映配體離開口袋需要的自由能，比對接分數更接近實驗量；但它依賴取樣是否充分（窗口重疊、前後半段一致），未收斂時只適合定性比較。",
-                    "The depth of the PMF is the free energy needed to take the ligand out of the pocket and is closer to an "
-                    "experimental quantity than a docking score; it depends on sufficient sampling (window overlap, agreement "
-                    "between halves) and is only qualitative when not converged."),
+        "title": ("結合自由能（SMD 與傘狀採樣）", "Binding free energy (SMD and umbrella sampling)",
+                  "結合自由エネルギー（SMD とアンブレラサンプリング）", "결합 자유 에너지 (SMD와 엄브렐라 샘플링)"),
+        "what": ("用導向分子動力學（SMD）把配體沿解離路徑拉出口袋，取路徑上的構形作為傘狀採樣的窗口，以 MBAR 合併成自由能剖面（PMF），最後加上體積修正得到標準結合自由能。",
+                 "Steered molecular dynamics (SMD) pulls the ligand out of the pocket along a dissociation path. "
+                 "Configurations along the path start the umbrella-sampling windows, and MBAR combines them into a "
+                 "free-energy profile (PMF). A volume correction then gives the standard binding free energy.",
+                 "ステアード分子動力学（SMD）でリガンドを解離経路に沿ってポケットから引き離し、経路上の構造をアンブレラサンプリングのウィンドウの出発点にします。"
+                 "MBAR でまとめて自由エネルギープロファイル（PMF）を求め、体積補正を加えて標準結合自由エネルギーを得ます。",
+                 "조향 분자동역학(SMD)으로 리간드를 해리 경로를 따라 포켓 밖으로 당기고, 경로 위의 구조를 엄브렐라 샘플링 윈도우의 시작점으로 씁니다. "
+                 "MBAR로 합쳐 자유 에너지 프로파일(PMF)을 구하고 부피 보정을 더해 표준 결합 자유 에너지를 얻습니다."),
+        "meaning": ("PMF 的井深是把配體帶離口袋所需的自由能，比對接分數更接近實驗量。它取決於取樣夠不夠，也就是窗口有沒有重疊、前後半段是否一致。沒有收斂時只能做定性比較。",
+                    "The depth of the PMF is the free energy needed to take the ligand out of the pocket, and it is closer to "
+                    "an experimental quantity than a docking score. It depends on enough sampling, meaning overlapping "
+                    "windows and agreement between the two halves. Without convergence it only supports a qualitative comparison.",
+                    "PMF の井戸の深さはリガンドをポケットから取り出すのに必要な自由エネルギーで、ドッキングスコアより実験値に近い量です。"
+                    "ただしサンプリングが十分であること、つまりウィンドウが重なり、前半と後半が一致していることが前提です。収束していなければ定性的な比較にしか使えません。",
+                    "PMF 우물의 깊이는 리간드를 포켓에서 빼내는 데 필요한 자유 에너지이며 도킹 점수보다 실험값에 가까운 양입니다. "
+                    "다만 샘플링이 충분해야 합니다. 즉 윈도우가 서로 겹치고 앞뒤 절반의 결과가 일치해야 합니다. 수렴하지 않았다면 정성적 비교에만 쓸 수 있습니다."),
     },
 }
 
@@ -187,12 +253,12 @@ class Doc:
         self.nf += 1
         self.collected += findings
         f = FIG[kind]
-        title = self.t(f["title"]) + (f"：{subject}" if subject and self.lang == "zh" else (f": {subject}" if subject else ""))
+        title = self.t(f["title"]) + (colon(self.lang) + subject if subject else "")
         items = "".join(f"<li class={x['level']}>{_esc(self.t(x['text']))}</li>" for x in findings)
         self.index.append({"n": self.nf, "kind": kind, "section": self.section, "subject": subject, "path": str(path),
                            "title": self.t(f["title"]), "caption": self.t(f["caption"]), "read": self.t(f["read"]),
                            "findings": [{"level": x["level"], "text": self.t(x["text"])} for x in findings]})
-        sep = "。" if self.lang == "zh" else ". "
+        sep = stop(self.lang)
         return (f"<div class=figblock><figure>{img}<div class=caption><b>{self.t(H['figure'])} {self.nf}.</b> {_esc(title)}{sep}"
                 f"{_esc(self.t(f['caption']))}</div></figure><div class=figtext>"
                 f"<p><b>{self.t(H['how_to_read'])}</b>　{_esc(self.t(f['read']))}</p>"
@@ -313,22 +379,26 @@ def _design(doc: Doc, wf) -> str:
     L, cfg = doc.lang, wf.cfg
     rec = cfg.get("receptor") or {}
     ligs = cfg.get("ligands") or []
-    rows = [[_esc(l.get("name")), _esc(tx(("胜肽", "peptide") if l.get("sequence") else ("小分子", "small molecule"), L)),
+    rows = [[_esc(l.get("name")), _esc(tx(("胜肽", "peptide", "ペプチド", "펩타이드") if l.get("sequence") else
+                                          ("小分子", "small molecule", "低分子", "저분자"), L)),
              f"<code>{_esc(l.get('sequence') or l.get('smiles') or l.get('sdf') or '—')}</code>"] for l in ligs]
     systems = (cfg.get("md") or {}).get("systems") or []
-    sys_txt = {"apo": ("蛋白單獨", "protein alone"), "docked_single": ("每個配體各自與蛋白", "each ligand with the protein"),
-               "docked_multi": ("所有配體同時與蛋白", "all ligands together with the protein")}
+    sys_txt = {"apo": ("蛋白單獨", "protein alone", "タンパク質単独", "단백질 단독"),
+               "docked_single": ("每個配體各自與蛋白", "each ligand with the protein", "各リガンドとタンパク質", "각 리간드와 단백질"),
+               "docked_multi": ("所有配體同時與蛋白", "all ligands together with the protein", "全リガンドを同時にタンパク質と", "모든 리간드를 함께 단백질과")}
     goal = cfg.get("goal")
-    p = (f"<p class=lead>{_esc(tx(('受體', 'Receptor'), L))}: <b>{_esc(rec.get('pdb_id') or Path(str(rec.get('file', '—'))).name)}</b>"
-         f"{(' · ' + _esc(tx(('排除鏈', 'excluded chains'), L)) + ' ' + _esc(', '.join(rec.get('exclude_chains')))) if rec.get('exclude_chains') else ''}"
-         f" · pH {cfg.get('ph', 7.4)} · {_esc(tx(('模擬系統', 'Systems'), L))}: "
+    c = colon(L)
+    p = (f"<p class=lead>{_esc(tx(('受體', 'Receptor', '受容体', '수용체'), L))}{c}<b>{_esc(rec.get('pdb_id') or Path(str(rec.get('file', '—'))).name)}</b>"
+         f"{(' · ' + _esc(tx(('排除鏈', 'excluded chains', '除外した鎖', '제외한 사슬'), L)) + ' ' + _esc(', '.join(rec.get('exclude_chains')))) if rec.get('exclude_chains') else ''}"
+         f" · pH {cfg.get('ph', 7.4)} · {_esc(tx(('模擬系統', 'Systems', 'シミュレーションする系', '시뮬레이션 시스템'), L))}{c}"
          f"{_esc(', '.join(tx(sys_txt.get(s, (s, s)), L) for s in systems))}"
-         + (f" · {_esc(tx(('研究目標', 'Goal'), L))}: {_esc(tx(advisor.GOALS[goal], L))}" if goal in advisor.GOALS else "") + "</p>")
+         + (f" · {_esc(tx(('研究目標', 'Goal', '研究の目的', '연구 목표'), L))}{c}{_esc(tx(advisor.GOALS[goal], L))}" if goal in advisor.GOALS else "") + "</p>")
     val = cfg.get("validation")
     if val:
-        p += f"<p class=muted>{_esc(tx(('依據文獻', 'Based on'), L))}: {_esc((val.get('paper') or {}).get('citation', ''))}</p>"
-    tab = doc.table([tx(("名稱", "Name"), L), tx(("種類", "Type"), L), tx(("結構（SMILES 或序列）", "Structure (SMILES or sequence)"), L)],
-                    rows, ("研究的配體", "Ligands studied")) if rows else ""
+        p += f"<p class=muted>{_esc(tx(('依據文獻', 'Based on', '参照した文献', '참고 문헌'), L))}{c}{_esc((val.get('paper') or {}).get('citation', ''))}</p>"
+    tab = doc.table([tx(("名稱", "Name", "名前", "이름"), L), tx(("種類", "Type", "種類", "종류"), L),
+                     tx(("結構（SMILES 或序列）", "Structure (SMILES or sequence)", "構造（SMILES または配列）", "구조 (SMILES 또는 서열)"), L)],
+                    rows, ("研究的配體", "Ligands studied", "対象のリガンド", "연구한 리간드")) if rows else ""
     return _section(doc, doc.next(), "design", "", p + tab, [])
 
 
@@ -337,17 +407,20 @@ def _structure(doc: Doc, wf) -> str:
     g = load_json(wf.dir / "structure_gates.json", {})
     gates = g.get("gates") or []
     params = doc.table([tx(H["parameter"], L), tx(H["value"], L)],
-                       [[tx(("pH", "pH"), L), str(wf.cfg.get("ph", 7.4))],
-                        [tx(("保留的輔因子與金屬", "Cofactors and metals kept"), L), _esc(", ".join(wf.cfg.get("keep_hetero") or []) or "—")]],
-                       ("受體準備參數", "Receptor preparation parameters"))
+                       [["pH", str(wf.cfg.get("ph", 7.4))],
+                        [tx(("保留的輔因子與金屬", "Cofactors and metals kept", "残した補因子と金属", "남긴 보조인자와 금속"), L),
+                         _esc(", ".join(wf.cfg.get("keep_hetero") or []) or "—")]],
+                       ("受體準備參數", "Receptor preparation parameters", "受容体準備のパラメータ", "수용체 준비 매개변수"))
     rows = [[_esc(x.get("name")), _esc(x.get("status")), _esc(x.get("explanation"))] for x in gates]
     prot = (wf.state()["steps"].get("receptor_docking") or {}).get("protonation") or {}
-    res = doc.table([tx(("檢查項目", "Check"), L), tx(("結果", "Result"), L), tx(("說明", "Explanation"), L)], rows,
-                    ("結構可信度檢查", "Structure validity checks")) if rows else ""
+    res = doc.table([tx(("檢查項目", "Check", "確認項目", "확인 항목"), L), tx(("結果", "Result", "結果", "결과"), L),
+                     tx(("說明", "Explanation", "説明", "설명"), L)], rows,
+                    ("結構可信度檢查", "Structure validity checks", "構造の信頼性チェック", "구조 신뢰성 확인")) if rows else ""
     if prot.get("pocket_flags"):
-        res += doc.table(["Residue", "pKa", tx(("注意", "Flag"), L)],
+        res += doc.table([tx(("殘基", "Residue", "残基", "잔기"), L), "pKa", tx(("注意", "Flag", "注意点", "주의"), L)],
                          [[_esc(f["residue"]), f"{f['pka']:.1f}", _esc("；".join(f["flags"]))] for f in prot["pocket_flags"]],
-                         ("口袋殘基的 pKa 審查（PROPKA；未自動更改）", "Pocket residue pKa review (PROPKA; not changed automatically)"), {1})
+                         ("口袋殘基的 pKa 審查（PROPKA，未自動更改）", "Pocket residue pKa review (PROPKA, not changed automatically)",
+                          "ポケット残基の pKa 確認（PROPKA、自動では変更しません）", "포켓 잔기의 pKa 검토 (PROPKA, 자동으로 바꾸지 않음)"), {1})
     return _section(doc, doc.next(), "structure", params, res, I.structure(gates))
 
 
@@ -365,10 +438,12 @@ def _screen(doc: Doc, wf) -> str:
     rows = rank_screen(res, top_n=int(scfg.get("top_n", 20))) if res else []
     sel = list(scfg.get("select") or [])
     params = doc.table([tx(H["parameter"], L), tx(H["value"], L)],
-                       [[tx(("搜尋強度", "Exhaustiveness"), L), str((res.get("params") or {}).get("exhaustiveness", scfg.get("exhaustiveness", 8)))],
-                        [tx(("每個化合物的姿勢數", "Poses per compound"), L), str((res.get("params") or {}).get("n_poses", scfg.get("n_poses", 3)))],
-                        [tx(("化合物庫", "Library"), L), _esc(Path(str(scfg.get("library", "—"))).name)]],
-                       ("篩選參數", "Screening parameters"))
+                       [[tx(("搜尋強度", "Exhaustiveness", "探索の徹底度（exhaustiveness）", "탐색 강도(exhaustiveness)"), L),
+                         str((res.get("params") or {}).get("exhaustiveness", scfg.get("exhaustiveness", 8)))],
+                        [tx(("每個化合物的姿勢數", "Poses per compound", "化合物あたりのポーズ数", "화합물당 포즈 수"), L),
+                         str((res.get("params") or {}).get("n_poses", scfg.get("n_poses", 3)))],
+                        [tx(("化合物庫", "Library", "化合物ライブラリ", "화합물 라이브러리"), L), _esc(Path(str(scfg.get("library", "—"))).name)]],
+                       ("篩選參數", "Screening parameters", "スクリーニングのパラメータ", "스크리닝 매개변수"))
     out = ""
     start = len(doc.collected)
     if rows:
@@ -377,16 +452,20 @@ def _screen(doc: Doc, wf) -> str:
                                 [x for x in sc_f if "molecular size" not in x["text"][1]])
         out += _screen_extra(doc, d, rows, man, [x for x in sc_f if "molecular size" in x["text"][1]])
     if rows:
-        out += doc.table([tx(("名次", "Rank"), L), tx(("化合物", "Compound"), L), tx(("分數（kcal mol⁻¹）", "Score (kcal mol⁻¹)"), L), tx(("與最佳差距", "Δ to best"), L),
-                          tx(("重原子", "Heavy atoms"), L), tx(("配體效率", "Ligand efficiency"), L), tx(("選入", "Selected"), L)],
+        out += doc.table([tx(("名次", "Rank", "順位", "순위"), L), tx(("化合物", "Compound", "化合物", "화합물"), L),
+                          tx(("分數（kcal mol⁻¹）", "Score (kcal mol⁻¹)", "スコア（kcal mol⁻¹）", "점수 (kcal mol⁻¹)"), L),
+                          tx(("與最佳差距", "Δ to best", "最良との差", "최고와의 차이"), L),
+                          tx(("重原子", "Heavy atoms", "重原子数", "중원자 수"), L), tx(("配體效率", "Ligand efficiency", "リガンド効率", "리간드 효율"), L),
+                          tx(("選入", "Selected", "選択", "선택"), L)],
                          [[str(r["rank"]), _esc(r["name"]), f"{r['score']:.2f}", f"{r['delta_to_best']:+.2f}", _fmt(r["heavy_atoms"], 0),
                            _fmt(r["ligand_efficiency"], 3), "✔" if r["name"] in sel else ""] for r in rows[:30]],
-                         ("篩選排名（前 30 名）", "Screening ranking (top 30)"), {0, 2, 3, 4, 5})
+                         ("篩選排名（前 30 名）", "Screening ranking (top 30)", "スクリーニング順位（上位 30）", "스크리닝 순위 (상위 30)"), {0, 2, 3, 4, 5})
     bad = failed_rows(res, man) if res else []
     if bad:
-        out += doc.table([tx(("化合物", "Compound"), L), tx(("階段", "Stage"), L), tx(("原因", "Reason"), L)],
+        out += doc.table([tx(("化合物", "Compound", "化合物", "화합물"), L), tx(("階段", "Stage", "段階", "단계"), L),
+                          tx(("原因", "Reason", "原因", "원인"), L)],
                          [[_esc(b["name"]), _esc(b["stage"]), _esc(b.get("error", ""))] for b in bad[:60]],
-                         ("未納入篩選的化合物", "Compounds not screened"))
+                         ("沒有納入篩選的化合物", "Compounds not screened", "スクリーニングに含まれなかった化合物", "스크리닝에서 빠진 화합물"))
     extra = I.screen(rows, len(bad), sel)[1:]          # failed count and user selection; the ranking itself is in the figure
     return _section(doc, doc.next(), "screen", params, out, doc.collected[start:] + extra)
 
@@ -400,12 +479,20 @@ def _screen_extra(doc: Doc, d: dict, rows: list[dict], man: dict, size_findings:
     if hist and len(sc) >= 5:
         thr = float(sc.mean() - sc.std())
         tail = [r["name"] for r in rows if r["score"] <= thr]
-        out += doc.figure_block(hist, "screen_hist", [FT.S("note", f"平均 {sc.mean():.2f} ± {sc.std():.2f} kcal mol⁻¹；{len(tail)} 個化合物比平均好一個標準差以上（{'、'.join(tail[:6])}）。",
-                                                            f"Mean {sc.mean():.2f} ± {sc.std():.2f} kcal mol⁻¹; {len(tail)} compounds score more than one standard deviation better than the mean ({', '.join(tail[:6])}).")])
+        m, s, n = f"{sc.mean():.2f}", f"{sc.std():.2f}", len(tail)
+        out += doc.figure_block(hist, "screen_hist", [FT.S(
+            "note",
+            f"平均 {m} ± {s} kcal mol⁻¹。有 {n} 個化合物比平均好一個標準差以上（{'、'.join(tail[:6])}）。",
+            f"Mean {m} ± {s} kcal mol⁻¹. {n} compounds score more than one standard deviation better than the mean ({', '.join(tail[:6])}).",
+            f"平均は {m} ± {s} kcal mol⁻¹ です。平均より 1 標準偏差以上よいスコアの化合物は {n} 個です（{'、'.join(tail[:6])}）。",
+            f"평균은 {m} ± {s} kcal mol⁻¹입니다. 평균보다 1 표준편차 이상 좋은 화합물은 {n}개입니다 ({', '.join(tail[:6])}).")])
     scat = ((d.get("plots") or {}).get("scatter") or {}).get("png")
     if scat:
-        out += doc.figure_block(scat, "screen_scatter", size_findings or [FT.S("note", "分數與分子大小沒有強相關，排名不是由分子大小主導。",
-                                                                                 "Score and size are not strongly correlated; the ranking is not driven by molecular size.")])
+        out += doc.figure_block(scat, "screen_scatter", size_findings or [FT.S(
+            "note", "分數與分子大小沒有強相關，排名不是由分子大小決定的。",
+            "Score and size are not strongly correlated, so molecular size does not drive the ranking.",
+            "スコアと分子の大きさに強い相関はなく、順位は分子の大きさで決まっていません。",
+            "점수와 분자 크기 사이에 강한 상관이 없으므로 순위는 분자 크기로 정해지지 않았습니다.")])
     entries = (man or {}).get("entries") or {}
     props, bits, names, scores = [], [], [], []
     for r in rows:
@@ -461,29 +548,33 @@ def _geometry_table(doc: Doc, rec: dict) -> str:
     L = doc.lang
     if not rec or not rec.get("per_ligand"):
         return ""
+    excluded = ("排除", "excluded", "除外", "제외")
     rows = []
     for n, v in rec["per_ligand"].items():
         if n in (rec.get("adjusted") or {}):
             a = rec["adjusted"][n]
-            act = tx((f"剛體微調 {a['rmsd']} Å", f"nudged {a['rmsd']} Å"), L)
+            act = tx((f"剛體微調 {a['rmsd']} Å", f"nudged {a['rmsd']} Å", f"剛体として {a['rmsd']} Å 微調整", f"강체 미세 조정 {a['rmsd']} Å"), L)
         elif n in (rec.get("excluded") or []):
-            act = tx(("排除", "excluded"), L)
+            act = tx(excluded, L)
         elif rec.get("culprit") == n and rec.get("status") == "DEFERRED":
-            act = tx(("交給建模層的軟核鬆弛", "handed to the soft-core relaxation at build time"), L)
+            act = tx(("交給建模時的軟核鬆弛處理", "handed to the soft-core relaxation at build time",
+                      "構築時のソフトコア緩和に任せる", "구축 단계의 소프트코어 완화로 넘김"), L)
         elif rec.get("culprit") == n:
-            act = tx(("建議排除（待決定）", "exclusion recommended (pending)"), L)
+            act = tx(("建議排除（待決定）", "exclusion recommended (pending)", "除外を推奨（判断待ち）", "제외 권장 (결정 대기)"), L)
         else:
             act = "—"
         rows.append([_esc(n), _esc(v.get("contacts")), _esc(v.get("overlaps")), _esc(v.get("piercings")),
-                     _esc(tx(("是", "yes"), L) if v.get("floating") else "—"), _esc(act)])
+                     _esc(tx(("是", "yes", "あり", "예"), L) if v.get("floating") else "—"), _esc(act)])
     for n in rec.get("excluded") or []:
         if n not in rec["per_ligand"]:
-            rows.append([_esc(n), "—", "—", "—", "—", _esc(tx(("排除", "excluded"), L))])
-    tab = doc.table([tx(("配體", "Ligand"), L), tx(("蛋白接觸", "Protein contacts"), L), tx(("原子重疊", "Overlaps"), L),
-                     tx(("穿環", "Ring piercing"), L), tx(("漂浮", "Floating"), L), tx(("處置", "Action"), L)], rows,
-                    ("多配體複合物幾何檢查（進入 MD 前）", "Geometry of the multi-ligand complex (before MD)"))
-    why = rec.get("why") or ["", ""]
-    return tab + f"<p>{_esc(why[0] if L == 'zh' else why[1])}</p>"
+            rows.append([_esc(n), "—", "—", "—", "—", _esc(tx(excluded, L))])
+    tab = doc.table([tx(("配體", "Ligand", "リガンド", "리간드"), L), tx(("蛋白接觸", "Protein contacts", "タンパク質との接触", "단백질 접촉"), L),
+                     tx(("原子重疊", "Overlaps", "原子の重なり", "원자 겹침"), L), tx(("穿環", "Ring piercing", "環の貫通", "고리 관통"), L),
+                     tx(("漂浮", "Floating", "浮遊", "떠 있음"), L), tx(("處置", "Action", "対応", "조치"), L)], rows,
+                    ("多配體複合物的幾何檢查（進入 MD 前）", "Geometry of the multi-ligand complex (before MD)",
+                     "複数リガンド複合体の幾何チェック（MD の前）", "다중 리간드 복합체의 기하 확인 (MD 전)"))
+    why = rec.get("why") or ""
+    return tab + f"<p>{_esc(tx(tuple(why) if isinstance(why, list) else why, L))}</p>"
 
 
 def _docking_extra(doc: Doc, e: dict, box: dict, rec_pdb, cmp_rows: list, rank_used: int | None = None, charges=None) -> str:
@@ -523,14 +614,15 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
     L = doc.lang
     d = wf.state()["steps"].get("docking") or {}
     rows = [r for r in advisor.parameter_table(vals, f, goal, L) if r["group_key"] == "docking"]
-    params = _param_table(doc, rows, ("對接參數", "Docking parameters"))
+    params = _param_table(doc, rows, ("對接參數", "Docking parameters", "ドッキングのパラメータ", "도킹 매개변수"))
     if not d:
         return _section(doc, doc.next(), "docking", params, "", [])
     res = load_json(d["result"], {})
     sel = (wf.state()["steps"].get("pose_selection") or {}).get("selection", {})
     box = res.get("box") or {}
-    out = (f"<p>{_esc(tx(('搜尋區中心', 'Box centre'), L))} {_esc(box.get('center'))} Å · {_esc(tx(('尺寸', 'size'), L))} "
-           f"{_esc(box.get('size'))} Å · {_esc(tx(('來源', 'source'), L))} {_esc(box.get('source'))}</p>")
+    out = (f"<p>{_esc(tx(('搜尋區中心', 'Box centre', '探索ボックスの中心', '탐색 상자 중심'), L))} {_esc(box.get('center'))} Å · "
+           f"{_esc(tx(('尺寸', 'size', 'サイズ', '크기'), L))} {_esc(box.get('size'))} Å · "
+           f"{_esc(tx(('來源', 'source', '設定元', '출처'), L))} {_esc(box.get('source'))}</p>")
     chosen = {}
     for v in (sel.get("ligands") or {}).values():
         chosen.setdefault(v.get("entry"), set()).add(v.get("rank"))
@@ -550,9 +642,9 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
                     out += doc.figure_block(png, "interaction_2d", FT.classify_interaction_2d(lig, cons), lig)
         trs = []
         for p in e["poses"]:
-            tag = ("✔ " + tx(("選用", "used"), L) if p["rank"] in chosen.get(e["name"], set()) else "") + \
-                  (" ★ " + tx(("推薦", "recommended"), L) if p.get("recommended") else "") + \
-                  (" ⚠ " + tx(("碰撞", "clash"), L) if p.get("clash") else "")
+            tag = ("✔ " + tx(("選用", "used", "使用", "사용"), L) if p["rank"] in chosen.get(e["name"], set()) else "") + \
+                  (" ★ " + tx(("推薦", "recommended", "推奨", "추천"), L) if p.get("recommended") else "") + \
+                  (" ⚠ " + tx(("碰撞", "clash", "衝突", "충돌"), L) if p.get("clash") else "")
             joint = p.get("contacts_per_ligand") is not None
             cont = " / ".join(str(c) for c in p["contacts_per_ligand"]) if joint else str(p["contacts"])
             row = [str(p["rank"]), f"{p['score']:.2f}", f"{p['cluster']} ({p['cluster_size']})", cont, _fmt(p.get("rmsd_ref"))]
@@ -560,16 +652,31 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
                 row.append(_fmt(p.get("min_ll_distance")))
             trs.append(row + [tag])
         is_joint = bool(e["poses"]) and e["poses"][0].get("contacts_per_ligand") is not None
-        head = [tx(("名次", "Rank"), L), tx(("分數（kcal mol⁻¹）", "Score (kcal mol⁻¹)"), L), tx(("叢集（大小）", "Cluster (size)"), L),
-                tx(("接觸殘基數", "Contacts"), L) + (f" ({' / '.join(e.get('ligands') or [])})" if is_joint else ""),
-                tx(("與晶體 RMSD（Å）", "RMSD to crystal (Å)"), L)] + ([tx(("配體間最短距離（Å）", "Min. ligand–ligand (Å)"), L)] if is_joint else []) + [""]
-        out += doc.table(head, trs, (f"{e['name']} 的對接姿勢", f"Docking poses of {e['name']}"), {0, 1, 4, 5} if is_joint else {0, 1, 3, 4})
+        head = [tx(("名次", "Rank", "順位", "순위"), L), tx(("分數（kcal mol⁻¹）", "Score (kcal mol⁻¹)", "スコア（kcal mol⁻¹）", "점수 (kcal mol⁻¹)"), L),
+                tx(("叢集（大小）", "Cluster (size)", "クラスター（大きさ）", "클러스터 (크기)"), L),
+                tx(("接觸殘基數", "Contacts", "接触残基数", "접촉 잔기 수"), L) + (f" ({' / '.join(e.get('ligands') or [])})" if is_joint else ""),
+                tx(("與晶體 RMSD（Å）", "RMSD to crystal (Å)", "結晶との RMSD（Å）", "결정 구조와의 RMSD (Å)"), L)] + \
+            ([tx(("配體間最短距離（Å）", "Min. ligand–ligand (Å)", "リガンド間の最短距離（Å）", "리간드 간 최단 거리 (Å)"), L)] if is_joint else []) + [""]
+        nm = e["name"]
+        out += doc.table(head, trs, (f"{nm} 的對接姿勢", f"Docking poses of {nm}", f"{nm} のドッキングポーズ", f"{nm}의 도킹 포즈"),
+                         {0, 1, 4, 5} if is_joint else {0, 1, 3, 4})
         if e.get("reason"):
-            out += f"<p class=muted>{_esc(tx(('系統推薦理由', 'Reason for the recommendation'), L))}: {_esc(e['reason'])}</p>"
+            out += (f"<p class=muted>{_esc(tx(('系統推薦的理由', 'Reason for the recommendation', '推奨の理由', '추천 이유'), L))}"
+                    f"{colon(L)}{_esc(e['reason'])}</p>")
     out += _geometry_table(doc, wf.state().get("multi_ligand") or {})
     if len(cmp_rows) >= 2:
         out += doc.figure_block(FG.ligand_compare(cmp_rows, doc.figdir / "docking_compare.png"), "ligand_compare", DF.classify_ligand_compare(cmp_rows))
     return _section(doc, doc.next(), "docking", params, out, doc.collected[start:])
+
+
+_CPP_STATUS = {  # the peptide module records these values in Chinese
+    "實驗證實": ("實驗證實", "experimentally confirmed", "実験で確認済み", "실험으로 확인됨"),
+    "計算預測": ("計算預測", "computational prediction", "計算による予測", "계산 예측"),
+    "未評估": ("未評估", "not assessed", "未評価", "평가 안 함"),
+    "不適用": ("不適用", "not applicable", "該当なし", "해당 없음"),
+    "可能穿膜": ("可能穿膜", "likely to penetrate", "膜を通過する可能性あり", "막 투과 가능성 있음"),
+    "不太可能穿膜": ("不太可能穿膜", "unlikely to penetrate", "膜を通過する可能性は低い", "막 투과 가능성 낮음"),
+}
 
 
 def _peptide(doc: Doc, wf) -> str:
@@ -578,35 +685,43 @@ def _peptide(doc: Doc, wf) -> str:
     if not cpp and not acc:
         return ""
     L = doc.lang
-    loc = {"intracellular": ("胞內", "intracellular"), "extracellular-membrane": ("膜外側", "extracellular, membrane"),
-           "secreted": ("分泌或胞外", "secreted or extracellular")}
+    loc = {"intracellular": ("胞內", "intracellular", "細胞内", "세포 내"),
+           "extracellular-membrane": ("膜外側", "extracellular, membrane", "膜の細胞外側", "막 바깥쪽"),
+           "secreted": ("分泌或胞外", "secreted or extracellular", "分泌型または細胞外", "분비형 또는 세포 외")}
+    unset = ("未指定", "not specified", "未指定", "지정 안 함")
     prm = [[f"<code>{_esc(l.get('sequence'))}</code>", _esc(l.get("name")),
-            _esc(tx(loc.get(str(l.get("target_location")), (l.get("target_location") or "未指定", l.get("target_location") or "not specified")), L)),
+            _esc(tx(loc.get(str(l.get("target_location"))), L) if str(l.get("target_location")) in loc else (l.get("target_location") or tx(unset, L))),
             _esc(l.get("termini", "charged"))] for l in wf.cfg.get("ligands") or [] if l.get("sequence")]
-    params = doc.table([tx(("序列", "Sequence"), L), tx(("名稱", "Name"), L), tx(("作用標靶位置", "Target location"), L),
-                        tx(("末端", "Termini"), L)], prm, ("胜肽設定", "Peptide settings")) if prm else ""
+    seq = ("序列", "Sequence", "配列", "서열")
+    params = doc.table([tx(seq, L), tx(("名稱", "Name", "名前", "이름"), L), tx(("作用標靶的位置", "Target location", "標的の位置", "표적 위치"), L),
+                        tx(("末端", "Termini", "末端", "말단"), L)], prm,
+                       ("胜肽設定", "Peptide settings", "ペプチドの設定", "펩타이드 설정")) if prm else ""
     rows = []
     for name, r in cpp.items():
-        stt = {"實驗證實": "experimentally confirmed", "計算預測": "computational prediction", "未評估": "not assessed", "不適用": "not applicable",
-               "可能穿膜": "likely to penetrate", "不太可能穿膜": "unlikely to penetrate"}
-        tr = (lambda x: stt.get(x, x)) if L == "en" else (lambda x: x)
-        rows.append([_esc(name), tx(("穿膜性", "Cell penetration"), L), _esc(tr(r.get("status", ""))), _esc(tr(r.get("prediction", "—"))),
-                     _esc(r.get("explanation", ""))])
+        tr = lambda x: tx(_CPP_STATUS[x], L) if x in _CPP_STATUS else x  # noqa: E731
+        rows.append([_esc(name), tx(("穿膜性", "Cell penetration", "膜透過性", "세포막 투과성"), L), _esc(tr(r.get("status", ""))),
+                     _esc(tr(r.get("prediction", "—"))), _esc(r.get("explanation", ""))])
     for name, r in acc.items():
-        for part, lab in (("precheck", ("對接前：搜尋區與大小", "Before docking: box and size")), ("pose", ("選用姿勢：埋藏與距離", "Chosen pose: burial and distance"))):
+        for part, lab in (("precheck", ("對接前的搜尋區與大小", "Before docking: box and size", "ドッキング前の探索ボックスと大きさ", "도킹 전 탐색 상자와 크기")),
+                          ("pose", ("選用姿勢的埋藏程度與距離", "Chosen pose: burial and distance", "選んだポーズの埋没度と距離", "선택한 포즈의 매몰도와 거리"))):
             g = r.get(part)
             if g:
                 rows.append([_esc(name), tx(lab, L), _esc(g.get("gate", "")), "", _esc(g.get("explanation", ""))])
-    out = doc.table([tx(("胜肽", "Peptide"), L), tx(("檢查", "Check"), L), tx(("狀態", "Status"), L), tx(("預測", "Prediction"), L),
-                     tx(("說明", "Explanation"), L)], rows, ("胜肽科學檢查", "Peptide scientific checks"))
+    out = doc.table([tx(("胜肽", "Peptide", "ペプチド", "펩타이드"), L), tx(("檢查", "Check", "確認項目", "확인 항목"), L),
+                     tx(("狀態", "Status", "状態", "상태"), L), tx(("預測", "Prediction", "予測", "예측"), L),
+                     tx(("說明", "Explanation", "説明", "설명"), L)], rows,
+                    ("胜肽的科學檢查", "Peptide scientific checks", "ペプチドの科学的チェック", "펩타이드 과학적 확인"))
     for name, r in cpp.items():
         sug = r.get("redesign_suggestions") or {}
         if sug:
             items = [c for b in sug.values() for c in b]
-            out += doc.table([tx(("序列", "Sequence"), L), tx(("設計方式", "Design"), L), tx(("預測分數", "Predicted score"), L),
-                              tx(("淨電荷", "Net charge"), L)],
+            out += doc.table([tx(seq, L), tx(("設計方式", "Design", "設計の方法", "설계 방식"), L),
+                              tx(("預測分數", "Predicted score", "予測スコア", "예측 점수"), L), tx(("淨電荷", "Net charge", "正味電荷", "순전하"), L)],
                              [[f"<code>{_esc(c['sequence'])}</code>", _esc(c["how"]), f"{c['score']}/8", f"{c['net_charge']:+d}"] for c in items[:9]],
-                             (f"{name} 的替代設計（假設，需實驗或外部工具確認）", f"Redesign options for {name} (hypotheses to be confirmed experimentally or with external predictors)"),
+                             (f"{name} 的替代設計。這些是假設，要用實驗或外部工具確認",
+                              f"Redesign options for {name}. These are hypotheses to confirm experimentally or with external predictors",
+                              f"{name} の代替設計。仮説なので、実験または外部ツールで確認してください",
+                              f"{name}의 대체 설계. 가설이므로 실험이나 외부 도구로 확인해야 합니다"),
                              {2, 3})
     return _section(doc, doc.next(), "peptide", params, out, I.peptide(cpp, acc))
 
@@ -615,7 +730,7 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
     doc.section = tx(SECTION["md"]["title"], doc.lang)
     L = doc.lang
     rows = [r for r in advisor.parameter_table(vals, f, goal, L) if r["group_key"] in ("system", "equil", "prod")]
-    params = _param_table(doc, rows, ("模擬參數", "Simulation parameters"))
+    params = _param_table(doc, rows, ("模擬參數", "Simulation parameters", "シミュレーションのパラメータ", "시뮬레이션 매개변수"))
     cases = (wf.state()["steps"].get("md_cases") or {}).get("cases", {})
     runs = (wf.state()["steps"].get("md_runs") or {}).get("runs", {})
     ana = wf.state()["steps"].get("analysis") or {}
@@ -631,21 +746,23 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
         restrained = restrained or bool(s.get("restrained_production"))
         if s.get("metrics_file"):
             metrics[key] = load_json(s["metrics_file"], {})
-        bound = "; ".join(f"{rn}: {tx(('留在口袋', 'stays'), L) if v['stays_bound'] else tx(('離開', 'leaves'), L)} ({v['rmsd_last20_A']:.1f} Å)"
+        bound = "; ".join(f"{rn}: {tx(('留在口袋', 'stays', 'ポケット内に留まる', '포켓에 머묾'), L) if v['stays_bound'] else tx(('離開', 'leaves', '離れる', '떠남'), L)} ({v['rmsd_last20_A']:.1f} Å)"
                           for rn, v in (s.get("ligands") or {}).items()) or "—"
         link = ""
         if r.get("run_ids"):
             try:
                 from ..project import Run
-                rp = build_run_report(Run(wf.project.case(c["case_id"]), r["run_ids"][0]))
-                link = f"<a href='{rp.as_uri()}'>{_esc(tx(('單次模擬報告', 'run report'), L))}</a>"
+                rp = build_run_report(Run(wf.project.case(c["case_id"]), r["run_ids"][0]), lang=L)
+                link = f"<a href='{rp.as_uri()}'>{_esc(tx(('單次模擬報告', 'run report', '個別の計算レポート', '개별 실행 보고서'), L))}</a>"
             except Exception:  # noqa: BLE001
                 link = ""
         trs.append([_esc(key), _esc(", ".join(c.get("ligands") or []) or "—"), _esc(r.get("status", "—")),
                     _fmt(s.get("rmsd_backbone_mean_A")) + _restrained_tag(s, L), _esc(bound), link])
-    out = doc.table([tx(("系統", "System"), L), tx(("配體", "Ligands"), L), tx(("狀態", "Status"), L),
-                     tx(("主鏈 RMSD 平均（Å）", "Mean backbone RMSD (Å)"), L), tx(("配體（最後 20 % 的口袋 RMSD）", "Ligand (pocket RMSD, last 20 %)"), L), ""],
-                    trs, ("各系統的模擬結果摘要", "Summary of the simulated systems"), {3})
+    system = ("系統", "System", "系", "시스템")
+    out = doc.table([tx(system, L), tx(("配體", "Ligands", "リガンド", "리간드"), L), tx(("狀態", "Status", "状態", "상태"), L),
+                     tx(("主鏈 RMSD 平均（Å）", "Mean backbone RMSD (Å)", "主鎖 RMSD の平均（Å）", "주사슬 RMSD 평균 (Å)"), L),
+                     tx(("配體（最後 20 % 的口袋 RMSD）", "Ligand (pocket RMSD, last 20 %)", "リガンド（最後の 20 % のポケット RMSD）", "리간드 (마지막 20 %의 포켓 RMSD)"), L), ""],
+                    trs, ("各系統的模擬結果摘要", "Summary of the simulated systems", "各系のシミュレーション結果のまとめ", "시스템별 시뮬레이션 결과 요약"), {3})
     # equilibration acceptance per system and stage (from the stage records of the first replica)
     acc_rows = []
     for key, c in cases.items():
@@ -661,19 +778,20 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
             acc = (load_json(rdir / "stages" / stg / f"{stg}_complete.json", {}) or {}).get("acceptance") or {}
             for chk in acc.get("checks") or []:
                 vals = ", ".join(f"{k} {v}" for k, v in chk.items() if k not in {"check", "ok"})
-                acc_rows.append([_esc(key), _esc(stg.upper() if stg != "production" else tx(("正式模擬", "production"), L)),
-                                 _esc(chk.get("check")), (tx(("通過", "pass"), L) if chk.get("ok") else
-                                                          f"<b class=warn>{_esc(tx(('未通過', 'fail'), L))}</b>"), _esc(vals)])
+                acc_rows.append([_esc(key), _esc(stg.upper() if stg != "production" else tx(("正式模擬", "production", "本計算", "본 시뮬레이션"), L)),
+                                 _esc(chk.get("check")), (tx(("通過", "pass", "合格", "통과"), L) if chk.get("ok") else
+                                                          f"<b class=warn>{_esc(tx(('未通過', 'fail', '不合格', '미통과'), L))}</b>"), _esc(vals)])
     if acc_rows:
-        out += doc.table([tx(("系統", "System"), L), tx(("階段", "Stage"), L), tx(("驗收項目", "Check"), L), tx(("結果", "Result"), L),
-                          tx(("數值", "Values"), L)], acc_rows,
-                         ("平衡與正式模擬的驗收檢查（溫度、密度）", "Acceptance checks of equilibration and production (temperature, density)"))
+        out += doc.table([tx(system, L), tx(("階段", "Stage", "段階", "단계"), L), tx(("驗收項目", "Check", "合否の項目", "검수 항목"), L),
+                          tx(("結果", "Result", "結果", "결과"), L), tx(("數值", "Values", "数値", "수치"), L)], acc_rows,
+                         ("平衡與正式模擬的驗收檢查（溫度與密度）", "Acceptance checks of equilibration and production (temperature and density)",
+                          "平衡化と本計算の合否チェック（温度と密度）", "평형화와 본 시뮬레이션의 검수 (온도와 밀도)"))
     comp = ana.get("comparison") or {}
     start = len(doc.collected)
     ext = {key: load_json(s_.get("extended_file"), {}) for key, s_ in sums.items() if s_.get("extended_file")}
     eq = _equil_figures(doc, wf, cases, runs)
     if eq:
-        out += _sub(doc, "平衡過程品質", "Equilibration quality") + eq
+        out += _sub(doc, "平衡過程的品質", "Equilibration quality", "平衡化の品質", "평형화 품질") + eq
     if metrics:
         out += _md_figures(doc, sums, metrics, ext)
     else:                                              # older runs without metrics.json: the analysis images as drawn
@@ -686,13 +804,15 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
                     out += doc.figure_block(fig["png"], "contacts", [], key)
     findings = doc.collected[start:]
     if restrained:
-        findings.append(I.F("caution", "正式模擬保留了主鏈約束，RMSD 與 RMSF 被人為壓低，不能作為結構穩定的證據。",
-                            "The backbone was restrained in production; RMSD and RMSF are artificially suppressed and are not evidence of stability."))
+        findings.append(I.F("caution", "正式模擬保留了主鏈約束，RMSD 與 RMSF 因此被人為壓低，不能當作結構穩定的證據。",
+                            "The backbone was restrained in production. RMSD and RMSF are therefore artificially low and are not evidence of stability.",
+                            "本計算でも主鎖を拘束していたため、RMSD と RMSF は人為的に低くなっています。構造が安定している証拠にはなりません。",
+                            "본 시뮬레이션에서도 주사슬을 구속했기 때문에 RMSD와 RMSF가 인위적으로 낮습니다. 구조가 안정하다는 증거가 될 수 없습니다."))
     return _section(doc, doc.next(), "md", params, out, findings)
 
 
-def _sub(doc: Doc, zh: str, en: str) -> str:
-    return f"<h3>{_esc(doc.t((zh, en)))}</h3>"
+def _sub(doc: Doc, zh: str, en: str, ja: str = "", ko: str = "") -> str:
+    return f"<h3>{_esc(doc.t((zh, en, ja, ko)))}</h3>"
 
 
 def _equil_figures(doc: Doc, wf, cases: dict, runs: dict) -> str:
@@ -733,7 +853,7 @@ def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None) ->
     ext = ext or {}
     order = sorted(metrics, key=lambda k: (not k.lower().startswith("apo"), k))
     ref = order[0] if order and order[0].lower().startswith("apo") else None
-    out = _sub(doc, "蛋白的穩定性與動態", "Protein stability and dynamics")
+    out = _sub(doc, "蛋白的穩定性與動態", "Protein stability and dynamics", "タンパク質の安定性と動き", "단백질의 안정성과 동역학")
     rmsd = {k: (metrics[k].get("time_ns") or [], metrics[k].get("rmsd_backbone_A") or []) for k in order if metrics[k].get("rmsd_backbone_A")}
     if rmsd:
         out += doc.figure_block(FG.timeseries(rmsd, "Backbone RMSD (Å)", doc.figdir / "md_rmsd.png"), "rmsd", FT.classify_rmsd(rmsd))
@@ -742,12 +862,12 @@ def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None) ->
         out += doc.figure_block(FG.timeseries(rg, "Radius of gyration (Å)", doc.figdir / "md_rg.png"), "rg", FT.classify_rg(rg))
     sasa = {k: (ext[k].get("time_ns") or [], (ext[k].get("sasa_protein") or {}).get("total_A2") or []) for k in order if (ext.get(k) or {}).get("sasa_protein")}
     if sasa:
-        ff = [x for k, (t, y) in sasa.items() for x in FT.classify_growth(k, y, ("溶劑可及面積", "solvent-accessible area"))]
+        ff = [x for k, (t, y) in sasa.items() for x in FT.classify_growth(k, y, ("溶劑可及面積", "solvent-accessible area", "溶媒接触表面積", "용매 접근 면적"))]
         out += doc.figure_block(FG.timeseries(sasa, "Protein SASA (Å²)", doc.figdir / "md_sasa.png"), "protein_sasa", ff)
     hbp = {k: ((ext[k].get("hbonds_protein") or {}).get("time_ns") or [], (ext[k].get("hbonds_protein") or {}).get("count") or [])
            for k in order if (ext.get(k) or {}).get("hbonds_protein")}
     if hbp:
-        ff = [x for k, (t, y) in hbp.items() for x in FT.classify_growth(k, y, ("內部氫鍵數", "internal hydrogen bonds"))]
+        ff = [x for k, (t, y) in hbp.items() for x in FT.classify_growth(k, y, ("內部氫鍵數", "internal hydrogen bonds", "内部水素結合の数", "내부 수소 결합 수"))]
         out += doc.figure_block(FG.timeseries(hbp, "Protein hydrogen bonds", doc.figdir / "md_hbond_protein.png"), "hbond_protein", ff)
     for k in order:
         d = (ext.get(k) or {}).get("dssp")
@@ -779,7 +899,7 @@ def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None) ->
     lig_keys = [(k, rn) for k in order for rn in (metrics[k].get("ligands") or {})]
     if not lig_keys:
         return out
-    out += _sub(doc, "配體在模擬中的結合", "Ligand binding during the simulation")
+    out += _sub(doc, "配體在模擬中的結合", "Ligand binding during the simulation", "シミュレーション中のリガンドの結合", "시뮬레이션 중 리간드 결합")
     lig, lf = {}, []
     for k, rn in lig_keys:
         d = metrics[k]["ligands"][rn]
@@ -846,23 +966,26 @@ def _binding(doc: Doc, wf, vals, f, goal) -> str:
     if not wf.cfg.get("binding", {}).get("enabled") and not b:
         return ""
     rows = [r for r in advisor.parameter_table(vals, f, goal, L) if r["group_key"] == "binding" and r["key"] != "binding"]
-    params = _param_table(doc, rows, ("結合自由能參數", "Binding free-energy parameters"))
+    params = _param_table(doc, rows, ("結合自由能參數", "Binding free-energy parameters", "結合自由エネルギーのパラメータ", "결합 자유 에너지 매개변수"))
     if not b:
         return _section(doc, doc.next(), "binding", params, "", [])
     pm = lambda v, e: "—" if v is None else (f"{v:.1f} ± {e:.1f}" if e is not None else f"{v:.1f}")  # noqa: E731
     trs = [[_esc(n), pm(r.get("delta_pmf_kj_mol"), r.get("delta_pmf_err_kj_mol")),
-            pm(r.get("dG_standard_kj_mol"), r.get("dG_err_kj_mol")) if r.get("dG_standard_kj_mol") is not None else tx(("不輸出", "not reported"), L),
+            pm(r.get("dG_standard_kj_mol"), r.get("dG_err_kj_mol")) if r.get("dG_standard_kj_mol") is not None else tx(("不輸出", "not reported", "出力しない", "출력 안 함"), L),
             _fmt(r.get("dG_standard_kcal_mol"), 1) if r.get("dG_standard_kcal_mol") is not None else "—",
             _fmt(r.get("r_min_nm"), 3), _fmt(r.get("max_force"), 0), _fmt(r.get("work"), 1)] for n, r in b.items()]
-    out = doc.table([tx(("配體", "Ligand"), L), "ΔPMF (kJ mol⁻¹)", "ΔG° (kJ mol⁻¹)", "ΔG° (kcal mol⁻¹)", tx(("結合距離（nm）", "Bound distance (nm)"), L),
-                     tx(("SMD 最大拉力（kJ mol⁻¹ nm⁻¹）", "SMD peak force (kJ mol⁻¹ nm⁻¹)"), L), tx(("SMD 功（kJ mol⁻¹）", "SMD work (kJ mol⁻¹)"), L)],
-                    trs, ("結合自由能結果", "Binding free-energy results"), {1, 2, 3, 4, 5, 6})
+    out = doc.table([tx(("配體", "Ligand", "リガンド", "리간드"), L), "ΔPMF (kJ mol⁻¹)", "ΔG° (kJ mol⁻¹)", "ΔG° (kcal mol⁻¹)",
+                     tx(("結合距離（nm）", "Bound distance (nm)", "結合距離（nm）", "결합 거리 (nm)"), L),
+                     tx(("SMD 最大拉力（kJ mol⁻¹ nm⁻¹）", "SMD peak force (kJ mol⁻¹ nm⁻¹)", "SMD の最大の力（kJ mol⁻¹ nm⁻¹）", "SMD 최대 힘 (kJ mol⁻¹ nm⁻¹)"), L),
+                     tx(("SMD 功（kJ mol⁻¹）", "SMD work (kJ mol⁻¹)", "SMD の仕事（kJ mol⁻¹）", "SMD 일 (kJ mol⁻¹)"), L)],
+                    trs, ("結合自由能結果", "Binding free-energy results", "結合自由エネルギーの結果", "결합 자유 에너지 결과"), {1, 2, 3, 4, 5, 6})
     start = len(doc.collected)
     for name, r in b.items():
         out += f"<h3>{_esc(name)}</h3>"
         out += _binding_figures(doc, name, r)
         if r.get("dG_withheld"):
-            out += f"<p class=warn>{_esc(tx(('ΔG° 不輸出的原因', 'Why ΔG° is not reported'), L))}: {_esc(str(r['dG_withheld']))}</p>"
+            out += (f"<p class=warn>{_esc(tx(('ΔG° 不輸出的原因', 'Why ΔG° is not reported', 'ΔG° を出力しない理由', 'ΔG°를 출력하지 않는 이유'), L))}"
+                    f"{colon(L)}{_esc(str(r['dG_withheld']))}</p>")
     comp = (wf.state()["steps"].get("binding") or {}).get("comparison") or {}
     out += _comparison_html(comp, L)
     out += _cooperativity_html(doc, comp.get("cooperativity") or [], b)
@@ -870,7 +993,8 @@ def _binding(doc: Doc, wf, vals, f, goal) -> str:
     findings = doc.collected[start:] + [x for x in I.binding(b) if "ΔG°" in x["text"][1] or "halves" in x["text"][1]]
     for ctx, c in (comp.get("contexts") or {}).items():
         if c.get("status") == "PASS" and c.get("why"):
-            findings.append(I.F("note", c["why"], c["why"]))
+            w = tuple(c.get("why_i18n") or (c["why"],) * 4)
+            findings.append(I.F("note", *w))
     return _section(doc, doc.next(), "binding", params, out, findings)
 
 
@@ -917,7 +1041,7 @@ def _cooperativity_html(doc: Doc, coop: list, b: dict) -> str:
     out = ""
     for c in coop:
         if c.get("status") == "INSUFFICIENT":
-            out += f"<p class=muted>{_esc(c['why'][0] if L == 'zh' else c['why'][1])}</p>"
+            out += f"<p class=muted>{_esc(tx(tuple(c['why']) if isinstance(c['why'], list) else c['why'], L))}</p>"
             continue
         use_dG = c.get("quantity", "").startswith("ΔΔG")
         rows = []
@@ -929,42 +1053,59 @@ def _cooperativity_html(doc: Doc, coop: list, b: dict) -> str:
                 w = (-(r_with.get("delta_pmf_kj_mol") or 0), r_with.get("delta_pmf_err_kj_mol"))
                 a = (-(r_alone.get("delta_pmf_kj_mol") or 0), r_alone.get("delta_pmf_err_kj_mol"))
             rows.append({"ligand": n, "alone": a, "with": w})
-        out += _sub(doc, "配體之間的協同", "Cooperativity between the ligands")
+        out += _sub(doc, "配體之間的協同作用", "Cooperativity between the ligands", "リガンド間の協同性", "리간드 간 협동성")
         out += doc.figure_block(FG.cooperativity_plot(rows, "ΔG° (kJ mol⁻¹)" if use_dG else "−ΔPMF (kJ mol⁻¹)",
                                                       doc.figdir / f"cooperativity_{c['context'].replace(':', '_')}.png"),
                                 "cooperativity", FT.classify_cooperativity(c), c["context"])
         if c.get("closure_kj_mol") is not None:
-            out += doc.table([tx(("量", "Quantity"), L), tx(("數值（kJ mol⁻¹）", "Value (kJ mol⁻¹)"), L), "σ"],
-                             [[_esc(tx(("協同 ΔΔG_coop（兩路徑平均）", "Cooperativity ΔΔG_coop (mean of the legs)"), L)), f"{c['coop_kj_mol']:+.2f}", _fmt(c.get("coop_err_kj_mol"))],
-                              [_esc(tx(("循環閉合誤差（兩路徑差）", "Cycle closure error (difference of the legs)"), L)), f"{c['closure_kj_mol']:+.2f}", _fmt(c.get("closure_sigma"))]]
-                             + [[_esc(f"{n}: " + tx(("另一配體存在時的變化", "shift with the partner bound"), L)), f"{v['value']:+.2f}", _fmt(v.get("err"))]
+            shift = tx(("另一配體存在時的變化", "shift with the partner bound", "相手のリガンドがあるときの変化", "상대 리간드가 있을 때의 변화"), L)
+            out += doc.table([tx(("量", "Quantity", "量", "양"), L), tx(("數值（kJ mol⁻¹）", "Value (kJ mol⁻¹)", "値（kJ mol⁻¹）", "값 (kJ mol⁻¹)"), L), "σ"],
+                             [[_esc(tx(("協同 ΔΔG_coop（兩條路徑的平均）", "Cooperativity ΔΔG_coop (mean of the two legs)",
+                                        "協同性 ΔΔG_coop（2 つの経路の平均）", "협동성 ΔΔG_coop (두 경로의 평균)"), L)),
+                               f"{c['coop_kj_mol']:+.2f}", _fmt(c.get("coop_err_kj_mol"))],
+                              [_esc(tx(("循環閉合誤差（兩條路徑的差）", "Cycle closure error (difference of the two legs)",
+                                        "サイクルの閉合誤差（2 つの経路の差）", "순환 닫힘 오차 (두 경로의 차이)"), L)),
+                               f"{c['closure_kj_mol']:+.2f}", _fmt(c.get("closure_sigma"))]]
+                             + [[_esc(f"{n}{colon(L)}{shift}"), f"{v['value']:+.2f}", _fmt(v.get("err"))]
                                 for n, v in (c.get("shifts") or {}).items()],
-                             ("協同自由能與循環閉合", "Cooperativity and cycle closure"), {1, 2})
+                             ("協同自由能與循環閉合", "Cooperativity and cycle closure", "協同自由エネルギーとサイクルの閉合", "협동 자유 에너지와 순환 닫힘"), {1, 2})
     return out
+
+
+def _ml(d: dict, key: str, lang: str) -> str:
+    """A field recorded by sampling.multi in Chinese, in the report language when its 4-language twin exists (D-74)."""
+    v = d.get(key + "_i18n")
+    return tx(tuple(v), lang) if isinstance(v, (list, tuple)) and len(v) == 4 else str(d.get(key, ""))
 
 
 def _comparison_html(comp: dict, lang: str = "zh") -> str:
     """WP9: ΔΔ ranking per context and co-occupancy shifts."""
     if not comp or not (comp.get("contexts") or comp.get("co_occupancy")):
         return ""
-    zh = lang == "zh"
-    parts = ["<h3>" + ("配體間比較（ΔΔ）" if zh else "Comparison between ligands (ΔΔ)") + "</h3>"]
+    L = lang
+    t = lambda *x: pick(x, L)  # noqa: E731
+    parts = ["<h3>" + t("配體間比較（ΔΔ）", "Comparison between ligands (ΔΔ)", "リガンド間の比較（ΔΔ）", "리간드 간 비교 (ΔΔ)") + "</h3>"]
     for ctx, c in comp.get("contexts", {}).items():
-        label = (("各配體單獨結合" if zh else "Each ligand bound alone") if ctx == "single" else
-                 (f"共同口袋（{_esc(ctx.split(':', 1)[1])}）" if zh else f"Shared pocket ({_esc(ctx.split(':', 1)[1])})"))
+        if ctx == "single":
+            label = t("各配體單獨結合", "Each ligand bound alone", "各リガンドが単独で結合", "각 리간드 단독 결합")
+        else:
+            pk = _esc(ctx.split(":", 1)[1])
+            label = t(f"共同口袋（{pk}）", f"Shared pocket ({pk})", f"共通ポケット（{pk}）", f"공유 포켓 ({pk})")
         if c.get("status") != "PASS":
-            parts.append(f"<p class=muted>{label}：{_esc(c.get('why', ''))}</p>")
+            parts.append(f"<p class=muted>{label}{colon(L)}{_esc(_ml(c, 'why', L))}</p>")
             continue
-        parts.append(f"<p><b>{label}</b> — {_esc(c['why'])}</p><table><tr><th>{'配體' if zh else 'Ligand'}</th>"
-                     f"<th class=num>{_esc(c['quantity'])} ({_esc(c['unit'])})</th><th class=num>σ</th><th>{'判定' if zh else 'Verdict'}</th></tr>")
+        parts.append(f"<p><b>{label}</b>{colon(L)}{_esc(_ml(c, 'why', L))}</p><table><tr><th>{t('配體', 'Ligand', 'リガンド', '리간드')}</th>"
+                     f"<th class=num>{_esc(c['quantity'])} ({_esc(c['unit'])})</th><th class=num>σ</th>"
+                     f"<th>{t('判定', 'Verdict', '判定', '판정')}</th></tr>")
         for r in c["rows"]:
             parts.append(f"<tr><td>{_esc(r['key'])}</td><td class=num>{r['delta']:+.2f}</td><td class=num>{'—' if r['sigma'] is None else r['sigma']}</td>"
-                         f"<td>{_esc(r['verdict'])}</td></tr>")
+                         f"<td>{_esc(_ml(r, 'verdict', L))}</td></tr>")
         parts.append("</table>")
     if comp.get("co_occupancy"):
-        parts.append("<p><b>" + ("共存效應" if zh else "Co-occupancy effect") + "</b>（" + ("共同口袋 − 單獨結合" if zh else "shared pocket minus alone")
-                     + "）</p><ul>" + "".join(f"<li>{_esc(c['why'])}</li>" for c in comp["co_occupancy"]) + "</ul>")
-    parts.append("<ul class=muted>" + "".join(f"<li>{_esc(n)}</li>" for n in comp.get("notes", [])) + "</ul>")
+        parts.append("<p><b>" + t("共存效應", "Co-occupancy effect", "共存の効果", "공존 효과") + "</b>"
+                     + paren(t("共同口袋減去單獨結合", "shared pocket minus alone", "共通ポケットから単独結合を引いた値", "공유 포켓에서 단독 결합을 뺀 값"), L)
+                     + "</p><ul>" + "".join(f"<li>{_esc(_ml(c, 'why', L))}</li>" for c in comp["co_occupancy"]) + "</ul>")
+    parts.append("<ul class=muted>" + "".join(f"<li>{_esc(tx(tuple(n), L) if isinstance(n, (list, tuple)) else n)}</li>" for n in (comp.get("notes_i18n") or comp.get("notes", []))) + "</ul>")
     return "".join(parts)
 
 
@@ -985,52 +1126,95 @@ def methods_text(wf, vals: dict, lang: str) -> str:
     rid = rec.get("pdb_id") or Path(str(rec.get("file", "the supplied structure"))).name
     ligs = cfg.get("ligands") or []
     peps = [l for l in ligs if l.get("sequence")]
+    small = len(peps) < len(ligs)
     sim = vals.get("docking_mode") == "simultaneous"
     hmr = vals.get("timestep_fs", 2) > 2
-    box = {"dodecahedron": ("菱形十二面體", "rhombic dodecahedral"), "cube": ("立方體", "cubic")}.get(vals.get("box_shape"), ("", ""))
+    box = {"dodecahedron": ("菱形十二面體", "rhombic dodecahedral", "菱形十二面体", "마름모십이면체"),
+           "cube": ("立方體", "cubic", "立方体", "정육면체")}.get(vals.get("box_shape"), ("", "", "", ""))
     salt = f"{vals.get('ion_positive', 'Na+')[:-1]}{vals.get('ion_negative', 'Cl-')[:-1]}"
-    if lang == "zh":
-        s = [f"受體結構（{rid}）以 PDBFixer 移除結晶添加物與水、補齊缺失重原子，並於 pH {cfg.get('ph', 7.4)} 加氫。"]
+    ph = cfg.get("ph", 7.4)
+    v = vals.get
+    lg = norm(lang)
+    if lg == "zh":
+        s = [f"受體結構（{rid}）以 PDBFixer 移除結晶添加物與水、補齊缺失的重原子，並於 pH {ph} 加氫。"]
         if ligs:
-            s.append(f"{len(ligs)} 個配體以 AutoDock Vina {'同時' if sim else '分別'}對接（搜尋強度 {vals.get('exhaustiveness')}，每個配體保留 {vals.get('n_poses')} 個姿勢），"
-                     "依分數、叢集大小與接觸殘基選定起始姿勢。")
-        s.append(f"系統以 Amber ff14SB 描述蛋白" + ("與胜肽" if peps else "") + ("、OpenFF Sage 2.2 描述小分子配體（部分電荷以 NAGL 或 AM1-BCC 計算）" if len(peps) < len(ligs) else "")
-                 + f"，置於{box[0]} TIP3P 水盒（蛋白到盒邊 {vals.get('padding_nm')} nm），以 {salt} 中和淨電荷並調整至 {vals.get('ion_concentration_molar')} M。")
-        s.append(f"長程靜電以 PME 計算，非鍵截斷 1.0 nm，含氫鍵以 HBonds 約束" + ("並以氫質量重分配（3 amu）" if hmr else "")
-                 + f"。系統經能量最小化（最多 {vals.get('minimize_iterations')} 步），於 NVT 由 {vals.get('heat_start_k'):g} K 升溫至 {vals.get('temperature_k'):g} K（{vals.get('nvt_ps'):g} ps），"
-                 f"再於 NPT（{vals.get('pressure_bar'):g} bar，Monte Carlo 恆壓器）平衡 {vals.get('npt_ps'):g} ps，期間逐步釋放位置約束（{vals.get('restraints')} 策略）。")
-        s.append(f"正式模擬以 Langevin 中點積分器（摩擦係數 {vals.get('friction_per_ps'):g} ps⁻¹、步長 {vals.get('timestep_fs'):g} fs）進行 {vals.get('production_ns'):g} ns，"
-                 f"獨立重複 {vals.get('replicas')} 次，每 {vals.get('trajectory_interval_ps'):g} ps 儲存一幀。所有模擬以 OpenMM 執行，分析以 MDTraj 計算主鏈 RMSD、Cα RMSF、配體口袋 RMSD 與接觸頻率。")
-        if vals.get("binding"):
-            s.append(f"結合自由能以導向分子動力學（拉速 {vals.get('pull_velocity_nm_per_ps'):g} nm ps⁻¹、彈簧常數 {vals.get('k_pull'):g} kJ mol⁻¹ nm⁻²，拉離 {vals.get('pull_distance_nm'):g} nm）產生解離路徑，"
-                     f"沿路徑設置傘狀採樣窗口（彈簧常數 {vals.get('k_umbrella'):g} kJ mol⁻¹ nm⁻²，每窗口平衡 {vals.get('window_equil_ps'):g} ps、取樣 {vals.get('window_prod_ps'):g} ps，依重疊自適應加窗），以 MBAR 合併為自由能剖面，"
-                     "誤差以自助法估計，並以前後半段一致性檢查收斂。")
+            s.append(f"{len(ligs)} 個配體以 AutoDock Vina {'同時' if sim else '分別'}對接（搜尋強度 {v('exhaustiveness')}，每個配體保留 {v('n_poses')} 個姿勢），"
+                     "再依分數、叢集大小與接觸殘基選定起始姿勢。")
+        s.append("蛋白" + ("與胜肽" if peps else "") + "使用 Amber ff14SB 力場" + ("，小分子配體使用 OpenFF Sage 2.2（部分電荷以 NAGL 或 AM1-BCC 計算）" if small else "")
+                 + f"。系統置於{box[0]} TIP3P 水盒（蛋白到盒邊 {v('padding_nm')} nm），以 {salt} 中和淨電荷並調整到 {v('ion_concentration_molar')} M。")
+        s.append("長程靜電以 PME 計算，非鍵截斷 1.0 nm，含氫的鍵以 HBonds 約束" + ("，並做氫質量重分配（3 amu）" if hmr else "")
+                 + f"。系統先做能量最小化（最多 {v('minimize_iterations')} 步），在 NVT 下由 {v('heat_start_k'):g} K 升溫到 {v('temperature_k'):g} K（{v('nvt_ps'):g} ps），"
+                 f"再於 NPT（{v('pressure_bar'):g} bar，Monte Carlo 恆壓器）平衡 {v('npt_ps'):g} ps，期間逐步釋放位置約束（{v('restraints')} 策略）。")
+        s.append(f"正式模擬使用 Langevin 中點積分器（摩擦係數 {v('friction_per_ps'):g} ps⁻¹，步長 {v('timestep_fs'):g} fs），長度 {v('production_ns'):g} ns，"
+                 f"獨立重複 {v('replicas')} 次，每 {v('trajectory_interval_ps'):g} ps 存一幀。所有模擬以 OpenMM 執行，主鏈 RMSD、Cα RMSF、配體口袋 RMSD 與接觸頻率以 MDTraj 計算。")
+        if v("binding"):
+            s.append(f"結合自由能的計算先以導向分子動力學產生解離路徑（拉速 {v('pull_velocity_nm_per_ps'):g} nm ps⁻¹，彈簧常數 {v('k_pull'):g} kJ mol⁻¹ nm⁻²，拉離 {v('pull_distance_nm'):g} nm）。"
+                     f"沿路徑設置傘狀採樣窗口（彈簧常數 {v('k_umbrella'):g} kJ mol⁻¹ nm⁻²，每個窗口平衡 {v('window_equil_ps'):g} ps、取樣 {v('window_prod_ps'):g} ps，依重疊程度自適應加窗），"
+                     "以 MBAR 合併成自由能剖面。誤差以自助法估計，收斂以前後半段是否一致來檢查。")
         return "".join(s)
-    s = [f"The receptor structure ({rid}) was prepared with PDBFixer: crystallisation additives and water were removed, "
-         f"missing heavy atoms were added and hydrogens were placed at pH {cfg.get('ph', 7.4)}. "]
+    if lg == "ja":
+        s = [f"受容体構造（{rid}）は PDBFixer で結晶化添加物と水を除き、欠けた重原子を補い、pH {ph} で水素を付加した。"]
+        if ligs:
+            s.append(f"{len(ligs)} 個のリガンドを AutoDock Vina で{'同時に' if sim else '個別に'}ドッキングし（探索の徹底度 {v('exhaustiveness')}、リガンドあたり {v('n_poses')} ポーズ）、"
+                     "スコア、クラスターの大きさ、接触残基から初期ポーズを選んだ。")
+        s.append("タンパク質" + ("とペプチド" if peps else "") + "には Amber ff14SB 力場を用い" + ("、低分子リガンドには OpenFF Sage 2.2 を用いた（部分電荷は NAGL または AM1-BCC で計算）" if small else "た")
+                 + f"。系は{box[2] + 'の' if box[2] else ''} TIP3P 水ボックスに入れ（タンパク質からボックス端まで {v('padding_nm')} nm）、{salt} で正味電荷を中和して {v('ion_concentration_molar')} M に調整した。")
+        s.append("長距離静電相互作用は PME で計算し、非結合カットオフは 1.0 nm、水素を含む結合は HBonds で拘束した" + ("。水素質量の再分配（3 amu）も行った" if hmr else "")
+                 + f"。エネルギー最小化（最大 {v('minimize_iterations')} ステップ）の後、NVT で {v('heat_start_k'):g} K から {v('temperature_k'):g} K まで昇温し（{v('nvt_ps'):g} ps）、"
+                 f"NPT（{v('pressure_bar'):g} bar、Monte Carlo バロスタット）で {v('npt_ps'):g} ps 平衡化しながら位置拘束を段階的に外した（{v('restraints')} 方式）。")
+        s.append(f"本計算は Langevin 中点積分法（摩擦係数 {v('friction_per_ps'):g} ps⁻¹、時間刻み {v('timestep_fs'):g} fs）で {v('production_ns'):g} ns 行った。"
+                 f"独立な計算の数は {v('replicas')} で、{v('trajectory_interval_ps'):g} ps ごとにフレームを保存した。シミュレーションはすべて OpenMM で実行し、"
+                 "主鎖 RMSD、Cα RMSF、リガンドのポケット内 RMSD、接触頻度は MDTraj で計算した。")
+        if v("binding"):
+            s.append(f"結合自由エネルギーは、まずステアード分子動力学で解離経路を作り（引き離し速度 {v('pull_velocity_nm_per_ps'):g} nm ps⁻¹、ばね定数 {v('k_pull'):g} kJ mol⁻¹ nm⁻²、"
+                     f"引き離し距離 {v('pull_distance_nm'):g} nm）、経路に沿ってアンブレラサンプリングのウィンドウを置いた（ばね定数 {v('k_umbrella'):g} kJ mol⁻¹ nm⁻²、"
+                     f"ウィンドウごとに平衡化 {v('window_equil_ps'):g} ps、サンプリング {v('window_prod_ps'):g} ps、重なりに応じてウィンドウを適応的に追加）。"
+                     "ウィンドウは MBAR で自由エネルギープロファイルにまとめた。誤差はブートストラップ法で見積もり、収束は前半と後半の一致で確認した。")
+        return "".join(s)
+    if lg == "ko":
+        s = [f"수용체 구조({rid})는 PDBFixer로 결정화 첨가물과 물을 제거하고 빠진 중원자를 채운 뒤 pH {ph}에서 수소를 붙였다. "]
+        if ligs:
+            s.append(f"리간드 {len(ligs)}개를 AutoDock Vina로 {'동시에' if sim else '각각'} 도킹하고(탐색 강도 {v('exhaustiveness')}, 리간드당 포즈 {v('n_poses')}개), "
+                     "점수, 클러스터 크기, 접촉 잔기를 보고 시작 포즈를 골랐다. ")
+        s.append("단백질" + ("과 펩타이드" if peps else "") + "에는 Amber ff14SB 힘장을 사용했다" + (". 저분자 리간드에는 OpenFF Sage 2.2를 사용했다(부분 전하는 NAGL 또는 AM1-BCC로 계산)" if small else "")
+                 + f". 시스템은 {box[3]} TIP3P 물 상자에 넣고(단백질에서 상자 가장자리까지 {v('padding_nm')} nm) {salt}로 순전하를 중화한 뒤 {v('ion_concentration_molar')} M로 맞췄다. ")
+        s.append("장거리 정전기는 PME로 계산했고 비결합 절단 거리는 1.0 nm, 수소를 포함한 결합은 HBonds로 구속했다" + (". 수소 질량 재분배(3 amu)도 적용했다" if hmr else "")
+                 + f". 에너지 최소화(최대 {v('minimize_iterations')} 단계) 후 NVT에서 {v('heat_start_k'):g} K에서 {v('temperature_k'):g} K까지 승온하고({v('nvt_ps'):g} ps), "
+                 f"NPT({v('pressure_bar'):g} bar, Monte Carlo 바로스탯)에서 {v('npt_ps'):g} ps 동안 평형화하면서 위치 구속을 단계적으로 풀었다({v('restraints')} 방식). ")
+        s.append(f"본 시뮬레이션은 Langevin 중점 적분기(마찰 계수 {v('friction_per_ps'):g} ps⁻¹, 시간 간격 {v('timestep_fs'):g} fs)로 {v('production_ns'):g} ns 동안 수행했다. "
+                 f"독립 반복 수는 {v('replicas')}회이며 {v('trajectory_interval_ps'):g} ps마다 프레임을 저장했다. 모든 시뮬레이션은 OpenMM으로 실행했고 "
+                 "주사슬 RMSD, Cα RMSF, 리간드 포켓 RMSD, 접촉 빈도는 MDTraj로 계산했다. ")
+        if v("binding"):
+            s.append(f"결합 자유 에너지는 먼저 조향 분자동역학으로 해리 경로를 만들었다(당김 속도 {v('pull_velocity_nm_per_ps'):g} nm ps⁻¹, 용수철 상수 {v('k_pull'):g} kJ mol⁻¹ nm⁻², "
+                     f"당김 거리 {v('pull_distance_nm'):g} nm). 경로를 따라 엄브렐라 샘플링 윈도우를 두었다(용수철 상수 {v('k_umbrella'):g} kJ mol⁻¹ nm⁻², "
+                     f"윈도우마다 평형화 {v('window_equil_ps'):g} ps, 샘플링 {v('window_prod_ps'):g} ps, 겹침 정도에 따라 윈도우를 적응적으로 추가). "
+                     "윈도우는 MBAR로 합쳐 자유 에너지 프로파일을 얻었다. 오차는 부트스트랩으로 추정했고 수렴은 앞뒤 절반의 일치로 확인했다.")
+        return "".join(s)
+    s = [f"The receptor structure ({rid}) was prepared with PDBFixer. Crystallisation additives and water were removed, "
+         f"missing heavy atoms were added and hydrogens were placed at pH {ph}. "]
     if ligs:
         s.append(f"{len(ligs)} ligand{'s were' if len(ligs) > 1 else ' was'} docked {'simultaneously' if sim else 'independently'} with AutoDock Vina "
-                 f"(exhaustiveness {vals.get('exhaustiveness')}, {vals.get('n_poses')} poses per ligand), and the starting pose was chosen from score, "
+                 f"(exhaustiveness {v('exhaustiveness')}, {v('n_poses')} poses per ligand), and the starting pose was chosen from score, "
                  "cluster size and contact residues. ")
     s.append("The protein" + (" and peptide" if peps else "") + " were described with Amber ff14SB"
-             + (" and small-molecule ligands with OpenFF Sage 2.2 (partial charges from NAGL or AM1-BCC)" if len(peps) < len(ligs) else "")
-             + f". Each system was solvated in a {box[1]} TIP3P water box with {vals.get('padding_nm')} nm between protein and box edge, "
-             f"neutralised and brought to {vals.get('ion_concentration_molar')} M {salt}. ")
-    s.append("Long-range electrostatics used PME with a 1.0 nm non-bonded cut-off; bonds to hydrogen were constrained"
+             + (" and small-molecule ligands with OpenFF Sage 2.2 (partial charges from NAGL or AM1-BCC)" if small else "")
+             + f". Each system was solvated in a {box[1]} TIP3P water box with {v('padding_nm')} nm between protein and box edge, "
+             f"neutralised and brought to {v('ion_concentration_molar')} M {salt}. ")
+    s.append("Long-range electrostatics used PME with a 1.0 nm non-bonded cut-off. Bonds to hydrogen were constrained"
              + (" and hydrogen masses were repartitioned to 3 amu" if hmr else "") + ". "
-             f"After energy minimisation (up to {vals.get('minimize_iterations')} steps), the system was heated from {vals.get('heat_start_k'):g} K to "
-             f"{vals.get('temperature_k'):g} K under NVT ({vals.get('nvt_ps'):g} ps) and equilibrated under NPT ({vals.get('pressure_bar'):g} bar, "
-             f"Monte Carlo barostat) for {vals.get('npt_ps'):g} ps while position restraints were released ({vals.get('restraints')} strategy). ")
-    s.append(f"Production used a Langevin middle integrator (friction {vals.get('friction_per_ps'):g} ps⁻¹, time step {vals.get('timestep_fs'):g} fs) "
-             f"for {vals.get('production_ns'):g} ns in {vals.get('replicas')} independent replica{'s' if vals.get('replicas', 1) > 1 else ''}, "
-             f"saving a frame every {vals.get('trajectory_interval_ps'):g} ps. All simulations were run with OpenMM; backbone RMSD, Cα RMSF, "
+             f"After energy minimisation (up to {v('minimize_iterations')} steps), the system was heated from {v('heat_start_k'):g} K to "
+             f"{v('temperature_k'):g} K under NVT ({v('nvt_ps'):g} ps) and equilibrated under NPT ({v('pressure_bar'):g} bar, "
+             f"Monte Carlo barostat) for {v('npt_ps'):g} ps while position restraints were released ({v('restraints')} strategy). ")
+    s.append(f"Production used a Langevin middle integrator (friction {v('friction_per_ps'):g} ps⁻¹, time step {v('timestep_fs'):g} fs) "
+             f"for {v('production_ns'):g} ns in {v('replicas')} independent replica{'s' if v('replicas', 1) > 1 else ''}, "
+             f"saving a frame every {v('trajectory_interval_ps'):g} ps. All simulations were run with OpenMM. Backbone RMSD, Cα RMSF, "
              "ligand pocket RMSD and contact frequencies were computed with MDTraj. ")
-    if vals.get("binding"):
-        s.append(f"Binding free energies were obtained by steered molecular dynamics (pulling velocity {vals.get('pull_velocity_nm_per_ps'):g} nm ps⁻¹, "
-                 f"spring constant {vals.get('k_pull'):g} kJ mol⁻¹ nm⁻², pulling distance {vals.get('pull_distance_nm'):g} nm) followed by umbrella "
-                 f"sampling along the path (spring constant {vals.get('k_umbrella'):g} kJ mol⁻¹ nm⁻², {vals.get('window_equil_ps'):g} ps equilibration "
-                 f"and {vals.get('window_prod_ps'):g} ps sampling per window, windows added adaptively by overlap); the windows were combined with MBAR, "
-                 "errors were estimated by bootstrapping and convergence was checked by agreement between the first and second halves.")
+    if v("binding"):
+        s.append(f"For binding free energies, steered molecular dynamics first produced a dissociation path (pulling velocity {v('pull_velocity_nm_per_ps'):g} nm ps⁻¹, "
+                 f"spring constant {v('k_pull'):g} kJ mol⁻¹ nm⁻², pulling distance {v('pull_distance_nm'):g} nm). Umbrella-sampling windows were "
+                 f"placed along the path (spring constant {v('k_umbrella'):g} kJ mol⁻¹ nm⁻², {v('window_equil_ps'):g} ps equilibration "
+                 f"and {v('window_prod_ps'):g} ps sampling per window, with windows added adaptively by overlap) and combined with MBAR. "
+                 "Errors were estimated by bootstrapping, and convergence was checked by agreement between the first and second halves.")
     return "".join(s)
 
 
@@ -1045,17 +1229,29 @@ def _limitations(doc: Doc, wf) -> list[str]:
     st_ = wf.state()
     multi = (st_["steps"].get("pose_selection") or {}).get("selection", {}).get("mode") == "simultaneous" or bool(st_.get("multi_ligand"))
     if multi:     # D-60: what a multi-ligand system can and cannot say
-        items.append(tx(("多配體系統：Vina 分數沒有靜電項，聯合姿勢的配體間作用只粗略估計；每個配體的部分電荷各自計算（AM1-BCC 類固定電荷，不含配體間極化），"
-                         "相鄰帶電基團的作用可能被高估或低估；模擬中的平底限制讓配體不會完全離開口袋，因此「共同佔位維持」需在無限制的重跑中確認。",
-                         "Multi-ligand system: the Vina score has no electrostatic term, so ligand–ligand interactions in joint poses are "
-                         "only roughly estimated; each ligand's partial charges are computed alone (fixed AM1-BCC-type charges without "
-                         "mutual polarisation), so neighbouring charged groups may be over- or under-stabilised; the flat-bottom restraint "
-                         "keeps every ligand from leaving the pocket, so sustained co-occupancy must be confirmed in an unrestrained rerun."), L))
+        items.append(tx(("這是多配體系統。Vina 分數沒有靜電項，聯合姿勢裡配體之間的作用只是粗略估計。"
+                         "每個配體的部分電荷是各自計算的固定電荷（AM1-BCC 類），不含配體之間的極化，相鄰帶電基團的作用可能被高估或低估。"
+                         "模擬中的平底限制讓配體不會完全離開口袋，所以兩個配體能否一直共同佔位，要在不加限制的重跑中確認。",
+                         "This is a multi-ligand system. The Vina score has no electrostatic term, so ligand–ligand interactions in "
+                         "joint poses are only rough estimates. Each ligand's partial charges are fixed AM1-BCC-type charges computed "
+                         "for that ligand alone, without mutual polarisation, so neighbouring charged groups may be over- or "
+                         "under-stabilised. The flat-bottom restraint keeps every ligand from leaving the pocket, so sustained "
+                         "co-occupancy has to be confirmed in an unrestrained rerun.",
+                         "これは複数リガンドの系です。Vina のスコアには静電項がないため、同時ポーズでのリガンド間の相互作用は大まかな見積もりにすぎません。"
+                         "各リガンドの部分電荷はそれぞれ単独で計算した固定電荷（AM1-BCC 系）で、リガンド間の分極を含まないため、隣り合う荷電基の相互作用は過大にも過小にも評価され得ます。"
+                         "シミュレーション中はフラットボトム拘束でリガンドがポケットから完全には離れないため、共存が保たれるかどうかは拘束なしの再計算で確認する必要があります。",
+                         "다중 리간드 시스템입니다. Vina 점수에는 정전기 항이 없으므로 동시 포즈에서 리간드 간 상호작용은 대략적인 추정일 뿐입니다. "
+                         "각 리간드의 부분 전하는 리간드마다 따로 계산한 고정 전하(AM1-BCC 계열)이며 리간드 간 분극을 포함하지 않으므로, 이웃한 하전기의 상호작용이 과대 또는 과소 평가될 수 있습니다. "
+                         "시뮬레이션 중에는 평평한 바닥 구속 때문에 리간드가 포켓을 완전히 떠나지 않으므로, 공존이 유지되는지는 구속 없이 다시 계산해서 확인해야 합니다."), L))
         ml = st_.get("multi_ligand") or {}
         if ml.get("status") == "ACCEPTED":
-            items.append(tx(("使用者選擇讓有重疊或穿環的多配體構型照原樣進入 MD；最小化可能把配體推離原位，相關結果需保守看待。",
-                             "The user let a multi-ligand geometry with overlaps or ring piercing enter MD as it was; minimisation "
-                             "may have pushed a ligand away from its pose, so read the related results conservatively."), L))
+            items.append(tx(("使用者讓有原子重疊或穿環的多配體構型照原樣進入 MD。能量最小化可能把配體推離原本的位置，相關結果要保守看待。",
+                             "The user let a multi-ligand geometry with overlaps or ring piercing enter MD as it was. Minimisation "
+                             "may have pushed a ligand away from its pose, so read the related results conservatively.",
+                             "ユーザーは原子の重なりや環の貫通がある複数リガンドの構造をそのまま MD に進めました。"
+                             "エネルギー最小化でリガンドが元の位置から押し出された可能性があるため、関連する結果は慎重に解釈してください。",
+                             "사용자가 원자 겹침이나 고리 관통이 있는 다중 리간드 구조를 그대로 MD에 넣었습니다. "
+                             "에너지 최소화 과정에서 리간드가 원래 자리에서 밀려났을 수 있으므로 관련 결과는 신중하게 해석해야 합니다."), L))
     for name, r in (wf.state().get("peptide_access") or {}).items():
         for part in ("precheck", "pose"):
             g = r.get(part) or {}
@@ -1065,12 +1261,18 @@ def _limitations(doc: Doc, wf) -> list[str]:
         items += [f"{name}: {c}" for c in r.get("caveats") or []]
     tier = (wf.cfg.get("md") or {}).get("tier", "teaching")
     if tier == "classroom":
-        items.append(tx(("本流程使用課堂等級（2 ns），只用於學習流程與檢查，不足以支持科學結論。",
-                         "This workflow used the classroom tier (2 ns); it is for learning and checking the workflow and does not support scientific conclusions."), L))
+        items.append(tx(("這個流程用的是課堂等級（2 ns），只適合學習與檢查流程，不足以支持科學結論。",
+                         "This workflow used the classroom tier (2 ns). It is for learning and checking the workflow and does not support scientific conclusions.",
+                         "このワークフローは授業用の等級（2 ns）で実行しました。手順の学習と確認のためのもので、科学的な結論の根拠にはなりません。",
+                         "이 워크플로는 수업용 등급(2 ns)으로 실행했습니다. 절차를 배우고 확인하는 용도이며 과학적 결론의 근거가 되지 못합니다."), L))
     if int((wf.cfg.get("md") or {}).get("replicas", 1)) < 3:
-        items.append(tx(("只有一次模擬，無法報告重複間的標準差。", "Only one replica was run, so no standard deviation between replicas can be reported."), L))
-    items.append(tx(("對接分數為經驗評分，誤差約 1 到 2 kcal mol⁻¹，不應直接解讀為結合親和力。",
-                     "Docking scores are empirical with an error of about 1–2 kcal mol⁻¹ and should not be read as binding affinities."), L))
+        items.append(tx(("只跑了一次模擬，無法報告重複之間的標準差。", "Only one replica was run, so no standard deviation between replicas can be reported.",
+                         "シミュレーションは 1 回だけなので、繰り返し間の標準偏差は報告できません。",
+                         "시뮬레이션을 한 번만 실행했으므로 반복 간 표준편차를 보고할 수 없습니다."), L))
+    items.append(tx(("對接分數是經驗評分，誤差約 1 到 2 kcal mol⁻¹，不要直接當成結合親和力。",
+                     "Docking scores are empirical, with an error of about 1 to 2 kcal mol⁻¹. Do not read them as binding affinities.",
+                     "ドッキングスコアは経験的な評価値で、誤差は約 1〜2 kcal mol⁻¹ です。結合親和性としてそのまま読まないでください。",
+                     "도킹 점수는 경험적 평가값이며 오차가 약 1~2 kcal mol⁻¹입니다. 결합 친화도로 그대로 읽지 마십시오."), L))
     return items
 
 
@@ -1079,7 +1281,7 @@ def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None 
     """banner_html: trusted markup placed above the title (the report template marks itself as synthetic data)."""
     out_path = Path(out_path) if out_path else wf.dir / "workflow_report.html"
     L = lang or wf.cfg.get("language") or "en"
-    L = L if L in ("en", "zh") else "en"
+    L = L if L in LANGS else "en"
     doc = Doc(L, wf.dir / "report_figures")
     counter = {"n": 0}
 
@@ -1105,26 +1307,28 @@ def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None 
     key = key[:10]
     rows_log = [r for r in wf.project.decisions.read() if str(r.get("stage", "")).startswith(
         ("workflow", "docking", "binding", "build", "engine", "screen", "gui", "peptide"))]
-    log = doc.table([tx(("時間", "Time"), L), tx(("階段", "Stage"), L), tx(("項目", "Item"), L), tx(("選擇", "Choice"), L),
-                     tx(("類型", "Type"), L), tx(("理由", "Reason"), L)],
+    log = doc.table([tx(("時間", "Time", "日時", "시각"), L), tx(("階段", "Stage", "段階", "단계"), L), tx(("項目", "Item", "項目", "항목"), L),
+                     tx(("選擇", "Choice", "選択", "선택"), L), tx(("類型", "Type", "種類", "유형"), L), tx(("理由", "Reason", "理由", "이유"), L)],
                     [[_esc(str(r.get("at", ""))[:19].replace("T", " ")), _esc(r.get("stage", "")), _esc(r.get("what", "")),
                       f"<code>{_esc(r.get('choice', ''))}</code>", _esc(r.get("kind", "")), _esc(r.get("why", ""))] for r in rows_log],
-                    ("自動與人工決策（依時間）", "Automatic and human decisions (chronological)"))
+                    ("自動與人工的決策（依時間排列）", "Automatic and human decisions (chronological)",
+                     "自動と手動の判断（時系列）", "자동 및 수동 결정 (시간순)"))
     n_meth = nxt()
     n_lim = nxt()
-    html = [f"<!doctype html><html lang={'zh-Hant' if L == 'zh' else 'en'}><head><meta charset=utf-8>"
-            f"<title>{_esc(tx(H['title'], L))} — {_esc(wf.name)}</title><style>{CSS}</style></head><body>" + banner_html,
+    html = [f"<!doctype html><html lang={HTML_LANG[L]}><head><meta charset=utf-8>"
+            f"<title>{_esc(tx(H['title'], L))} · {_esc(wf.name)}</title><style>{CSS}</style></head><body>" + banner_html,
             f"<h1>{_esc(tx(H['title'], L))}</h1>",
-            f"<p class=meta>{_esc(tx(H['project'], L))}: {_esc(wf.project.name)} · {_esc(tx(H['workflow'], L))}: {_esc(wf.name)} · "
-            f"{_esc(tx(H['generated'], L))}: {now_iso()[:19].replace('T', ' ')} UTC</p>",
-            (f"<p class=meta>{_esc(tx(H['zh_note'], L))}</p>" if L == "en" else ""),
+            f"<p class=meta>{_esc(tx(H['project'], L))}{colon(L)}{_esc(wf.project.name)} · {_esc(tx(H['workflow'], L))}{colon(L)}{_esc(wf.name)} · "
+            f"{_esc(tx(H['generated'], L))}{colon(L)}{now_iso()[:19].replace('T', ' ')} UTC</p>",
+            (f"<p class=meta>{_esc(tx(H['zh_note'], L))}</p>" if L != "zh" else ""),
             f"<div class=box><b>{_esc(tx(H['key_findings'], L))}</b>{_findings_html(key, L) or '<p class=muted>—</p>'}</div>",
             *body,
             f"<h2>{n_meth}. {_esc(tx(H['methods'], L))}</h2><div class=methods>{_esc(methods_text(wf, vals, L))}</div>",
             f"<h2>{n_lim}. {_esc(tx(H['limitations'], L))}</h2><ul>" + "".join(f"<li>{_esc(x)}</li>" for x in _limitations(doc, wf)) + "</ul>",
             _viewer_section(wf, L),
             f"<h2>{_esc(tx(H['appendix_params'], L))}</h2>" + _param_table(doc, advisor.parameter_table(vals, f, goal, L),
-                                                                         ("全部參數：採用值、本案例建議值與理由", "All parameters: value used, recommendation for this case and reason")),
+                                                                         ("全部參數的採用值、本案例建議值與理由", "All parameters with the value used, the recommendation for this case and the reason",
+                                                                          "全パラメータの使用値、このケースの推奨値と理由", "전체 매개변수의 사용값, 이 사례의 권장값과 이유")),
             f"<h2>{_esc(tx(H['appendix_log'], L))}</h2>{log}",
             f"<h2>{_esc(tx(H['appendix_cfg'], L))}</h2><details><summary>config.json</summary><pre>{_esc(json.dumps(cfg, ensure_ascii=False, indent=1))}</pre></details>",
             __import__("md20.util.stamp", fromlist=["html_footer"]).html_footer(), "</body></html>"]
@@ -1157,11 +1361,12 @@ def _viewer_section(wf, lang: str = "zh") -> str:
         except Exception:  # noqa: BLE001  (e.g. no mdtraj): fall back to the start structure
             try:
                 sc = scene_for({**t, "mode": "start"})
-                t = {**t, "label": f"{key}：建模起始結構"}
+                t = {**t, "label": key + colon(lang) + pick(("建模起始結構", "starting structure from the build", "構築した初期構造", "구축된 시작 구조"), lang)}
             except Exception:  # noqa: BLE001
                 continue
         parts.append(f"<h3>{_esc(t['label'])}</h3>" + viewer_html(sc, standalone=False, height_px=380))
     if not parts:
         return ""
-    return ("<h2>" + ("3D 檢視（離線，可拖曳旋轉；軌跡可播放）" if lang == "zh" else "3D view (offline; drag to rotate, the trajectory can be played)")
+    return ("<h2>" + pick(("3D 檢視（離線可用。拖曳可旋轉，軌跡可以播放）", "3D view (works offline. Drag to rotate and play the trajectory)",
+                           "3D 表示（オフラインで使えます。ドラッグで回転、軌跡は再生できます）", "3D 보기 (오프라인 사용 가능. 드래그하면 회전하고 궤적을 재생할 수 있습니다)"), lang)
             + "</h2>" + "".join(parts))

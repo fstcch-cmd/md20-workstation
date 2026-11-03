@@ -3,6 +3,10 @@
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
+## v0.1.0a4（準備中，2026-11-03）
+- 四種介面與報告語言（英文、繁中、日文、韓文，D-74）；介面、報告與學生文件改寫。純 Python 測試全過；介面四語截圖與「計算中切換語系」穩定性檢查在 CI `gui-preview`。
+- 日韓文未經母語者校對。
+
 ## 目前版本：v0.1.0a3（2026-11-03 發行）
 - 發行：https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a3 （`MD20-Windows-v0.1.0a3.zip`、`MD20-macOS-v0.1.0a3.zip`；發行前在乾淨 Windows 與 macOS runner 實裝驗證通過）。
 - 發行的 main 包含 D-72（578c484）。**4bccdff（D-71）以前的程式 CI 15 個 job 全綠**；D-72（vina.exe HighQoS 標記與執行緒量測）的完整 CI 尚未確認，使用者 11/03 08:50 決定不等筆電驗證直接發行。

@@ -36,16 +36,19 @@ def test_config_from_mode_applies_values_and_asks_before_md():
 
 
 def test_teaching_cases_and_content_are_bilingual():
-    for key, (zh, en) in UI.items():
-        assert zh and en, key
-        assert " / " not in zh and " / " not in en, key        # user rule: no slash separators
+    # D-74: every text is (zh, en, ja, ko)
+    for key, v in UI.items():
+        assert len(v) == 4 and all(v), key
+        assert not any(" / " in x for x in v), key            # user rule: no slash separators
     for m in MODES.values():
-        assert all(m["title"]) and all(m["text"])
+        assert len(m["title"]) == 4 and all(m["title"]) and len(m["text"]) == 4 and all(m["text"])
     for case, c in TEACHING.items():
         for part in ("title", "background"):
-            assert all(c[part])
+            assert len(c[part]) == 4 and all(c[part])
         for part in ("objectives", "checks", "discussion"):
-            assert c[part] and all(zh and en for zh, en in c[part])
+            assert c[part] and all(len(x) == 4 and all(x) for x in c[part])
+        for title, text in c["stages"]:
+            assert len(title) == 4 and all(title) and len(text) == 4 and all(text)
         cfg = teaching_config(case)
         assert cfg["confirm_before_md"] and cfg["md"]["tier"] == "classroom"
         assert cfg["validation"]["case"] == case
@@ -53,3 +56,5 @@ def test_teaching_cases_and_content_are_bilingual():
     assert c24["docking"]["mode"] == "simultaneous" and len(c24["ligands"]) == 6 and c24["md"]["padding_nm"] == 1.0
     assert c25["ligands"][0]["sequence"] == "GGGGGKP" and c25["md"]["restraints"] == "gentle"
     assert t("estimate_text", "en", total=1, md=1, bind=0, atoms=2, speed=3).startswith("About 1 h")
+    for lang in ("zh", "ja", "ko"):
+        assert "{" not in t("estimate_text", lang, total=1, md=1, bind=0, atoms=2, speed=3)

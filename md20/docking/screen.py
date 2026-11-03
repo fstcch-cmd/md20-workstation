@@ -18,6 +18,7 @@ import numpy as np
 
 from ..util import atomic_write_json, load_json, now_iso, DecisionLog
 from .box import Box
+from ..i18n import pick as tx, colon
 
 INDISTINGUISHABLE_KCAL = 1.0       # Vina's own error is ~1–2 kcal/mol; within this of the top, order is noise
 LE_REFERENCE = 0.3                 # kcal/mol per heavy atom — common "good ligand efficiency" guide line
@@ -47,8 +48,8 @@ class ScreenConfig:
     def params(self) -> dict:
         return {"exhaustiveness": self.exhaustiveness, "n_poses": self.n_poses, "scoring": self.scoring, "seed": self.seed,
                 "reduced_search": True, "protonation": self.protonation, "ph": self.ph,
-                "note": "篩選用縮減搜尋（exhaustiveness 低、pose 少）；分數只用於剔除，不是結合自由能。"
-                        "配體以 pH 主要離子態對接（PubChem/ChEMBL 給的中性結構會先離子化），與受體加氫一致。"}
+                "note": "篩選用縮減搜尋，exhaustiveness 低、pose 少。分數只用來剔除化合物，不是結合自由能。"
+                        "配體以該 pH 下的主要離子態對接，PubChem 或 ChEMBL 給的中性結構會先離子化，與受體加氫一致。"}
 
 
 # ----------------------------------------------------------------------------- batch docking
@@ -69,8 +70,8 @@ def screen_dock(receptor_pdb: Path | str, entries: list[dict], box: Box, out_dir
     todo = [e for e in entries if results["entries"].get(e["name"], {}).get("status") != "OK"]
     if decisions and todo:
         decisions.record("screen.docking", "setup", cfg.params(),
-                         f"高通量篩選 {len(entries)} 個化合物（{len(entries) - len(todo)} 個已完成，續跑 {len(todo)} 個）：每個化合物各自對接，"
-                         f"exhaustiveness {cfg.exhaustiveness}、{cfg.n_poses} 個 pose。分數接近者視為不可區分，之後正式對接才用完整搜尋。")
+                         f"高通量篩選 {len(entries)} 個化合物，已完成 {len(entries) - len(todo)} 個，續跑 {len(todo)} 個。每個化合物各自對接，"
+                         f"exhaustiveness {cfg.exhaustiveness}、{cfg.n_poses} 個 pose。分數接近的視為不可區分，之後正式對接才用完整搜尋。")
     t0, done_now = time.monotonic(), 0
     for i, e in enumerate(todo, 1):
         if should_stop and should_stop():
@@ -233,16 +234,21 @@ STATUS_COLORS = {"PASS": "#2f7d5b", "AUTO_FIXED": "#c08a1e", "NEEDS_HUMAN": "#b8
 def echart_ranking(rows: list[dict], *, top_n: int = 30, lang: str = "en") -> dict:
     """Ranked horizontal bar chart (best score at the top), coloured by recommendation; the band marks compounds within
     1 kcal/mol of the best (inside Vina's error).  Each bar's name is the compound name, so a click selects it."""
-    zh = lang == "zh"
     rs = sorted([r for r in rows if r.get("score") is not None], key=lambda r: r["score"])[:top_n]
     rs = list(reversed(rs))                      # ECharts category axes draw bottom-up
     best = min((r["score"] for r in rs), default=0.0)
     data = [{"value": r["score"], "name": r["name"],
              "itemStyle": {"color": STATUS_COLORS.get(r.get("recommendation_status"), "#7b8794")}} for r in rs]
     return {
-        "title": {"text": "篩選排名（Vina 分數，越負越好）" if zh else "Screening ranking (Vina score, more negative is better)",
-                  "subtext": ("灰色帶：與最佳差距 1 kcal/mol 以內，名次在誤差內；點選長條可選取化合物" if zh else
-                              "Grey band: within 1 kcal/mol of the best, order within error; click a bar to select the compound"),
+        "title": {"text": tx(("篩選排名（Vina 分數，越負越好）", "Screening ranking (Vina score, more negative is better)",
+                              "スクリーニング順位（Vina スコア、負に大きいほど良い）", "스크리닝 순위(Vina 점수, 더 음수일수록 좋음)"), lang),
+                  "subtext": tx(("灰色帶是與最佳差距 1 kcal/mol 以內的範圍，這些名次在誤差內。點一下長條可以選取化合物。",
+                                 "The grey band is within 1 kcal/mol of the best, where the order is within error. Click a bar "
+                                 "to select the compound.",
+                                 "灰色の帯は最良値から 1 kcal/mol 以内の範囲で、この中の順位は誤差内です。棒をクリックすると化合物を"
+                                 "選べます。",
+                                 "회색 띠는 최고값에서 1 kcal/mol 이내 범위로, 이 안의 순위는 오차 범위입니다. 막대를 누르면 화합물을 "
+                                 "선택할 수 있습니다."), lang),
                   "textStyle": {"fontSize": 13, "fontWeight": 600}, "subtextStyle": {"fontSize": 11}},
         "grid": {"left": 120, "right": 40, "top": 60, "bottom": 30},
         "tooltip": {"trigger": "item", "formatter": "{b}: {c} kcal/mol"},
@@ -254,16 +260,21 @@ def echart_ranking(rows: list[dict], *, top_n: int = 30, lang: str = "en") -> di
     }
 
 
-def echart_screen(rows: list[dict], top_n: int = 20) -> dict:
+def echart_screen(rows: list[dict], top_n: int = 20, lang: str = "en") -> dict:
     """ECharts option for the GUI: score vs heavy atoms, one series per recommendation status."""
     series = []
     for st, col in (("PASS", "#1baf7a"), ("AUTO_FIXED", "#eda100"), ("NEEDS_HUMAN", "#e34948")):
         pts = [[r["heavy_atoms"], r["score"], r["name"], r["ligand_efficiency"]] for r in rows if r["recommendation_status"] == st]
         if pts:
             series.append({"name": st, "type": "scatter", "symbolSize": 7, "itemStyle": {"color": col}, "data": pts})
-    return {"title": {"text": "篩選：分數 vs 重原子數（越低越好；分數在 1 kcal/mol 內視為同級）", "textStyle": {"fontSize": 12}},
+    sep, comma = colon(lang), tx(("，", ", ", "、", ", "), lang)
+    return {"title": {"text": tx(("篩選分數與重原子數。分數越低越好，相差 1 kcal/mol 以內視為同級",
+                                  "Screen score against heavy atoms. Lower is better; scores within 1 kcal/mol count as equal",
+                                  "スクリーニングのスコアと重原子数。低いほど良く、1 kcal/mol 以内の差は同等とみなします",
+                                  "스크리닝 점수와 중원자 수. 낮을수록 좋으며 1 kcal/mol 이내 차이는 같은 수준으로 봅니다"), lang),
+                      "textStyle": {"fontSize": 12}},
             "tooltip": {"trigger": "item", "formatter": "{b}"},
             "legend": {"bottom": 0},
-            "xAxis": {"name": "重原子數", "type": "value"},
+            "xAxis": {"name": tx(("重原子數", "Heavy atoms", "重原子数", "중원자 수"), lang), "type": "value"},
             "yAxis": {"name": "Vina score (kcal/mol)", "type": "value", "inverse": True},
-            "series": [{**s, "data": [{"value": d[:2], "name": f"{d[2]}：{d[1]} kcal/mol，LE {d[3]}"} for d in s["data"]]} for s in series]}
+            "series": [{**s, "data": [{"value": d[:2], "name": f"{d[2]}{sep}{d[1]} kcal/mol{comma}LE {d[3]}"} for d in s["data"]]} for s in series]}

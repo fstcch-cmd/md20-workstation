@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["md20/gui/**", "tools/gui_preview.py", ".github/workflows/gui-preview.yml"]
+    paths: ["md20/gui/**", "md20/i18n.py", "md20/advisor.py", "tools/gui_preview.py", ".github/workflows/gui-preview.yml"]
 
 permissions:
   contents: write   # screenshots are also pushed to the `gui-preview` branch (artifact blobs are not reachable from the dev container)
@@ -13,7 +13,7 @@ permissions:
 jobs:
   screenshots:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,12 +24,14 @@ jobs:
           python -m playwright install --with-deps chromium
           sudo apt-get install -y fonts-noto-cjk >/dev/null
       - name: Render pages
-        run: python tools/gui_preview.py gui_preview
+        run: python tools/gui_preview.py gui_preview     # four languages + language-switch stability check (D-74)
       - uses: actions/upload-artifact@v4
-        with: { name: gui-preview, path: gui_preview/*.png }
+        if: always()
+        with: { name: gui-preview, path: "gui_preview/*" }
       - name: Push screenshots to the gui-preview branch
+        if: always()
         run: |
-          mkdir /tmp/pv && cp gui_preview/*.png /tmp/pv/
+          mkdir /tmp/pv && cp gui_preview/* /tmp/pv/
           cd /tmp/pv && git init -q && git checkout -q -b gui-preview
           git -c user.name=ci -c user.email=ci@md20 add . && git -c user.name=ci -c user.email=ci@md20 commit -qm "GUI preview ${{ github.sha }}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gui-preview

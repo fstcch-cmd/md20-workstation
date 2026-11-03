@@ -14,8 +14,9 @@ def test_every_kind_bilingual_and_in_spec():
     spec = open("docs/specs/report_language.md", encoding="utf-8").read()
     for k, f in FT.FIG.items():
         for part in ("title", "caption", "read"):
-            zh, en = f[part]
-            assert zh and en and zh != en, (k, part)
+            zh, en, ja, ko = f[part]                                   # D-74: four languages
+            assert zh and en and ja and ko and zh != en, (k, part)
+            assert ja != en and ko != en, (k, part)
         assert f"`{k}`" in spec, k                                     # every figure kind is specified in the spec
 
 

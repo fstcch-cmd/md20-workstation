@@ -2,7 +2,7 @@
  * Scene JSON: {atoms:[{e,n,r,s,k}], bonds:[[i,j]], frames:[[x,y,z,...]], interactions:{frames:[[[i,j,t]]]}}
  *   k = "L" ligand | "P" pocket side chain | "T" Cα trace | "M" metal
  *   t = "h" H-bond candidate | "c" hydrophobic contact | "m" metal coordination (geometric, computed in Python)
- * Drag = rotate, wheel = zoom, ▶ = play frames, 互作 / 表面 toggles.  No network, no WebGL required. */
+ * Drag = rotate, wheel = zoom, ▶ = play frames, interaction and surface toggles (labels from scene.ui).  No network, no WebGL required. */
 (function () {
   "use strict";
   var CPK = {C: "#909090", N: "#3050F8", O: "#FF0D0D", S: "#FFFF30", P: "#FF8000", H: "#FFFFFF", F: "#90E050",
@@ -166,8 +166,9 @@
       b.onclick = function () { v[key] = !v[key]; b.textContent = (v[key] ? "☑ " : "☐ ") + label; v.draw(); };
       bar.appendChild(b);
     }
-    toggle("互作", "showInter", true);
-    toggle("表面", "showSurface", false);
+    var ui = scene.ui || {};               // button labels in the interface language (D-74)
+    toggle(ui.interactions || "互作", "showInter", true);
+    toggle(ui.surface || "表面", "showSurface", false);
     el.appendChild(bar);
     v = new MD20View(cv, scene, sl ? {onFrame: function (f) { sl.value = f; }} : {});
     return v;

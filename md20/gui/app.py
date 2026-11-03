@@ -18,7 +18,8 @@ from .actions import apply_gate_action, resample_range, select_screen_ligands
 from ..docking.screen import echart_screen, echart_ranking
 from .views import (gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html,
                     coverage_targets, coverage_chart, coverage_summary)
-from .content import t, LANG_NAMES
+from .content import t
+from ..i18n import pick, colon, paren, LANGS, LANG_NAMES, QUASAR_LANG
 from .gate_text import gate_title, gate_general, option_text
 
 from ..util.timeutil import to_local
@@ -39,47 +40,48 @@ def lang() -> str:
     return STATE["lang"] if STATE["lang"] in LANG_NAMES else "en"
 
 
-def _(zh: str, en: str) -> str:
-    """Inline bilingual text for page code."""
-    return zh if lang() == "zh" else en
+def _(zh: str, en: str, ja: str = "", ko: str = "") -> str:
+    """Inline text for page code, in the interface language (D-74; a missing Japanese or Korean text falls back to English)."""
+    return pick((zh, en, ja, ko), lang())
 
 
-STEP_TEXT = {"receptor_input": ("受體來源", "Receptor source"), "receptor_docking": ("受體整理", "Receptor preparation"),
-             "screen_library": ("篩選：化合物庫", "Screening: compound library"), "screen_docking": ("篩選：快速對接", "Screening: fast docking"),
-             "screen_selection": ("篩選：選擇化合物", "Screening: compound selection"), "docking": ("分子對接", "Molecular docking"),
-             "pose_selection": ("姿勢選擇", "Pose selection"), "md_confirm": ("確認進入分子動力學", "Confirm molecular dynamics"),
-             "md_cases": ("建模", "System building"), "md_runs": ("分子動力學", "Molecular dynamics"),
-             "analysis": ("軌跡分析", "Trajectory analysis"), "binding": ("結合自由能", "Binding free energy"), "report": ("報告", "Report")}
-STATUS_TEXT = {"PASS": ("完成", "Done"), "COMPLETE": ("完成", "Done"), "RUNNING": ("執行中", "Running"), "PAUSED": ("已暫停", "Paused"),
-               "NEEDS_HUMAN": ("需要你決定", "Needs your decision"), "ERROR": ("錯誤", "Error"), "IDLE": ("未執行", "Idle"),
-               "AUTO_FIXED": ("已自動修正", "Corrected automatically"), "—": ("—", "—")}
+STEP_TEXT = {"receptor_input": ("受體來源", "Receptor source", "受容体の入力", "수용체 입력"),
+             "receptor_docking": ("受體整理", "Receptor preparation", "受容体の準備", "수용체 준비"),
+             "screen_library": ("篩選：化合物庫", "Screening: compound library", "スクリーニング：化合物ライブラリ", "스크리닝: 화합물 라이브러리"),
+             "screen_docking": ("篩選：快速對接", "Screening: fast docking", "スクリーニング：高速ドッキング", "스크리닝: 빠른 도킹"),
+             "screen_selection": ("篩選：選擇化合物", "Screening: compound selection", "スクリーニング：化合物の選択", "스크리닝: 화합물 선택"),
+             "docking": ("分子對接", "Molecular docking", "分子ドッキング", "분자 도킹"),
+             "pose_selection": ("姿勢選擇", "Pose selection", "ポーズの選択", "포즈 선택"),
+             "md_confirm": ("確認進入分子動力學", "Confirm molecular dynamics", "分子動力学に進む確認", "분자동역학 진행 확인"),
+             "md_cases": ("建模", "System building", "系の構築", "계 구축"),
+             "md_runs": ("分子動力學", "Molecular dynamics", "分子動力学", "분자동역학"),
+             "analysis": ("軌跡分析", "Trajectory analysis", "トラジェクトリ解析", "궤적 분석"),
+             "binding": ("結合自由能", "Binding free energy", "結合自由エネルギー", "결합 자유 에너지"),
+             "report": ("報告", "Report", "レポート", "보고서")}
+STATUS_TEXT = {"PASS": ("完成", "Done", "完了", "완료"), "COMPLETE": ("完成", "Done", "完了", "완료"),
+               "RUNNING": ("執行中", "Running", "実行中", "실행 중"), "PAUSED": ("已暫停", "Paused", "一時停止中", "일시 정지됨"),
+               "NEEDS_HUMAN": ("需要你決定", "Needs your decision", "判断が必要", "결정 필요"),
+               "ERROR": ("錯誤", "Error", "エラー", "오류"), "IDLE": ("未執行", "Idle", "未実行", "실행 전"),
+               "AUTO_FIXED": ("已自動修正", "Corrected automatically", "自動で修正済み", "자동 수정됨"), "—": ("—", "—", "—", "—")}
 
 
-SOURCE_EN = [("科學限制 · 胜肽", "Scientific limitation · peptide"), ("科學限制", "Scientific limitation"), ("結構可信度", "Structure validity"), ("受體整理", "Receptor preparation"),
-             ("受體來源", "Receptor source"), ("對接前檢查", "Docking pre-checks"), ("分子對接", "Molecular docking"),
-             ("pose 選擇", "Pose selection"), ("確認進入 MD", "Confirm molecular dynamics"), ("MD 建模", "System building"),
-             ("MD 執行", "Molecular dynamics"), ("軌跡分析", "Trajectory analysis"), ("SMD＋傘狀採樣", "Binding free energy"),
-             ("報告", "Report"), ("組裝", "assembly"), ("受體", "receptor"), ("配體", "ligand")]
-BADGE_EN = {"需要你決定": "Needs your decision", "已自動修正": "Corrected automatically", "通過": "Passed", "已暫停": "Paused", "執行中": "Running"}
-
-
-def card_source(src: str) -> str:
-    if lang() == "zh":
-        return src
-    for zh, en in SOURCE_EN:
-        src = src.replace(zh, en)
+def card_source(src: str, lang_code: str | None = None) -> str:
+    """Source label of a gate card; gate_cards(lang=...) already writes it in the interface language."""
     return src
 
 
-def card_badge(c: dict) -> str:
+def card_badge(c: dict, lang_code: str | None = None) -> str:
     if c.get("advisory"):
-        return _("科學限制提醒", "Scientific notice")
-    return c["label"] if lang() == "zh" else BADGE_EN.get(c["label"], c["label"])
+        return pick(("科學限制提醒", "Scientific notice", "科学的な限界のお知らせ", "과학적 한계 안내"), lang_code or lang())
+    return c["label"]                     # gate_cards(lang=...) already wrote the badge in the interface language
 
 
-RESOURCE_MODES = {"background": ("省資源：可同時寫報告", "Light: keep using the computer"),
-                  "balanced": ("平衡（預設）", "Balanced (default)"),
-                  "full": ("全速：電腦閒置時", "Full speed: computer idle")}
+# the zh and en labels of these three are quoted in the student guides (docs/students/): keep them as they are
+RESOURCE_MODES = {"background": ("省資源：可同時寫報告", "Light: keep using the computer",
+                                 "省リソース：レポートを書きながら使う", "절약: 보고서를 쓰면서 사용"),
+                  "balanced": ("平衡（預設）", "Balanced (default)", "バランス（既定）", "균형(기본)"),
+                  "full": ("全速：電腦閒置時", "Full speed: computer idle", "フル稼働：パソコンを使っていないとき",
+                           "최대 속도: 컴퓨터를 쓰지 않을 때")}
 
 
 def resource_mode() -> str:
@@ -149,30 +151,37 @@ def _header():
             def change(e):
                 set_lang(e.value)
                 ui.navigate.reload()
-            ui.select({k: (v[0] if L == "zh" else v[1]) for k, v in RESOURCE_MODES.items()}, value=resource_mode(),
-                      on_change=lambda e: (set_resource_mode(e.value), ui.notify(_("資源用量已更新；下一個計算步驟起生效。",
-                                                                                    "Resource use updated; applies from the next step.")))
-                      ).props("dense dark borderless options-dense").classes("w-56").tooltip(_("計算可以使用多少電腦資源", "How much of this computer a calculation may use"))
-            ui.select(LANG_NAMES, value=L, on_change=change).props("dense dark borderless options-dense").classes("w-28")
+            ui.select({k: pick(v, L) for k, v in RESOURCE_MODES.items()}, value=resource_mode(),
+                      on_change=lambda e: (set_resource_mode(e.value), ui.notify(_(
+                          "資源用量已更新，從下一個計算步驟開始生效。", "Resource use updated. It applies from the next step.",
+                          "リソースの使用量を更新しました。次の計算ステップから反映されます。",
+                          "자원 사용량을 바꿨습니다. 다음 계산 단계부터 적용됩니다.")))
+                      ).props("dense dark borderless options-dense").classes("w-56").tooltip(_(
+                          "計算可以使用多少電腦資源", "How much of this computer a calculation may use",
+                          "計算にこのパソコンの資源をどれだけ使うか", "계산에 이 컴퓨터 자원을 얼마나 쓸지"))
+            ui.select(LANG_NAMES, value=L, on_change=change).props("dense dark borderless options-dense data-testid=lang-select").classes("w-28")
     # D-67: wherever the user goes (home, system page, another language), the running calculation is one click away
     job = RUNNER.running()
     if job is not None:
         href = f"/wf/{job.wf.project.dir.name}/{job.wf.name}"
         with ui.row().classes("w-full items-center gap-3 px-4 py-2").style("background:#fff7e6;border-bottom:1px solid #f0d9a8"):
             ui.icon("autorenew").classes("text-warning")
-            ui.label(_("計算進行中：", "Calculation running: ") + f"{job.wf.project.dir.name} / {job.wf.name}").classes("text-sm")
-            ui.button(_("回到進度", "Back to progress"), on_click=lambda h=href: ui.navigate.to(h)).props("dense outline no-caps color=primary")
+            ui.label(_("計算進行中：", "Calculation running: ", "計算中：", "계산 중: ") + f"{job.wf.project.dir.name} / {job.wf.name}").classes("text-sm")
+            ui.button(_("回到進度", "Back to progress", "進行状況に戻る", "진행 상황으로 돌아가기"),
+                      on_click=lambda h=href: ui.navigate.to(h)).props("dense outline no-caps color=primary")
 
 
 @ui.page("/system")
 def dashboard():
     _header()
     with ui.column().classes("w-full max-w-5xl mx-auto"):
-        ui.label(_("電腦狀態", "Computer status")).classes("text-xl font-semibold")
-        box = ui.markdown(_("_按下按鈕執行診斷_", "_Press a button to check this computer_"))
+        L = lang()
+        ui.label(_("電腦狀態", "Computer status", "パソコンの状態", "컴퓨터 상태")).classes("text-xl font-semibold")
+        box = ui.markdown(_("_按下按鈕檢查這台電腦_", "_Press a button to check this computer_",
+                            "_ボタンを押すとこのパソコンを診断します_", "_버튼을 누르면 이 컴퓨터를 진단합니다_"))
 
         async def do_doctor(bench: bool):
-            box.set_content(_("診斷中，效能測試約 20 秒…", "Checking; the benchmark takes about 20 s…") if bench else _("診斷中…", "Checking…"))
+            box.set_content(t("doctor_bench_wait", L) if bench else t("doctor_wait", L))
             from nicegui import run as nrun
             rep = await nrun.io_bound(run_doctor, do_benchmark=bench, benchmark_seconds=15.0)
             STATE["doctor"] = rep
@@ -181,8 +190,8 @@ def dashboard():
             box.set_content(rep.to_markdown(lang()))
             render_drivers(rep)
         with ui.row():
-            ui.button(_("快速診斷", "Quick check"), on_click=lambda: do_doctor(False))
-            ui.button(_("診斷並測試效能", "Check and benchmark"), on_click=lambda: do_doctor(True)).props("outline")
+            ui.button(t("doctor_quick", L), on_click=lambda: do_doctor(False))
+            ui.button(t("doctor_bench", L), on_click=lambda: do_doctor(True)).props("outline")
         drv_box = ui.column().classes("w-full gap-2")
 
         def render_drivers(rep):
@@ -196,11 +205,16 @@ def dashboard():
                     with ui.card().classes("w-full"):
                         with ui.row().classes("items-center gap-2"):
                             ui.badge(dp.status, color=color)
-                            ui.label(f"{dp.vendor} {dp.gpu} · 驅動 {dp.driver or '未知'} · 現在會用 {dp.platform_now}").classes("font-semibold")
+                            drv = dp.driver or _("未知", "unknown", "不明", "알 수 없음")
+                            ui.label(f"{dp.vendor} {dp.gpu} · " + _(f"驅動 {drv} · 目前使用 {dp.platform_now}",
+                                                                    f"driver {drv} · now using {dp.platform_now}",
+                                                                    f"ドライバー {drv} · 現在の使用先 {dp.platform_now}",
+                                                                    f"드라이버 {drv} · 현재 사용 {dp.platform_now}")).classes("font-semibold")
                         ui.label(dp.why).classes("text-sm whitespace-pre-wrap")
                         for st in dp.steps:
                             ui.label(st).classes("text-sm text-primary")
-                        ui.label(f"安裝器指令：{installer_hint(dp)}").classes("text-xs font-mono")
+                        ui.label(_("安裝器指令：", "Installer command: ", "インストーラーのコマンド：", "설치 프로그램 명령: ")
+                                 + installer_hint(dp)).classes("text-xs font-mono")
                         with ui.row().classes("gap-2"):
                             if dp.download_url:
                                 prog = ui.label("").classes("text-sm")
@@ -208,29 +222,40 @@ def dashboard():
                                 async def do_download(url=dp.download_url, prog=prog):
                                     from nicegui import run as nrun
                                     from ..env.drivers import download_driver
-                                    prog.set_text("下載中…")
+                                    prog.set_text(_("下載中…", "Downloading…", "ダウンロード中…", "다운로드 중…"))
                                     try:
                                         dest = await nrun.io_bound(download_driver, url)
                                     except Exception as exc:  # noqa: BLE001
-                                        prog.set_text(f"下載失敗：{exc}"); return
-                                    prog.set_text(f"已下載：{dest}。請雙擊安裝（管理員權限、重開機），再重跑安裝器。")
-                                ui.button(f"一鍵下載官方驅動{'（' + dp.package_version + '）' if dp.package_version else ''}",
+                                        prog.set_text(_("下載失敗：", "Download failed: ", "ダウンロードに失敗しました：", "다운로드 실패: ") + str(exc)); return
+                                    prog.set_text(_(f"已下載到 {dest}。請雙擊安裝，這需要管理員權限並重開機，之後再執行一次安裝器。",
+                                                    f"Downloaded to {dest}. Double-click it to install (this needs administrator "
+                                                    "rights and a restart), then run the installer again.",
+                                                    f"{dest} にダウンロードしました。ダブルクリックしてインストールしてください。管理者権限と再起動が必要です。"
+                                                    "その後、インストーラーをもう一度実行してください。",
+                                                    f"{dest}에 다운로드했습니다. 더블클릭해 설치하십시오. 관리자 권한과 재시작이 필요합니다. "
+                                                    "그다음 설치 프로그램을 다시 실행하십시오."))
+                                ui.button(_("下載官方驅動", "Download the official driver", "公式ドライバーをダウンロード", "공식 드라이버 다운로드")
+                                          + (paren(dp.package_version, L) if dp.package_version else ""),
                                           on_click=do_download).props("color=primary")
                             if dp.download_page:
-                                ui.button(_("開啟官方下載頁", "Open the official download page"), on_click=lambda u=dp.download_page: ui.navigate.to(u, new_tab=True)).props("outline")
+                                ui.button(_("開啟官方下載頁", "Open the official download page", "公式のダウンロードページを開く", "공식 다운로드 페이지 열기"), on_click=lambda u=dp.download_page: ui.navigate.to(u, new_tab=True)).props("outline")
         ui.separator()
-        ui.label(_("流程", "Workflows")).classes("text-xl font-semibold")
+        ui.label(_("流程", "Workflows", "ワークフロー", "워크플로")).classes("text-xl font-semibold")
         rows = list_workflows(STATE["projects_dir"])
         cols = [{"name": k, "label": l, "field": k} for k, l in
-                (("project", "專案"), ("workflow", "流程"), ("last_step", "最後步驟"), ("status", "狀態"), ("updated", "更新"))]
-        t = ui.table(columns=cols, rows=rows, row_key="workflow").classes("w-full")
-        t.on("rowClick", lambda e: ui.navigate.to(f"/wf/{e.args[1]['project']}/{e.args[1]['workflow']}"))
+                (("project", _("專案", "Project", "プロジェクト", "프로젝트")), ("workflow", _("流程", "Workflow", "ワークフロー", "워크플로")),
+                 ("last_step", _("最後步驟", "Last step", "最後のステップ", "마지막 단계")), ("status", t("status", L)),
+                 ("updated", _("更新時間", "Updated", "更新日時", "업데이트")))]
+        tbl = ui.table(columns=cols, rows=rows, row_key="workflow").classes("w-full")
+        tbl.on("rowClick", lambda e: ui.navigate.to(f"/wf/{e.args[1]['project']}/{e.args[1]['workflow']}"))
         if not rows:
-            ui.label(_("尚無流程；從首頁選擇模式開始。", "No workflows yet; choose a mode on the home page.")).classes("text-gray-500")
+            ui.label(_("還沒有流程。到首頁選一種模式開始。", "No workflows yet. Choose a mode on the home page to start.",
+                       "まだワークフローがありません。ホームでモードを選んで始めてください。",
+                       "아직 워크플로가 없습니다. 홈에서 모드를 골라 시작하십시오.")).classes("text-gray-500")
 
 
 def _start(wf: Workflow):
-    platform = _platform()
+    platform = "FAKE" if os.environ.get("MD20_GUI_FAKE_RUN") else _platform()   # test stand-in (D-74)
     policy = PausePolicy(pause_file=wf.project.dir / "PAUSE", pause_on_battery=True,
                          power_probe=__import__("md20.env.hardware", fromlist=["_power_state"])._power_state,
                          resource_guard=__import__("md20.env.resources", fromlist=["CachedGuard"]).CachedGuard())
@@ -252,18 +277,21 @@ def _gate_buttons(wf: Workflow, card: dict):
             def do(a=a, note=note):
                 job = RUNNER.get(wf)
                 if job and job.thread and job.thread.is_alive():
-                    ui.notify("流程執行中；請先暫停或等它停在閘門再做決定", type="warning"); return
+                    ui.notify(t("busy", lang()), type="warning"); return
                 try:
                     out = apply_gate_action(wf, a, note.value if note else "")
                 except (ValueError, KeyError) as exc:
                     ui.notify(str(exc), type="negative"); return
-                ui.notify(f"已寫回設定：{a['label']}；自 {a['from_step']} 起重跑（{len(out['invalidated'])} 個步驟）。"
-                          "按「開始／繼續」執行。", type="positive")
+                lab, n, frm, btn = option_text(a["label"], lang()), len(out["invalidated"]), a["from_step"], t("run_continue", lang())
+                ui.notify(_(f"已寫入設定：{lab}。會從 {frm} 重跑，共 {n} 個步驟。按「{btn}」執行。",
+                            f"Saved to the settings: {lab}. The run restarts from {frm} ({n} steps). Press {btn} to run it.",
+                            f"設定に書き込みました：{lab}。{frm} から再実行します（{n} ステップ）。「{btn}」を押して実行してください。",
+                            f"설정에 저장했습니다: {lab}. {frm}부터 다시 실행합니다({n}단계). '{btn}'을 눌러 실행하십시오."), type="positive")
             ui.button(option_text(a["label"], lang()), on_click=do).props("outline color=primary no-caps")
     if card.get("manual"):
-        ui.label(_("需要在程式外處理（處理後重新提供輸入）：", "Needs work outside the program (then provide the new input):")).classes("text-xs text-gray-500")
+        ui.label(t("manual_hint", lang())).classes("text-xs text-gray-500")
         for o in card["manual"]:
-            ui.label(f"→ {option_text(o, lang())}").classes("text-sm text-gray-700")
+            ui.label(f"• {option_text(o, lang())}").classes("text-sm text-gray-700")
 
 
 async def _upload_payload(e) -> tuple[str, bytes]:
@@ -289,13 +317,14 @@ def _manual_upload_panel(wf: Workflow):
         return
     rep = manual_upload_report(names, lib_dir)
     failed = [n for n, r in (man.get("entries") or {}).items() if r.get("status") != "OK"]
-    with ui.expansion(_("手動上傳結構（下載被阻擋時）", "Upload structures manually (when downloads are blocked)"),
+    with ui.expansion(t("hts_manual", lang()),
                       value=bool(failed)).classes("w-full md20-card"):
         ui.label(tx(NAMING_RULES[0], lang())).classes("md20-why")
         if failed:
-            ui.label(_("仍需結構：", "Still missing: ") + ", ".join(f"{n}.sdf" for n in failed[:40])).classes("text-sm")
+            ui.label(_("仍缺結構：", "Still missing: ", "構造がまだないもの：", "아직 구조가 없는 것: ") + ", ".join(f"{n}.sdf" for n in failed[:40])).classes("text-sm")
         if rep["bad_name"] or rep["unmatched"]:
-            ui.label(_("未使用（命名不符）：", "Not used (name does not match): ") + ", ".join(rep["bad_name"] + rep["unmatched"])).classes("text-sm text-negative")
+            ui.label(_("未使用（檔名不符）：", "Not used (name does not match): ", "未使用（ファイル名が一致しません）：",
+                       "사용하지 않음(파일 이름 불일치): ") + ", ".join(rep["bad_name"] + rep["unmatched"])).classes("text-sm text-negative")
         log = ui.column().classes("gap-0")
 
         async def got(e):
@@ -303,7 +332,7 @@ def _manual_upload_panel(wf: Workflow):
             ok, why, save_as = check_upload_name(fname, names)
             with log:
                 if not ok:
-                    ui.label(f"{fname}: {_('已拒絕', 'Rejected')} — {tx(why, lang())}").classes("text-sm text-negative")
+                    ui.label(f"{fname}{colon(lang())}{t('upload_rejected', lang())}{paren(tx(why, lang()), lang())}").classes("text-sm text-negative")
                     return
                 d = lib_dir / MANUAL_DIR
                 d.mkdir(parents=True, exist_ok=True)
@@ -311,14 +340,14 @@ def _manual_upload_panel(wf: Workflow):
                     if old_f.name.lower() == save_as.lower() and old_f.name != save_as:
                         old_f.replace(d / save_as)
                 (d / save_as).write_bytes(data)
-                ui.label(f"{fname}: {_('已接受', 'Accepted')}").classes("text-sm text-positive")
+                ui.label(f"{fname}{colon(lang())}{t('upload_ok', lang())}").classes("text-sm text-positive")
             # the library step is re-run so the new file is picked up (downloaded files are cached, not re-fetched)
             st = wf.state()
             for k in ("screen_library", "screen_docking", "screen_selection"):
                 st["steps"].pop(k, None)
             from ..util import atomic_write_json
             atomic_write_json(st, wf.state_path)
-        ui.upload(on_upload=got, multiple=True, auto_upload=True, label=_("選擇 .sdf 檔", "Choose .sdf files")).props("accept=.sdf flat bordered color=blue-grey-7").classes("w-full")
+        ui.upload(on_upload=got, multiple=True, auto_upload=True, label=_("選擇 .sdf 檔", "Choose .sdf files", ".sdf ファイルを選ぶ", ".sdf 파일 선택")).props("accept=.sdf flat bordered color=blue-grey-7").classes("w-full")
 
 
 def _figure_gallery(wf: Workflow):
@@ -327,6 +356,7 @@ def _figure_gallery(wf: Workflow):
     from ..report.workflow_report import build_workflow_report
     top = ui.row().classes("items-center gap-3")
     box = ui.column().classes("w-full gap-3")
+    btn = _("產生或更新圖表", "Build or refresh figures", "図を作成または更新", "그림 만들기 또는 업데이트")
     with top:
         info = ui.label("").classes("text-sm md20-muted")
 
@@ -334,8 +364,12 @@ def _figure_gallery(wf: Workflow):
         idx = load_json(wf.dir / "report_figures" / f"index_{lang()}.json", {})
         box.clear()
         figs = idx.get("figures") or []
-        info.set_text(_(f"共 {len(figs)} 張圖（產生於 {idx.get('created_at', '—')[:19]}）", f"{len(figs)} figures (generated {idx.get('created_at', '—')[:19]})")
-                      if figs else _("尚未產生圖表；流程有結果後按「產生或更新圖表」。", "No figures yet; press Build or refresh figures once the workflow has results."))
+        made = idx.get("created_at", "—")[:19]
+        info.set_text(_(f"共 {len(figs)} 張圖，產生於 {made}", f"{len(figs)} figures, generated {made}",
+                        f"図 {len(figs)} 枚、作成日時 {made}", f"그림 {len(figs)}개, 생성 시각 {made}")
+                      if figs else _(f"還沒有圖表。流程有結果後，按「{btn}」。", f"No figures yet. Press {btn} once the workflow has results.",
+                                     f"まだ図がありません。ワークフローに結果が出たら「{btn}」を押してください。",
+                                     f"아직 그림이 없습니다. 워크플로에 결과가 나오면 '{btn}'를 누르십시오."))
         sec = None
         with box:
             for f in figs:
@@ -344,22 +378,22 @@ def _figure_gallery(wf: Workflow):
                     ui.label(sec or "").classes("md20-section")
                 with ui.card().classes("w-full md20-card p-3"):
                     ui.image(f"/file?path={f['path']}").classes("w-full max-w-3xl")
-                    ui.label(f"{_('圖', 'Figure')} {f['n']}. {f['title']}" + (f" — {f['subject']}" if f.get("subject") else "")).classes("font-semibold text-sm")
+                    ui.label(f"{_('圖', 'Figure', '図', '그림')} {f['n']}. {f['title']}" + (paren(f["subject"], lang()) if f.get("subject") else "")).classes("font-semibold text-sm")
                     ui.label(f["caption"]).classes("md20-why")
-                    ui.label(_("如何判讀：", "How to read: ") + f["read"]).classes("text-sm")
+                    ui.label(_("怎麼看：", "How to read it: ", "読み方：", "읽는 법: ") + f["read"]).classes("text-sm")
                     for x in f.get("findings") or []:
                         ui.label(("⚠ " if x["level"] == "caution" else "• ") + x["text"]).classes(
                             "text-sm " + ("text-negative" if x["level"] == "caution" else ""))
 
     async def rebuild():
-        info.set_text(_("產生中…", "Building…"))
+        info.set_text(_("產生中…", "Building…", "作成中…", "만드는 중…"))
         try:
             await nrun.io_bound(build_workflow_report, wf, wf.dir / f"workflow_report_{lang()}.html", lang=lang())
         except Exception as exc:  # noqa: BLE001
             ui.notify(f"{type(exc).__name__}: {exc}", type="negative")
         render()
     with top:
-        ui.button(_("產生或更新圖表", "Build or refresh figures"), on_click=rebuild).props("outline no-caps")
+        ui.button(btn, on_click=rebuild).props("outline no-caps")
     render()
 
 
@@ -367,13 +401,16 @@ def _figure_gallery(wf: Workflow):
 def workflow_page(project: str, name: str):
     _header()
     if safe_name(project) != project or safe_name(name) != name or not (Path(STATE["projects_dir"]) / project / "project.json").is_file():
-        ui.label(_("找不到這個專案或流程。", "Project or workflow not found.")).classes("text-negative"); return
+        ui.label(_("找不到這個專案或流程。", "Project or workflow not found.", "このプロジェクトまたはワークフローが見つかりません。",
+                   "이 프로젝트 또는 워크플로를 찾을 수 없습니다.")).classes("text-negative"); return
     proj = Project(Path(STATE["projects_dir"]) / project)
     try:
         wf = Workflow.open(proj, name)          # never creates an empty workflow for a mistyped URL
     except FileNotFoundError:
-        ui.label(f"找不到流程 {name}。").classes("text-negative"); return
-    cfg = wf.cfg
+        ui.label(_(f"找不到流程 {name}。", f"Workflow {name} not found.", f"ワークフロー {name} が見つかりません。",
+                   f"워크플로 {name}을(를) 찾을 수 없습니다.")).classes("text-negative"); return
+    L = lang()
+    run_btn = t("run_continue", L)
     with ui.column().classes("w-full max-w-6xl mx-auto gap-3"):
         ui.label(f"{project} / {name}").classes("text-xl font-semibold")
         status = ui.label("").classes("text-lg")
@@ -390,13 +427,18 @@ def workflow_page(project: str, name: str):
             confirm_box.clear()
             if stp.get("status") != "NEEDS_HUMAN":
                 return
-            card = next((c for c in gate_cards(wf) if c["title"] == "confirm MD"), None)
+            card = next((c for c in gate_cards(wf, lang=lang()) if c["title"] == "confirm MD"), None)
             go = next((a for a in (card or {}).get("actions", []) if a["label"].startswith("進入分子動力學")), None)
             with confirm_box, ui.card().classes("w-full md20-card").style("border-left: 4px solid #2f6f9f"):
                 ui.label(t("confirm_md_title", lang())).classes("md20-section")
-                ui.label(_(stp.get("message", ""), "Docking and pose selection are complete. Check the selected poses in "
-                           "the pose table, then decide whether to continue to molecular dynamics (building, "
-                           "equilibration and production; this can take hours depending on the settings).")).classes("text-sm")
+                ui.label(_(stp.get("message", ""),
+                           "Docking and pose selection are complete. Check the selected poses in the pose table, then decide "
+                           "whether to continue to molecular dynamics. This covers building, equilibration and production, "
+                           "and can take hours depending on the settings.",
+                           "分子ドッキングとポーズ選択が終わりました。ポーズ表で選ばれたポーズを確認し、分子動力学に進むかどうか決めてください。"
+                           "系の構築、平衡化、本計算を行い、設定によっては数時間かかります。",
+                           "분자 도킹과 포즈 선택이 끝났습니다. 포즈 표에서 선택된 포즈를 확인한 뒤 분자동역학으로 진행할지 결정하십시오. "
+                           "계 구축, 평형화, 본 계산을 하며 설정에 따라 몇 시간 걸릴 수 있습니다.")).classes("text-sm")
 
                 def proceed():
                     job = RUNNER.get(wf)
@@ -405,58 +447,84 @@ def workflow_page(project: str, name: str):
                     if go:
                         apply_gate_action(wf, go)
                     _start(wf)
-                    ui.notify(_("已確認，開始分子動力學。", "Confirmed; molecular dynamics is starting."), type="positive")
+                    ui.notify(_("已確認，開始分子動力學。", "Confirmed. Molecular dynamics is starting.",
+                                "確認しました。分子動力学を始めます。", "확인했습니다. 분자동역학을 시작합니다."), type="positive")
+                go_btn = _("進入分子動力學", "Proceed to molecular dynamics", "分子動力学に進む", "분자동역학으로 진행")
                 with ui.row().classes("gap-2"):
-                    ui.button(_("進入分子動力學", "Proceed to molecular dynamics"), on_click=proceed).props("color=primary no-caps")
-                    ui.button(_("先改選姿勢", "Choose another pose first"),
-                              on_click=lambda: ui.notify(_("在下方姿勢表點選要使用的姿勢，再按「進入分子動力學」。",
-                                                           "Click the pose to use in the table below, then press Proceed."))
+                    ui.button(go_btn, on_click=proceed).props("color=primary no-caps")
+                    ui.button(_("先改選姿勢", "Choose another pose first", "先に別のポーズを選ぶ", "먼저 다른 포즈 선택"),
+                              on_click=lambda: ui.notify(_(f"在下方姿勢表點選要使用的姿勢，再按「{go_btn}」。",
+                                                           f"Click the pose to use in the table below, then press {go_btn}.",
+                                                           f"下のポーズ表で使うポーズをクリックしてから「{go_btn}」を押してください。",
+                                                           f"아래 포즈 표에서 사용할 포즈를 클릭한 뒤 '{go_btn}'을 누르십시오."))
                               ).props("outline no-caps")
         with ui.row():
-            ui.button(_("開始或繼續", "Start or continue"), on_click=lambda: _start(wf))
-            ui.button(_("暫停（在下一個區段結束時）", "Pause (at the end of the next segment)"), on_click=lambda: (wf.project.dir / "PAUSE").touch()).props("outline")
-            report_btn = ui.button(_("開啟報告", "Open report"),
+            ui.button(run_btn, on_click=lambda: _start(wf))
+            ui.button(t("pause", L), on_click=lambda: (wf.project.dir / "PAUSE").touch()).props("outline")
+            report_btn = ui.button(t("open_report", L),
                                    on_click=lambda: ui.navigate.to(f"/report/{project}/{name}?lang={lang()}", new_tab=True)).props("outline")
         steps = ui.table(columns=[{"name": k, "label": l, "field": k, "align": "left",
                                    **({"style": "white-space: normal; max-width: 560px"} if k == "message" else {})}
-                                  for k, l in (("step", _("步驟", "Step")), ("status", _("狀態", "Status")), ("at", _("時間", "Time")),
-                                               ("message", _("訊息", "Message")))],
+                                  for k, l in (("step", t("step", L)), ("status", t("status", L)), ("at", t("time", L)),
+                                               ("message", t("message", L)))],
                          rows=[], row_key="key").props("dense flat").classes("w-full md20-card")
-        ui.label(_("對接姿勢（★ 推薦、✔ 已選；點選一列改用該姿勢，系統會從姿勢選擇之後重新執行）", "Docking poses (★ recommended, ✔ selected; click a row to use that pose, the run restarts from pose selection)")).classes("font-semibold")
+        ui.label(t("poses", L)).classes("font-semibold")
         poses = ui.table(columns=[{"name": k, "label": l, "field": k, "align": "left"} for k, l in
-                                  (("entry", _("配體", "Ligand")), ("rank", _("名次", "Rank")), ("score", _("分數（kcal mol⁻¹）", "Score (kcal mol⁻¹)")),
-                                   ("cluster", _("叢集（大小）", "Cluster (size)")), ("contacts", _("接觸殘基數", "Contacts")),
-                                   ("rmsd_ref", _("與晶體 RMSD（Å）", "RMSD to crystal (Å)")), ("md_screen", _("短模擬篩選", "Short-MD screen")),
+                                  (("entry", _("配體", "Ligand", "リガンド", "리간드")), ("rank", _("名次", "Rank", "順位", "순위")),
+                                   ("score", _("分數（kcal mol⁻¹）", "Score (kcal mol⁻¹)", "スコア（kcal mol⁻¹）", "점수(kcal mol⁻¹)")),
+                                   ("cluster", _("叢集（大小）", "Cluster (size)", "クラスター（サイズ）", "클러스터(크기)")),
+                                   ("contacts", _("接觸殘基數", "Contacts", "接触残基数", "접촉 잔기 수")),
+                                   ("rmsd_ref", _("與晶體的 RMSD（Å）", "RMSD to crystal (Å)", "結晶との RMSD（Å）", "결정 대비 RMSD(Å)")),
+                                   ("md_screen", _("短模擬篩選", "Short-MD screen", "短い MD による選別", "짧은 MD 선별")),
                                    ("tag", ""))], rows=[], row_key="key").props("dense flat").classes("w-full md20-card")
         reason = ui.markdown("")
 
-        def pick(e):
+        def pick_pose(e):
             row = e.args[1]
             job = RUNNER.get(wf)
             if job and job.thread and job.thread.is_alive():
-                ui.notify("流程執行中；請先暫停再改選 pose（執行中改選會和背景執行緒互相覆寫狀態）", type="warning"); return
+                ui.notify(_("流程正在執行。請先暫停再改選姿勢，否則會和背景執行的流程互相覆寫狀態。",
+                            "The workflow is running. Pause it before you change the pose, or the two would overwrite each other's state.",
+                            "ワークフローは実行中です。ポーズを変える前に一時停止してください。そうしないと実行中の処理と状態を上書きし合います。",
+                            "워크플로가 실행 중입니다. 포즈를 바꾸기 전에 일시 정지하십시오. 그렇지 않으면 실행 중인 작업과 상태를 서로 덮어씁니다."),
+                          type="warning"); return
             set_pose_choice(wf, row["entry"], row["rank"])
-            ui.notify(f"{row['entry']} 改用第 {row['rank']} 名 pose；按「開始／繼續」重新執行後續步驟")
-        poses.on("rowClick", pick)
+            ent, rk = row["entry"], row["rank"]
+            ui.notify(_(f"{ent} 改用第 {rk} 名姿勢。按「{run_btn}」重跑後面的步驟。",
+                        f"{ent} now uses pose {rk}. Press {run_btn} to rerun the later steps.",
+                        f"{ent} は {rk} 位のポーズに変えました。「{run_btn}」を押すと後のステップを再実行します。",
+                        f"{ent}은(는) 이제 {rk}위 포즈를 사용합니다. '{run_btn}'을 누르면 이후 단계를 다시 실행합니다."))
+        poses.on("rowClick", pick_pose)
         # ---- WP13: gate cards / live curves / timeline / offline 3D -------------------------------------
         with ui.tabs().classes("w-full") as tabs:
-            t_gate, t_screen, t_live, t_umb, t_time, t_3d = (ui.tab(_("閘門", "Gates")), ui.tab(_("篩選", "Screening")), ui.tab(_("即時曲線", "Live curves")),
-                                                             ui.tab(_("傘狀採樣覆蓋", "Umbrella coverage")), ui.tab(_("時間軸", "Timeline")), ui.tab(_("3D 檢視", "3D view")))
-            t_fig = ui.tab(_("圖表", "Figures"))
+            t_gate, t_screen, t_live, t_umb, t_time, t_3d = (ui.tab(t("gates", L)), ui.tab(t("screening", L)), ui.tab(t("live", L)),
+                                                             ui.tab(t("umbrella", L)), ui.tab(t("timeline", L)), ui.tab(t("viewer", L)))
+            t_fig = ui.tab(_("圖表", "Figures", "図", "그림"))
         with ui.tab_panels(tabs, value=t_gate).classes("w-full"):
             with ui.tab_panel(t_gate):
                 cards_box = ui.column().classes("w-full gap-2")
             with ui.tab_panel(t_screen):
-                ui.label(_("高通量篩選（縮減搜尋的 Vina 分數，只用來剔除）。勾選要進入下一步的化合物，或直接點選排名圖的長條。", "High-throughput screen (reduced-search Vina scores, used only to discard). Tick the compounds to take forward, or click a bar in the ranking chart.") + " " + _(
-                         "≈ 表示與第 1 名差距 < 1 kcal/mol，在 Vina 誤差內、名次沒有統計意義。",
-                         "≈ marks a gap below 1 kcal/mol to the best compound: within Vina's error, the order is not meaningful.")).classes("text-sm")
+                ui.label(_("高通量篩選用的是縮減搜尋的 Vina 分數，只拿來剔除化合物。勾選要進入下一步的化合物，或直接點排名圖的長條。"
+                           "標 ≈ 的化合物和第 1 名差不到 1 kcal/mol，在 Vina 的誤差內，名次沒有統計意義。",
+                           "The high-throughput screen uses reduced-search Vina scores, only to discard compounds. Tick the compounds "
+                           "to take forward, or click a bar in the ranking chart. Compounds marked ≈ are less than 1 kcal/mol from "
+                           "the best one. That gap is within Vina's error, so their order is not meaningful.",
+                           "ハイスループットスクリーニングは探索を縮小した Vina スコアを使い、化合物を除くためだけに用います。次に進める化合物にチェックを入れるか、"
+                           "順位グラフの棒をクリックしてください。≈ の付いた化合物は 1 位との差が 1 kcal/mol 未満です。Vina の誤差の範囲内なので、順位に意味はありません。",
+                           "고처리량 스크리닝은 탐색을 줄인 Vina 점수를 사용하며 화합물을 걸러 내는 데만 씁니다. 다음 단계로 보낼 화합물을 선택하거나 "
+                           "순위 그래프의 막대를 클릭하십시오. ≈ 표시가 있는 화합물은 1위와의 차이가 1 kcal/mol 미만입니다. Vina 오차 범위 안이므로 "
+                           "순위에 의미가 없습니다.")).classes("text-sm")
                 scr_info = ui.label("").classes("text-sm")
                 ch_rank = ui.echart(echart_ranking([], lang=lang())).classes("w-full h-96")
                 ch_scr = ui.echart(echart_screen([])).classes("w-full h-80")
                 scr_tbl = ui.table(columns=[{"name": k, "label": l, "field": k, "sortable": True} for k, l in
-                                            (("rank", "名次"), ("name", "化合物"), ("score", "score"), ("delta_to_best", "Δ最佳"),
-                                             ("heavy_atoms", "重原子"), ("ligand_efficiency", "LE"), ("cluster_size", "cluster"),
-                                             ("contacts", "接觸"), ("recommendation_status", "推薦"), ("tag", ""))],
+                                            (("rank", _("名次", "Rank", "順位", "순위")), ("name", _("化合物", "Compound", "化合物", "화합물")),
+                                             ("score", _("分數", "Score", "スコア", "점수")),
+                                             ("delta_to_best", _("與最佳差距", "Δ to best", "1 位との差", "1위와의 차이")),
+                                             ("heavy_atoms", _("重原子數", "Heavy atoms", "重原子数", "중원자 수")), ("ligand_efficiency", "LE"),
+                                             ("cluster_size", _("叢集大小", "Cluster size", "クラスターサイズ", "클러스터 크기")),
+                                             ("contacts", _("接觸殘基數", "Contacts", "接触残基数", "접촉 잔기 수")),
+                                             ("recommendation_status", _("推薦", "Recommendation", "推奨", "추천")), ("tag", ""))],
                                    rows=[], row_key="key", selection="multiple", pagination=25).classes("w-full")
 
 
@@ -472,74 +540,107 @@ def workflow_page(project: str, name: str):
                         sel.append(row)
                     scr_tbl.selected = sel
                     scr_tbl.update()
-                    ui.notify(_(f"已選 {len(sel)} 個化合物", f"{len(sel)} compounds selected"))
+                    ui.notify(_(f"已選 {len(sel)} 個化合物", f"{len(sel)} compounds selected", f"{len(sel)} 個の化合物を選択中",
+                                f"화합물 {len(sel)}개 선택됨"))
                 try:
                     ch_rank.on_point_click(bar_click)
                     ch_scr.on_point_click(bar_click)
                 except AttributeError:      # older NiceGUI without point-click events: the table selection still works
                     pass
                 with ui.row().classes("items-end gap-2"):
-                    scr_note = ui.input(_("備註（為什麼選這些）", "Note (why these compounds)")).classes("w-72")
+                    scr_note = ui.input(option_text("備註（為什麼選這些）", L)).classes("w-72")
 
                     def do_select(mode: str):
                         job = RUNNER.get(wf)
                         if job and job.thread and job.thread.is_alive():
-                            ui.notify("流程執行中；請先暫停再選擇", type="warning"); return
+                            ui.notify(t("busy", L), type="warning"); return
                         names = [r["name"] for r in scr_tbl.selected]
                         try:
                             out = select_screen_ligands(wf, names, mode, note=scr_note.value or "")
                         except ValueError as exc:
                             ui.notify(str(exc), type="negative"); return
-                        ui.notify(f"已選 {len(out['selected'])} 個化合物（{mode}）；按「開始／繼續」進入正式對接與 MD", type="positive")
-                    ui.button(_("各自對接後進入模擬", "Dock each, then simulate"), on_click=lambda: do_select("independent")).props("color=primary")
-                    ui.button(_("多配體同時對接後進入模擬", "Dock together, then simulate"), on_click=lambda: do_select("simultaneous")).props("outline")
+                        n = len(out["selected"])
+                        ui.notify(_(f"已選 {n} 個化合物（{mode}）。按「{run_btn}」進入正式對接與分子動力學。",
+                                    f"{n} compounds selected ({mode}). Press {run_btn} to go on to full docking and molecular dynamics.",
+                                    f"{n} 個の化合物を選びました（{mode}）。「{run_btn}」を押すと本格的なドッキングと分子動力学に進みます。",
+                                    f"화합물 {n}개를 선택했습니다({mode}). '{run_btn}'을 누르면 정식 도킹과 분자동역학으로 넘어갑니다."),
+                                  type="positive")
+                    ui.button(_("各自對接後進入模擬", "Dock each, then simulate", "個別にドッキングしてからシミュレーション",
+                                "각각 도킹한 뒤 시뮬레이션"), on_click=lambda: do_select("independent")).props("color=primary")
+                    ui.button(_("多配體同時對接後進入模擬", "Dock together, then simulate", "まとめてドッキングしてからシミュレーション",
+                                "함께 도킹한 뒤 시뮬레이션"), on_click=lambda: do_select("simultaneous")).props("outline")
                 _manual_upload_panel(wf)
             with ui.tab_panel(t_live):
                 prog = ui.label("").classes("text-sm")
                 bar = ui.linear_progress(value=0, show_value=False).classes("w-full")
                 with ui.row().classes("w-full"):
-                    ch_t = ui.echart(echart_options([], title=_("溫度", "Temperature"), x=_("步", "step"), y="K")).classes("w-[48%] h-60")
-                    ch_e = ui.echart(echart_options([], title=_("位能", "Potential energy"), x=_("步", "step"), y="kJ mol⁻¹")).classes("w-[48%] h-60")
+                    step_ax = _("步", "step", "ステップ", "스텝")
+                    ch_t = ui.echart(echart_options([], title=_("溫度", "Temperature", "温度", "온도"), x=step_ax, y="K")).classes("w-[48%] h-60")
+                    ch_e = ui.echart(echart_options([], title=_("位能", "Potential energy", "ポテンシャルエネルギー", "퍼텐셜 에너지"),
+                                                    x=step_ax, y="kJ mol⁻¹")).classes("w-[48%] h-60")
                 with ui.row().classes("w-full"):
-                    ch_f = ui.echart(echart_options([], title=_("SMD 拉力", "SMD force"), x="r (nm)", y="kJ mol⁻¹ nm⁻¹")).classes("w-[48%] h-60")
-                    ch_w = ui.echart(echart_options([], title=_("SMD 功", "SMD work"), x="r (nm)", y="kJ mol⁻¹")).classes("w-[48%] h-60")
+                    ch_f = ui.echart(echart_options([], title=_("SMD 拉力", "SMD force", "SMD の引っ張り力", "SMD 당김 힘"),
+                                                    x="r (nm)", y="kJ mol⁻¹ nm⁻¹")).classes("w-[48%] h-60")
+                    ch_w = ui.echart(echart_options([], title=_("SMD 功", "SMD work", "SMD の仕事", "SMD 일"),
+                                                    x="r (nm)", y="kJ mol⁻¹")).classes("w-[48%] h-60")
             with ui.tab_panel(t_umb):
-                ui.label("每個 window 的取樣分佈（細線）與合併樣本（面積）；紅色 = 斷點，PMF 在那裡不可信。"
-                         "自動補窗會由大缺口到小缺口補齊；若你看到想補的區間，輸入範圍後按「補採樣」。").classes("text-sm")
-                cov_pick = ui.select({}, label="結合目標").classes("w-96")
+                add_btn = _("補採樣", "Add windows", "ウィンドウを追加", "윈도우 추가")
+                ui.label(_("細線是每個窗口的取樣分佈，面積是合併後的樣本。紅色是斷點，那裡的 PMF 不可信。"
+                           f"程式會自動從大缺口補到小缺口。如果你看到還想補的區間，輸入範圍後按「{add_btn}」。",
+                           "Thin lines show the sampling of each window and the filled area shows all samples together. Red marks "
+                           "a gap, where the PMF cannot be trusted. Gaps are filled automatically, largest first. To fill a range "
+                           f"yourself, enter it and press {add_btn}.",
+                           "細い線は各ウィンドウのサンプリング分布、塗りつぶしはまとめたサンプルです。赤は途切れた部分で、そこの PMF は信頼できません。"
+                           f"大きな隙間から順に自動で補います。自分で補いたい範囲があれば、範囲を入力して「{add_btn}」を押してください。",
+                           "가는 선은 윈도우별 샘플링 분포이고 채워진 면적은 합친 샘플입니다. 빨간색은 끊긴 구간이며 그곳의 PMF는 믿을 수 없습니다. "
+                           f"큰 틈부터 자동으로 채웁니다. 직접 채우고 싶은 구간이 있으면 범위를 입력하고 '{add_btn}'를 누르십시오.")).classes("text-sm")
+                cov_pick = ui.select({}, label=_("結合目標", "Binding target", "結合の対象", "결합 대상")).classes("w-96")
                 cov_info = ui.label("").classes("text-sm")
-                ch_cov = ui.echart(coverage_chart({})).classes("w-full h-80")
+                ch_cov = ui.echart(coverage_chart({}, lang=L)).classes("w-full h-80")
                 with ui.row().classes("items-end gap-2"):
-                    rs_lo = ui.number("從 (nm)", step=0.01, format="%.3f").classes("w-32")
-                    rs_hi = ui.number("到 (nm)", step=0.01, format="%.3f").classes("w-32")
-                    rs_k = ui.number("k（選填，kJ/mol/nm²）", step=100).classes("w-48")
-                    rs_note = ui.input("備註（為什麼補這段）").classes("w-72")
+                    rs_lo = ui.number(_("從（nm）", "From (nm)", "開始（nm）", "시작(nm)"), step=0.01, format="%.3f").classes("w-32")
+                    rs_hi = ui.number(_("到（nm）", "To (nm)", "終了（nm）", "끝(nm)"), step=0.01, format="%.3f").classes("w-32")
+                    rs_k = ui.number(_("k（選填，kJ/mol/nm²）", "k (optional, kJ/mol/nm²)", "k（任意、kJ/mol/nm²）", "k(선택, kJ/mol/nm²)"),
+                                     step=100).classes("w-48")
+                    rs_note = ui.input(_("備註（為什麼補這段）", "Note (why this range)", "メモ（この範囲を補う理由）",
+                                         "메모(이 구간을 채우는 이유)")).classes("w-72")
 
                     def do_resample():
                         job = RUNNER.get(wf)
                         if job and job.thread and job.thread.is_alive():
-                            ui.notify("流程執行中；請先暫停再補採樣", type="warning"); return
+                            ui.notify(t("busy", L), type="warning"); return
                         if not cov_pick.value or rs_lo.value is None or rs_hi.value is None:
-                            ui.notify("請選擇結合目標並輸入範圍", type="warning"); return
+                            ui.notify(_("請選擇結合目標並輸入範圍。", "Choose a binding target and enter a range.",
+                                        "結合の対象を選び、範囲を入力してください。", "결합 대상을 고르고 범위를 입력하십시오."),
+                                      type="warning"); return
                         target = cov_pick.value.split("|")[0]
                         try:
                             out = resample_range(wf, target, float(rs_lo.value), float(rs_hi.value),
                                                  k=float(rs_k.value) if rs_k.value else None, note=rs_note.value or "")
                         except ValueError as exc:
                             ui.notify(str(exc), type="negative"); return
-                        ui.notify(f"{target}：在此區間新增 {len(out['windows'])} 個 window（k {out['k']:.0f}、間距 "
-                                  f"{out['spacing_nm']:.3f} nm）；按「開始／繼續」執行，已完成的 window 不重跑。", type="positive")
-                    ui.button(_("補採樣", "Add windows"), on_click=do_resample).props("color=primary")
+                        n, kk, sp = len(out["windows"]), f"{out['k']:.0f}", f"{out['spacing_nm']:.3f}"
+                        ui.notify(_(f"{target}：這個區間新增 {n} 個窗口（k {kk}，間距 {sp} nm）。按「{run_btn}」執行，已完成的窗口不會重跑。",
+                                    f"{target}: {n} windows added in this range (k {kk}, spacing {sp} nm). Press {run_btn} to run them. "
+                                    "Finished windows are not run again.",
+                                    f"{target}：この範囲にウィンドウを {n} 個追加しました（k {kk}、間隔 {sp} nm）。「{run_btn}」を押して実行してください。"
+                                    "完了したウィンドウは再実行しません。",
+                                    f"{target}: 이 구간에 윈도우 {n}개를 추가했습니다(k {kk}, 간격 {sp} nm). '{run_btn}'을 눌러 실행하십시오. "
+                                    "끝난 윈도우는 다시 실행하지 않습니다."), type="positive")
+                    ui.button(add_btn, on_click=do_resample).props("color=primary")
             with ui.tab_panel(t_fig):
                 _figure_gallery(wf)
             with ui.tab_panel(t_time):
                 time_box = ui.column().classes("w-full gap-1")
             with ui.tab_panel(t_3d):
-                targets = viewer_targets(wf)
+                targets = viewer_targets(wf, lang=L)
                 if not targets:
-                    ui.label(_("建模完成後即可檢視 3D 結構；正式模擬完成後可播放軌跡。", "The 3D structure appears after building; the trajectory plays after production.")).classes("text-gray-500")
+                    ui.label(_("建模完成後就能看 3D 結構，正式模擬完成後可以播放軌跡。",
+                               "The 3D structure appears after building. The trajectory can be played after production.",
+                               "系の構築が終わると 3D 構造を表示できます。本計算が終わるとトラジェクトリを再生できます。",
+                               "계 구축이 끝나면 3D 구조를 볼 수 있습니다. 본 계산이 끝나면 궤적을 재생할 수 있습니다.")).classes("text-gray-500")
                 else:
-                    pick3d = ui.select({i: t["label"] for i, t in enumerate(targets)}, value=0, label="結構").classes("w-96")
+                    pick3d = ui.select({i: t["label"] for i, t in enumerate(targets)}, value=0, label=_("結構", "Structure", "構造", "구조")).classes("w-96")
                     frame = ui.html("").classes("w-full")
 
                     def show3d():
@@ -555,19 +656,22 @@ def workflow_page(project: str, name: str):
         def refresh():
             job = RUNNER.get(wf)
             snap = job.snapshot() if job else {"status": "IDLE", "message": "", "steps": __import__("md20.gui.logic", fromlist=["step_rows"]).step_rows(wf.state()), "history": []}
-            status.set_text(_("狀態：", "Status: ") + STATUS_TEXT.get(str(snap['status']), (str(snap['status']),) * 2)[0 if lang() == "zh" else 1])
-            render_confirm()
-            msg.set_content(f"```\n{snap['message']}\n```" if snap["message"] else "")
             L = lang()
-            steps.rows = [{**r, "step": (STEP_TEXT.get(r.get("key"), (r["step"], r["step"]))[0 if L == "zh" else 1]),
-                           "status": STATUS_TEXT.get(r["status"], (r["status"], r["status"]))[0 if L == "zh" else 1],
+            status.set_text(t("status", L) + colon(L) + pick(STATUS_TEXT.get(str(snap["status"]), str(snap["status"])), L))
+            render_confirm()
+            m = pick(snap["message"], L)                  # the runner's own messages are (zh, en, ja, ko) tuples
+            msg.set_content(f"```\n{m}\n```" if m else "")
+            steps.rows = [{**r, "step": pick(STEP_TEXT.get(r.get("key"), r["step"]), L),
+                           "status": pick(STATUS_TEXT.get(r["status"], r["status"]), L),
                            "at": (r.get("at") or "").replace("T", " ")[:19]} for r in snap["steps"]]
-            rows = pose_table(wf)
+            rows = pose_table(wf, L)
             for r in rows:
                 r["key"] = f"{r['entry']}-{r['rank']}"
-                r["tag"] = ("★" if r["recommended"] else "") + ("✔" if r["chosen"] else "") + ("⚠碰撞" if r["clash"] else "")
+                r["tag"] = ("★" if r["recommended"] else "") + ("✔" if r["chosen"] else "") + \
+                    (_("⚠碰撞", "⚠clash", "⚠衝突", "⚠충돌") if r["clash"] else "")
             poses.rows = rows
-            reason.set_content("\n\n".join(f"**{r['entry']} 推薦理由：** {r['reason']}" for r in rows if r["reason"]))
+            why = _("推薦理由", "why recommended", "推奨の理由", "추천 이유")
+            reason.set_content("\n\n".join(f"**{r['entry']} {why}{colon(L).rstrip()}** {r['reason']}" for r in rows if r["reason"]))
             ls = live_series(snap["history"])
             for ch, k in ((ch_t, "temperature"), (ch_e, "potential"), (ch_f, "smd_force"), (ch_w, "smd_work")):
                 ch.options["series"][0]["data"] = ls[k]
@@ -577,15 +681,23 @@ def workflow_page(project: str, name: str):
                 eta = ""
                 if pg.get("eta_s") is not None:
                     m = int(pg["eta_s"] // 60)
-                    eta = _(f"，此階段約剩 {m // 60} 小時 {m % 60} 分" if m >= 60 else f"，此階段約剩 {m} 分",
-                            f"; about {m // 60} h {m % 60} min left in this stage" if m >= 60 else f"; about {m} min left in this stage")
+                    h, mm = m // 60, m % 60
+                    eta = (_(f"，這個階段約剩 {h} 小時 {mm} 分", f", about {h} h {mm} min left in this stage",
+                             f"、この段階の残り約 {h} 時間 {mm} 分", f", 이 단계 남은 시간 약 {h}시간 {mm}분") if m >= 60 else
+                           _(f"，這個階段約剩 {m} 分", f", about {m} min left in this stage",
+                             f"、この段階の残り約 {m} 分", f", 이 단계 남은 시간 약 {m}분"))
                     if pg.get("ns_per_day"):
-                        eta += _(f"（本機 {pg['ns_per_day']} ns 每天）", f" ({pg['ns_per_day']} ns per day here)")
-                prog.set_text(f"{pg['stage']}：{pg['pct']}%" + eta + (_(f"（傘狀採樣窗口 {ls['umbrella']['window']} 之 {ls['umbrella']['n']}）",
-                                                                      f" (umbrella window {ls['umbrella']['window']} of {ls['umbrella']['n']})")
-                                                                    if ls.get("umbrella") else ""))
+                        nsd = pg["ns_per_day"]
+                        eta += paren(_(f"本機每天 {nsd} ns", f"{nsd} ns per day here", f"このパソコンで 1 日 {nsd} ns",
+                                       f"이 컴퓨터에서 하루 {nsd} ns"), L)
+                umb = ""
+                if ls.get("umbrella"):
+                    w, nw = ls["umbrella"]["window"], ls["umbrella"]["n"]
+                    umb = paren(_(f"傘狀採樣窗口 {w}，共 {nw} 個", f"umbrella window {w} of {nw}",
+                                  f"アンブレラサンプリング {nw} ウィンドウ中 {w} 番目", f"엄브렐라 샘플링 윈도우 {nw}개 중 {w}번째"), L)
+                prog.set_text(f"{pg['stage']}{colon(L)}{pg['pct']}%" + eta + umb)
                 bar.set_value((pg["pct"] or 0) / 100.0)
-            tg = coverage_targets(wf)
+            tg = coverage_targets(wf, lang=L)
             opts = {f"{t['target']}|{t['dir']}": t["label"] for t in tg}
             if opts != cov_pick.options:
                 cov_pick.set_options(opts, value=cov_pick.value if cov_pick.value in opts else (next(iter(opts), None)))
@@ -593,8 +705,8 @@ def workflow_page(project: str, name: str):
                 cov = load_json(Path(cov_pick.value.split("|", 1)[1]) / "coverage.json", {})
                 if cov.get("updated_at") != cov_sig["v"]:
                     cov_sig["v"] = cov.get("updated_at")
-                    ch_cov.options.clear(); ch_cov.options.update(coverage_chart(cov)); ch_cov.update()
-                    cov_info.set_text(coverage_summary(cov))
+                    ch_cov.options.clear(); ch_cov.options.update(coverage_chart(cov, lang=L)); ch_cov.update()
+                    cov_info.set_text(coverage_summary(cov, lang=L))
             srows = screen_table(wf)
             if len(srows) != scr_sig["v"]:
                 scr_sig["v"] = len(srows)
@@ -602,33 +714,43 @@ def workflow_page(project: str, name: str):
                 ch_scr.options.clear(); ch_scr.options.update(echart_screen(srows)); ch_scr.update()
                 ch_rank.options.clear(); ch_rank.options.update(echart_ranking(srows, lang=lang())); ch_rank.update()
                 sd = wf.state()["steps"].get("screen_docking") or {}
-                scr_info.set_text(f"{len(srows)} 個化合物有分數；{len(sd.get('failed') or [])} 個失敗／略過（見閘門與報告）。" if srows else
-                                  "尚無篩選結果（config 的 screen.library 指定化合物庫後執行）。")
-            cards = gate_cards(wf)
+                nf = len(sd.get("failed") or [])
+                scr_info.set_text(_(f"{len(srows)} 個化合物有分數，{nf} 個失敗或略過。細節在閘門與報告。",
+                                    f"{len(srows)} compounds have scores and {nf} failed or were skipped. See the gates and the report.",
+                                    f"{len(srows)} 個の化合物にスコアがあり、{nf} 個は失敗または省略されました。詳しくはゲートとレポートを見てください。",
+                                    f"화합물 {len(srows)}개에 점수가 있고 {nf}개는 실패하거나 건너뛰었습니다. 자세한 내용은 게이트와 보고서를 보십시오.")
+                                  if srows else
+                                  _("還沒有篩選結果。在 config 的 screen.library 指定化合物庫後再執行。",
+                                    "No screening results yet. Set the compound library in screen.library of the config, then run.",
+                                    "スクリーニングの結果はまだありません。config の screen.library で化合物ライブラリを指定してから実行してください。",
+                                    "아직 스크리닝 결과가 없습니다. config의 screen.library에 화합물 라이브러리를 지정한 뒤 실행하십시오."))
+            cards = gate_cards(wf, lang=L)
             if cards != cards_sig["v"]:
                 cards_sig["v"] = cards
                 cards_box.clear()
                 with cards_box:
                     if not cards:
-                        ui.label(_("目前沒有需要注意的閘門。", "No gates need attention.")).classes("text-gray-500")
+                        ui.label(t("no_gates", L)).classes("text-gray-500")
                     for c in cards:
                         with ui.card().classes("w-full"):
                             with ui.row().classes("items-center gap-2"):
-                                ui.badge(card_badge(c), color="blue-grey-6" if c.get("advisory") else c["color"])
-                                ui.label(f"{card_source(c['source'])} · {gate_title(c['title'], lang())}").classes("font-semibold")
-                            if lang() == "en" and gate_general(c["title"]):
-                                # D-55: general English explanation; the recorded detail (Chinese, with this run's numbers) below
-                                ui.label(gate_general(c["title"])).classes("text-sm")
+                                ui.badge(card_badge(c, L), color="blue-grey-6" if c.get("advisory") else c["color"])
+                                ui.label(f"{card_source(c['source'], L)} · {gate_title(c['title'], L)}").classes("font-semibold")
+                            general = gate_general(c["title"], L)
+                            if L != "zh" and general:
+                                # D-55: the general explanation in this language; the recorded detail (Chinese, with this run's numbers) below
+                                ui.label(general).classes("text-sm")
                                 if c["explanation"]:
-                                    with ui.expansion("Details (recorded in Chinese)").classes("w-full text-xs"):
+                                    with ui.expansion(_("細節（以中文記錄）", "Details (recorded in Chinese)", "詳細（中国語で記録）",
+                                                        "상세 내용(중국어로 기록됨)")).classes("w-full text-xs"):
                                         ui.label(c["explanation"]).classes("text-xs whitespace-pre-wrap")
                             else:
                                 ui.label(c["explanation"]).classes("text-sm whitespace-pre-wrap")
                             if c["status"] != "NEEDS_HUMAN" and not c.get("advisory"):
                                 for o in c["options"]:
-                                    ui.label(f"→ {option_text(o, lang())}").classes("text-sm text-primary")
+                                    ui.label(f"• {option_text(o, L)}").classes("text-sm text-primary")
                             _gate_buttons(wf, c)
-            tl = timeline(wf, limit=120)
+            tl = timeline(wf, limit=120, lang=L)
             if len(tl) != time_sig["v"]:
                 time_sig["v"] = len(tl)
                 time_box.clear()
@@ -636,7 +758,8 @@ def workflow_page(project: str, name: str):
                     for e in reversed(tl):
                         with ui.row().classes("w-full items-start gap-2"):
                             ui.label(to_local(e["at"], "%H:%M:%S")).classes("text-xs text-gray-500 w-16")
-                            ui.badge(_("人工", "Manual") if e["status"] == "human" else (_("步驟", "Step") if e["kind"] == "step" else _("自動", "Automatic")),
+                            ui.badge(_("人工", "Manual", "手動", "수동") if e["status"] == "human" else
+                                     (t("step", L) if e["kind"] == "step" else _("自動", "Automatic", "自動", "자동")),
                                      color="negative" if e["status"] in ("human", "NEEDS_HUMAN") else
                                      ("primary" if e["kind"] == "step" else "grey"))
                             with ui.column().classes("gap-0"):
@@ -659,13 +782,15 @@ def serve_viewer(project: str, name: str, i: int = 0):
         wf = Workflow.open(proj, name)
     except FileNotFoundError:
         return HTMLResponse("not found", status_code=404)
-    targets = viewer_targets(wf)
+    targets = viewer_targets(wf, lang=lang())
     if not 0 <= i < len(targets):
-        return HTMLResponse("沒有可檢視的結構", status_code=404)
+        return HTMLResponse(_("沒有可以檢視的結構。", "There is no structure to show.", "表示できる構造がありません。",
+                              "표시할 구조가 없습니다."), status_code=404)
     try:
-        return HTMLResponse(viewer_html(scene_for(targets[i]), title=targets[i]["label"]))
+        return HTMLResponse(viewer_html(scene_for(targets[i]), title=targets[i]["label"], lang=lang()))
     except Exception as exc:  # noqa: BLE001
-        return HTMLResponse(f"無法產生 3D 場景：{type(exc).__name__}: {exc}", status_code=500)
+        return HTMLResponse(_("無法產生 3D 場景：", "The 3D scene could not be built: ", "3D シーンを作成できませんでした：",
+                              "3D 장면을 만들 수 없습니다: ") + f"{type(exc).__name__}: {exc}", status_code=500)
 
 
 @app.get("/report/{project}/{name}")
@@ -679,7 +804,7 @@ def serve_report(project: str, name: str, lang: str = "en"):
     except FileNotFoundError:
         return HTMLResponse("not found", status_code=404)
     from ..report.workflow_report import build_workflow_report
-    code = lang if lang in ("en", "zh") else "en"
+    code = lang if lang in LANGS else "en"
     try:
         p = build_workflow_report(wf, wf.dir / f"workflow_report_{code}.html", lang=code)
     except Exception as exc:  # noqa: BLE001
@@ -708,5 +833,5 @@ def main(projects_dir: str | None = None, port: int = 8020, show: bool = True, h
         STATE["lang"] = None
     Path(STATE["projects_dir"]).mkdir(parents=True, exist_ok=True)
     if host not in ("127.0.0.1", "localhost", "::1"):
-        print(f"注意：GUI 對外開放於 {host}:{port}——同一網路上的任何人都能操作此工作站與下載專案檔。", flush=True)
-    ui.run(title="MD20", host=host, port=port, show=show, reload=False, language="zh-TW" if lang() == "zh" else "en-US")
+        print(f"注意：GUI 對外開放於 {host}:{port}。同一個網路上的任何人都能操作這台工作站，也能下載專案檔。", flush=True)
+    ui.run(title="MD20", host=host, port=port, show=show, reload=False, language=QUASAR_LANG[lang()])

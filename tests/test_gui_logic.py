@@ -54,8 +54,10 @@ def test_pose_table_shows_md_screen_verdicts(tmp_path):
     wf._mark("docking", result=str(wf.dir / "dock.json"))
     atomic_write_json({"BEN": {"1": {"verdict": "UNSTABLE", "worst_tail_rmsd_A": 4.2}, "2": {"verdict": "STABLE", "worst_tail_rmsd_A": 1.1}}},
                       wf.dir / "pose_screen.json")
-    rows = {r["rank"]: r for r in pose_table(wf)}
+    rows = {r["rank"]: r for r in pose_table(wf, "zh")}
     assert rows[1]["md_screen"] == "不穩定（4.2 Å）" and rows[2]["md_screen"] == "穩定（1.1 Å）"
+    rows = {r["rank"]: r for r in pose_table(wf, "en")}
+    assert rows[1]["md_screen"] == "Unstable (4.2 Å)" and rows[2]["md_screen"] == "Stable (1.1 Å)"
 
 
 def test_gui_listens_on_localhost_by_default(monkeypatch):

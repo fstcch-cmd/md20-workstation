@@ -4,11 +4,13 @@ from __future__ import annotations
 from ..util.timeutil import to_local
 import copy
 import queue
+import os
 import threading
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..i18n import pick, paren, LANGS
 from ..util import load_json, safe_name
 from ..workflow import Workflow, WorkflowBlocked, example_config, SYSTEM_MODES
 
@@ -134,10 +136,17 @@ class Runner:
         def target():
             job.status = "RUNNING"
             try:
-                out = wf.run(make_factory, platform, should_pause=should_pause, progress_cb=job.events.put)
+                fake = os.environ.get("MD20_GUI_FAKE_RUN")
+                out = (_fake_run(wf, float(fake), job.events.put) if fake else
+                       wf.run(make_factory, platform, should_pause=should_pause, progress_cb=job.events.put))
                 job.status = out["status"]
                 job.report = out.get("report", "")
-                job.message = "完成" if out["status"] == "COMPLETE" else "已暫停；按「繼續」從中斷處接續"
+                # a (zh, en, ja, ko) tuple: the page shows it in its own language
+                job.message = (("完成", "Done", "完了しました", "완료") if out["status"] == "COMPLETE" else
+                               ("已暫停。按「開始或繼續」會從停下的地方接著跑。",
+                                "Paused. Press Start or continue to carry on from where it stopped.",
+                                "一時停止しました。「開始または再開」を押すと、止まったところから続きます。",
+                                "일시 정지했습니다. '시작 또는 계속'을 누르면 멈춘 곳부터 이어서 실행합니다."))
             except WorkflowBlocked as exc:
                 job.status, job.message = "NEEDS_HUMAN", str(exc)
             except Exception as exc:  # noqa: BLE001
@@ -156,6 +165,29 @@ class Runner:
         return self.jobs.get(f"{wf.project.dir}::{wf.name}")
 
 
+def _fake_run(wf: Workflow, seconds: float, progress_cb) -> dict:
+    """Test stand-in for wf.run (env MD20_GUI_FAKE_RUN=<seconds>; tools/gui_preview.py, D-74): counts its starts and
+    heartbeats in <workflow>/_fake_run.json so a test can prove that a language switch neither stops, restarts nor
+    duplicates a running calculation.  Never used unless that variable is set."""
+    import json
+    import time
+    f = wf.dir / "_fake_run.json"
+    wf.dir.mkdir(parents=True, exist_ok=True)
+    st = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+    st["starts"] = int(st.get("starts", 0)) + 1
+    st["finished"] = False
+    n = max(1, int(seconds))
+    for k in range(n):
+        st["beats"] = int(st.get("beats", 0)) + 1
+        st["t"] = time.time()
+        f.write_text(json.dumps(st), encoding="utf-8")
+        progress_cb({"stage": "fake", "case_id": "fake", "completed_local_steps": k + 1, "total_steps": n, "elapsed_s": float(k)})
+        time.sleep(1.0)
+    st["finished"] = True
+    f.write_text(json.dumps(st), encoding="utf-8")
+    return {"status": "COMPLETE"}
+
+
 def set_pose_choice(wf: Workflow, entry: str, rank: int) -> None:
     """User override from the pose table; invalidates pose selection and everything downstream."""
     cfg = load_json(wf.dir / "config.json", wf.cfg)
@@ -169,7 +201,7 @@ def set_pose_choice(wf: Workflow, entry: str, rank: int) -> None:
     atomic_write_json(st, wf.state_path)
 
 
-def pose_table(wf: Workflow) -> list[dict]:
+def pose_table(wf: Workflow, lang: str = "en") -> list[dict]:
     d = wf.state()["steps"].get("docking")
     if not d:
         return []
@@ -183,16 +215,21 @@ def pose_table(wf: Workflow) -> list[dict]:
             rows.append({"entry": e["name"], "rank": p["rank"], "score": round(p["score"], 2), "cluster": f"{p['cluster']} ({p['cluster_size']})",
                          "contacts": p["contacts"], "rmsd_ref": p["rmsd_ref"], "clash": p.get("clash", False),
                          "recommended": p["recommended"], "chosen": p["rank"] in chosen, "reason": e["reason"] if p["recommended"] else "",
-                         "md_screen": _screen_label((screen.get(e["name"]) or {}).get(str(p["rank"])))})
+                         "md_screen": _screen_label((screen.get(e["name"]) or {}).get(str(p["rank"])), lang)})
     return rows
 
 
-def _screen_label(a: dict | None) -> str:
+_VERDICT = {"STABLE": ("穩定", "Stable", "安定", "안정"), "UNSTABLE": ("不穩定", "Unstable", "不安定", "불안정"),
+            "FAILED": ("失敗", "Failed", "失敗", "실패")}
+
+
+def _screen_label(a: dict | None, lang: str = "en") -> str:
     if not a:
         return ""
-    v = {"STABLE": "穩定", "UNSTABLE": "不穩定", "FAILED": "失敗"}.get(a.get("verdict"), a.get("verdict", ""))
+    v = a.get("verdict", "")
+    v = pick(_VERDICT[v], lang) if v in _VERDICT else v
     r = a.get("worst_tail_rmsd_A")
-    return f"{v}（{r:.1f} Å）" if r is not None else v
+    return v + paren(f"{r:.1f} Å", lang) if r is not None else v
 
 
 def list_workflows(projects_dir: Path) -> list[dict]:
@@ -230,7 +267,7 @@ def screen_table(wf: Workflow) -> list[dict]:
 
 
 # ------------------------------------------------------------------------------------- GUI v2 (D-51)
-def parse_ligand_lines(text: str) -> list[dict]:
+def parse_ligand_lines(text: str, lang: str = "en") -> list[dict]:
     """One ligand per line: `NAME SMILES [crystal_resname]` or `NAME peptide:SEQUENCE [target_location]`.
     Names become 3-character residue names (topology); they must stay unique."""
     out = []
@@ -240,7 +277,10 @@ def parse_ligand_lines(text: str) -> list[dict]:
             continue
         parts = [p for p in line.replace(",", " ").replace("\t", " ").split(" ") if p]
         if len(parts) < 2:
-            raise ValueError(f"每行需要「名稱 SMILES」或「名稱 peptide:序列」：{line}")
+            raise ValueError(pick((f"每行要寫「名稱 SMILES」或「名稱 peptide:序列」：{line}",
+                                   f"Each line needs NAME SMILES or NAME peptide:SEQUENCE: {line}",
+                                   f"各行には「名前 SMILES」か「名前 peptide:配列」を書いてください：{line}",
+                                   f"각 줄에는 '이름 SMILES' 또는 '이름 peptide:서열'을 적어야 합니다: {line}"), lang))
         name = safe_name(parts[0])[:3].upper()
         if parts[1].lower().startswith("peptide:"):
             from ..build.peptide import clean_sequence
@@ -254,7 +294,11 @@ def parse_ligand_lines(text: str) -> list[dict]:
         out.append(d)
     names = [d["name"] for d in out]
     if len(set(names)) != len(names):
-        raise ValueError("配體名稱（前三字元）重複；請改名以免拓撲殘基名衝突。")
+        raise ValueError(pick(("有配體名稱的前三個字元相同。請改名，否則拓撲裡的殘基名會衝突。",
+                               "Two ligand names share the same first three characters. Rename one, or their residue "
+                               "names in the topology will clash.",
+                               "先頭 3 文字が同じリガンド名があります。トポロジーの残基名が衝突するので、名前を変えてください。",
+                               "앞 세 글자가 같은 리간드 이름이 있습니다. 토폴로지의 잔기 이름이 충돌하므로 이름을 바꾸십시오."), lang))
     return out
 
 
@@ -272,17 +316,21 @@ def config_from_mode(*, mode: str, name: str, values: dict, pdb_id: str = "", re
     elif receptor_file:
         cfg["receptor"] = {"file": receptor_file}
     else:
-        raise ValueError("請輸入 PDB 編號或上傳受體結構檔")
+        raise ValueError(pick(("請輸入 PDB 編號，或上傳受體結構檔。", "Enter a PDB ID or upload a receptor structure file.",
+                               "PDB ID を入力するか、受容体の構造ファイルをアップロードしてください。",
+                               "PDB ID를 입력하거나 수용체 구조 파일을 업로드하십시오."), lang))
     cfg["ph"] = float(ph)
     cfg["keep_hetero"] = [x.strip().upper() for x in keep_hetero.replace(",", " ").split() if x.strip()]
-    cfg["ligands"] = parse_ligand_lines(ligands_text)
+    cfg["ligands"] = parse_ligand_lines(ligands_text, lang)
     if box_residue.strip():
         cfg["box"] = {"from_residue": box_residue.strip().upper()}
     elif box_center.strip():
         c = [float(x) for x in box_center.replace(" ", "").split(",")]
         s = [float(x) for x in (box_size or "22,22,22").replace(" ", "").split(",")]
         if len(c) != 3 or len(s) != 3:
-            raise ValueError("搜尋區中心與尺寸各需要三個數字（x, y, z）")
+            raise ValueError(pick(("搜尋區的中心和尺寸各要三個數字（x, y, z）。", "The box centre and size each need three numbers (x, y, z).",
+                                   "探索ボックスの中心と大きさには、それぞれ 3 つの数字（x, y, z）が必要です。",
+                                   "탐색 상자의 중심과 크기에는 각각 숫자 세 개(x, y, z)가 필요합니다."), lang))
         cfg["box"] = {"center": c, "size": s}
     else:
         cfg["box"] = {}
@@ -290,9 +338,12 @@ def config_from_mode(*, mode: str, name: str, values: dict, pdb_id: str = "", re
     systems = list(systems or (["apo", "docked_single"] if ligs else ["apo"]))
     bad = [s for s in systems if s not in SYSTEM_MODES]
     if bad:
-        raise ValueError(f"未知的模擬系統：{bad}")
+        raise ValueError(pick((f"未知的模擬系統：{bad}", f"Unknown simulation systems: {bad}",
+                               f"不明なシミュレーション系：{bad}", f"알 수 없는 시뮬레이션 계: {bad}"), lang))
     if "docked_multi" in systems and len(ligs) < 2:
-        raise ValueError("「所有配體同時與蛋白」需要至少兩個配體")
+        raise ValueError(pick(("「所有配體同時與蛋白」至少要有兩個配體。", "Simulating all ligands together with the protein needs at least two ligands.",
+                               "すべてのリガンドを同時にタンパク質と計算するには、リガンドが 2 つ以上必要です。",
+                               "모든 리간드를 단백질과 함께 계산하려면 리간드가 두 개 이상 필요합니다."), lang))
     if not ligs:
         systems = ["apo"]
     v = dict(values)
@@ -309,7 +360,7 @@ def config_from_mode(*, mode: str, name: str, values: dict, pdb_id: str = "", re
         cfg.pop("screen", None)
     cfg["pose_choices"] = {}
     cfg["confirm_before_md"] = True
-    cfg["language"] = lang if lang in ("en", "zh") else "en"
+    cfg["language"] = lang if lang in LANGS else "en"
     cfg["gui_mode"] = mode
     cfg["goal"] = goal
     return cfg

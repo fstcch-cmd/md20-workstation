@@ -60,3 +60,17 @@ def test_teaching_one_docks_at_classroom_effort_and_research_keeps_the_paper(): 
     assert hsieh2024.workflow_config(tier="classroom")["docking"]["exhaustiveness"] == 8
     assert hsieh2024.workflow_config(tier="teaching")["docking"]["exhaustiveness"] == 8
     assert hsieh2024.workflow_config(tier="research")["docking"]["exhaustiveness"] == 32
+
+
+def test_fake_run_counts_starts_and_beats(tmp_path, monkeypatch):   # D-74: stand-in used by the GUI stability check
+    import json
+    import types
+    from md20.gui.logic import Runner
+    monkeypatch.setenv("MD20_GUI_FAKE_RUN", "2")
+    wf = types.SimpleNamespace(dir=tmp_path / "wf", name="w", project=types.SimpleNamespace(dir=tmp_path))
+    r = Runner()
+    job = r.start(wf, None, "FAKE")
+    assert r.start(wf, None, "FAKE") is job          # a second press while it runs returns the same job
+    job.thread.join(10)
+    st = json.loads((tmp_path / "wf" / "_fake_run.json").read_text())
+    assert st["starts"] == 1 and st["beats"] == 2 and st["finished"] and job.status == "COMPLETE"

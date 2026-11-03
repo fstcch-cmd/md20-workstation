@@ -14,6 +14,7 @@ from nicegui import app, ui
 
 from .. import advisor
 from ..advisor import tx, PARAMS, QUICK_KEYS, GOALS, GROUPS, GROUP_ORDER
+from ..i18n import paren
 from ..project import Project
 from ..util import load_json, safe_name, atomic_write_json
 from ..workflow import Workflow
@@ -140,15 +141,18 @@ def teach(case: str):
             if (proj.dir / "workflows" / safe_name(cfg["name"]) / "config.json").is_file():
                 # the lesson already exists: continue it instead of overwriting its decisions
                 wf = Workflow.open(proj, cfg["name"])
-                ui.notify(_("這個教學案例已經建立過，繼續原本的流程。", "This lesson already exists; continuing it."))
+                ui.notify(_("這個教學案例已經建立過，會接著原本的流程。", "This lesson already exists. Continuing it.",
+                            "この教材はすでに作成済みです。元のワークフローを続けます。", "이 교육 사례는 이미 만들어져 있습니다. 기존 워크플로를 이어 갑니다."))
             else:
                 wf = Workflow(proj, cfg)
             job = _start(wf)
             if job.wf.dir != wf.dir:
-                ui.notify(_("已有另一個計算在進行，先帶你回到它（同一時間只跑一個）。",
-                            "Another calculation is running; taking you to it (one at a time)."), type="warning")
+                ui.notify(_("已有另一個計算在進行。同一時間只跑一個，先帶你回到它。",
+                            "Another calculation is running. Only one runs at a time, so this takes you to it.",
+                            "別の計算が実行中です。同時に動かせるのは一つだけなので、そちらに移動します。",
+                            "다른 계산이 실행 중입니다. 한 번에 하나만 실행하므로 그 계산으로 이동합니다."), type="warning")
             ui.navigate.to(f"/wf/{job.wf.project.dir.name}/{job.wf.name}")
-        ui.button(t("start_lesson", L), on_click=start).props("color=primary no-caps size=lg")
+        ui.button(t("start_lesson", L), on_click=start).props("color=primary no-caps size=lg data-testid=start-lesson")
 
 
 def teaching_rows(vals: dict, paper_vals: dict, f, L: str) -> list[dict]:
@@ -159,12 +163,20 @@ def teaching_rows(vals: dict, paper_vals: dict, f, L: str) -> list[dict]:
         if r["group_key"] == "binding" and r["key"] != "binding" and not vals.get("binding"):
             continue
         if r["key"] == "exhaustiveness" and vals.get("docking_mode", vals.get("mode")) != "independent" and r["value"] == 8:
-            r = {**r, "why": _("課堂時間內可完成的搜尋強度；論文使用 32（六個配體同時對接在 RTX 4060 筆電上超過 2 小時），研究等級可改回。",
-                               "A search effort that finishes within a class; the paper used 32 (over 2 h on an RTX 4060 laptop for six ligands docked together); research tier restores it.")}
+            r = {**r, "why": _("這個搜尋強度在一堂課內跑得完。論文用的是 32，六個配體同時對接在 RTX 4060 筆電上要超過 2 小時。研究等級會改回 32。",
+                               "This exhaustiveness finishes within one class. The paper used 32, which takes over 2 h on an RTX 4060 "
+                               "laptop for six ligands docked together. The research tier sets it back to 32.",
+                               "この探索の徹底度（exhaustiveness）なら授業時間内に終わります。論文では 32 を使っており、6 つのリガンドを同時にドッキングすると "
+                               "RTX 4060 のノートパソコンで 2 時間以上かかります。研究レベルでは 32 に戻します。",
+                               "이 탐색 강도(exhaustiveness)는 수업 시간 안에 끝납니다. 논문은 32를 사용했으며, 리간드 여섯 개를 함께 도킹하면 "
+                               "RTX 4060 노트북에서 2시간 넘게 걸립니다. 연구 등급에서는 32로 되돌립니다.")}
             rows.append(r); continue
         if r["key"] in paper_vals and r["value"] != r["recommended"]:
-            r = {**r, "why": _(f"依論文設定（系統對一般個案的建議為 {r['recommended_text']}：{r['why']}）",
-                               f"Taken from the paper (for a general case the recommendation is {r['recommended_text']}: {r['why']})")}
+            rt, w = r["recommended_text"], r["why"]
+            r = {**r, "why": _(f"依論文的設定。一般個案的建議值是 {rt}。{w}",
+                               f"Taken from the paper. For a general case the recommendation is {rt}. {w}",
+                               f"論文の設定に合わせています。一般的な事例での推奨値は {rt} です。{w}",
+                               f"논문 설정을 따릅니다. 일반적인 사례의 권장값은 {rt}입니다. {w}")}
         rows.append(r)
     return rows
 
@@ -182,7 +194,7 @@ def new_mode(mode: str):
 
 def _widget(key: str, value, L: str, on_change):
     p = PARAMS[key]
-    label = advisor.param_label(key, L) + (f"（{p['unit']}）" if (p["unit"] and L == "zh") else (f" ({p['unit']})" if p["unit"] else ""))
+    label = advisor.param_label(key, L) + (paren(p["unit"], L) if p["unit"] else "")
     if p["type"] == "choice":
         return ui.select({k: tx(v, L) for k, v in p["choices"].items()}, value=value, label=label,
                          on_change=on_change).classes("w-full")
@@ -215,7 +227,7 @@ def _form(mode: str):
     with left:
         with ui.card().classes("w-full md20-card p-4"):
             with ui.row().classes("w-full gap-3 no-wrap"):
-                project = ui.input(t("project_name", L), value="Projects" if L == "en" else "專案").classes("w-1/2")
+                project = ui.input(t("project_name", L), value="Projects").classes("w-1/2")      # D-67: ASCII project names
                 name = ui.input(t("workflow_name", L), value="workflow_1").classes("w-1/2")
             goal = ui.select({k: tx(v, L) for k, v in GOALS.items()}, value="teaching", label=t("goal", L)).classes("w-full")
         with ui.card().classes("w-full md20-card p-4"):
@@ -229,12 +241,13 @@ def _form(mode: str):
             async def got_receptor(e):
                 fname, data = await _upload_payload(e)
                 if Path(fname).suffix.lower() not in (".pdb", ".ent", ".cif", ".mmcif"):
-                    ui.notify(_("只接受 PDB 或 mmCIF 檔。", "Only PDB or mmCIF files are accepted."), type="negative"); return
+                    ui.notify(_("只接受 PDB 或 mmCIF 檔。", "Only PDB or mmCIF files are accepted.", "PDB か mmCIF のファイルだけを受け付けます。",
+                                "PDB 또는 mmCIF 파일만 받습니다."), type="negative"); return
                 dst = _uploads_dir() / f"{uuid.uuid4().hex[:8]}_{safe_name(Path(fname).stem)}{Path(fname).suffix.lower()}"
                 dst.write_bytes(data)
                 state["receptor_file"] = str(dst)
                 state["receptor_text"] = data.decode("utf-8", errors="ignore") if dst.suffix in (".pdb", ".ent") else None
-                rec_info.set_text(_("已上傳：", "Uploaded: ") + fname)
+                rec_info.set_text(_("已上傳：", "Uploaded: ", "アップロード済み：", "업로드됨: ") + fname)
                 refresh()
             ui.upload(on_upload=got_receptor, auto_upload=True, max_files=1, label=t("or_upload", L)).props("accept=.pdb,.ent,.cif,.mmcif flat bordered color=blue-grey-7").classes("w-full")
         with ui.card().classes("w-full md20-card p-4"):
@@ -263,17 +276,21 @@ def _form(mode: str):
                 async def got_library(e):
                     fname, data = await _upload_payload(e)
                     if Path(fname).suffix.lower() not in (".xlsx", ".xls", ".csv"):
-                        ui.notify(_("只接受 Excel 或 CSV。", "Only Excel or CSV files are accepted."), type="negative"); return
+                        ui.notify(_("只接受 Excel 或 CSV 檔。", "Only Excel or CSV files are accepted.", "Excel か CSV のファイルだけを受け付けます。",
+                                    "Excel 또는 CSV 파일만 받습니다."), type="negative"); return
                     dst = _uploads_dir() / f"{uuid.uuid4().hex[:8]}_{safe_name(Path(fname).stem)}{Path(fname).suffix.lower()}"
                     dst.write_bytes(data)
                     try:
                         from ..docking.library import read_library
                         entries, warns = read_library(dst)
                     except Exception as exc:  # noqa: BLE001
-                        ui.notify(_("表格無法讀取：", "The table could not be read: ") + str(exc), type="negative"); return
+                        ui.notify(_("表格無法讀取：", "The table could not be read: ", "表を読み込めませんでした：", "표를 읽을 수 없습니다: ")
+                                  + str(exc), type="negative"); return
                     state["library_file"] = str(dst)
-                    lib_info.set_text(_(f"已上傳 {fname}：{len(entries)} 個化合物", f"Uploaded {fname}: {len(entries)} compounds")
-                                      + (f"；{len(warns)} " + _("則提醒", "notes") if warns else ""))
+                    ne, nw = len(entries), len(warns)
+                    lib_info.set_text(_(f"已上傳 {fname}，共 {ne} 個化合物", f"Uploaded {fname} with {ne} compounds",
+                                        f"{fname} をアップロードしました（化合物 {ne} 個）", f"{fname} 업로드됨, 화합물 {ne}개")
+                                      + (_(f"，{nw} 則提醒", f", {nw} notes", f"、注意 {nw} 件", f", 알림 {nw}건") if warns else ""))
                 ui.upload(on_upload=got_library, auto_upload=True, max_files=1, label=t("hts_upload", L)).props("accept=.xlsx,.xls,.csv flat bordered color=blue-grey-7")
 
         # ------------------------------------------------------------------ parameters
@@ -296,7 +313,7 @@ def _form(mode: str):
     # ---------------------------------------------------------------------- behaviour
     def draft_cfg() -> dict:
         try:
-            parsed = parse_ligand_lines(ligs.value or "")
+            parsed = parse_ligand_lines(ligs.value or "", L)
             lig_err.set_text("")
         except ValueError as exc:
             parsed = []
@@ -422,8 +439,12 @@ def _form(mode: str):
             shutil.copy2(state["library_file"], wf.dir / Path(state["library_file"]).name)
         job = _start(wf)
         if job.wf.dir != wf.dir:
-            ui.notify(_("已有另一個計算在進行；新流程已建立但尚未開始，等目前的完成後在它的頁面按「開始／繼續」。",
-                        "Another calculation is running; the new workflow is created but not started. Start it from its page when the current one finishes."),
+            btn = t("run_continue", L)
+            ui.notify(_(f"已有另一個計算在進行。新流程已建立但還沒開始，等目前的計算結束後，到它的頁面按「{btn}」。",
+                        f"Another calculation is running. The new workflow is created but not started. When the current one "
+                        f"finishes, press {btn} on its page.",
+                        f"別の計算が実行中です。新しいワークフローは作成しましたが、まだ始めていません。今の計算が終わったら、そのページで「{btn}」を押してください。",
+                        f"다른 계산이 실행 중입니다. 새 워크플로는 만들었지만 아직 시작하지 않았습니다. 지금 계산이 끝나면 그 페이지에서 '{btn}'을 누르십시오."),
                       type="warning")
         ui.navigate.to(f"/wf/{job.wf.project.dir.name}/{job.wf.name}")
 

@@ -127,7 +127,7 @@ def test_gate_cards_and_timeline(tmp_path):
         wf._block("pose_selection", "BEN：都不穩定（選項：重跑對接 / 指定名次）")
     cards = gate_cards(wf)
     assert cards[0]["status"] == "NEEDS_HUMAN"
-    blk = next(c for c in cards if c["source"] == "pose 選擇")
+    blk = next(c for c in cards if c["source"] == "姿勢選擇")
     assert blk["options"] == ["重跑對接", "指定名次"] and "都不穩定" in blk["explanation"]
     assert any(c["title"] == "metal ZN:A301" and c["color"] == "negative" for c in cards)
     assert any(c["title"] == "altloc" and c["label"] == "已自動修正" for c in cards)
@@ -136,7 +136,7 @@ def test_gate_cards_and_timeline(tmp_path):
     tl = timeline(wf)
     assert [e["at"] for e in tl] == sorted(e["at"] for e in tl)
     assert any(e["title"].startswith("workflow.pose") and "保守" in e["text"] for e in tl)
-    assert any(e["kind"] == "step" and e["title"] == "pose 選擇" and e["status"] == "NEEDS_HUMAN" for e in tl)
+    assert any(e["kind"] == "step" and e["title"] == "姿勢選擇" and e["status"] == "NEEDS_HUMAN" for e in tl)
 
 
 def test_static_asset_present():

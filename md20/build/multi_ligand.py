@@ -325,42 +325,71 @@ def resolve(ligands: list[Mol], protein: Mol | None, *, exclude: list[str] = (),
             "culprit": remaining, "ligands": [l.name for l in work]}
     if remaining is None:
         status = "AUTO_FIXED" if (adjusted or auto_excluded) else "PASS"
-        parts_zh, parts_en = [], []
+        parts = []          # (zh, en, ja, ko) sentences
         for n, a in adjusted.items():
-            parts_zh.append(f"{n} 以剛體微調（旋轉 {a['rotation_deg']}°、平移 {a['shift_A']} Å，RMSD {a['rmsd']} Å ≤ {MAX_NUDGE_RMSD} Å，結合模式不變）消除重疊或穿環")
-            parts_en.append(f"{n} nudged as a rigid body (rotation {a['rotation_deg']}°, shift {a['shift_A']} Å, RMSD {a['rmsd']} Å ≤ "
-                            f"{MAX_NUDGE_RMSD} Å, same binding mode) to clear overlaps or ring piercing")
+            how = f"{a['rotation_deg']}°", f"{a['shift_A']} Å", f"RMSD {a['rmsd']} Å ≤ {MAX_NUDGE_RMSD} Å"
+            parts.append((f"{n} 以剛體微調消除重疊或穿環（旋轉 {how[0]}、平移 {how[1]}，{how[2]}），結合模式不變。",
+                          f"{n} was nudged as a rigid body to clear overlaps or ring piercing (rotation {how[0]}, shift "
+                          f"{how[1]}, {how[2]}), keeping the same binding mode.",
+                          f"{n} を剛体として少し動かし、重なりまたは環の貫通を解消しました（回転 {how[0]}、移動 {how[1]}、"
+                          f"{how[2]}）。結合様式は変わっていません。",
+                          f"강체 미세 조정으로 {n} 리간드의 겹침 또는 고리 관통을 없앴습니다(회전 {how[0]}, 이동 {how[1]}, "
+                          f"{how[2]}). 결합 모드는 그대로입니다."))
         for n in auto_excluded:
-            parts_zh.append(f"{n} 在此姿勢未與蛋白或其他配體接觸（漂浮），自多配體系統排除")
-            parts_en.append(f"{n} touches neither the protein nor another ligand in this pose (floating) and was removed from the multi-ligand system")
+            parts.append((f"{n} 在這個姿勢下沒有接觸蛋白或其他配體，屬於漂浮狀態，已從多配體系統中排除。",
+                          f"{n} touches neither the protein nor another ligand in this pose (floating), so it was removed "
+                          "from the multi-ligand system.",
+                          f"{n} はこのポーズでタンパク質にもほかのリガンドにも接していない浮いた状態のため、複数リガンド系から"
+                          "外しました。",
+                          f"이 포즈에서 {n} 리간드는 단백질에도 다른 리간드에도 닿지 않는 떠 있는 상태라 다중 리간드 계에서 "
+                          "제외했습니다."))
         for n in excluded:
-            parts_zh.append(f"{n} 依使用者決定排除"); parts_en.append(f"{n} excluded by the user")
-        info.update(status=status, why=("；".join(parts_zh) or "所有配體無重疊、無穿環，且都與蛋白接觸。",
-                                         "; ".join(parts_en) or "No overlaps, no ring piercing, every ligand touches the protein."), options=[])
+            parts.append((f"{n} 依使用者的決定排除。", f"{n} was excluded by the user.", f"{n} はユーザーの判断で除外しました。",
+                          f"{n} 리간드는 사용자 결정에 따라 제외했습니다."))
+        clean = ("所有配體都沒有重疊或穿環，而且都接觸到蛋白。", "No overlaps, no ring piercing, and every ligand touches the protein.",
+                 "どのリガンドにも重なりや環の貫通はなく、すべてタンパク質に接しています。",
+                 "모든 리간드에 겹침이나 고리 관통이 없고, 모두 단백질에 닿아 있습니다.")
+        why = tuple(sep.join(p[i] for p in parts) or clean[i] for i, sep in enumerate(("", " ", "", " ")))
+        info.update(status=status, why=why, options=[])
         return info
     v = per[remaining]
-    kinds_zh, kinds_en = [], []
+    kinds = []          # (zh, en, ja, ko) noun phrases
     if v["piercings"]:
-        kinds_zh.append(f"{len(v['piercings'])} 處穿環"); kinds_en.append(f"{len(v['piercings'])} ring piercing(s)")
+        k = len(v["piercings"])
+        kinds.append((f"{k} 處穿環", f"{k} ring piercing(s)", f"環の貫通 {k} か所", f"고리 관통 {k}곳"))
     if v["overlaps"]:
-        kinds_zh.append(f"{len(v['overlaps'])} 對原子重疊（最近 {min(o['d'] for o in v['overlaps'])} Å）")
-        kinds_en.append(f"{len(v['overlaps'])} overlapping atom pair(s) (closest {min(o['d'] for o in v['overlaps'])} Å)")
+        k, d = len(v["overlaps"]), min(o["d"] for o in v["overlaps"])
+        kinds.append((f"{k} 對原子重疊（最近 {d} Å）", f"{k} overlapping atom pair(s) (closest {d} Å)",
+                      f"原子の重なり {k} 組（最短 {d} Å）", f"원자 겹침 {k}쌍(최단 {d} Å)"))
     if v["floating"]:
-        kinds_zh.append("未與蛋白接觸"); kinds_en.append("no contact with the protein")
-    with_ = "、".join(v["partners"]) or "—"
+        kinds.append(("沒有接觸蛋白", "no contact with the protein", "タンパク質との接触なし", "단백질과 접촉 없음"))
+    kz, ke, kj, kk = ("、".join(x[0] for x in kinds), ", ".join(x[1] for x in kinds), "、".join(x[2] for x in kinds),
+                      ", ".join(x[3] for x in kinds))
+    wz, we = "、".join(v["partners"]) or "—", ", ".join(v["partners"]) or "—"
+    r, c = remaining, v["contacts"]
     if len(work) == 1:
-        rec_zh = f"建議改選 {remaining} 的其他姿勢（與蛋白接觸 {v['contacts']} 個重原子）。"
-        rec_en = f"Recommended: choose another pose for {remaining} ({v['contacts']} protein contacts)."
+        rec = (f"建議改選 {r} 的其他姿勢。它與蛋白接觸的重原子有 {c} 個。",
+               f"Try another pose for {r}. It makes {c} heavy-atom contacts with the protein.",
+               f"{r} のほかのポーズを選ぶことを勧めます。タンパク質と接している重原子は {c} 個です。",
+               f"{r}의 다른 포즈를 고르는 것을 권합니다. 단백질과 접촉하는 중원자는 {c}개입니다.")
     else:
-        rec_zh = (f"建議排除 {remaining}（它牽涉的問題最多，且與蛋白接觸 {v['contacts']} 個重原子，是較不可信的姿勢），或改選其他聯合姿勢。")
-        rec_en = (f"Recommended: exclude {remaining} (involved in the most problems, {v['contacts']} protein contacts, the less "
-                  "credible pose) or choose another joint pose.")
+        rec = (f"建議排除 {r}，或改選其他聯合姿勢。{r} 牽涉的問題最多，與蛋白接觸的重原子有 {c} 個，是比較不可信的姿勢。",
+               f"Exclude {r} or choose another joint pose. {r} is involved in the most problems and has {c} protein "
+               "contacts, so it is the less credible pose.",
+               f"{r} を除外するか、別の組み合わせのポーズを選ぶことを勧めます。{r} は問題に最も多く関わっており、タンパク質と"
+               f"接する重原子は {c} 個で、信頼性の低いほうのポーズです。",
+               f"{r} 리간드를 제외하거나 다른 포즈 조합을 고르는 것을 권합니다. {r} 리간드는 문제에 가장 많이 관련되어 있고 "
+               f"단백질과 접촉하는 중원자가 {c}개로, 신뢰도가 낮은 쪽의 포즈입니다.")
     info.update(status="ACCEPTED" if accept else "NEEDS_HUMAN",
-                why=(f"{remaining} 與 {with_} 之間 {'、'.join(kinds_zh)}，在 {MAX_NUDGE_RMSD} Å 內的剛體微調無法消除；"
-                     f"這種構型進入能量最小化會被硬推開或卡死（穿環無法自行解開）。" + rec_zh,
-                     f"{remaining} has {', '.join(kinds_en)} with {', '.join(v['partners']) or '—'} that a rigid nudge within "
-                     f"{MAX_NUDGE_RMSD} Å cannot remove; minimisation would either blast the atoms apart or stay locked (a pierced "
-                     f"ring does not untangle by itself). " + rec_en),
+                why=(f"{r} 與 {wz} 之間有 {kz}，在 {MAX_NUDGE_RMSD} Å 內的剛體微調無法消除。這種構型進入能量最小化時，"
+                     "原子會被硬推開或卡住，穿環也無法自行解開。" + rec[0],
+                     f"{r} has {ke} with {we} that a rigid nudge within {MAX_NUDGE_RMSD} Å cannot remove. Minimisation "
+                     "would either blast the atoms apart or stay locked, and a pierced ring does not untangle by itself. " + rec[1],
+                     f"{r} と {wz} の間に{kj}があり、{MAX_NUDGE_RMSD} Å 以内の剛体移動では解消できません。このままエネルギー"
+                     "最小化に進むと、原子が無理に押し離されるか動けなくなり、環の貫通は自然にはほどけません。" + rec[2],
+                     f"{r} 리간드와 {we} 사이에 {kk} 문제가 있으며, {MAX_NUDGE_RMSD} Å 이내의 강체 미세 조정으로는 없앨 수 "
+                     "없습니다. 이대로 에너지 최소화를 하면 원자가 억지로 밀려나거나 움직이지 못하게 되고, 관통된 고리는 저절로 "
+                     "풀리지 않습니다. " + rec[3]),
                 options=([f"multi_ligand.exclude: [{remaining}]（建議）"] if len(work) > 1 else [])
                 + [f"pose_choices: {pose_entry}=<其他名次>", "multi_ligand.accept_geometry: true（不建議：照原樣進入 MD）"])
     return info

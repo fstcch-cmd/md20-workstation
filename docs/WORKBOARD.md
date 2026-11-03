@@ -9,6 +9,7 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **D-74 去 AI 感改寫＋日文、韓文＋發行 v0.1.0a4**（使用者 11/03 09:31、09:50）：程式與文件完成；待 CI 與 gui-preview 穩定性檢查後發行 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-03 09:40 | 其他 session 勿動 md20/i18n.py、md20/gui/、md20/report/ |
 | **D-73 全部文件與 v0.1.0a3 同步**（使用者 11/03 09:03）：完成，見 DECISIONS D-73 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-03 09:05 | 只改文件 |
 | **D-72 調查 vina.exe 只用約 4 執行緒**（使用者 11/03 08:35）：原始碼確認 Vina 不限制；Windows QoS→HighQoS 標記＋每次執行量測；已隨 v0.1.0a3 發行（使用者決定不做筆電實測） | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-03 08:40 | 其他 session 勿動 md20/docking/vina_cli.py、md20/env/winfix.py |
 | **接手（HANDOFF_2026-11-02 §0）＋週二交付**：D-62–D-71 完成；c868014 全綠；Windows＋macOS 發行流程與學生說明（docs/students/）；**a3 發行待使用者按 Run workflow**（本 session 無發行權限）；未決：vina.exe 多配體只用約 4 執行緒 | HANDOFF_2026-11-02／使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-02 20:45 | 可讀筆電檔案 |

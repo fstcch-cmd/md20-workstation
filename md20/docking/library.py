@@ -160,11 +160,21 @@ def read_library(path: Path | str, *, sheet: str | int | None = None) -> tuple[l
 
 MANUAL_DIR = "manual_upload"
 NAMING_RULES = (
-    ("檔名必須與表格「name」欄完全相同，加上 .sdf（例：表格寫 caffeine，檔名為 caffeine.sdf）；"
-     "只用英文字母、數字、底線與連字號，不含空格，最長 40 字元；大小寫不區分（Windows 檔案系統不分大小寫），所以表格中不可有只差大小寫的名稱；一個檔案只放一個化合物。",
-     "The file name must equal the sheet's \"name\" column plus .sdf (sheet says caffeine → caffeine.sdf); "
-     "letters, digits, underscore and hyphen only, no spaces, at most 40 characters; case is ignored (Windows file "
-     "systems do not distinguish it), so the sheet must not contain names that differ only by case; one compound per file."),
+    ("檔名要和表格「name」欄完全相同，再加上 .sdf。例如表格寫 caffeine，檔名就是 caffeine.sdf。"
+     "只能用英文字母、數字、底線與連字號，不能有空格，最長 40 個字元。Windows 的檔案系統不分大小寫，"
+     "所以表格裡不能有只差大小寫的名稱。一個檔案只放一個化合物。",
+     "The file name must equal the sheet's \"name\" column plus .sdf. If the sheet says caffeine, the file is "
+     "caffeine.sdf. Use letters, digits, underscore and hyphen only, with no spaces and at most 40 characters. "
+     "Windows file systems ignore case, so the sheet must not contain names that differ only by case. Put one "
+     "compound in each file.",
+     "ファイル名は表の「name」列と完全に同じにし、.sdf を付けます。たとえば表に caffeine とあれば、ファイル名は "
+     "caffeine.sdf です。使える文字は英字、数字、アンダースコア、ハイフンだけで、空白は使えず、最大 40 文字です。"
+     "Windows のファイルシステムは大文字と小文字を区別しないため、大文字と小文字だけが違う名前を表に入れないでください。"
+     "1 つのファイルには 1 つの化合物だけを入れます。",
+     "파일 이름은 표의 \"name\" 열과 똑같이 하고 .sdf를 붙입니다. 예를 들어 표에 caffeine이라고 쓰면 파일 이름은 "
+     "caffeine.sdf입니다. 영문자, 숫자, 밑줄, 하이픈만 쓸 수 있고 공백은 안 되며 최대 40자입니다. Windows 파일 "
+     "시스템은 대소문자를 구분하지 않으므로 대소문자만 다른 이름이 표에 있으면 안 됩니다. 파일 하나에는 화합물 하나만 "
+     "넣습니다."),
 )
 _NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
@@ -198,21 +208,27 @@ def manual_upload_report(names: list[str], out_dir: Path | str) -> dict:
             "bad_name": bad_name, "unmatched": unmatched, "case_conflicts": conflicts, "rules": NAMING_RULES[0]}
 
 
-def check_upload_name(filename: str, names: list[str]) -> tuple[bool, tuple[str, str], str | None]:
-    """GUI upload check: (ok, (zh, en) reason, file name to save as — the sheet's own spelling)."""
+def check_upload_name(filename: str, names: list[str]) -> tuple[bool, tuple[str, str, str, str], str | None]:
+    """GUI upload check: (ok, (zh, en, ja, ko) reason, file name to save as — the sheet's own spelling)."""
     stem, ext = (filename[:-4], filename[-4:]) if len(filename) > 4 else (filename, "")
     if ext.lower() != ".sdf":
-        return False, ("只接受 .sdf 檔。", "Only .sdf files are accepted."), None
+        return False, ("只接受 .sdf 檔。", "Only .sdf files are accepted.", "受け付けるのは .sdf ファイルだけです。",
+                       ".sdf 파일만 받습니다."), None
     if not _NAME_RE.match(stem):
-        return False, ("檔名只能有英文字母、數字、底線與連字號，最長 40 字元。",
-                       "Only letters, digits, underscore and hyphen, at most 40 characters."), None
+        return False, ("檔名只能用英文字母、數字、底線與連字號，最長 40 個字元。",
+                       "Use only letters, digits, underscore and hyphen, at most 40 characters.",
+                       "ファイル名に使えるのは英字、数字、アンダースコア、ハイフンだけで、最大 40 文字です。",
+                       "파일 이름에는 영문자, 숫자, 밑줄, 하이픈만 쓸 수 있으며 최대 40자입니다."), None
     hits = [n for n in names if n.lower() == stem.lower()]
     if not hits:
-        return False, (f"表格中沒有名為 {stem} 的化合物。", f"No compound named {stem} in the sheet."), None
+        return False, (f"表格中沒有名為 {stem} 的化合物。", f"No compound named {stem} in the sheet.",
+                       f"表に {stem} という名前の化合物はありません。", f"표에 이름이 {stem}인 화합물이 없습니다."), None
     if len(hits) > 1:
-        return False, (f"表格中有只差大小寫的名稱（{'、'.join(hits)}），請先在表格改名。",
-                       f"The sheet has names that differ only by case ({', '.join(hits)}); rename them in the sheet first."), None
-    return True, ("", ""), f"{hits[0]}.sdf"
+        return False, (f"表格中有只差大小寫的名稱（{'、'.join(hits)}），請先在表格裡改名。",
+                       f"The sheet has names that differ only by case ({', '.join(hits)}). Rename them in the sheet first.",
+                       f"表に大文字と小文字だけが違う名前があります（{'、'.join(hits)}）。先に表で名前を変えてください。",
+                       f"표에 대소문자만 다른 이름이 있습니다({', '.join(hits)}). 먼저 표에서 이름을 바꾸십시오."), None
+    return True, ("", "", "", ""), f"{hits[0]}.sdf"
 
 
 def write_template(path: Path | str) -> Path:
@@ -376,13 +392,13 @@ def _check_sdf(path: Path, filters: LibraryFilters, decisions: DecisionLog | Non
     frags = Chem.GetMolFrags(mol, asMols=True, sanitizeFrags=True)
     if len(frags) > 1:
         if not filters.strip_salts:
-            raise ValueError(f"含 {len(frags)} 個片段（鹽／溶劑），而 filters.strip_salts=false")
+            raise ValueError(f"含 {len(frags)} 個片段（鹽或溶劑），而 filters.strip_salts=false")
         big = max(frags, key=lambda m: m.GetNumHeavyAtoms())
         dropped = [Chem.MolToSmiles(Chem.RemoveHs(f)) for f in frags if f is not big]
         if decisions:
             decisions.record("screen.library", name, "largest fragment kept",
-                             f"輸入含 {len(frags)} 個片段，只保留最大片段對接；移除：{', '.join(dropped)}。"
-                             "若這是季銨鹽／金屬配合物等需要保留反離子的分子，請改提供去鹽後的 SDF。")
+                             f"輸入含 {len(frags)} 個片段，只保留最大的片段對接，移除了 {', '.join(dropped)}。"
+                             "如果這是季銨鹽或金屬配合物這類需要保留反離子的分子，請改提供去鹽後的 SDF。")
         mol = big
         if mol.GetNumConformers() == 0 or not mol.GetConformer().Is3D():
             raise ValueError("去鹽後沒有 3D 座標")
@@ -462,7 +478,7 @@ def resolve_library(entries: list[LibraryEntry], out_dir: Path | str, *, fetch=h
                 cid = _pubchem_cid_from_name(fetch, e.label, limiter, sleep)
                 data, src = _pubchem_sdf(fetch, cid, limiter, sleep)
                 rec["pubchem_cid"] = cid
-                note = f"以名稱「{e.label}」查 PubChem 得 CID {cid}；名稱查詢可能對應到錯的分子，請核對。"
+                note = f"以名稱「{e.label}」查 PubChem 得到 CID {cid}。名稱查詢可能對到錯的分子，請核對。"
                 if decisions:
                     decisions.record("screen.library", e.name, f"name lookup → CID {cid}", note, kind="human")
             else:
@@ -527,8 +543,8 @@ def resolve_library(entries: list[LibraryEntry], out_dir: Path | str, *, fetch=h
     if decisions:
         s = manifest["summary"]
         decisions.record("screen.library", "resolve", s,
-                         f"化合物庫 {s['total']} 筆：{s['OK']} 可用、{s['FAILED']} 失敗、{s['SKIPPED']} 略過；"
-                         "失敗／略過的化合物不會悄悄消失，會列在篩選閘門與報告。")
+                         f"化合物庫共 {s['total']} 筆，可用 {s['OK']}、失敗 {s['FAILED']}、略過 {s['SKIPPED']}。"
+                         "失敗或略過的化合物不會悄悄消失，會列在篩選閘門與報告裡。")
     return manifest
 
 

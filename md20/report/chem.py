@@ -10,9 +10,15 @@ from pathlib import Path
 import numpy as np
 
 LIMITS = {"mw": 500.0, "logp": 5.0, "hbd": 5, "hba": 10, "tpsa": 140.0, "rotb": 10}
-PROP_LABELS = {"mw": ("分子量", "Molecular weight", "Da"), "logp": ("脂水分配係數 logP", "logP", ""),
-               "tpsa": ("極性表面積", "Polar surface area", "Å²"), "hbd": ("氫鍵供體", "H-bond donors", ""),
-               "hba": ("氫鍵受體", "H-bond acceptors", ""), "rotb": ("可轉動鍵", "Rotatable bonds", "")}
+# Axis labels: {"label": (zh, en, ja, ko), "unit": ...}; resolve the label with md20.i18n.pick (D-74).
+PROP_LABELS = {
+    "mw": {"label": ("分子量", "Molecular weight", "分子量", "분자량"), "unit": "Da"},
+    "logp": {"label": ("脂水分配係數 logP", "logP", "分配係数 logP", "분배 계수 logP"), "unit": ""},
+    "tpsa": {"label": ("極性表面積", "Polar surface area", "極性表面積", "극성 표면적"), "unit": "Å²"},
+    "hbd": {"label": ("氫鍵供體", "H-bond donors", "水素結合供与体", "수소 결합 주개"), "unit": ""},
+    "hba": {"label": ("氫鍵受體", "H-bond acceptors", "水素結合受容体", "수소 결합 받개"), "unit": ""},
+    "rotb": {"label": ("可轉動鍵", "Rotatable bonds", "回転可能結合", "회전 가능 결합"), "unit": ""},
+}
 
 
 def lipinski_violations(p: dict) -> int:
