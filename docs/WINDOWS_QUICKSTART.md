@@ -1,6 +1,6 @@
 # Windows 快速上手（用獨顯筆電當測試機）
 
-> 適用 **v0.1.0a11**（2026-11-03）。只是上課使用的話，請看較短的學生版 `docs/students/WINDOWS.md`，macOS 看 `docs/students/MAC.md`。
+> 適用 **v0.1.0a12**（2026-11-03）。只是上課使用的話，請看較短的學生版 `docs/students/WINDOWS.md`，macOS 看 `docs/students/MAC.md`。
 
 這份說明的目標是在 30 分鐘內把 MD20 裝到你的筆電上，確認有用到 GPU，跑完一個真實案例，再把結果回報到 repo。這樣這台筆電就成為正式的測試環境。
 每一步都寫了「預期看到什麼」。沒看到的話就停下來，把畫面上的文字貼到 `docs/COMPATIBILITY.md`，或告訴開發 session。
@@ -11,7 +11,7 @@
 - 安裝 [Git for Windows](https://git-scm.com/download/win)，或直接下載 repo 的 ZIP 解壓縮。
 
 ## 1. 安裝（10–20 分鐘，大多花在下載）
-**最簡單的方式（不需要 git）**：到 GitHub 的 Releases 頁下載最新的 `MD20-Windows-<版本>.zip`，目前是 `MD20-Windows-v0.1.0a11.zip`。在檔案上按右鍵選「解壓縮全部」，再雙擊 `Install-MD20.cmd`。
+**最簡單的方式（不需要 git）**：到 GitHub 的 Releases 頁下載最新的 `MD20-Windows-<版本>.zip`，目前是 `MD20-Windows-v0.1.0a12.zip`。在檔案上按右鍵選「解壓縮全部」，再雙擊 `Install-MD20.cmd`。
 SmartScreen 出現時，按「其他資訊」，再按「仍要執行」。程式會複製到 `%LOCALAPPDATA%\MD20\app`，解壓縮的資料夾之後可以刪掉。
 已安裝的舊版不會刪除，會移到 `%LOCALAPPDATA%\MD20\_to_delete\`。其他預期畫面和下面的開發者安裝相同。
 
@@ -57,6 +57,7 @@ powershell -ExecutionPolicy Bypass -File installer\install.ps1          # 有 nv
 ## 4. 圖形介面
 雙擊桌面的 `MD20-GUI.cmd`，瀏覽器會打開 http://127.0.0.1:8020 。預設只有本機能連（127.0.0.1）。
 - 首頁有四種模式：教學模式一（多種小分子，hsieh2024）、教學模式二（胜肽，hsieh2025）、快速模式和專業模式。
+- 胜肽可以直接把序列貼在配體欄，10 個殘基以上會先預測結構再對接。摺疊工具要先裝一次：雙擊解壓資料夾裡的 `Install-Folding.cmd`（數 GB，約 20–60 分鐘），或在「電腦狀態」頁按「一鍵安裝」。
 - 右上角有兩個選單。資源選單有「省資源：可同時寫報告」、「平衡（預設）」、「全速：電腦閒置時」，從下一個計算步驟起生效。語言選單有 English、繁體中文、日本語、한국어。
 - 一次只跑一個計算。切換語言或離開頁面不會重跑。頂端的橫幅「計算進行中…回到進度」可以帶你回到進度頁。
 - **計算期間不要關掉黑色主控台視窗**，瀏覽器可以關。關掉主控台會一起結束計算（包括 vina.exe）。重新開啟後按「開始／繼續」，會從中斷的地方接著算。

@@ -82,6 +82,7 @@
 - 長時間模擬：正式模擬 > 100 ns 時右欄顯示規劃（天數、硬碟、存檔間隔、幀數與分段、續跑檔保留數，取自 `advisor.long_run_plan`）；
   > 1 µs 顯示確認勾選，勾了寫 `md.long_run_confirmed: true`，沒勾是警告（流程會在正式模擬前停下來問）。估計以水盒中的蛋白計算，卡片上註明。
 - 快速模式：配體欄裡每個胜肽旁邊一個「先摺疊這個胜肽」勾選（`fold: true`，只對勾選的胜肽）。
+  D-85：配體欄可直接貼序列（不用 `peptide:`），10 個殘基以上預設勾選；電腦狀態頁加「一鍵安裝」（背景執行 setup-fold --warmup / setup-cg）。見 `structure_prediction.md` §8。
 - 電腦狀態頁「選用工具」：摺疊環境與粗粒化工具是否安裝、完整安裝指令（Windows `%LOCALAPPDATA%\MD20\md20.cmd setup-fold --engine omegafold --yes`、
   `... setup-cg --yes`；macOS `~/MD20/md20`），「顯示安裝計畫（不安裝）」按鈕只呼叫 `fold.setup_plan` 與 `martini.install_plan` 列出指令，不執行任何程式。
 - 閘門一鍵（`actions.py`）：`fold`、`fold confidence`、`fold placement`（不摺疊、仍使用、改用對接、改用指定工具、輸入工具名或受體序列）；

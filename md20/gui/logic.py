@@ -273,27 +273,45 @@ def screen_table(wf: Workflow) -> list[dict]:
 
 # ------------------------------------------------------------------------------------- GUI v2 (D-51)
 def parse_ligand_lines(text: str, lang: str = "en") -> list[dict]:
-    """One ligand per line: `NAME SMILES [crystal_resname]` or `NAME peptide:SEQUENCE [target_location]`.
-    Names become 3-character residue names (topology); they must stay unique."""
+    """One ligand per line: `NAME SMILES [crystal_resname]`, `NAME SEQUENCE [target_location]` or just `SEQUENCE`.
+    D-85: a bare amino-acid sequence is a peptide (no `peptide:` needed; `peptide:` and `smiles:` still force the
+    reading); a one-word line gets the name PEP/LIG (PP2, LG2 … when used twice).  Names become 3-character residue
+    names (topology); they must stay unique."""
+    from ..build.peptide import classify_ligand_text, AmbiguousLigand
     out = []
+    auto = {"peptide": ["PEP"] + [f"PP{i}" for i in range(2, 10)], "smiles": ["LIG"] + [f"LG{i}" for i in range(2, 10)]}
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         parts = [p for p in line.replace(",", " ").replace("\t", " ").split(" ") if p]
-        if len(parts) < 2:
-            raise ValueError(pick((f"每行要寫「名稱 SMILES」或「名稱 peptide:序列」：{line}",
-                                   f"Each line needs NAME SMILES or NAME peptide:SEQUENCE: {line}",
-                                   f"各行には「名前 SMILES」か「名前 peptide:配列」を書いてください：{line}",
-                                   f"각 줄에는 '이름 SMILES' 또는 '이름 peptide:서열'을 적어야 합니다: {line}"), lang))
-        name = safe_name(parts[0])[:3].upper()
-        if parts[1].lower().startswith("peptide:"):
-            from ..build.peptide import clean_sequence
-            d = {"name": name, "sequence": clean_sequence(parts[1].split(":", 1)[1]), "termini": "charged"}
+        one = len(parts) == 1
+        tok = parts[0] if one else parts[1]
+        try:
+            kind, value = classify_ligand_text(tok)
+        except AmbiguousLigand:
+            raise ValueError(pick((f"「{tok}」可以是 SMILES，也可以是胺基酸序列。請在前面加 smiles: 或 peptide: 說明是哪一種。",
+                                   f"\"{tok}\" reads both as SMILES and as an amino-acid sequence. Put smiles: or peptide: "
+                                   "in front of it to say which.",
+                                   f"「{tok}」は SMILES とも アミノ酸配列とも読めます。前に smiles: か peptide: を付けてください。",
+                                   f"'{tok}'은(는) SMILES로도 아미노산 서열로도 읽힙니다. 앞에 smiles: 또는 peptide:를 붙이십시오."),
+                                  lang)) from None
+        if one and kind == "smiles" and not tok.lower().startswith("smiles:"):
+            raise ValueError(pick((f"每行要寫「名稱 SMILES」或「名稱 序列」，只有序列時可以省略名稱：{line}",
+                                   f"Each line needs NAME SMILES or NAME SEQUENCE (a sequence alone is fine too): {line}",
+                                   f"各行には「名前 SMILES」か「名前 配列」を書いてください（配列だけでも構いません）：{line}",
+                                   f"각 줄에는 '이름 SMILES' 또는 '이름 서열'을 적어야 합니다(서열만 써도 됩니다): {line}"), lang))
+        if one:
+            used = {d["name"] for d in out}
+            name = next((n for n in auto[kind] if n not in used), auto[kind][-1])
+        else:
+            name = safe_name(parts[0])[:3].upper()
+        if kind == "peptide":
+            d = {"name": name, "sequence": value, "termini": "charged"}
             if len(parts) > 2:
                 d["target_location"] = parts[2]
         else:
-            d = {"name": name, "smiles": parts[1]}
+            d = {"name": name, "smiles": value}
             if len(parts) > 2:
                 d["reference_resname"] = parts[2].upper()
         out.append(d)

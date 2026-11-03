@@ -1,7 +1,8 @@
 ﻿# MD20 Windows installer (PowerShell).  Downloads micromamba, creates the md20 env, installs the package.
 # Usage:  powershell -ExecutionPolicy Bypass -File installer\install.ps1 [-Gpu cuda|opencl|cpu]
 param([ValidateSet("auto","cuda","opencl","cpu")] [string]$Gpu = "auto", [string]$Root = "",
-      [ValidateSet("","11.8","12.0","12.4")] [string]$Cuda = "")   # -Cuda 11.8: keep an old driver, install the matching OpenMM build
+      [ValidateSet("","11.8","12.0","12.4")] [string]$Cuda = "",   # -Cuda 11.8: keep an old driver, install the matching OpenMM build
+      [switch]$WithFold)   # -WithFold: also install peptide folding (OmegaFold, several GB) and fold one test peptide (D-85)
 $ErrorActionPreference = "Stop"
 if (-not $Root) { $Root = if ($env:MD20_ROOT) { $env:MD20_ROOT } else { Join-Path $env:LOCALAPPDATA "MD20" } }
 $env:MAMBA_ROOT_PREFIX = $Root
@@ -120,6 +121,11 @@ if ((Test-Path $Desktop) -and -not $env:MD20_NO_DESKTOP) {
 }
 Write-Host "[4/4] Doctor ..."
 & $Mamba run -p $Prefix md20 doctor
+if ($WithFold) {
+  Write-Host "[+] 胜肽摺疊工具（OmegaFold，數 GB，約 20–60 分鐘）..."
+  & $Mamba run -p $Prefix md20 setup-fold --engine omegafold --yes --warmup
+  if ($LASTEXITCODE -ne 0) { Write-Host "!! 摺疊工具沒有裝好；MD20 本身已可使用。之後雙擊 Install-Folding.cmd 或在 GUI 電腦狀態頁按一鍵安裝。" }
+}
 Write-Host ""
 Write-Host "完成。"
 Write-Host "  圖形介面：雙擊桌面的 MD20-GUI.cmd（或 $Gui）"

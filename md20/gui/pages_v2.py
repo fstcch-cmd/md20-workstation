@@ -272,7 +272,7 @@ def _form(mode: str, expand_all: bool = False):
         with ui.card().classes("w-full md20-card p-4"):
             ui.label(t("ligands", L)).classes("md20-section")
             ui.label(t("ligand_help", L)).classes("md20-why")
-            ligs = ui.textarea(placeholder="LIG  CC(=O)Nc1ccc(O)cc1\nPEP  peptide:GGGGGKP").props("autogrow").classes("w-full font-mono")
+            ligs = ui.textarea(placeholder="LIG  CC(=O)Nc1ccc(O)cc1\nMEL  GIGAVLKVLTTGLPALISWIKRKRQQ").props("autogrow").classes("w-full font-mono")
             lig_err = ui.label("").classes("text-sm text-negative")
             qf_box = ui.row().classes("w-full gap-3 items-center")       # quick mode: "fold this peptide" per peptide
             ligs.on("blur", lambda: refresh())
@@ -457,8 +457,12 @@ def _form(mode: str, expand_all: bool = False):
         names = A.peptide_names(parsed)
         if names == state["quick_peps"]:
             return
+        # D-85: a peptide long enough to fold is ticked when it first appears (the user can untick it); shorter ones
+        # are docked from the extended build, as fold() would skip them anyway.
+        seen = set(state["quick_peps"] or [])
         state["quick_peps"] = names
         state["quick_fold"] &= set(names)
+        state["quick_fold"] |= {n for n in A.default_fold_names(parsed) if n not in seen}
         qf_box.clear()
         with qf_box:
             for n in names:

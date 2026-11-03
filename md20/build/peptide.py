@@ -38,6 +38,37 @@ def clean_sequence(seq: str) -> str:
     return s
 
 
+# D-85: a bare amino-acid sequence typed in the ligand box is read as a peptide.  Letters that a SMILES string can
+# hold without brackets (organic subset B C N O P S F I) are ambiguous; any other amino-acid letter (A D E G H K L M Q
+# R T V W Y) cannot appear bare in SMILES, so its presence decides "peptide".
+SMILES_BARE = set("BCNOPSFI")
+AMBIGUOUS_MIN = 5          # an all-C/N/P/S/F/I string this long could be either: ask instead of guessing
+
+
+class AmbiguousLigand(ValueError):
+    """The text reads as SMILES and as a sequence; the user must add smiles: or peptide:."""
+
+
+def classify_ligand_text(text: str) -> tuple[str, str]:
+    """("peptide", SEQUENCE) or ("smiles", SMILES) for one ligand token.  `peptide:` / `smiles:` force the reading.
+    Raises AmbiguousLigand for an all-C/N/P/S/F/I string of AMBIGUOUS_MIN or more letters, ValueError for a bad
+    sequence after `peptide:`."""
+    t = str(text).strip()
+    low = t.lower()
+    if low.startswith("peptide:"):
+        return "peptide", clean_sequence(t.split(":", 1)[1])
+    if low.startswith("smiles:"):
+        return "smiles", t.split(":", 1)[1].strip()
+    if t.isascii() and t.isalpha() and (t.isupper() or t.islower()):   # mixed case (Cl, Br) is SMILES
+        up = t.upper()
+        if set(up) <= AA1 and len(up) >= 2:
+            if set(up) - SMILES_BARE:
+                return "peptide", up
+            if len(up) >= AMBIGUOUS_MIN:
+                raise AmbiguousLigand(up)
+    return "smiles", t
+
+
 def looks_like_peptide(smiles: str) -> bool:
     """≥ 2 consecutive α-amino-acid units.  Used only to *stop* and ask, never to guess a sequence."""
     try:

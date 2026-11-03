@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import copy
 import re
+import os
 import sys
+from pathlib import Path
 
 from ..i18n import pick, colon
 
@@ -97,7 +99,7 @@ TEXT = {
                   "below 50 stops the run to ask you. Peptides under 10 residues are not folded. A folding tool must be "
                   "installed first (see the computer status page).",
                   "配列からペプチドの構造を予測します。結果は予測として明記し、平均 pLDDT が 50 未満なら止まって確認します。"
-                  "10 残基未満のペプチドは折りたたみません。先にフォールディングツールのインストールが必要です（コンピューターの状態のページ）。",
+                  "10 残基未満のペプチドは折りたたみません。先にフォールディングツールのインストールが必要です（パソコンの状態のページ）。",
                   "서열로 펩타이드 구조를 예측합니다. 결과는 예측으로 표시하며 평균 pLDDT가 50 미만이면 멈추고 묻습니다. "
                   "10잔기 미만 펩타이드는 접지 않습니다. 먼저 폴딩 도구를 설치해야 합니다(컴퓨터 상태 페이지)."),
     "fold_mode": ("摺疊方式", "Folding", "折りたたみ方法", "접힘 방식"),
@@ -139,6 +141,12 @@ def defaults() -> dict:
 
 def peptide_names(ligands: list[dict]) -> list[str]:
     return [l["name"] for l in ligands or [] if isinstance(l, dict) and l.get("sequence")]
+
+
+def default_fold_names(ligands: list[dict]) -> list[str]:
+    """D-85: peptides folded by default in quick mode (at least MIN_FOLD_RESIDUES residues)."""
+    from ..build.fold import MIN_FOLD_RESIDUES
+    return [l["name"] for l in ligands or [] if isinstance(l, dict) and len(l.get("sequence") or "") >= MIN_FOLD_RESIDUES]
 
 
 def membrane_spec(adv: dict) -> dict | None:
@@ -297,12 +305,12 @@ def advanced_checks(adv: dict, *, ligands: list[dict], has_receptor: bool, bindi
         inst = fold_installed or {}
         engine = adv.get("fold_engine") or "auto"
         if peps and engine != "upload" and inst and not (inst.get(engine) if engine != "auto" else any(inst.values())):
-            out.append(_issue("warning", "fold", fl, ("這台電腦還沒有安裝摺疊工具，流程會在摺疊時停下來。到電腦狀態頁看安裝指令。",
+            out.append(_issue("warning", "fold", fl, ("這台電腦還沒有安裝摺疊工具，流程會在摺疊時停下來。到電腦狀態頁按「一鍵安裝」。",
                               "No folding tool is installed on this computer, so the workflow will stop at the folding step. "
-                              "The computer status page shows the install command.",
+                              "Press Install now on the computer status page.",
                               "このコンピューターにはフォールディングツールがないため、折りたたみの段階で止まります。"
-                              "インストールのコマンドはコンピューターの状態のページにあります。",
-                              "이 컴퓨터에는 폴딩 도구가 없어 접힘 단계에서 멈춥니다. 설치 명령은 컴퓨터 상태 페이지에 있습니다."), lang))
+                              "パソコンの状態のページで「今すぐインストール」を押してください。",
+                              "이 컴퓨터에는 폴딩 도구가 없어 접힘 단계에서 멈춥니다. 컴퓨터 상태 페이지에서 '지금 설치'를 누르십시오."), lang))
     if production_ns and float(production_ns) > LONG_RUN_CONFIRM_NS and not adv.get("long_run_confirmed"):
         out.append(_issue("warning", "long_run", TEXT["long_run"], TEXT["long_run_note"], lang))
     return out
@@ -366,6 +374,19 @@ TOOL_TEXT = {
     "plan_title": ("安裝時會依序執行", "The install runs these commands in order", "インストール時に次のコマンドを順に実行します",
                    "설치할 때 다음 명령을 차례로 실행합니다"),
     "plan_problem": ("現在無法安裝", "It cannot be installed right now", "今はインストールできません", "지금은 설치할 수 없습니다"),
+    "install_now": ("一鍵安裝", "Install now", "今すぐインストール", "지금 설치"),
+    "installing": ("安裝中，可以繼續使用其他功能；這一頁會顯示進度。", "Installing. You can keep using MD20; this page shows "
+                   "the progress.", "インストール中です。ほかの機能は使えます。このページに進み具合が出ます。",
+                   "설치 중입니다. 다른 기능은 계속 쓸 수 있습니다. 이 페이지에 진행 상황이 나옵니다."),
+    "install_done": ("安裝結束。結束碼", "Install finished. Exit code", "インストールが終わりました。終了コード",
+                     "설치가 끝났습니다. 종료 코드"),
+    "install_fold_note": ("會下載 PyTorch 與模型權重，總共數 GB，要 20 到 60 分鐘。請接上電源和網路，在上課前裝好。",
+                          "Downloads PyTorch and the model weights, several GB in total, in 20 to 60 minutes. Keep the "
+                          "computer on power and online, and install it before class.",
+                          "PyTorch とモデルの重みを合わせて数 GB ダウンロードし、20〜60 分かかります。電源とネットにつないで、"
+                          "授業の前にインストールしてください。",
+                          "PyTorch와 모델 가중치를 합쳐 수 GB 내려받으며 20~60분 걸립니다. 전원과 네트워크를 연결하고 "
+                          "수업 전에 설치하십시오."),
     "vram": ("顯示卡記憶體", "Graphics memory", "GPU メモリ", "그래픽 메모리"),
 }
 
@@ -388,6 +409,51 @@ def tool_rows(fold_status: dict, cg_avail: dict, lang: str, *, platform: str | N
               "detail": ", ".join(f"{k} {'✓' if v.get('ok') else '✗'}" for k, v in cg_avail.items()),
               "note": pick(TOOL_TEXT["cg_detail"], lang), "command": f"{cmd} setup-cg --yes"}
     return [fold_row, cg_row]
+
+
+def install_argv(kind: str, python: str | None = None) -> list[str]:
+    """D-85: what the "Install now" button runs (the same command a student would type; see docs/students)."""
+    py = python or sys.executable
+    if kind == "fold":
+        return [py, "-m", "md20", "setup-fold", "--engine", "omegafold", "--yes", "--warmup"]
+    if kind == "cg":
+        return [py, "-m", "md20", "setup-cg", "--yes"]
+    raise ValueError(kind)
+
+
+INSTALLS: dict = {}          # kind -> {"proc": Popen, "log": Path}; one install of each kind at a time
+
+
+def start_install(kind: str, log_dir: Path, *, popen=None) -> dict:
+    """Start the install in the background and write its output to <log_dir>/setup-<kind>.log.  A running install of
+    the same kind is returned as it is (no second copy)."""
+    import subprocess
+    cur = INSTALLS.get(kind)
+    if cur and cur["proc"].poll() is None:
+        return cur
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log = log_dir / f"setup-{kind}.log"
+    fh = open(log, "w", encoding="utf-8", errors="replace")
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"}
+    proc = (popen or subprocess.Popen)(install_argv(kind), stdout=fh, stderr=subprocess.STDOUT, env=env)
+    INSTALLS[kind] = {"proc": proc, "log": log, "fh": fh}
+    return INSTALLS[kind]
+
+
+def install_progress(kind: str, tail: int = 12) -> tuple[str, int | None]:
+    """(last lines of the log, exit code or None while running); ("", None) when nothing was started."""
+    cur = INSTALLS.get(kind)
+    if not cur:
+        return "", None
+    rc = cur["proc"].poll()
+    if rc is not None and not cur["fh"].closed:
+        cur["fh"].close()
+    try:
+        lines = Path(cur["log"]).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        lines = []
+    return "\n".join(lines[-tail:]), rc
 
 
 def setup_preview(kind: str, lang: str, *, fold_plan=None, cg_plan=None) -> list[str]:

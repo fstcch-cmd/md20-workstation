@@ -9,6 +9,7 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **D-85 胜肽直接貼序列自動摺疊＋一鍵安裝＋教學文件，發行 v0.1.0a12**（使用者 11/03 23:15）：完成，待筆電實測 `Install-Folding.cmd` | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-03 23:20 | 見 DECISIONS D-85 |
 | **D-80 專業版：建膜、一鍵摺疊、微秒級**（使用者 11/03 14:32）：規格已寫（membrane、structure_prediction、long_timescale），等使用者看方向後實作 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-03 14:40 | 其他 session 勿動這三份規格與未來的 md20/build/fold.py、md20/build/membrane.py |
 | **D-74 去 AI 感改寫＋日文、韓文＋發行 v0.1.0a4**（使用者 11/03 09:31、09:50）：**已發行 v0.1.0a4**（release run 41579558389）；發行點 49e2eae CI 15 個 job 全綠 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-03 09:40 | 其他 session 勿動 md20/i18n.py、md20/gui/、md20/report/ |
 | **D-73 全部文件與 v0.1.0a3 同步**（使用者 11/03 09:03）：完成，見 DECISIONS D-73 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-03 09:05 | 只改文件 |

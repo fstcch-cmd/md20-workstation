@@ -296,7 +296,33 @@ def _optional_tools(L: str):
                 except Exception as exc:  # noqa: BLE001
                     lines = [f"{type(exc).__name__}: {exc}"]
                 out.set_text("\n".join(lines))
-            ui.button(pick(TOOL_TEXT["preview"], L), on_click=show).props(f"outline no-caps data-testid=preview-{r['key']}")
+            with ui.row().classes("items-center gap-2"):
+                ui.button(pick(TOOL_TEXT["preview"], L), on_click=show).props(f"outline no-caps data-testid=preview-{r['key']}")
+                if not r["installed"]:
+                    _install_button(r["key"], L)
+
+
+def _install_button(kind: str, L: str):
+    """D-85: run `md20 setup-fold … --warmup` / `md20 setup-cg` from the GUI in the background and show its log."""
+    from .advanced import TOOL_TEXT, start_install, install_progress
+    from ..util import default_projects_dir
+    note = ui.label(pick(TOOL_TEXT["install_fold_note"], L) if kind == "fold" else "").classes("text-sm")
+    log = ui.label("").classes("text-xs font-mono whitespace-pre-wrap w-full")
+
+    def poll():
+        text, rc = install_progress(kind)
+        if not text and rc is None:
+            return
+        head = pick(TOOL_TEXT["installing"], L) if rc is None else f"{pick(TOOL_TEXT['install_done'], L)} {rc}"
+        log.set_text(head + "\n" + text)
+
+    def go():
+        start_install(kind, default_projects_dir() / "_tools")
+        poll()
+    ui.button(pick(TOOL_TEXT["install_now"], L), on_click=go).props(f"color=primary no-caps data-testid=install-{kind}")
+    ui.timer(2.0, poll)
+    poll()
+    return note
 
 
 def _start(wf: Workflow):

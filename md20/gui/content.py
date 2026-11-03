@@ -17,7 +17,7 @@ UI = {
     "app_title": ("MD20 分子模擬工作站", "MD20 Molecular Simulation Workstation",
                   "MD20 分子シミュレーションワークステーション", "MD20 분자 시뮬레이션 워크스테이션"),
     "nav_home": ("首頁", "Home", "ホーム", "홈"),
-    "nav_system": ("電腦狀態", "Computer status", "コンピューターの状態", "컴퓨터 상태"),
+    "nav_system": ("電腦狀態", "Computer status", "パソコンの状態", "컴퓨터 상태"),
     "nav_projects": ("專案", "Projects", "プロジェクト", "프로젝트"),
     "language": ("語言", "Language", "言語", "언어"),
     "home_intro": ("從分子對接、分子動力學一路做到結合自由能。每一步都會先檢查輸入。程式自動修正的地方，會說明改了什麼。"
@@ -47,17 +47,19 @@ UI = {
                     "残す補因子と金属（残基名をスペースで区切る）", "유지할 보조인자와 금속(잔기 이름, 공백으로 구분)"),
     "ligands": ("配體", "Ligands", "リガンド", "리간드"),
     "ligand_help": ("每行寫一個配體，依序是名稱、SMILES 或胜肽序列，最後可以加上共結晶配體的殘基名。"
-                    "胜肽序列前面加 peptide:，例如 peptide:GGGGGKP。對接和模擬都直接使用 SMILES 寫出的帶電狀態，"
+                    "胜肽直接貼上序列即可，例如 MEL GIGAVLKVLTTGLPALISWIKRKRQQ；只有序列時連名稱都可以省略。10 個殘基以上的胜肽會先預測結構再對接（要先安裝摺疊工具）。序列只由 C、N、P、S、F、I 組成時，請在前面加 peptide: 或 smiles: 說明是哪一種。對接和模擬都直接使用 SMILES 寫出的帶電狀態，"
                     "所以請寫成 pH 7.4 下的形式。",
                     "Write one ligand per line. Give the name, then a SMILES string or peptide sequence, and optionally the "
-                    "residue name of a co-crystal ligand. Put peptide: in front of a peptide sequence, for example "
-                    "peptide:GGGGGKP. Docking and simulation use the charge state exactly as written in the SMILES, so "
+                    "residue name of a co-crystal ligand. For a peptide, paste the sequence, for example MEL GIGAVLKVLTTGLPALISWIKRKRQQ; "
+                    "a sequence alone needs no name. Peptides of 10 or more residues are folded before docking (the folding "
+                    "tool must be installed). If a sequence contains only C, N, P, S, F and I, put peptide: or smiles: in "
+                    "front of it to say which it is. Docking and simulation use the charge state exactly as written in the SMILES, so "
                     "write it for pH 7.4.",
                     "1 行に 1 つのリガンドを書きます。名前、SMILES またはペプチド配列の順に書き、必要なら共結晶リガンドの"
-                    "残基名を加えます。ペプチド配列の前には peptide: を付けます。例えば peptide:GGGGGKP のように書きます。"
+                    "残基名を加えます。ペプチドは配列をそのまま貼り付けます。例えば MEL GIGAVLKVLTTGLPALISWIKRKRQQ です。配列だけなら名前も省略できます。10 残基以上のペプチドは構造を予測してからドッキングします（折りたたみツールのインストールが必要です）。配列が C、N、P、S、F、I だけでできているときは、前に peptide: か smiles: を付けてください。"
                     "ドッキングとシミュレーションは SMILES に書かれた荷電状態をそのまま使うので、pH 7.4 での形で書いてください。",
                     "한 줄에 리간드 하나를 씁니다. 이름, SMILES 또는 펩타이드 서열 순서로 쓰고, 필요하면 공결정 리간드의 "
-                    "잔기 이름을 덧붙입니다. 펩타이드 서열 앞에는 peptide:를 붙여 peptide:GGGGGKP처럼 씁니다. 도킹과 "
+                    "잔기 이름을 덧붙입니다. 펩타이드는 서열을 그대로 붙여 넣습니다. 예: MEL GIGAVLKVLTTGLPALISWIKRKRQQ. 서열만 쓸 때는 이름을 생략해도 됩니다. 10잔기 이상의 펩타이드는 구조를 예측한 뒤 도킹합니다(접힘 도구 설치 필요). 서열이 C, N, P, S, F, I로만 이루어졌으면 앞에 peptide: 또는 smiles:를 붙이십시오. 도킹과 "
                     "시뮬레이션은 SMILES에 적힌 전하 상태를 그대로 사용하므로 pH 7.4 기준으로 쓰십시오."),
     "site": ("結合位置（對接搜尋區）", "Binding site (docking search box)", "結合部位（ドッキングの探索領域）",
              "결합 부위(도킹 탐색 영역)"),
@@ -89,7 +91,7 @@ UI = {
     "estimate": ("時間估計", "Time estimate", "所要時間の見積もり", "예상 소요 시간"),
     "estimate_none": ("還沒有效能測試。到「電腦狀態」頁執行一次，就能依這台電腦的速度估計時間。",
                       "No benchmark yet. Run one on the Computer status page and the time will be estimated for this computer.",
-                      "まだベンチマークがありません。「コンピューターの状態」ページで一度実行すると、このコンピューターの速度で"
+                      "まだベンチマークがありません。「パソコンの状態」ページで一度実行すると、このコンピューターの速度で"
                       "時間を見積もります。",
                       "아직 성능 테스트가 없습니다. '컴퓨터 상태' 페이지에서 한 번 실행하면 이 컴퓨터의 속도로 시간을 예측합니다."),
     "estimate_text": ("約 {total} 小時。分子動力學 {md} 小時，結合計算 {bind} 小時。系統約有 {atoms} 個原子，這台電腦每天約跑 {speed} ns。",

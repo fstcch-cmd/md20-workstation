@@ -7,7 +7,7 @@
   md20 status --project P                       stage of every case / run
   md20 demo [--dir DIR]                         end-to-end demo with the Fake backend (no OpenMM needed)
   md20 fold SEQUENCE [--receptor-seq S] [--engine E] [--out DIR]   predicted structure (D-80)
-  md20 setup-fold [--engine omegafold|boltz|esmfold] [--yes]       install a folding tool (plan first)
+  md20 setup-fold [--engine omegafold|boltz|esmfold] [--yes] [--warmup]  install a folding tool (plan first)
   md20 setup-cg [--yes]                         install martinize2, insane, martini_openmm (plan first)
 """
 from __future__ import annotations
@@ -372,8 +372,35 @@ def cmd_setup_fold(a):
         if rc != 0:
             _p(f"失敗（結束碼 {rc}），已停止。")
             return rc
-    _p("安裝完成：" + ("可用" if F.engine_available(a.engine) else "找不到執行檔，請檢查上面的輸出"))
-    return 0 if F.engine_available(a.engine) else 1
+    ok = F.engine_available(a.engine)
+    _p("安裝完成：" + ("可用" if ok else "找不到執行檔，請檢查上面的輸出"))
+    if ok and getattr(a, "warmup", False):
+        rc = _fold_warmup(a.engine)
+        if rc:
+            return rc
+    return 0 if ok else 1
+
+
+WARMUP_SEQ = "GIGAVLKVLTTGLPALISWIKRKRQQ"     # melittin (26 residues), also the laptop check sequence
+
+
+def _fold_warmup(engine: str) -> int:
+    """D-85: fold one short peptide right after installing, so the model weights are downloaded now (at home, on a
+    good connection) and not in class, and so the student sees that folding works on this computer."""
+    import tempfile
+    import time
+    from .build import fold as F
+    out = Path(tempfile.mkdtemp(prefix="md20_fold_warmup_"))
+    _p(f"試摺一次 melittin（{len(WARMUP_SEQ)} 個殘基），順便下載模型權重；第一次可能要 10 到 30 分鐘 ...")
+    t0 = time.time()
+    try:
+        r = F.fold(WARMUP_SEQ, engine=engine, out_dir=out, apply_gates=False)
+    except Exception as exc:  # noqa: BLE001 — report and stop; the install itself already succeeded
+        _p(f"試摺失敗：{exc}")
+        _p("工具已安裝，但還不能預測。請把上面的訊息傳給老師。")
+        return 3
+    _p(f"試摺完成：{r.engine}，平均 pLDDT {r.mean_plddt}，用時 {time.time() - t0:.0f} 秒。可以在配體欄直接輸入胜肽序列了。")
+    return 0
 
 
 def cmd_setup_cg(a):
@@ -536,7 +563,9 @@ def main(argv=None) -> int:
     fo.set_defaults(fn=cmd_fold)
     sf = sub.add_parser("setup-fold", help="安裝結構預測工具到獨立環境（先顯示計畫，加 --yes 才執行）")
     sf.add_argument("--engine", default="omegafold", choices=["omegafold", "boltz", "esmfold"])
-    sf.add_argument("--yes", action="store_true"); sf.set_defaults(fn=cmd_setup_fold)
+    sf.add_argument("--yes", action="store_true")
+    sf.add_argument("--warmup", action="store_true", help="安裝後試摺一個胜肽（下載模型權重並確認可用）")
+    sf.set_defaults(fn=cmd_setup_fold)
     scg = sub.add_parser("setup-cg", help="安裝粗粒化 Martini 3 工具（vermouth、insane、martini_openmm；先顯示計畫，加 --yes 才執行）")
     scg.add_argument("--yes", action="store_true"); scg.set_defaults(fn=cmd_setup_cg)
     rp = sub.add_parser("report"); rp.add_argument("--project", required=True); rp.add_argument("--case", required=True)

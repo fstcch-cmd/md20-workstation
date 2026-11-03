@@ -131,6 +131,10 @@ EOS
 chmod +x "$GUI"
 if [ -d "$HOME/Desktop" ]; then cp "$GUI" "$HOME/Desktop/MD20-GUI.command"; chmod +x "$HOME/Desktop/MD20-GUI.command"; fi
 echo "[4/4] Doctor ..."; "$ROOT/md20" doctor
+if [ "${MD20_WITH_FOLD:-}" = "1" ]; then   # D-85: also install peptide folding (several GB) and fold one test peptide
+  echo "[+] 胜肽摺疊工具 Peptide folding (OmegaFold) ..."
+  "$ROOT/md20" setup-fold --engine omegafold --yes --warmup || echo "!! 摺疊工具沒有裝好；之後雙擊 Install-Folding.command。 / Folding was not installed; double-click Install-Folding.command later."
+fi
 echo
 echo "完成 Done."
 echo "  圖形介面 GUI：雙擊桌面的 MD20-GUI.command（或 or: ${GUI}）"

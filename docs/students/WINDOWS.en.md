@@ -5,7 +5,7 @@
 You need Windows 10 or 11, at least 8 GB of free disk space and an internet connection. If the computer has an NVIDIA graphics card, MD20 uses the GPU (CUDA) automatically. Without one it still runs on OpenCL or the CPU, only more slowly.
 
 ## 1. Install (once, about 15–30 minutes)
-1. Download `MD20-Windows-v0.1.0a11.zip` from the page your instructor gave you.
+1. Download `MD20-Windows-v0.1.0a12.zip` from the page your instructor gave you.
 2. Right-click the file and choose "Extract All".
 3. Open the extracted folder and double-click `Install-MD20.cmd`.
    - If a blue "Windows protected your PC" window appears, click "More info" and then "Run anyway".
@@ -42,7 +42,18 @@ notepad trypsin.json
 - You can close the window halfway. **Type the last line again and it continues from where it stopped.**
 - The results are in `MD20_Projects\first_case` inside your Documents folder. Open `report.html` there.
 
-## 4. If something goes wrong
+## 4. A peptide as the ligand (paste the sequence)
+1. **Install the folding tool first (once, at home before class)**: double-click `Install-Folding.cmd` in the unzipped folder. It downloads PyTorch and the model weights, several GB in total, in about 20–60 minutes, and then folds one test peptide. It is installed when you see Done at the end. You can also press Install now on the Computer status page of the interface.
+2. In quick mode, paste the sequence into the ligand box with a name in front:
+   ```
+   MEL GIGAVLKVLTTGLPALISWIKRKRQQ
+   ```
+   A sequence alone also works; it is named PEP. You no longer need `peptide:`.
+3. For a peptide of 10 or more residues, "Fold this peptide first" is ticked for you: the program predicts its structure, then docks it and runs MD. Untick it to skip folding. A peptide shorter than 10 residues usually has no fixed structure on its own, so it is not folded and docking changes its shape instead.
+4. If the prediction confidence is low (pLDDT below 50) or no folding tool is installed, the workflow stops at the folding step and lists what you can do: install the tool, upload a structure from AlphaFold Server, or skip folding.
+5. If a sequence contains only the letters C, N, P, S, F and I (for example `CCCCCN`), it could also be SMILES, so the program asks you to put `peptide:` or `smiles:` in front of it.
+
+## 5. If something goes wrong
 Run the line below and send a photo or a copy of the output to your instructor.
 ```
 %LOCALAPPDATA%\MD20\md20.cmd doctor --no-benchmark

@@ -7,6 +7,18 @@
 
 ## 2026-11-03
 
+### D-85　胜肽直接貼序列就自動摺疊：序列辨識、預設勾選、一鍵安裝；發行 v0.1.0a12
+- 使用者（11/03 16:46、23:15）：「最簡單的方式是使用者打入胜肽的序列在配體的欄裡面，這樣就可以自動做完所有的事情」；要今晚完成、更新教學敘述並發行。
+- 之前的狀況（如實回報給使用者）：要寫 `peptide:` 前綴、要手動勾「先摺疊」、要另外在終端機跑 `md20 setup-fold`。
+- 決定：
+  1. **辨識**（`peptide.classify_ligand_text`）：全大寫或全小寫、只含 20 種胺基酸字母，且含 A D E G H K L M Q R T V W Y 任一（這些字母不能不加括號出現在 SMILES）→ 胜肽。只由 C N P S F I 組成、5 個字母以上 → 擋下請使用者加 `peptide:`／`smiles:`（寧可擋也不要猜）；少於 5 個字母當 SMILES。大小寫混合是 SMILES。一行只有序列時自動命名 PEP、PP2…。
+  2. **預設勾選**：快速模式 10 個殘基以上的胜肽第一次出現時預設勾「先摺疊」；專業模式、教學模式與命令列 config 不變（避免既有專案重跑時行為改變）。
+  3. **安裝**：`setup-fold --warmup`（裝完試摺 melittin，把權重先下載）；`Install-Folding.cmd`／`.command` 雙擊安裝；`Install-MD20.cmd -WithFold`、`MD20_WITH_FOLD=1`；GUI 電腦狀態頁「一鍵安裝」背景執行並顯示日誌（同類只跑一個）。
+- 被否決：把摺疊工具放進預設安裝（數 GB、20–60 分鐘，用不到胜肽的學生不需要）；用 RDKit 解析判斷（介面要在沒有 RDKit 時也能跑，且 `CCCCCN` 兩種讀法都合法）；專業模式也自動改摺疊設定（專業模式由使用者明確選）。
+- 測試：`tests/test_peptide_input.py`（16 項）；既有 `test_gui_v2_logic` 通過。
+- **未驗證**：Windows 筆電實際跑 `Install-Folding.cmd` 與 GPU 試摺；macOS。請使用者在筆電雙擊 `Install-Folding.cmd` 後回報畫面。
+- 文件：學生說明 8 份新增「胜肽當配體」一節；TEACHING、WINDOWS_QUICKSTART、README、specs/structure_prediction.md §8、gui_v2.md。
+
 ### D-84　`setup-cg` 裝完說找不到 vermouth：改成不靠 PATH 找 martinize2；發行 v0.1.0a11
 - 現象（使用者筆電 18:08）：`md20 setup-cg --yes` 三個 pip 都成功，最後卻顯示「安裝後仍找不到：vermouth」。
 - 原因判斷：檢查要求 `martinize2` 指令在 PATH 上（`shutil.which`）。pip 把它放在環境的 Scripts 資料夾；舊版 vermouth 以 pbr `scripts` 安裝成沒有副檔名的檔案，Windows 的 `which` 只認 PATHEXT（.exe 等），找不到。insane 用 console_scripts（有 .exe）所以通過。未在筆電上直接確認是哪一種，屬推論。

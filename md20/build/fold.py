@@ -82,12 +82,12 @@ M = {
               "フォールディングしません。従来の伸びた構造を使い、ドッキングの探索で立体配座を変えます。レポートにこのことを記載します。",
               "펩타이드 잔기가 {n}개로 {min}개보다 적습니다. 이렇게 짧은 펩타이드는 단독으로는 안정된 구조가 없는 경우가 많아 "
               "폴딩하지 않습니다. 기존의 펼쳐진 구조를 사용하고 도킹 탐색 중에 형태가 바뀝니다. 보고서에 이 내용을 적습니다."),
-    "no_engine": ("這台電腦沒有可用的結構預測工具。可以執行 md20 setup-fold 安裝，或到 AlphaFold Server 或 ColabFold 預測後上傳結構檔。",
-                  "No structure prediction tool is available on this computer. Run md20 setup-fold to install one, "
+    "no_engine": ("這台電腦沒有可用的結構預測工具。可以在電腦狀態頁按「一鍵安裝」（或執行 md20 setup-fold --engine omegafold --yes），或到 AlphaFold Server 或 ColabFold 預測後上傳結構檔。",
+                  "No structure prediction tool is available on this computer. Press Install now on the computer status page (or run md20 setup-fold --engine omegafold --yes), "
                   "or predict the structure on AlphaFold Server or ColabFold and upload the file.",
-                  "このコンピュータで使える構造予測ツールがありません。md20 setup-fold でインストールするか、"
+                  "このコンピュータで使える構造予測ツールがありません。パソコンの状態のページで「今すぐインストール」を押す（または md20 setup-fold --engine omegafold --yes を実行する）か、"
                   "AlphaFold Server または ColabFold で予測して構造ファイルをアップロードしてください。",
-                  "이 컴퓨터에서 사용할 수 있는 구조 예측 도구가 없습니다. md20 setup-fold로 설치하거나 "
+                  "이 컴퓨터에서 사용할 수 있는 구조 예측 도구가 없습니다. 컴퓨터 상태 페이지에서 '지금 설치'를 누르거나(또는 md20 setup-fold --engine omegafold --yes 실행) "
                   "AlphaFold Server 또는 ColabFold에서 예측한 후 구조 파일을 업로드하십시오."),
     "no_engine_complex": ("受體加胜肽的複合物需要 Boltz-2（顯示卡記憶體至少 {need} GB，這台偵測到 {have}）或 ColabFold。"
                           "也可以到 AlphaFold Server 預測後上傳結果。",

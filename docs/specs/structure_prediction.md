@@ -124,4 +124,27 @@ Boltz 預設 `msa: empty`（單序列模式，不把序列送出去）並在 not
 
 ### 7.10 未決
 - GUI：輸入序列一鍵摺疊的按鈕、「電腦狀態」頁顯示 `fold_status()`、NEEDS_HUMAN 選項的一鍵寫回（`md20/gui/actions.py`）都還沒做。
+  - 更正（D-85）：以上三項已在 D-80 後續與 D-85 做完（直接貼序列、預設勾選、一鍵安裝），見 §8。
 - 報告：`state["fold"]` 已存，報告還沒有顯示（須標註「預測」）。
+
+## 8. 直接貼序列就自動摺疊（D-85，2026-11-03 夜，使用者要求「打入序列在配體欄就自動做完所有的事」）
+### 8.1 序列辨識（`md20/build/peptide.py: classify_ligand_text`）
+- 規則：整串只有 20 種胺基酸字母、全大寫或全小寫，且至少含一個**不能不加括號出現在 SMILES 的字母**（A D E G H K L M Q R T V W Y）→ 胜肽。
+  SMILES 不加括號可出現的大寫字母只有有機子集 B C N O P S F I；其中 C N P S F I 也是胺基酸。
+- 只由 C N P S F I 組成：少於 5 個字母當 SMILES（`CCN`、`CC`）；5 個以上（`CCCCCN`）兩種讀法都說得通 → 擋下，請使用者加 `peptide:` 或 `smiles:`（寧可擋也不要猜）。
+- 大小寫混合（`ClCCl`、`CBr`）一律是 SMILES。`peptide:`、`smiles:` 前綴仍可強制讀法。
+- 一行只有序列時，名稱自動取 PEP、PP2…；只有 SMILES 仍要名稱（名稱是拓撲殘基名，自動取 LIG 容易與晶體配體混淆），加 `smiles:` 才自動取 LIG、LG2…。
+- 被否決的做法：用 RDKit 試解析 SMILES 來判斷——介面解析在沒有 RDKit 的環境（CI 純 Python、GUI 預覽）也要能跑，而且 `CCCCCN` 兩種讀法都合法，解析成功不代表使用者的意思。
+### 8.2 預設摺疊
+- 快速模式：10 個殘基以上（`MIN_FOLD_RESIDUES`）的胜肽第一次出現時，「先摺疊這個胜肽」**預設勾選**；使用者可取消。短胜肽本來就會被 `fold()` 略過，不勾。
+- 專業模式不變（摺疊群組由使用者選）；教學一、二不變（GGGGGKP 7 個殘基）。命令列的 config 不變（`fold` 未設就不摺疊），避免既有專案重跑時行為改變。
+### 8.3 安裝
+- `md20 setup-fold --warmup`：裝完試摺 melittin（26 殘基），在家把模型權重下載好，上課時不用再下載；試摺失敗回傳 3，訊息說明工具已裝但不能預測。
+- 解壓資料夾新增 `Install-Folding.cmd`（Windows）與 `Install-Folding.command`（macOS）：雙擊即執行上述指令；自訂安裝位置用參數或 `MD20_ROOT`。
+- `Install-MD20.cmd -WithFold`、macOS `MD20_WITH_FOLD=1`：主程式裝完接著裝摺疊；失敗不影響 MD20 本身。
+- GUI「電腦狀態」頁的摺疊列多一個「一鍵安裝」：背景執行同一個指令，日誌寫到 `MD20_Projects/_tools/setup-fold.log`，頁面每 2 秒顯示最後 12 行；同類安裝同時只跑一個。缺工具時的警告與 `no_engine` 閘門文字改為指向這個按鈕。
+- 不放進預設安裝：數 GB 且要 20–60 分鐘，沒有要用胜肽的學生不需要。
+### 8.4 驗證狀態
+- 純 Python 測試：`tests/test_peptide_input.py`（辨識、自動命名、歧義擋下、預設勾選、安裝按鈕的背景執行）。
+- **未驗證**：Windows 筆電上 `Install-Folding.cmd` 實際安裝與 GPU 試摺（a10 修好安裝後尚未重跑）；macOS 未測。
+

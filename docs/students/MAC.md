@@ -5,11 +5,11 @@
 你需要 macOS 12 以上（Apple Silicon M1–M4 或 Intel 都可以）、至少 8 GB 的可用磁碟空間，以及網路。Mac 沒有 CUDA，程式會用 OpenCL 或 CPU 計算，速度比 NVIDIA 筆電慢。**課堂案例請用 classroom 等級。**
 
 ## 1. 安裝（只做一次，約 15–30 分鐘）
-1. 下載 `MD20-macOS-v0.1.0a11.zip`，在「下載項目」裡雙擊解壓縮，會得到資料夾 `MD20-v0.1.0a11`。
+1. 下載 `MD20-macOS-v0.1.0a12.zip`，在「下載項目」裡雙擊解壓縮，會得到資料夾 `MD20-v0.1.0a12`。
 2. 打開「終端機」（在 Launchpad 搜尋 Terminal），貼上下面這行，按 Enter。
 
 ```
-bash ~/Downloads/MD20-v0.1.0a11/Install-MD20.command
+bash ~/Downloads/MD20-v0.1.0a12/Install-MD20.command
 ```
    - 最後出現「完成 Done.」才算裝好。如果出現錯誤，把終端機裡的文字複製給老師。
    - 程式會裝在家目錄的 `MD20` 資料夾。下載的那個資料夾之後可以刪掉。
@@ -45,7 +45,18 @@ sed -i '' 's/"tier": "teaching"/"tier": "classroom"/' trypsin.json
 - 中途關掉終端機沒關係，**再打一次最後一行，會從中斷的地方繼續**。
 - 結果在「文件」資料夾裡的 `MD20_Projects/first_case`，打開裡面的 `report.html`。
 
-## 4. 出問題時
+## 4. 胜肽當配體（直接貼序列）
+1. **先裝摺疊工具（只做一次，上課前在家裝）**：雙擊解壓資料夾裡的 `Install-Folding.command`。它會下載 PyTorch 和模型權重，共數 GB，約 20–60 分鐘，最後會試摺一個胜肽。最後看到 Done 就裝好了。也可以在介面的「電腦狀態」頁按「一鍵安裝」。
+2. 在快速模式的配體欄，直接貼上序列，名稱寫在前面：
+   ```
+   MEL GIGAVLKVLTTGLPALISWIKRKRQQ
+   ```
+   只貼序列也可以，名稱會自動取為 PEP。不用再加 `peptide:`。
+3. 10 個殘基以上的胜肽，旁邊的「先摺疊這個胜肽」會自動勾起：程式先預測結構，再對接、跑 MD。不想摺疊就取消勾選。少於 10 個殘基的胜肽單獨存在時通常沒有固定結構，不摺疊，直接由對接改變構形。
+4. 預測信心太低（pLDDT 低於 50）或沒有裝摺疊工具時，流程會停在「摺疊」，並列出可以怎麼做：安裝工具、上傳 AlphaFold Server 的結構，或不摺疊。
+5. 序列只由 C、N、P、S、F、I 這幾個字母組成時（例如 `CCCCCN`），它也可能是 SMILES，程式會請你在前面加 `peptide:` 或 `smiles:`。
+
+## 5. 出問題時
 執行下面這行，把輸出複製給老師。
 ```
 ~/MD20/md20 doctor --no-benchmark
