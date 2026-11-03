@@ -34,6 +34,9 @@
 - **更正（CI bffc0e9，03:28 UTC）**：openmm-stack（Ubuntu、macOS 各 1 失敗／488 通過）與 heavy workflow 紅。原因都是只在真環境跑的測試仍斷言改寫前的中文：
   `test_gui_server` 找「需要在程式外處理」（現為「以下要在程式外處理…」），`test_full_workflow_3ptb` 找報告裡的「production 軌跡」（現為「正式模擬軌跡」）。
   科學結果都通過（3PTB 全流程 binding PASS）。改寫時各子代理只能跑純 Python 測試，這兩處沒被抓到——之後改用語要先 grep 只在 CI 跑的測試。
+- **發行（12:5x）**：使用者要求 13:00 前發行第四版。49e2eae 的 CI 14／15 綠，只剩 Windows openmm-stack 在跑；判斷：該 commit 相對於上一輪全綠的程式只改了文字、
+  測試斷言與報告 3D 檢視的語言參數，Windows 的安裝與純 Python 測試已綠，發行流程本身還會在乾淨 Windows 與 macOS 實裝驗證——風險低，於是先發行，
+  Windows openmm-stack 結果出來後補記在此（若紅，修正後發 a5）。release run 41579558389：verify-windows、verify-macos 通過。
   同時修正：報告的 3D 檢視沒有把語言傳給 `viewer_targets`／`viewer_html`，英日韓報告的檢視器標題與按鈕會是中文。發行改等新一輪 CI 全綠。
 
 ### D-73　全部文件與 v0.1.0a3 同步

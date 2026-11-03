@@ -3,7 +3,11 @@
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
-## v0.1.0a4（準備中，2026-11-03）
+## v0.1.0a4（2026-11-03 12:5x 發行）
+- https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a4 （Windows、macOS 安裝檔；發行前 verify-windows 與 verify-macos 實裝驗證通過）。
+- 發行點 49e2eae：CI 15 個 job 中 14 個綠（含三 OS 中的 Ubuntu、macOS openmm-stack 與 heavy workflow）；**Windows openmm-stack 在發行時仍在跑**，
+  使用者要求 13:00 前發行，所以沒有等它（該 commit 只改文字與報告的語言參數；上一個程式版本 4bccdff 的 Windows openmm-stack 是綠的）。結果出來後補記。
+- gui-preview（0ec6ce2，介面程式最後一次修改）：四語截圖正常，計算中切換語系穩定性檢查 OK。
 - 四種介面與報告語言（英文、繁中、日文、韓文，D-74）；介面、報告與學生文件改寫。純 Python 測試全過；介面四語截圖與「計算中切換語系」穩定性檢查在 CI `gui-preview`。
 - 日韓文未經母語者校對。
 
