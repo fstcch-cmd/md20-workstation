@@ -1,6 +1,6 @@
 # Windows 快速上手（用獨顯筆電當測試機）
 
-> 適用 **v0.1.0a5**（2026-11-03）。只是上課使用的話，請看較短的學生版 `docs/students/WINDOWS.md`，macOS 看 `docs/students/MAC.md`。
+> 適用 **v0.1.0a6**（2026-11-03）。只是上課使用的話，請看較短的學生版 `docs/students/WINDOWS.md`，macOS 看 `docs/students/MAC.md`。
 
 這份說明的目標是在 30 分鐘內把 MD20 裝到你的筆電上，確認有用到 GPU，跑完一個真實案例，再把結果回報到 repo。這樣這台筆電就成為正式的測試環境。
 每一步都寫了「預期看到什麼」。沒看到的話就停下來，把畫面上的文字貼到 `docs/COMPATIBILITY.md`，或告訴開發 session。
@@ -11,7 +11,7 @@
 - 安裝 [Git for Windows](https://git-scm.com/download/win)，或直接下載 repo 的 ZIP 解壓縮。
 
 ## 1. 安裝（10–20 分鐘，大多花在下載）
-**最簡單的方式（不需要 git）**：到 GitHub 的 Releases 頁下載最新的 `MD20-Windows-<版本>.zip`，目前是 `MD20-Windows-v0.1.0a5.zip`。在檔案上按右鍵選「解壓縮全部」，再雙擊 `Install-MD20.cmd`。
+**最簡單的方式（不需要 git）**：到 GitHub 的 Releases 頁下載最新的 `MD20-Windows-<版本>.zip`，目前是 `MD20-Windows-v0.1.0a6.zip`。在檔案上按右鍵選「解壓縮全部」，再雙擊 `Install-MD20.cmd`。
 SmartScreen 出現時，按「其他資訊」，再按「仍要執行」。程式會複製到 `%LOCALAPPDATA%\MD20\app`，解壓縮的資料夾之後可以刪掉。
 已安裝的舊版不會刪除，會移到 `%LOCALAPPDATA%\MD20\_to_delete\`。其他預期畫面和下面的開發者安裝相同。
 

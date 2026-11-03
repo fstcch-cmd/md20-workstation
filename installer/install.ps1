@@ -88,18 +88,23 @@ Write-Host "[3/4] 安裝 md20 ..."
 Assert-Ok "安裝 md20"
 & $Mamba run -p $Prefix md20 setup-vina
 if ($LASTEXITCODE -ne 0) { Write-Host "!! Vina 下載失敗（多半是 GitHub 限流）；稍後執行 md20.cmd setup-vina 即可，其餘安裝繼續。" }
-# launchers: md20.cmd (command line) and MD20-GUI.cmd (double-click → browser GUI), both next to micromamba.exe
+# launchers: md20.cmd (command line) and MD20-GUI.cmd (double-click → browser GUI), both next to micromamba.exe.
+# D-77: both start from a short PATH.  `micromamba run` prepends the environment's folders to PATH inside a cmd script;
+# on a computer whose PATH is already long (conda, MGLTools, PyMOL …) the result exceeds cmd's 8191-character line limit
+# and fails with "The input line is too long" before MD20 starts.  MD20 needs nothing from the user's PATH.
 $Cmd = Join-Path $Root "md20.cmd"
 Set-Content -Encoding ASCII -Path $Cmd -Value @(
   "@echo off",
   "set MAMBA_ROOT_PREFIX=%~dp0",
   "set PYTHONUTF8=1",
+  "set `"PATH=%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0;%ProgramFiles%\NVIDIA Corporation\NVSMI`"",
   "`"%~dp0micromamba.exe`" run -p `"%~dp0envs\md20`" md20 %*")
 $Gui = Join-Path $Root "MD20-GUI.cmd"
 Set-Content -Encoding ASCII -Path $Gui -Value @(
   "@echo off",
   "set MAMBA_ROOT_PREFIX=%~dp0",
   "set PYTHONUTF8=1",
+  "set `"PATH=%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0;%ProgramFiles%\NVIDIA Corporation\NVSMI`"",
   "echo MD20 GUI: http://127.0.0.1:8020  (close this window to stop)",
   "`"%~dp0micromamba.exe`" run -p `"%~dp0envs\md20`" md20 gui",
   "pause")

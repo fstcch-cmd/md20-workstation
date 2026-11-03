@@ -7,6 +7,18 @@
 
 ## 2026-11-03
 
+### D-77　Windows 啟動檔遇到很長的 PATH 時失敗（The input line is too long）；發行 v0.1.0a6
+- 使用者回報（11/03 13:30，照片）：執行 `%LOCALAPPDATA%\MD20\MD20-GUI.cmd` 出現「The input line is too long. The syntax of the command is incorrect.」。
+- 原因（判斷）：`micromamba run` 在 Windows 以 cmd 腳本啟用環境，把環境的資料夾加到 PATH 前面；這台筆電裝過 conda、MGLTools、PyMOL 等，PATH 本來就很長，
+  加上去後超過 cmd 單行 8191 字元的上限，MD20 還沒開始就失敗。CI 的乾淨 runner PATH 很短，所以從沒測出來。
+- 決定：`md20.cmd` 與 `MD20-GUI.cmd` 在呼叫 micromamba 前把 PATH 換成短的系統路徑（system32、Windows、Wbem、PowerShell、NVIDIA NVSMI）。
+  MD20 不依賴使用者 PATH 上的任何東西（Vina 以絕對路徑找、OpenMM 用環境內的 DLL、NVIDIA 驅動在 system32）。只影響這兩個啟動檔的視窗，不改系統設定。
+  CI installer-windows 與發行的 verify-windows：雙擊桌面啟動檔前把 PATH 加長到約 8,000 字元，仍須在 http://127.0.0.1:8020 回 200。
+- 當下的暫時解法（已告訴使用者）：在 cmd 先 `set PATH=C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem` 再執行啟動檔。
+- 被否決：繞過 micromamba 直接執行 envs\md20\python.exe——要自己重建環境啟用時的 PATH 與變數，改動較大；在發行前時間有限。
+- 證據：`tests/test_installer_paths.py::test_windows_launchers_start_from_a_short_path`；發行流程的長 PATH 桌面啟動檢查。
+- v0.1.0a5（只含 D-76）在發現本問題時已在發行中，未取消（取消 CI 曾被拒絕）；請一律用 a6。
+
 ### D-76　Windows 桌面的 MD20-GUI.cmd 打不開介面；發行 v0.1.0a5
 - 使用者回報（11/03 13:24）：GUI 打不開。筆電桌面的 `MD20-GUI.cmd` 內容是 `"%~dp0micromamba.exe" run -p "%~dp0envs\md20" md20 gui`。
 - 原因：安裝器（自 11/01 的 1b8117b 起）把 `%LOCALAPPDATA%\MD20\MD20-GUI.cmd` **原樣複製**到桌面；`%~dp0` 是「這個 .cmd 所在的資料夾」，

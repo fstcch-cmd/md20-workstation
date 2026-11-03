@@ -93,3 +93,10 @@ def test_desktop_gui_launcher_points_at_the_install():   # D-76
     s = (Path(__file__).resolve().parents[1] / "installer" / "install.ps1").read_text(encoding="utf-8-sig")
     assert 'Copy-Item $Gui (Join-Path $Desktop' not in s
     assert 'call `"$Gui`"' in s
+
+
+def test_windows_launchers_start_from_a_short_path():   # D-77
+    """`micromamba run` prepends to PATH in a cmd script; a long user PATH made it fail with 'The input line is too long'."""
+    from pathlib import Path
+    s = (Path(__file__).resolve().parents[1] / "installer" / "install.ps1").read_text(encoding="utf-8-sig")
+    assert s.count('set `"PATH=%SystemRoot%\\system32;') == 2      # md20.cmd and MD20-GUI.cmd

@@ -297,6 +297,9 @@ jobs:
           $d = [Environment]::GetFolderPath("Desktop"); $l = Join-Path $d "MD20-GUI.cmd"
           if (-not (Test-Path $l)) { Write-Host "no Desktop folder on this runner: skipped"; exit 0 }
           Get-Content $l
+          # D-77: a student's PATH can be long (conda, MGLTools …); `micromamba run` then hit cmd's 8191-character limit
+          $env:PATH = $env:PATH + (";C:\Program Files\Some Long Vendor Folder\With A Long Name\bin" * 120)
+          Write-Host "PATH length for this check: $($env:PATH.Length)"
           $p = Start-Process cmd.exe -ArgumentList "/c `"$l`"" -PassThru -WindowStyle Hidden
           $ok = $false
           for ($i = 0; $i -lt 120; $i++) {
