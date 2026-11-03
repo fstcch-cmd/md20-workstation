@@ -17,11 +17,11 @@
   4. **歷史文件不改寫**：`DECISIONS.md` 舊條目、`releases/v0.1.0a1.md`、`v0.1.0a2.md`、`REVIEW_*`、`HANDOFF_2026-11-02.md`、`specs/docking.md`、`specs/gui.md` 保留原文；
      需要時在檔頭加「後續」說明（HANDOFF_2026-11-02），規格檔在狀態行下加「2026-11-03 更新」。
 - 更新的檔案：README、CLAUDE.md、HANDOFF、HANDOFF_2026-11-02（檔頭）、STATUS（開頭「目前版本」）、COMPATIBILITY（發現的處置）、WINDOWS_QUICKSTART、LAPTOP_SESSION、WORKFLOW、TEACHING、
-  students/WINDOWS、students/MAC、releases/v0.1.0a3（補 D-64–D-72，並同步 GitHub Release 說明）、specs/README（狀態；補登 gui_v2、multi_ligand、report_language）、
+  students/WINDOWS、students/MAC、releases/v0.1.0a3（補 D-64–D-72）、specs/README（狀態；補登 gui_v2、multi_ligand、report_language）、
   specs 的 umbrella_adaptive、implicit_solvent、solvent_box、pbc_centering、gui_v2、drivers、restraints_freeze_truncation、ci_validation。
 - 更正的錯誤敘述：預設拉速 0.01 → 0.005（WORKFLOW）；hsieh2025 的 CPP「擋下」→ 只提醒（HANDOFF、STATUS、ci_validation；D-48）；CI「cancel-in-progress」→ main 不取消（HANDOFF）；
   最新 Release a1 → a3（LAPTOP_SESSION）；commit 屬名格式（CLAUDE.md、HANDOFF）。
-- 未決：claude.ai 上的「安裝與使用說明」文件（非 repo）不在本次範圍。
+- 未決：GitHub Release 頁面上的說明仍是發行當時的版本（本 session 無權編輯 Release，HTTP 403），需使用者把 `docs/releases/v0.1.0a3.md` 貼到 Release 的 Edit；claude.ai 上的「安裝與使用說明」文件（非 repo）不在本次範圍。
 
 ### D-72　vina.exe 只用約 4 執行緒：Vina 本身不限制，是 Windows 11 的 QoS 把它排到節能核心（推測，附量測）
 - 使用者要求（11/03 08:35）：調查 D-68／D-70／D-71 留下的「多配體對接 vina.exe 只用約 4 個 CPU 執行緒（約 24%）」。
