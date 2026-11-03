@@ -231,21 +231,44 @@ def check_upload_name(filename: str, names: list[str]) -> tuple[bool, tuple[str,
     return True, ("", "", "", ""), f"{hits[0]}.sdf"
 
 
+TEMPLATE_ROWS = [   # D-79: every row works offline (SMILES only), so the example runs as uploaded
+    ("benzamidine", "NC(=N)c1ccccc1"),
+    ("4-aminobenzamidine", "NC(=N)c1ccc(N)cc1"),
+    ("4-methylbenzamidine", "Cc1ccc(C(N)=N)cc1"),
+    ("3-aminobenzamidine", "NC(=N)c1cccc(N)c1"),
+    ("benzylamine", "NCc1ccccc1"),
+    ("aspirin", "CC(=O)Oc1ccccc1C(=O)O"),
+    ("caffeine", "Cn1cnc2c1c(=O)n(C)c(=O)n2C"),
+    ("phenol", "Oc1ccccc1"),
+]
+TEMPLATE_HELP = [
+    ("欄位 Column", "說明 Meaning", "例 Example"),
+    ("name", "必填。化合物名稱，用英數字。Required. Letters and digits.", "aspirin"),
+    ("smiles", "化學結構，不需網路。Structure; no network needed.", "CC(=O)Oc1ccccc1C(=O)O"),
+    ("pubchem_cid", "沒有 SMILES 時，從 PubChem 下載（需要網路）。Downloaded from PubChem when there is no SMILES.", "2244"),
+    ("inchikey", "同上，以 InChIKey 查 PubChem。Looked up in PubChem.", "BSYNRYMUTXBXSQ-UHFFFAOYSA-N"),
+    ("chembl_id", "同上，從 ChEMBL 下載。Downloaded from ChEMBL.", "CHEMBL25"),
+    ("ccd", "同上，PDB 的三字母配體代碼。PDB ligand code.", "AIN"),
+    ("sdf", "自己的結構檔，檔名必須是 name 加 .sdf，於介面「手動上傳結構」上傳。Your own file, named <name>.sdf.", "aspirin.sdf"),
+    ("", "每列只需填一種結構來源；同一列填了好幾種時，優先序 sdf > smiles > pubchem_cid > inchikey > chembl_id > ccd。"
+         "Fill one structure source per row; when several are filled, sdf comes first, then the order above.", ""),
+    ("", "範例的第一張工作表可以直接上傳試跑（3PTB 胰蛋白酶：前四個是苯甲脒類抑制劑，後四個是對照）。"
+         "The first sheet can be uploaded as is (trypsin 3PTB: four benzamidine-type inhibitors and four controls).", ""),
+]
+
+
 def write_template(path: Path | str) -> Path:
-    """Example sheet (xlsx or csv by extension) showing every accepted column."""
+    """Example compound table (xlsx or csv by extension).  D-79: the first sheet runs as uploaded — SMILES only, so no
+    network lookup can fail and no missing SDF stops the screen; the other ways to name a compound are explained on a
+    second sheet ("說明 How to fill"), which the reader ignores (it reads the first sheet)."""
     import pandas as pd
-    rows = [
-        {"name": "benzamidine", "smiles": "NC(=[NH2+])c1ccccc1", "pubchem_cid": "", "inchikey": "", "chembl_id": "", "ccd": "", "sdf": ""},
-        {"name": "aspirin", "smiles": "", "pubchem_cid": "2244", "inchikey": "", "chembl_id": "", "ccd": "", "sdf": ""},
-        {"name": "caffeine", "smiles": "", "pubchem_cid": "", "inchikey": "RYYVLZVUVIJVGH-UHFFFAOYSA-N", "chembl_id": "", "ccd": "", "sdf": ""},
-        {"name": "imatinib", "smiles": "", "pubchem_cid": "", "inchikey": "", "chembl_id": "CHEMBL941", "ccd": "", "sdf": ""},
-        {"name": "ATP", "smiles": "", "pubchem_cid": "", "inchikey": "", "chembl_id": "", "ccd": "ATP", "sdf": ""},
-        {"name": "my_compound", "smiles": "", "pubchem_cid": "", "inchikey": "", "chembl_id": "", "ccd": "", "sdf": "my_compound.sdf"},
-    ]
+    cols = ["name", "smiles", "pubchem_cid", "inchikey", "chembl_id", "ccd", "sdf"]
+    df = pd.DataFrame([{**{c: "" for c in cols}, "name": n, "smiles": smi} for n, smi in TEMPLATE_ROWS], columns=cols)
     p = Path(path)
-    df = pd.DataFrame(rows)
     if p.suffix.lower() in (".xlsx", ".xlsm"):
-        df.to_excel(p, index=False)
+        with pd.ExcelWriter(p) as xw:
+            df.to_excel(xw, index=False, sheet_name="compounds")
+            pd.DataFrame(TEMPLATE_HELP[1:], columns=list(TEMPLATE_HELP[0])).to_excel(xw, index=False, sheet_name="說明 How to fill")
     else:
         df.to_csv(p, index=False, encoding="utf-8-sig")
     return p

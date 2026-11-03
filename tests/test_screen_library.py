@@ -39,10 +39,11 @@ def test_read_csv_with_aliases(tmp_path):
 def test_read_xlsx_and_template_roundtrip(tmp_path):
     p = write_template(tmp_path / "t.xlsx")
     entries, problems = read_library(p)
-    assert not problems and len(entries) == 6
-    assert {e.name for e in entries} == {"benzamidine", "aspirin", "caffeine", "imatinib", "ATP", "my_compound"}
-    local = next(e for e in entries if e.name == "my_compound")
-    assert local.sdf.endswith("my_compound.sdf") and str(tmp_path) in local.sdf   # relative to the sheet
+    assert not problems and len(entries) == 8 and entries[0].name == "benzamidine"
+    q = tmp_path / "local.csv"                                  # an sdf column is resolved relative to the sheet
+    q.write_text("name,sdf\nmy_compound,my_compound.sdf\n", encoding="utf-8")
+    local = read_library(q)[0][0]
+    assert local.sdf.endswith("my_compound.sdf") and str(tmp_path) in local.sdf
 
 
 def test_problems_are_listed_not_guessed(tmp_path):
@@ -235,3 +236,15 @@ def test_manual_upload_naming_and_priority(tmp_path):
     assert not check_upload_name("caffeine.mol2", ["caffeine"])[0]
     ok, why, _ = check_upload_name("x.sdf", ["Abc", "abc", "x", "X"])
     assert not ok and "differ only by case" in why[1]
+
+
+def test_template_runs_as_uploaded(tmp_path):   # D-79
+    from md20.docking.library import write_template, read_library
+    for ext in ("xlsx", "csv"):
+        p = write_template(tmp_path / f"t.{ext}")
+        entries, problems = read_library(p)
+        assert not problems and len(entries) == 8
+        assert all(e.smiles for e in entries)                      # nothing needs a download or an SDF file
+    import openpyxl
+    wb = openpyxl.load_workbook(tmp_path / "t.xlsx")
+    assert wb.sheetnames[0] == "compounds" and len(wb.sheetnames) == 2

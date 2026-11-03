@@ -70,3 +70,6 @@ CI（openmm-stack，有 vina/rdkit/網路）：3PTB + 5 個 PubChem CID 真下�
 1. 篩選排名只用最佳 pose 的 Vina 分數是否足夠？要不要加 cluster 共識或簡單的 consensus（vina + vinardo）？
 2. 去鹽只取最大片段：對季銨鹽／金屬配合物類化合物是否會誤刪？
 3. 1.0 kcal/mol 的「不可區分」門檻是否合理（Vina 文獻誤差約 1–2 kcal/mol）？
+
+## 範例表格（D-79，2026-11-03）
+第一張工作表只用 SMILES、可直接上傳試跑（3PTB：4 個苯甲脒類抑制劑＋4 個對照）；其他來源欄位的寫法在第二張工作表「說明 How to fill」。讀取只看第一張。

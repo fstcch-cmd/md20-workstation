@@ -7,6 +7,16 @@
 
 ## 2026-11-03
 
+### D-79　高通量篩選的範例 Excel 上傳後卡住：改成可直接試跑的範例；發行 v0.1.0a8
+- 使用者回報（11/03 14:16）：高通量篩選示範的 Excel 上傳「怪怪的」。
+- 原因：範例同時示範六種化合物來源（smiles、pubchem_cid、inchikey、chembl_id、ccd、sdf），其中 `my_compound` 指向不存在的 `my_compound.sdf`，
+  另外四列要連 PubChem、ChEMBL、RCSB 下載；篩選預設 `allow_partial: false`，任何一列失敗就停在閘門，所以「原封不動上傳」一定卡住。
+  化合物（ATP、imatinib 等）也和範例受體 3PTB 無關，排名沒有教學意義。
+- 決定：第一張工作表 `compounds` 只用 SMILES（不需網路），8 個化合物：4 個苯甲脒類胰蛋白酶抑制劑與 4 個對照；
+  第二張工作表「說明 How to fill」逐欄說明其他來源各舉一例（讀取只看第一張工作表，不會被誤讀）。CSV 範本只有化合物。
+- 證據：`tests/test_screen_library.py::test_template_runs_as_uploaded`、`::test_read_xlsx_and_template_roundtrip`（sdf 相對路徑改用獨立 CSV 測）。
+- 未決：使用者說的「怪怪的」是否還包括其他現象（例如 Excel 開啟時的警告），尚待確認。
+
 ### D-78　多配體同時對接時所有聯合姿勢都碰撞：改選「進入 MD 風險最低」的姿勢，不再卡住；發行 v0.1.0a7
 - 使用者回報（11/03 14:06，截圖）：教學一（hsieh2024）9 個聯合姿勢全部標「碰撞」，流程停在姿勢選擇，課堂卡住；就算點選某一列也會被「請改選」擋下。
   使用者要求：發現碰撞擋下沒錯，但要能合理、安全地進到 MD，提示哪個風險最低，**要通則，不是針對這個範例**。
