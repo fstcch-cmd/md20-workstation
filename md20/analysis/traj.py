@@ -63,6 +63,8 @@ def load_production(run_dir: Path | str, topology_pdb: Path | str, *, stride: in
         raise FileNotFoundError("production 沒有 DCD；請確認 stage 已完成且 write_dcd=True")
     top, _ = production_topology(run_dir, topology_pdb)       # solute-only DCDs (long runs) get a cut topology
     traj = md.load(dcds, top=top, stride=stride)
+    from .stream import set_production_time
+    set_production_time(traj, run_dir, dcds, stride=stride)     # D-89: real time axis across chunk files
     return center_trajectory(traj, metal_indices=metal_indices, superpose=superpose)
 
 
@@ -81,6 +83,8 @@ def export_centered(run_dir: Path | str, topology_pdb: Path | str, *, metal_indi
     from .stream import production_topology
     top0, _ = production_topology(run_dir, topology_pdb)
     raw = md.load(dcds, top=top0, stride=stride)
+    from .stream import set_production_time
+    set_production_time(raw, run_dir, dcds, stride=stride)
     raw_xyz_last = raw.xyz[-1].copy()
     cen = center_trajectory(raw, metal_indices=metal_indices, superpose=False, inplace=True)
     adir = run_dir / "analysis"; adir.mkdir(parents=True, exist_ok=True)

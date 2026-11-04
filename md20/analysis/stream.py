@@ -159,6 +159,53 @@ def production_info(run_dir: Path | str) -> dict:
             "dcd_atom_count": info.get("dcd_atom_count")}
 
 
+def dcd_frame_counts(dcds: list) -> list[int]:
+    """Frames in each DCD (header only, no coordinates read)."""
+    import mdtraj as md
+    out = []
+    for f in dcds:
+        with md.formats.DCDTrajectoryFile(str(f)) as fh:
+            out.append(len(fh))
+    return out
+
+
+def production_times_ps(run_dir: Path | str, dcds: list | None = None, *, stride: int = 1,
+                        counts: list[int] | None = None) -> np.ndarray | None:
+    """Simulated time of every saved frame (ps), as `md.load(dcds, stride=stride)` returns them.
+
+    D-89: mdtraj gives DCD frames no time (each file starts again at 0 with 1 ps per frame), so a production split
+    into chunks plotted as 0–9 ps, 0–9 ps … and every line jumped back to zero.  The time comes from the stage
+    record instead: total steps × time step spread evenly over all saved frames (OpenMM writes the first frame one
+    interval after the start).  None when the record is missing."""
+    comp = load_json(Path(run_dir) / "stages" / "production" / "production_complete.json", {})
+    res = comp.get("result") or {}
+    dcds = dcds if dcds is not None else res.get("dcd_paths") or []
+    steps, dt_fs = res.get("steps"), comp.get("timestep_fs")
+    if not dcds or not steps or not dt_fs:
+        return None
+    counts = counts if counts is not None else dcd_frame_counts(dcds)
+    n = int(sum(counts))
+    if n <= 0:
+        return None
+    dt_ps = float(steps) * float(dt_fs) / 1000.0 / n
+    out, start = [], 0
+    for c in counts:
+        idx = np.arange(0, c, max(1, int(stride)))
+        out.append((start + idx + 1) * dt_ps)
+        start += c
+    return np.concatenate(out) if out else None
+
+
+def set_production_time(traj, run_dir: Path | str, dcds: list, *, stride: int = 1) -> None:
+    """Give a loaded production trajectory its real time axis (production_times_ps) when the lengths agree."""
+    try:
+        t = production_times_ps(run_dir, dcds, stride=stride)
+    except Exception:  # noqa: BLE001 — keep mdtraj's frame numbering rather than fail the analysis
+        t = None
+    if t is not None and len(t) == traj.n_frames:
+        traj.time = t
+
+
 def remap_groups(groups: dict | None, subset: list[int] | None) -> dict | None:
     """Full-system atom indices → indices in a solute-only trajectory (atoms outside the subset are dropped)."""
     if groups is None or subset is None:
@@ -245,12 +292,24 @@ def stream_production_metrics(run_dir: Path | str, topology_pdb: Path | str, *, 
             res = [f"{top.atom(int(j)).residue.name}{top.atom(int(j)).residue.resSeq}" for j in near[:, 1]]
             per_lig[name] = StreamingMetrics(contact_pairs=near, pair_residues=res)
     prot = StreamingMetrics(rmsd_atoms=bb, rmsf_atoms=ca)
+    try:
+        times = production_times_ps(run_dir, info["dcds"])          # D-89: real time, not mdtraj's per-file 0, 1, 2 …
+    except Exception:  # noqa: BLE001
+        times = None
+    seen = 0
+
+    def tchunk(ch):
+        nonlocal seen
+        n = len(ch.xyz)
+        tt = times[seen:seen + n] if times is not None and seen + n <= len(times) else ch.time
+        seen += n
+        return tt
     for ch in [first]:
-        prot.update(ch.xyz, ch.time)
+        prot.update(ch.xyz, tchunk(ch))
         for sm in per_lig.values():
             sm.update(ch.xyz)
     for ch in chunks:
-        prot.update(ch.xyz, ch.time)
+        prot.update(ch.xyz, tchunk(ch))
         for sm in per_lig.values():
             sm.update(ch.xyz)
     p = prot.result()

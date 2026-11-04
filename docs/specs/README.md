@@ -48,3 +48,4 @@
 - 驗證案例：`md20/validation/`、`tests/test_validation_papers.py`
 | `report_language.md` | 報告用語規範：每張圖的通用說明（圖說、如何判讀、情境句型與門檻；D-54） |
 | `multi_ligand.md` | 多配體同時對接 → MD：穿環、重疊、漂浮的檢查與處置順序、力場一致性、報告版型（D-60） |
+| [figures.md](figures.md) | 自動產圖規則：時間軸、圖例在圖外、每條線命名、顏色一致、多系列改小圖、細線＋移動平均（D-89） | 已實作・純 Python 與繪圖測試 |

@@ -23,6 +23,8 @@ def _plt():
 
 
 def _save(fig, path: Path) -> str:
+    from ..analysis.plots import legend_outside
+    legend_outside(fig)                      # D-89: legends to the right of the plots, never over the data
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path)
     import matplotlib.pyplot as plt
@@ -73,24 +75,100 @@ def screen_ranking(rows: list[dict], path: Path, top_n: int = 25) -> str | None:
     return _save(fig, path)
 
 
+# D-89 line-chart rules (docs/specs/figures.md): x must increase; every line has a name in the key; one colour per
+# series, the same series keeps its colour in every figure of a report; more series than colours add line styles;
+# helper lines (second-half mean) are explained in the key; the key sits outside the plot on the right.
+_COLOURS: dict[str, int] = {}
+LINESTYLES = ["-", "--", "-.", ":"]
+
+
+def reset_colours() -> None:
+    """Called at the start of each report so colour numbering starts again."""
+    _COLOURS.clear()
+
+
+def series_style(label: str) -> dict:
+    """Colour and line style of one named series; stable within a report (first come, first numbered)."""
+    i = _COLOURS.setdefault(str(label), len(_COLOURS))
+    return {"color": PALETTE[i % len(PALETTE)], "ls": LINESTYLES[(i // len(PALETTE)) % len(LINESTYLES)]}
+
+
+def time_axis(t, n: int) -> tuple[np.ndarray, str]:
+    """(x values, x label).  Times that do not increase (chunk files each starting at 0, from runs analysed before
+    D-89) are never drawn as time: the frame number is used and the label says so."""
+    t = np.asarray(t if t is not None else [], float)[:n]
+    if len(t) == n and n > 1 and np.all(np.diff(t) > 0):
+        return t, "Time (ns)"
+    return np.arange(1, n + 1, dtype=float), "Saved frame (time axis not recorded)"
+
+
+def running_mean(y: np.ndarray, frac: float = 0.05) -> tuple[np.ndarray, int]:
+    """Centred running mean over ~5 % of the frames (at least 3, odd); edges use the frames available."""
+    n = len(y)
+    w = max(3, int(round(n * frac)) | 1)
+    if n < w:
+        return y.astype(float), 1
+    k = np.ones(w)
+    num = np.convolve(y, k, mode="same")
+    den = np.convolve(np.ones(n), k, mode="same")
+    return num / den, w
+
+
+OVERLAY_MAX = 3            # more series than this are drawn one panel each (small multiples), same axes
+
+
 def timeseries(series: dict, ylabel: str, path: Path, *, threshold: float | None = None) -> str | None:
-    """series: {label: (t_ns, y)}"""
+    """series: {label: (t_ns, y)}.  D-89 rules: every line named; thin = every saved frame, thick = running mean in
+    the same colour (both named in the key); up to three series share one plot, more get one panel each with the
+    series name on the panel, so lines of different ligands never pile up; the key is outside on the right."""
     series = {k: v for k, v in series.items() if v and len(v[1]) > 1}
     if not series:
         return None
     plt = _plt()
-    fig, ax = plt.subplots(figsize=(6.4, 2.6))
-    for (k, (t, y)), c in zip(series.items(), PALETTE * 3):
-        t, y = np.asarray(t, float)[:len(y)], np.asarray(y, float)
-        ax.plot(t, y, color=c, lw=1.0, label=k, alpha=0.85)
-        n = len(y)
-        if n >= 8:
-            ax.hlines(y[n // 2:].mean(), t[n // 2], t[-1], colors=c, linestyles=":", lw=1.2)
+    names = list(series)
+    many = len(names) > OVERLAY_MAX
+    if many:
+        fig, axes = plt.subplots(len(names), 1, figsize=(6.4, 1.05 * len(names) + 0.8), sharex=True, sharey=True)
+        axes = list(np.atleast_1d(axes))
+    else:
+        fig, ax = plt.subplots(figsize=(6.4, 2.8))
+        axes = [ax] * len(names)
+    xlabel, win_ns = "Time (ns)", None
+    for ax, k in zip(axes, names):
+        t, y = series[k]
+        y = np.asarray(y, float)
+        x, xl = time_axis(t, len(y))
+        if xl != "Time (ns)":
+            xlabel = xl
+        st = series_style(k)
+        ax.plot(x, y, color=st["color"], ls=st["ls"], lw=0.6, alpha=0.35)
+        m, w = running_mean(y)
+        ax.plot(x, m, color=st["color"], ls=st["ls"], lw=1.8, label=k)
+        if w > 1 and xl == "Time (ns)" and len(x) > 1:
+            win_ns = w * float(np.median(np.diff(x)))
+        if threshold is not None:
+            ax.axhline(threshold, color="#b8433f", ls="--", lw=0.8)
+        if many:
+            ax.set_title(k, loc="left", fontsize=7.5, color=st["color"], fontweight="bold", pad=2)
+            ax.set_ylabel("")
+    if many:
+        fig.supylabel(ylabel, fontsize=9)
+        axes[-1].set_xlabel(xlabel)
+        key_ax = axes[0]
+    else:
+        axes[0].set_ylabel(ylabel)
+        axes[0].set_xlabel(xlabel)
+        key_ax = axes[0]
+    key_ax.plot([], [], color="#52514e", lw=0.6, alpha=0.5, label="Thin: every saved frame")
+    key_ax.plot([], [], color="#52514e", lw=1.8,
+                label="Thick: running mean" + (f" ({win_ns:.2g} ns)" if win_ns else ""))
     if threshold is not None:
-        ax.axhline(threshold, color="#b8433f", ls="--", lw=0.8)
-    ax.set_xlabel("Time (ns)")
-    ax.set_ylabel(ylabel)
-    ax.legend(fontsize=7, ncol=min(4, len(series)))
+        key_ax.plot([], [], color="#b8433f", ls="--", lw=0.8, label=f"Threshold {threshold:g}")
+    if many:                                   # names are on the panels; the key explains the line kinds only
+        for line in list(key_ax.get_lines()):
+            if line.get_label() in names:
+                line.set_label("_" + line.get_label())
+    key_ax.legend(fontsize=7)
     return _save(fig, path)
 
 
@@ -195,13 +273,21 @@ def two_panel(t, y1, y2, l1: str, l2: str, path: Path) -> str | None:
         return None
     plt = _plt()
     fig, axes = plt.subplots(2, 1, figsize=(6.4, 3.6), sharex=True)
-    t = np.asarray(t, float)
-    axes[0].plot(t[:len(y1)], y1, color=PALETTE[0], lw=0.9)
+    x1, xl = time_axis(t, len(y1))
+    y1 = np.asarray(y1, float)
+    axes[0].plot(x1, y1, color=PALETTE[0], lw=0.6, alpha=0.35)
+    axes[0].plot(x1, running_mean(y1)[0], color=PALETTE[0], lw=1.8)
     axes[0].set_ylabel(l1)
     if y2 is not None and len(y2):
-        axes[1].plot(t[:len(y2)], y2, color=PALETTE[1], lw=0.9)
+        y2 = np.asarray(y2, float)
+        x2, _ = time_axis(t, len(y2))
+        axes[1].plot(x2, y2, color=PALETTE[1], lw=0.6, alpha=0.35)
+        axes[1].plot(x2, running_mean(y2)[0], color=PALETTE[1], lw=1.8)
     axes[1].set_ylabel(l2)
-    axes[1].set_xlabel("Time (ns)")
+    axes[1].set_xlabel(xl)
+    axes[0].plot([], [], color="#52514e", lw=0.6, alpha=0.5, label="Thin: every saved frame")
+    axes[0].plot([], [], color="#52514e", lw=1.8, label="Thick: running mean")
+    axes[0].legend(fontsize=7)
     return _save(fig, path)
 
 
@@ -209,12 +295,12 @@ def dssp_area(t, frac: dict, path: Path) -> str | None:
     if not frac or not frac.get("C"):
         return None
     plt = _plt()
-    t = np.asarray(t, float)[:len(frac["C"])]
+    t, xl = time_axis(t, len(frac["C"]))
     fig, ax = plt.subplots(figsize=(6.4, 2.4))
     ax.stackplot(t, frac["H"], frac["E"], frac["C"], labels=["α-helix", "β-strand", "other"],
                  colors=["#c0612b", "#2f6f9f", "#d9dee3"])
     ax.set_ylim(0, 1)
-    ax.set_xlabel("Time (ns)")
+    ax.set_xlabel(xl)
     ax.set_ylabel("Fraction of residues")
     ax.legend(fontsize=7, ncol=3, loc="lower right")
     return _save(fig, path)
@@ -250,9 +336,9 @@ def clusters_plot(c: dict, t, path: Path) -> str | None:
     axes[0].set_ylim(0, 1)
     axes[0].set_xticks(range(1, k + 1))
     lab = np.asarray(c.get("labels") or [], int)
-    t = np.asarray(t, float)[:len(lab)]
+    t, xl = time_axis(t, len(lab))
     axes[1].scatter(t, lab + 1, c=[PALETTE[i % len(PALETTE)] for i in lab], s=6)
-    axes[1].set_xlabel("Time (ns)")
+    axes[1].set_xlabel(xl)
     axes[1].set_ylabel("Cluster")
     axes[1].set_yticks(range(1, int(lab.max()) + 2) if len(lab) else [1])
     return _save(fig, path)
@@ -285,11 +371,14 @@ def fingerprint_plot(fp: dict, t, path: Path, top_n: int = 25) -> str | None:
     order = np.argsort(-(M > 0).mean(1))[:top_n]
     M = M[order]
     fig, ax = plt.subplots(figsize=(7.2, 0.22 * len(order) + 1.0))
-    t = np.asarray(t, float)
+    t = np.asarray(t if t is not None else [], float)
+    xl_ = "Time (ns)"
+    if len(t) < 2 or not np.all(np.diff(t) > 0):        # D-89: never stretch a broken time axis over the matrix
+        t, xl_ = np.arange(1, M.shape[1] + 1, dtype=float), "Saved frame (time axis not recorded)"
     ax.imshow(M, aspect="auto", interpolation="nearest", cmap=ListedColormap(["#ffffff", "#c9a227", "#2f6f9f", "#b8433f"]),
               vmin=0, vmax=3, extent=[t[0] if len(t) else 0, t[-1] if len(t) else M.shape[1], len(order) - 0.5, -0.5])
     ax.set_yticks(range(len(order)), [res[i] for i in order], fontsize=7)
-    ax.set_xlabel("Time (ns)")
+    ax.set_xlabel(xl_)
     handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in ("#c9a227", "#2f6f9f", "#b8433f")]
     ax.legend(handles, ["hydrophobic", "polar", "ionic"], fontsize=7, ncol=3, loc="upper left", bbox_to_anchor=(0, -0.12))
     return _save(fig, path)
@@ -547,7 +636,8 @@ def contact_matrix(rows: list, cols: list, M, path: Path, *, vmax: float = 8.0, 
 
 
 def _band_panel(ax, t, y, ref, lo, hi, ylabel: str, color: str) -> None:
-    t, y = np.asarray(t, float)[:len(y)], np.asarray(y, float)
+    y = np.asarray(y, float)
+    t, _ = time_axis(t, len(y))
     if ref is not None:
         ax.axhspan(lo, hi, color="#7b8794", alpha=0.15, lw=0)
         ax.axhline(ref, color="#4d6170", lw=0.8)
@@ -608,7 +698,7 @@ def insertion_plot(t, com, deepest, path: Path) -> str | None:
     if com is None or len(com) < 2:
         return None
     plt = _plt()
-    t = np.asarray(t, float)[:len(com)]
+    t, xl = time_axis(t, len(com))
     fig, ax = plt.subplots(figsize=(6.4, 2.6))
     ax.axhspan(-0.5, 0.3, color="#7b8794", alpha=0.15, lw=0)
     ax.axhline(0, color="#4d6170", lw=0.8)
@@ -616,7 +706,7 @@ def insertion_plot(t, com, deepest, path: Path) -> str | None:
     if deepest is not None and len(deepest):
         ax.plot(t[:len(deepest)], deepest, color=PALETTE[1], lw=0.9, ls="--", label="deepest heavy atom")
     ax.invert_yaxis()
-    ax.set_xlabel("Time (ns)")
+    ax.set_xlabel(xl)
     ax.set_ylabel("Depth below P plane (nm)")
     ax.legend(fontsize=7)
     return _save(fig, path)

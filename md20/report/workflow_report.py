@@ -798,11 +798,13 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
     comp = ana.get("comparison") or {}
     start = len(doc.collected)
     ext = {key: load_json(s_.get("extended_file"), {}) for key, s_ in sums.items() if s_.get("extended_file")}
+    _repair_times(wf, cases, runs, metrics, ext)           # D-89: analyses made before the time-axis fix
     eq = _equil_figures(doc, wf, cases, runs)
     if eq:
         out += _sub(doc, "平衡過程的品質", "Equilibration quality", "平衡化の品質", "평형화 품질") + eq
     if metrics:
-        out += _md_figures(doc, sums, metrics, ext)
+        disp = {key: {v: u for u, v in (c.get("ligand_map") or {}).items()} for key, c in cases.items()}
+        out += _md_figures(doc, sums, metrics, ext, disp)
     else:                                              # older runs without metrics.json: the analysis images as drawn
         for key, s_ in sums.items():
             figs = s_.get("figures") or {}
@@ -857,8 +859,14 @@ def _equil_figures(doc: Doc, wf, cases: dict, runs: dict) -> str:
     return out
 
 
-def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None) -> str:
+def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None, names: dict | None = None) -> str:
     """Protein stability and dynamics, then ligand binding in dynamics — every analysis that exists for the run."""
+    names = names or {}
+
+    def lab(k, rn):
+        """D-89: the student's ligand name with the residue name used in the topology, e.g. docked_multi PGA (L01)."""
+        u = (names.get(k) or {}).get(rn)
+        return f"{k} {u} ({rn})" if u and u != rn else f"{k} {rn}"
     ext = ext or {}
     order = sorted(metrics, key=lambda k: (not k.lower().startswith("apo"), k))
     ref = order[0] if order and order[0].lower().startswith("apo") else None
@@ -913,7 +921,7 @@ def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None) ->
     for k, rn in lig_keys:
         d = metrics[k]["ligands"][rn]
         if d.get("rmsd_in_pocket_A"):
-            lig[f"{k} {rn}"] = (metrics[k].get("time_ns") or [], d["rmsd_in_pocket_A"])
+            lig[lab(k, rn)] = (metrics[k].get("time_ns") or [], d["rmsd_in_pocket_A"])
             lf += FT.classify_ligand_rmsd(k, rn, metrics[k].get("time_ns") or np.arange(len(d["rmsd_in_pocket_A"])), d["rmsd_in_pocket_A"])
     if lig:
         out += doc.figure_block(FG.timeseries(lig, "Ligand RMSD in pocket (Å)", doc.figdir / "md_ligand_rmsd.png", threshold=3.0), "ligand_rmsd", lf)
@@ -922,7 +930,7 @@ def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None) ->
         if d.get("com_distance_to_pocket_A"):
             out += doc.figure_block(FG.two_panel(metrics[k].get("time_ns") or [], d["com_distance_to_pocket_A"], d.get("polar_contacts") or [],
                                                  "COM distance (Å)", "Polar contacts", doc.figdir / f"md_com_{k}_{rn}.png"),
-                                    "com_distance", FT.classify_com(f"{k} {rn}", metrics[k].get("time_ns"), d["com_distance_to_pocket_A"]), f"{k} {rn}")
+                                    "com_distance", FT.classify_com(lab(k, rn), metrics[k].get("time_ns"), d["com_distance_to_pocket_A"]), lab(k, rn))
     for k in order:                                     # D-60: multi-ligand systems — does co-occupancy hold?
         lld = metrics[k].get("ligand_ligand_distance_A") or {}
         if lld:
@@ -934,35 +942,35 @@ def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None) ->
     for k, rn in lig_keys:
         L = ((ext.get(k) or {}).get("ligands") or {}).get(rn) or {}
         if (L.get("sasa") or {}).get("buried_fraction"):
-            bur[f"{k} {rn}"] = (ext[k].get("time_ns") or [], L["sasa"]["buried_fraction"])
-            bf += FT.classify_burial(f"{k} {rn}", L["sasa"]["buried_fraction"])
+            bur[lab(k, rn)] = (ext[k].get("time_ns") or [], L["sasa"]["buried_fraction"])
+            bf += FT.classify_burial(lab(k, rn), L["sasa"]["buried_fraction"])
     if bur:
         out += doc.figure_block(FG.timeseries(bur, "Buried fraction of ligand surface", doc.figdir / "md_burial.png"), "ligand_burial", bf)
     for k, rn in lig_keys:
         fq = metrics[k]["ligands"][rn].get("contact_frequency") or {}
         if fq:
-            out += doc.figure_block(FG.contacts(fq, doc.figdir / f"md_contacts_{k}_{rn}.png"), "contacts", FT.classify_contacts(k, rn, fq), f"{k} {rn}")
+            out += doc.figure_block(FG.contacts(fq, doc.figdir / f"md_contacts_{k}_{rn}.png"), "contacts", FT.classify_contacts(k, rn, fq), lab(k, rn))
     hb, hf = {}, []
     for k, rn in lig_keys:
         L = ((ext.get(k) or {}).get("ligands") or {}).get(rn) or {}
         if (L.get("hbonds") or {}).get("count") is not None:
-            hb[f"{k} {rn}"] = (ext[k].get("time_ns") or [], L["hbonds"]["count"])
+            hb[lab(k, rn)] = (ext[k].get("time_ns") or [], L["hbonds"]["count"])
     if hb:
         out += doc.figure_block(FG.timeseries(hb, "Ligand–protein hydrogen bonds", doc.figdir / "md_hbond_count.png"), "hbond_count", FT.classify_hbond_count(hb))
     for k, rn in lig_keys:
         L = ((ext.get(k) or {}).get("ligands") or {}).get(rn) or {}
         if L.get("hbonds"):
             out += doc.figure_block(FG.bars(L["hbonds"].get("occupancy") or [], "Occupancy", doc.figdir / f"md_hbond_occ_{k}_{rn}.png"),
-                                    "hbond_occupancy", FT.classify_hbond_occupancy(f"{k} {rn}", L["hbonds"].get("occupancy") or []), f"{k} {rn}")
+                                    "hbond_occupancy", FT.classify_hbond_occupancy(lab(k, rn), L["hbonds"].get("occupancy") or []), lab(k, rn))
         if (L.get("fingerprint") or {}).get("residues"):
             out += doc.figure_block(FG.fingerprint_plot(L["fingerprint"], ext[k].get("time_ns") or [], doc.figdir / f"md_fp_{k}_{rn}.png"),
-                                    "fingerprint", FT.classify_fingerprint(f"{k} {rn}", L["fingerprint"].get("occupancy") or {}), f"{k} {rn}")
+                                    "fingerprint", FT.classify_fingerprint(lab(k, rn), L["fingerprint"].get("occupancy") or {}), lab(k, rn))
     wb, wf_ = {}, []
     for k, rn in lig_keys:
         L = ((ext.get(k) or {}).get("ligands") or {}).get(rn) or {}
         if (L.get("water_bridges") or {}).get("count") is not None:
-            wb[f"{k} {rn}"] = (ext[k].get("time_ns") or [], L["water_bridges"]["count"])
-            wf_ += FT.classify_water(f"{k} {rn}", L["water_bridges"])
+            wb[lab(k, rn)] = (ext[k].get("time_ns") or [], L["water_bridges"]["count"])
+            wf_ += FT.classify_water(lab(k, rn), L["water_bridges"])
     if wb:
         out += doc.figure_block(FG.timeseries(wb, "Water bridges", doc.figdir / "md_water.png"), "water_bridges", wf_)
     return out
@@ -1310,12 +1318,48 @@ def _limitations(doc: Doc, wf) -> list[str]:
 
 
 # ------------------------------------------------------------------------------------------- build
+def _repair_times(wf, cases: dict, runs: dict, metrics: dict, ext: dict) -> None:
+    """D-89: trajectories analysed before the fix carry mdtraj's per-file frame numbers as time (0–9 ps, 0–9 ps …),
+    which drew every line back to zero.  When a stored time axis does not increase, rebuild it from the production
+    record of the first replica (total steps × time step over all saved frames); the extended analysis used
+    frame_indices() of the same trajectory, so its frames get the matching times.  If the record cannot be read the
+    figures fall back to frame numbers (figures.time_axis)."""
+    from ..analysis.extended import frame_indices
+    for key, m in metrics.items():
+        t = m.get("time_ns") or []
+        if len(t) < 2 or np.all(np.diff(np.asarray(t, float)) > 0):
+            continue
+        real = None
+        try:
+            from ..project import Run
+            from ..analysis.stream import production_times_ps
+            r = runs.get(key) or {}
+            if r.get("run_ids") and key in cases:
+                ps = production_times_ps(Run(wf.project.case(cases[key]["case_id"]), r["run_ids"][0]).dir)
+                real = None if ps is None else np.asarray(ps, float) / 1000.0
+        except Exception:  # noqa: BLE001
+            real = None
+        if real is None or len(real) != len(t):
+            continue
+        m["time_ns"] = real.tolist()
+        e = ext.get(key) or {}
+        if e.get("time_ns"):
+            idx = frame_indices(len(real))
+            if len(idx) == len(e["time_ns"]):
+                e["time_ns"] = real[idx].tolist()
+                hp = e.get("hbonds_protein") or {}
+                if hp.get("time_ns"):
+                    step = max(1, len(idx) // 100)
+                    hp["time_ns"] = real[idx][::step].tolist()
+
+
 def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None = None, banner_html: str = "") -> Path:
     """banner_html: trusted markup placed above the title (the report template marks itself as synthetic data)."""
     out_path = Path(out_path) if out_path else wf.dir / "workflow_report.html"
     L = lang or wf.cfg.get("language") or "en"
     L = L if L in LANGS else "en"
     doc = Doc(L, wf.dir / "report_figures")
+    FG.reset_colours()                         # D-89: one colour per series, the same in every figure of this report
     counter = {"n": 0}
 
     def nxt():

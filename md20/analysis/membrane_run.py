@@ -102,6 +102,8 @@ def analyse_membrane_run(run_dir: Path | str, build_manifest: dict, *, label: st
         raise RuntimeError("找不到正式模擬的軌跡或拓樸檔，無法做膜分析。")
     top, subset = production_topology(run_dir, top_pdb)
     traj = md.load(info["dcds"], top=top)
+    from .stream import set_production_time
+    set_production_time(traj, run_dir, info["dcds"])          # D-89
     heads = remap_indices(mem.get("head_atom_indices") or [], subset)
     waters = remap_indices(_water_oxygens(top_pdb), subset)
     from ..workflow import manifest_ligands

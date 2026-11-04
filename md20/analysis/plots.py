@@ -28,7 +28,44 @@ def _mpl():
     return plt
 
 
+def legend_outside(fig) -> None:
+    """D-89: every legend of the figure moves into one column on the right of the plots, outside the axes, so labels
+    never cover the data.  The plotting area keeps its size (the saved image grows to the right through
+    bbox_inches="tight"), like a panel B that only holds the key.  Entries with the same label are listed once.
+    A figure can opt out with fig._md20_keep_legends = True."""
+    if getattr(fig, "_md20_keep_legends", False):
+        return
+    axes = [ax for ax in fig.axes if ax.get_legend() is not None]
+    if not axes:
+        return
+    entries, seen, size, title = [], set(), None, None
+    for ax in axes:
+        leg = ax.get_legend()
+        handles = getattr(leg, "legend_handles", None) or getattr(leg, "legendHandles", None) or []
+        texts = leg.get_texts()
+        if size is None and texts:
+            size = texts[0].get_fontsize()
+        t = leg.get_title().get_text()
+        title = title or (t or None)
+        for h, tx in zip(handles, texts):
+            lab = tx.get_text()
+            if lab and not lab.startswith("_") and lab not in seen:
+                seen.add(lab)
+                entries.append((h, lab))
+        leg.remove()
+    if not entries:
+        return
+    boxes = [ax.get_position() for ax in fig.axes if ax.get_visible()]
+    x = max(b.x1 for b in boxes) + 0.015
+    y = max(b.y1 for b in boxes)
+    fig.legend([h for h, _ in entries], [lab for _, lab in entries], loc="upper left", bbox_to_anchor=(x, y),
+               bbox_transform=fig.transFigure, frameon=False, fontsize=min(float(size or 8), 8.0),
+               ncol=1 if len(entries) <= 18 else 2, borderaxespad=0.0, handlelength=1.6, title=title,
+               title_fontsize=min(float(size or 8), 8.0))
+
+
 def _save(fig, out_base: Path) -> dict:
+    legend_outside(fig)
     out_base.parent.mkdir(parents=True, exist_ok=True)
     png, svg = out_base.with_suffix(".png"), out_base.with_suffix(".svg")
     from ..util.stamp import figure_metadata, OWNER_SHORT
