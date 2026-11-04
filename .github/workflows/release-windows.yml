@@ -46,6 +46,18 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: md20-windows-zip, path: dl }
+      - name: Install-MD20.cmd run from inside the ZIP explains how to extract (D-91)
+        shell: cmd
+        env:
+          MD20_NOPAUSE: "1"
+        run: |
+          mkdir "%RUNNER_TEMP%\only_cmd"
+          powershell -NoProfile -Command "Add-Type -A System.IO.Compression.FileSystem; $z=[IO.Compression.ZipFile]::OpenRead((Get-ChildItem dl\MD20-Windows-*.zip).FullName); $e=$z.Entries | ? { $_.FullName -like '*/Install-MD20.cmd' }; [IO.Compression.ZipFileExtensions]::ExtractToFile($e, '%RUNNER_TEMP%\only_cmd\Install-MD20.cmd'); $z.Dispose()" || exit /b 1
+          call "%RUNNER_TEMP%\only_cmd\Install-MD20.cmd" > "%RUNNER_TEMP%\only_cmd\out.txt"
+          set RC=%ERRORLEVEL%
+          type "%RUNNER_TEMP%\only_cmd\out.txt"
+          if not "%RC%"=="3" (echo expected exit code 3, got %RC% & exit /b 1)
+          findstr /c:"Extract All" "%RUNNER_TEMP%\only_cmd\out.txt" >nul || (echo the extract instruction is missing & exit /b 1)
       - name: Unzip and run Install-MD20.cmd (double-click entry point; Windows PowerShell 5.1 inside)
         shell: cmd
         env:

@@ -5,9 +5,10 @@
 You need Windows 10 or 11, at least 8 GB of free disk space and an internet connection. If the computer has an NVIDIA graphics card, MD20 uses the GPU (CUDA) automatically. Without one it still runs on OpenCL or the CPU, only more slowly.
 
 ## 1. Install (once, about 15–30 minutes)
-1. Download `MD20-Windows-v0.1.0a15.zip` from the page your instructor gave you.
+1. Download `MD20-Windows-v0.1.0a16.zip` from the page your instructor gave you.
 2. Right-click the file and choose "Extract All".
 3. Open the extracted folder and double-click `Install-MD20.cmd`.
+   - Extract first. Double-clicking `Install-MD20.cmd` inside the zip does not work (Windows takes out only that one file); the window then tells you to extract.
    - If a blue "Windows protected your PC" window appears, click "More info" and then "Run anyway".
    - The installation is finished when the window ends with "完成" (Done). If you see an error, take a photo of the whole window and send it to your instructor.
 4. A new file, `MD20-GUI.cmd`, appears on the desktop.

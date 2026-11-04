@@ -7,6 +7,13 @@
 
 ## 2026-11-04
 
+### D-91　在 zip 裡直接雙擊 Install-MD20.cmd 時，改成清楚說明要先解壓縮；發行 v0.1.0a16
+- 使用者（11/04 10:37）回報：`-File 參數的 '...\AppData\Local\Temp\<guid>_MD20-Windows-v0.1.0a15.zip.28d\MD20-v0.1.0a15\installer\install.ps1' 引數不存在`。
+- 原因：在檔案總管裡打開 zip、直接雙擊 `Install-MD20.cmd`，Windows 只把這一個檔取出到 Temp 執行，旁邊沒有 `installer\install.ps1`。安裝程式本身沒有問題。
+- 決定：`Install-MD20.cmd` 先檢查 `installer\install.ps1` 是否存在；沒有就以中文與英文說明「在 zip 上按右鍵 → 解壓縮全部，再從解壓出來的資料夾執行」，結束碼 3。檔案改存 UTF-8（只在這個分支切換 `chcp 65001` 才顯示中文；正常安裝路徑不動）。學生說明四種語言加一行提醒。
+- 被否決：讓 cmd 自己從 Temp 找回 zip 解壓（zip 位置無法可靠得知）；改成單一 exe 安裝檔（需要簽章與另一套建置）。
+- 測試：發行流程在 Windows 上把 `Install-MD20.cmd` 單獨取出執行，檢查結束碼 3 與「Extract All」訊息，之後才做正常安裝驗證。
+
 ### D-90　重寫 README
 - 使用者（11/04 10:26）：「重寫這個 repo 的 README」。
 - 決定：README 改為給第一次來的人看：一段話說明 MD20 是什麼；學生安裝（Windows、macOS 對照表與選用工具）；能做什麼（功能表）；介面的四種模式與常用位置；命令列精簡清單；筆電實測與使用時的科學限制；文件地圖；開發者區（安裝、目錄、開發規則）；英文摘要。依 `docs/specs/writing_style.md` 寫，不用破折號串句。

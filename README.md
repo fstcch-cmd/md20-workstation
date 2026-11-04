@@ -5,7 +5,7 @@
 > © HCC Lab, National Kaohsiung University of Science and Technology. All rights reserved.
 > 本 repo 暫時公開，只供持續整合（CI）測試使用。沒有附授權，請勿重製、散布或用於其他用途。
 
-**最新版本 [v0.1.0a15](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a15)**（2026-11-04，教學預覽版，Windows 與 macOS）
+**最新版本 [v0.1.0a16](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a16)**（2026-11-04，教學預覽版，Windows 與 macOS）
 
 MD20 讓學生在自己的筆電上，從分子對接一路做到分子動力學與結合自由能，最後得到一份可以直接讀的報告。
 安裝環境、修 PDB、建拓撲、平衡驗收、畫圖、寫方法段落都由程式完成。程式每做一個自動決定，都會記下理由；遇到需要人判斷的地方就停下來，列出可以選的做法。
