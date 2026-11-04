@@ -1051,4 +1051,8 @@ def main(projects_dir: str | None = None, port: int = 8020, show: bool = True, h
     Path(STATE["projects_dir"]).mkdir(parents=True, exist_ok=True)
     if host not in ("127.0.0.1", "localhost", "::1"):
         print(f"注意：GUI 對外開放於 {host}:{port}。同一個網路上的任何人都能操作這台工作站，也能下載專案檔。", flush=True)
-    ui.run(title="MD20", host=host, port=port, show=show, reload=False, language=QUASAR_LANG[lang()])
+    # D-93: loading a large system (OpenMM XML) can hold the GIL for tens of seconds; the browser waits instead of
+    # showing "connection lost" and reloading the page
+    import inspect
+    extra = {"reconnect_timeout": 180.0} if "reconnect_timeout" in inspect.signature(ui.run).parameters else {}
+    ui.run(title="MD20", host=host, port=port, show=show, reload=False, language=QUASAR_LANG[lang()], **extra)

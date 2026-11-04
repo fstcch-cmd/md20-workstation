@@ -51,8 +51,17 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
     if name in ("binding path", "binding target") and ev.get("target") and option.startswith("略過 "):
         # D-92: leave this target out and go on with the others; finished targets are reused from their files
         return _act(option, [{"path": ["binding", "skip_targets", ev["target"]], "value": True}], "binding")
+    if name in ("binding path", "binding target") and ev.get("target") and "（binding.alone）" in option:
+        # D-93: build the ligand alone (new single-ligand MD) and pull it from there; the shared-pocket MD is kept
+        lig = ev.get("ligand") or ev["target"].split(":", 1)[-1]
+        return _act(option, [{"path": ["binding", "alone", lig], "value": True}], "binding")
+    if name in ("binding path", "binding target") and ev.get("target") and "（binding.anchor_residues）" in option:
+        return _act(option, [{"path": ["binding", "anchor_residues", ev["target"]], "value": "{text}"}], "binding",
+                    needs_text=True, text_hint="anchor 殘基編號，至少 3 個，位在配體要離開方向的反側（例如 120, 145, A:163）")
     if option.startswith("binding.enabled: false"):
-        return _act(option, [{"path": ["binding", "enabled"], "value": False}], "binding")
+        # D-93: "只做 MD" must also drop the targets added later (binding.added / alone), or the same gate comes back
+        return _act(option, [{"path": ["binding", "enabled"], "value": False}, {"path": ["binding", "added"], "value": []},
+                             {"path": ["binding", "alone"], "value": {}}], "binding")
     # pocket metal before docking: "metal_policy: {ZN: bonded}…"
     m = _METAL_OPT.search(option)
     if m:
@@ -295,7 +304,8 @@ def binding_candidates(wf) -> list[dict]:
     runs = (st.get("md_runs") or {}).get("runs") or {}
     res = (st.get("binding") or {}).get("results") or {}
     b = wf.cfg.get("binding") or {}
-    added = set(b.get("added") or [])
+    alone = b.get("alone") or {}
+    added = set(b.get("added") or []) | {k for k, v in (alone.items() if isinstance(alone, dict) else ()) if v}
     wanted = set(b.get("ligands") or [])
     out = []
     for key, c in cases.items():

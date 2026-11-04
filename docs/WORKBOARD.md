@@ -9,6 +9,7 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **D-93 拉離路徑誤判修正、「只做 MD」真的停下、加「只算單獨結合」「指定 anchor 殘基」，發行 v0.1.0a18**（使用者 11/04）：完成，待筆電確認 URI 實際 SMD 與連線丟失 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-04 12:30 | 見 docs/specs/multi_ligand.md 第十二節 |
 | **D-89 折線圖重新規劃（時間軸、圖例在外、命名、顏色、小圖），發行 v0.1.0a15**（使用者 11/04 09:50）：完成 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-04 09:55 | 見 docs/specs/figures.md |
 | **D-88 專案資料夾指定、開啟任何專案；GUI 瀏覽器自我驗證**（使用者 11/04 09:08）：完成，併入 v0.1.0a14 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-04 09:10 | 見 DECISIONS D-88 |
 | **D-87 指定配體做 SMD、報告後加做與整合、首頁找回流程，發行 v0.1.0a14**（使用者 11/04 08:42）：完成，待 CI GUI 測試與筆電 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-04 08:45 | 見 DECISIONS D-87 |

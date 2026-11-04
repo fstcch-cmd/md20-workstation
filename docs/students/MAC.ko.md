@@ -5,11 +5,11 @@
 macOS 12 이상(Apple Silicon M1–M4 또는 Intel), 8 GB 이상의 여유 디스크 공간, 인터넷 연결이 필요합니다. Mac에는 CUDA가 없으므로 OpenCL 또는 CPU로 계산합니다. NVIDIA 노트북보다 느립니다. **수업 사례에는 classroom 등급을 사용하십시오.**
 
 ## 1. 설치(처음 한 번만, 약 15–30분)
-1. `MD20-macOS-v0.1.0a17.zip`을 내려받고 "다운로드" 폴더에서 더블클릭해 압축을 풉니다. `MD20-v0.1.0a17` 폴더가 생깁니다.
+1. `MD20-macOS-v0.1.0a18.zip`을 내려받고 "다운로드" 폴더에서 더블클릭해 압축을 풉니다. `MD20-v0.1.0a18` 폴더가 생깁니다.
 2. "터미널"을 열고(Launchpad에서 Terminal 검색), 아래 줄을 붙여 넣은 뒤 Enter를 누릅니다.
 
 ```
-bash ~/Downloads/MD20-v0.1.0a17/Install-MD20.command
+bash ~/Downloads/MD20-v0.1.0a18/Install-MD20.command
 ```
    - 마지막에 "完成 Done."이 나타나면 설치가 끝난 것입니다. 오류가 나오면 터미널의 글자를 복사해 선생님께 보내 주십시오.
    - 프로그램은 홈 폴더의 `MD20` 폴더에 설치됩니다. 내려받은 폴더는 나중에 지워도 됩니다.

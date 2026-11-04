@@ -233,7 +233,9 @@ def test_membrane_gate_actions():
     assert _patches(g, "md_cases")[0] == {}
     g = {"name": "membrane binding", "status": "NEEDS_HUMAN", "options": ["binding.enabled: false（只做 MD）"]}
     acts, _ = _patches(g, "binding")
-    assert list(acts.values())[0][0] == [{"path": ["binding", "enabled"], "value": False}]
+    assert list(acts.values())[0][0] == [{"path": ["binding", "enabled"], "value": False},
+                                         {"path": ["binding", "added"], "value": []},
+                                         {"path": ["binding", "alone"], "value": {}}]
     g = {"name": "membrane surface placement", "status": "NEEDS_HUMAN",
          "options": ["md.membrane.surface_distance_nm: 1.0", "md.membrane.surface_orientation: parallel"]}
     acts, _ = _patches(g, "md_cases")

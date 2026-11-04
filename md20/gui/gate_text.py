@@ -892,13 +892,18 @@ GATES.update({
 # D-92 binding target gates (Workflow.binding)
 GATES.update({
     "binding path": (("結合自由能：拉離路徑", "Binding free energy: exit path", "結合自由エネルギー：引き離しの経路", "결합 자유 에너지: 당김 경로"),
-                     ("這個配體往外拉的每個方向都會碰到口袋裡的其他配體，找不到乾淨的出口。可以先略過它，算其他配體。",
-                      "Every way out for this ligand runs into another ligand in the pocket, so no clean exit was found. "
-                      "You can leave it out and compute the other ligands.",
-                      "このリガンドを引き出すどの方向にも、ポケット内の別のリガンドがあり、きれいな出口が見つかりません。"
-                      "このリガンドを飛ばして、ほかのリガンドを計算できます。",
-                      "이 리간드를 빼내는 모든 방향에 포켓 안의 다른 리간드가 있어 깨끗한 출구를 찾지 못했습니다. "
-                      "이 리간드를 건너뛰고 다른 리간드를 계산할 수 있습니다.")),
+                     ("這個配體往外拉的路上有口袋裡的其他配體，自動換方向也沒有找到乾淨的出口。可以：只算它單獨與蛋白結合"
+                      "（另跑一段只有它的 MD）、自己指定 anchor 殘基改變拉離方向、先略過它算其他配體，或只做 MD。",
+                      "The way out for this ligand runs into another ligand in the pocket, and turning the exit "
+                      "automatically found no clean path. You can compute it bound alone (an extra MD run with only this "
+                      "ligand), choose the anchor residues yourself to change the pulling direction, leave it out and "
+                      "compute the others, or do molecular dynamics only.",
+                      "このリガンドを引き出す経路にポケット内の別のリガンドがあり、方向を自動で変えてもきれいな出口が"
+                      "見つかりません。単独で結合した状態だけ計算する（このリガンドだけの MD を追加で実行）、anchor 残基を"
+                      "自分で指定して引き離す方向を変える、飛ばしてほかを計算する、MD だけにする、のどれかを選べます。",
+                      "이 리간드를 빼내는 경로에 포켓 안의 다른 리간드가 있고, 방향을 자동으로 바꿔도 깨끗한 출구를 찾지 "
+                      "못했습니다. 단독 결합만 계산(이 리간드만 있는 MD를 추가 실행), anchor 잔기를 직접 지정해 당김 방향 "
+                      "변경, 건너뛰고 다른 리간드 계산, MD만 수행 중에서 고를 수 있습니다.")),
     "binding target": (("結合自由能：無法計算", "Binding free energy: cannot be computed", "結合自由エネルギー：計算できない", "결합 자유 에너지: 계산할 수 없음"),
                        ("這個配體的結合自由能無法計算，原因寫在訊息裡。可以先略過它，算其他配體。",
                         "The binding free energy of this ligand cannot be computed; the message says why. You can leave it "
@@ -909,3 +914,8 @@ GATES.update({
 PREFIX.append(("略過 ", ("Leave this ligand out and compute the others", "このリガンドを飛ばしてほかを計算する",
                        "이 리간드를 건너뛰고 다른 리간드 계산")))
 
+PREFIX.append(("只算 ", ("Compute it bound alone (extra MD with only this ligand)",
+                       "単独で結合した状態だけ計算する（このリガンドだけの MD を追加）",
+                       "단독 결합만 계산(이 리간드만 있는 MD 추가)")))
+PREFIX.append(("指定 anchor 殘基", ("Choose anchor residues to change the pulling direction",
+                                "anchor 残基を指定して引き離す方向を変える", "anchor 잔기를 지정해 당김 방향 변경")))

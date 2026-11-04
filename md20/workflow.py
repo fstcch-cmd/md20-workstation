@@ -136,6 +136,7 @@ DECISION_KEYS: tuple[tuple[str, ...], ...] = (
     ("md", "resolution"), ("md", "membrane", "surface_distance_nm"),   # coarse-grained gates (D-86)
     ("binding", "added"), ("binding", "target_replicas"),               # targets and extra SMD runs chosen later (D-87)
     ("binding", "skip_targets"),                                         # targets left out at the path gate (D-92)
+    ("binding", "alone"), ("binding", "anchor_residues"),                # path gate choices (D-93)
 )
 LIGAND_DECISION_KEYS = ("cpp_override", "cpp_evidence", "target_location", "fold_accept_low", "fold_upload", "fold_engine",
                         "fold_accept_rmsd", "fold_receptor_seq")
@@ -1026,6 +1027,10 @@ class Workflow:
         a["case_id"] = (reg.get(rkey) or {}).get("case_id")
         return a
 
+    def _alone(self) -> set[str]:
+        a = (self.cfg.get("binding") or {}).get("alone") or {}
+        return {k for k, v in a.items() if v} if isinstance(a, dict) else set(a)
+
     def _cases_to_build(self, sel: dict) -> list[dict]:
         systems = self.cfg.get("md", {}).get("systems", ["apo", "docked_single"])
         out = []
@@ -1037,6 +1042,11 @@ class Workflow:
         if "docked_single" in systems:
             for name in sel["ligands"]:
                 out.append({"key": f"docked_{name}", "mode": "docked_single", "ligands": [name]})
+        elif self._alone():
+            # D-93: "只算單獨結合" from the binding path gate — a ligand blocked in the shared pocket is also built alone
+            for name in sel["ligands"]:
+                if name in self._alone():
+                    out.append({"key": f"docked_{name}", "mode": "docked_single", "ligands": [name]})
         if "docked_multi" in systems:
             names = list(sel["ligands"])
             if len(names) < 2:
@@ -1542,11 +1552,14 @@ class Workflow:
         they run even when binding.enabled is false, and only they are added."""
         b = self.cfg.get("binding", {})
         enabled = bool(b.get("enabled"))
-        added = set(b.get("added") or [])
+        alone = self._alone()
+        added = set(b.get("added") or []) | alone           # D-93: pull the ligand from its own single-ligand system …
         wanted = (set(b["ligands"]) if b.get("ligands") else None) if enabled else set()
         targets, ctx = [], {"single": []}
 
-        skip = set((b.get("skip_targets") or {}).keys()) if isinstance(b.get("skip_targets"), dict) else set(b.get("skip_targets") or [])
+        sk = b.get("skip_targets") or {}
+        skip = {k for k, v in sk.items() if v} if isinstance(sk, dict) else set(sk)
+        skip |= {f"multi:{n}" for n in alone}               # … instead of from the shared pocket
 
         def take(key: str, lig: str) -> bool:
             if key in skip:                          # D-92: the student chose to leave this one out
@@ -1569,12 +1582,31 @@ class Workflow:
                     ctx[f"multi:{key}"].append(f"multi:{n}")
         return targets, ctx
 
+    def _anchor_override(self, name: str, bm: dict) -> list[int] | None:
+        """D-93: anchor residues the student typed at the path gate (binding.anchor_residues[target])."""
+        spec = ((self.cfg.get("binding") or {}).get("anchor_residues") or {}).get(name)
+        if not spec:
+            return None
+        from .sampling.binding import anchor_atoms_from_residues
+        idx, missing = anchor_atoms_from_residues(bm["topology_pdb"], spec)
+        if missing or len(idx) < 3:
+            msg = (f"{name}：指定的 anchor 殘基 {spec} " + (f"找不到 Cα：{', '.join(missing)}" if missing else "少於 3 個") +
+                   "。請輸入結構中的殘基編號（例如 120, 145, A:163），至少 3 個，位在配體要離開方向的反側。")
+            self._block("binding", msg, gates=[{"name": "binding path", "status": "NEEDS_HUMAN", "explanation": msg,
+                                                "evidence": {"target": name},
+                                                "options": [f"指定 anchor 殘基，改變拉離方向（binding.anchor_residues）",
+                                                            f"略過 {name}，先算其他配體（binding.skip_targets）",
+                                                            "binding.enabled: false（只做 MD）"]}])
+        self.dec.record("binding.anchor", name, spec, f"使用者指定 anchor 殘基 {spec}（{len(idx)} 個 Cα）；拉離方向 = anchor 質心 → 配體質心。",
+                        kind="human")
+        return idx
+
     def binding(self, runs: dict, built: dict, platform, *, should_pause=None, progress_cb=None) -> dict:
         from .sampling.binding import run_binding, BindingConfig
         from types import SimpleNamespace
         from .sampling.multi import compare_binding, aggregate_binding_replicas
         b = self.cfg.get("binding", {})
-        if not b.get("enabled") and not b.get("added"):
+        if not b.get("enabled") and not b.get("added") and not self._alone():
             return {}
         if self._solvent() == "gbn2":
             msg = ("隱式溶劑（GBn2）不做 SMD／傘狀採樣：拉離過程的去溶劑化能障在連續介質模型下會失真，PMF 與 ΔG° 不可信。")
@@ -1629,17 +1661,28 @@ class Workflow:
                 rcfg = BindingConfig(**{**cfg.to_dict(), "seed": cfg.seed + 1000 * i,
                                         "extra_windows": list((b.get("manual_windows") or {}).get(name, []))})
                 odir = binding_replica_dir(self.dir / "binding" / name.replace(":", "_"), i, n_rep)
+                if i == 0:
+                    anchor_idx = self._anchor_override(name, bm)
                 res = run_binding(bm["system_xml"], bm["topology_pdb"], rdir / "stages" / "production" / "production_state.xml",
                                   odir,
                                   ligand_indices=lrec["heavy_atom_indices"], ligand_resname=mname, config=rcfg, platform_name=platform.name,
                                   platform_properties=platform.properties, decisions=self.dec, should_pause=should_pause,
-                                  progress_cb=progress_cb, other_ligand_indices=others or None)
+                                  progress_cb=progress_cb, other_ligand_indices=others or None, anchor_indices=anchor_idx)
                 if res.status == "NEEDS_HUMAN":
                     results[name] = {"status": "NEEDS_HUMAN", "ligand": t["ligand"], "caveats": res.caveats}
                     msg = f"{name} 結合自由能（replica {i + 1}）：{res.caveats[0] if res.caveats else ''}"
-                    gate = {"name": "binding path" if "拉離路徑" in msg else "binding target", "status": "NEEDS_HUMAN",
-                            "explanation": msg, "evidence": {"target": name},
-                            "options": [f"略過 {name}，先算其他配體（binding.skip_targets）", "binding.enabled: false（只做 MD）"]}
+                    path = "拉離路徑" in msg
+                    opts = [f"略過 {name}，先算其他配體（binding.skip_targets）"]
+                    if path and name.startswith("multi:"):
+                        opts.append(f"只算 {t['ligand']} 單獨結合（binding.alone）")
+                    if path:
+                        opts.append(f"指定 anchor 殘基，改變拉離方向（binding.anchor_residues）")
+                    opts.append("binding.enabled: false（只做 MD）")
+                    if path and name.startswith("multi:"):
+                        msg += ("（沒有「先拉外側配體」：每個目標都從同一段 MD 的終點各自拉離，其他配體一直留在口袋裡；先拉外側"
+                                "配體不會讓它從這個配體的路上消失。要讓路徑空出來，請選「只算單獨結合」。）")
+                    gate = {"name": "binding path" if path else "binding target", "status": "NEEDS_HUMAN",
+                            "explanation": msg, "evidence": {"target": name, "ligand": t["ligand"]}, "options": opts}
                     self._block("binding", msg, results=results, gates=[gate])
                 if res.status == "PAUSED":
                     paused = True

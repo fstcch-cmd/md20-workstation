@@ -40,11 +40,10 @@ def pull_path_blockers(anchor_com: np.ndarray, ligand_xyz: np.ndarray, others: d
     radius = float(np.max(np.linalg.norm(ligand_xyz - lig_com, axis=1))) + clearance_nm if len(ligand_xyz) > 1 else clearance_nm
     out = []
     for name, xyz in others.items():
-        v = np.asarray(xyz, dtype=float) - lig_com
-        t = v @ u
-        perp = np.linalg.norm(v - np.outer(t, u), axis=1)
-        inside = (t > 0) & (t < pull_distance_nm) & (perp < radius)
+        inside = _in_cylinder(np.asarray(xyz, dtype=float), lig_com, u, pull_distance_nm, radius)
         if inside.any():
+            v = np.asarray(xyz, dtype=float) - lig_com
+            t = v @ u
             out.append({"ligand": name, "n_atoms_in_path": int(inside.sum()),
                         "nearest_along_path_nm": round(float(t[inside].min()), 3), "path_radius_nm": round(radius, 3)})
     return out
@@ -59,11 +58,19 @@ def sphere_directions(n: int = 600) -> np.ndarray:
     return np.stack([r * np.cos(phi), r * np.sin(phi), z], axis=1)
 
 
+APPROACH_NM = 0.15        # D-92 更正: an atom blocks only if moving out brings the ligand this much closer to it
+
+
 def _in_cylinder(points: np.ndarray, origin: np.ndarray, u: np.ndarray, length: float, radius: float) -> np.ndarray:
+    """Atoms the pulled ligand would run into: inside the exit cylinder AND closer to the axis than they are to the
+    ligand centre now by more than APPROACH_NM.  A neighbour already in contact beside the ligand (t ≈ 0) gets no
+    closer as the ligand leaves, so it does not block (laptop 11/04: ALC and MAL touching URI at 0.014 and 0.04 nm
+    along the path blocked every direction)."""
     v = np.asarray(points, float) - origin
     t = v @ u
     perp = np.linalg.norm(v - np.outer(t, u), axis=1)
-    return (t > 0) & (t < length) & (perp < radius)
+    now = np.sqrt(t * t + perp * perp)
+    return (t > 0) & (t < length) & (perp < radius) & (now - perp > APPROACH_NM)
 
 
 def find_exit_direction(ligand_xyz: np.ndarray, others: dict[str, np.ndarray], protein_xyz: np.ndarray, *,

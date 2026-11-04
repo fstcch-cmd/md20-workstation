@@ -211,3 +211,67 @@ def test_skipped_target_is_left_out(tmp_path):
     built = {"docked_multi": {"mode": "docked_multi", "ligands": ["URI", "ALC", "MAL"]}}
     targets, _ = wf._binding_targets({"docked_multi": {}}, built)
     assert [t["key"] for t in targets] == ["multi:ALC", "multi:MAL"]
+
+
+# ------------------------------------------------------------------------------------------------ D-93
+def test_contact_neighbour_beside_the_ligand_does_not_block():
+    """Laptop 11/04 (hsieh2024_rela_1vkx): ALC/MAL touching URI at t ≈ 0.01–0.04 nm blocked every direction."""
+    from md20.sampling.multi import pull_path_blockers
+    lig = np.array([[0.0, 0, 0], [0.2, 0, 0], [-0.2, 0, 0], [0, 0.2, 0], [0, -0.2, 0]])
+    beside = {"ALC": np.array([[0.02, 0.5, 0.0], [0.04, 0.55, 0.1]])}       # in contact, level with the ligand
+    assert pull_path_blockers(np.array([0, 0, -1.0]), lig, beside, pull_distance_nm=1.5) == []
+    ahead = {"MAL": np.array([[0.0, 0.1, 0.8]])}                            # on the way out
+    assert pull_path_blockers(np.array([0, 0, -1.0]), lig, ahead, pull_distance_nm=1.5)[0]["ligand"] == "MAL"
+
+
+def test_alone_builds_a_single_case_and_pulls_from_it(tmp_path):
+    from md20.project import Project
+    from md20.workflow import Workflow
+    cfg = {"name": "w", "receptor": {}, "ligands": [], "md": {"systems": ["apo", "docked_multi"]},
+           "binding": {"enabled": False, "multi": True, "added": ["multi:URI"], "alone": {"URI": True}}}
+    wf = Workflow(Project.create(tmp_path, "p"), cfg)
+    assert wf._alone() == {"URI"}
+    built = {"docked_multi": {"mode": "docked_multi", "ligands": ["URI", "ALC"]},
+             "docked_URI": {"mode": "docked_single", "ligands": ["URI"]}}
+    targets, ctx = wf._binding_targets({"docked_multi": {}, "docked_URI": {}}, built)
+    assert [t["key"] for t in targets] == ["URI"] and ctx["single"] == ["URI"]
+
+
+def test_path_gate_options_are_all_actionable():
+    from md20.gui.actions import gate_actions
+    g = {"name": "binding path", "status": "NEEDS_HUMAN", "evidence": {"target": "multi:URI", "ligand": "URI"},
+         "options": ["略過 multi:URI，先算其他配體（binding.skip_targets）", "只算 URI 單獨結合（binding.alone）",
+                     "指定 anchor 殘基，改變拉離方向（binding.anchor_residues）", "binding.enabled: false（只做 MD）"]}
+    acts, manual = gate_actions(g, step="binding")
+    assert not manual and len(acts) == 4
+    by = {a["label"]: a for a in acts}
+    assert by["只算 URI 單獨結合（binding.alone）"]["patch"] == [{"path": ["binding", "alone", "URI"], "value": True}]
+    assert by["只算 URI 單獨結合（binding.alone）"]["from_step"] == "binding"     # shared-pocket MD is not redone
+    assert by["指定 anchor 殘基，改變拉離方向（binding.anchor_residues）"]["needs_text"]
+    off = by["binding.enabled: false（只做 MD）"]["patch"]
+    assert {"path": ["binding", "added"], "value": []} in off
+
+
+def test_only_md_stops_added_targets(tmp_path):
+    from md20.project import Project
+    from md20.workflow import Workflow
+    from md20.gui.actions import apply_patch
+    cfg = {"name": "w", "receptor": {}, "ligands": [], "md": {},
+           "binding": {"enabled": True, "multi": True, "added": ["multi:URI"]}}
+    new = apply_patch(cfg, [{"path": ["binding", "enabled"], "value": False}, {"path": ["binding", "added"], "value": []},
+                            {"path": ["binding", "alone"], "value": {}}])
+    wf = Workflow(Project.create(tmp_path, "p"), new)
+    assert wf.binding({}, {}, None) == {}
+
+
+def test_anchor_residues_to_ca(tmp_path):
+    from md20.sampling.binding import anchor_atoms_from_residues
+    lines = []
+    i = 0
+    for ch, rs in (("A", 120), ("A", 121), ("B", 120)):
+        for nm, el in (("N", "N"), ("CA", "C"), ("C", "C")):
+            i += 1
+            lines.append(f"ATOM  {i:5d}  {nm:<3s} ALA {ch}{rs:4d}    {0:8.3f}{0:8.3f}{0:8.3f}  1.00  0.00          {el:>2s}")
+    p = tmp_path / "t.pdb"; p.write_text("\n".join(lines) + "\nEND\n")
+    idx, missing = anchor_atoms_from_residues(p, "120, 121，B:120, 999")
+    assert idx == [1, 4, 7] and missing == ["999"]

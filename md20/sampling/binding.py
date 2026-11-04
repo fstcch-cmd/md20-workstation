@@ -405,6 +405,38 @@ def finished_result(out_dir: Path | str, cfg: "BindingConfig") -> "BindingResult
     return None
 
 
+def anchor_atoms_from_residues(topology_pdb, spec: str) -> tuple[list[int], list[str]]:
+    """D-93: the student names anchor residues by their number in the structure ("120, 145, A:163"); the anchor is
+    their Cα atoms.  Atom index = order of the ATOM/HETATM records (how OpenMM numbers a PDB it wrote).  Returns
+    (indices, residues not found)."""
+    import re as _re
+    want = []
+    for tok in _re.split(r"[\s,，;；]+", str(spec or "").strip()):
+        if not tok:
+            continue
+        m = _re.fullmatch(r"(?:([A-Za-z0-9]):)?(-?\d+)", tok)
+        if not m:
+            want.append((None, None, tok))
+            continue
+        want.append((m.group(1), int(m.group(2)), tok))
+    found: dict[str, int] = {}
+    i = 0
+    for line in Path(topology_pdb).read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.startswith(("ATOM", "HETATM")):
+            continue
+        if line[12:16].strip() == "CA" and line[76:78].strip() in ("C", ""):
+            try:
+                rs = int(line[22:26])
+            except ValueError:
+                rs = None
+            ch = line[21].strip()
+            for c, r, tok in want:
+                if r is not None and rs == r and (c is None or c == ch) and tok not in found:
+                    found[tok] = i
+        i += 1
+    return [found[t] for _, _, t in want if t in found], [t for _, _, t in want if t not in found]
+
+
 def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xml: Path | str | None, out_dir: Path | str, *,
                 ligand_resname: str | None = None, ligand_indices: list[int] | None = None,
                 anchor_indices: list[int] | None = None, config: BindingConfig | None = None,

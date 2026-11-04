@@ -5,11 +5,11 @@
 你需要 macOS 12 以上（Apple Silicon M1–M4 或 Intel 都可以）、至少 8 GB 的可用磁碟空間，以及網路。Mac 沒有 CUDA，程式會用 OpenCL 或 CPU 計算，速度比 NVIDIA 筆電慢。**課堂案例請用 classroom 等級。**
 
 ## 1. 安裝（只做一次，約 15–30 分鐘）
-1. 下載 `MD20-macOS-v0.1.0a17.zip`，在「下載項目」裡雙擊解壓縮，會得到資料夾 `MD20-v0.1.0a17`。
+1. 下載 `MD20-macOS-v0.1.0a18.zip`，在「下載項目」裡雙擊解壓縮，會得到資料夾 `MD20-v0.1.0a18`。
 2. 打開「終端機」（在 Launchpad 搜尋 Terminal），貼上下面這行，按 Enter。
 
 ```
-bash ~/Downloads/MD20-v0.1.0a17/Install-MD20.command
+bash ~/Downloads/MD20-v0.1.0a18/Install-MD20.command
 ```
    - 最後出現「完成 Done.」才算裝好。如果出現錯誤，把終端機裡的文字複製給老師。
    - 程式會裝在家目錄的 `MD20` 資料夾。下載的那個資料夾之後可以刪掉。

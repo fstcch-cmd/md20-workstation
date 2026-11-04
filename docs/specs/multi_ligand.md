@@ -123,3 +123,15 @@ D-61：`tests/test_softcore.py`（OpenMM：軟核解開穿環、保持限制在�
 - 被否決：直接沿原方向拉並加註（數值不是本配體的結合自由能）；要使用者手動輸入 anchor 原子編號（教學情境做不到）。
 - 測試：`tests/test_multi_binding.py`（出口避開其他配體且不朝蛋白牆、新 anchor 通過路徑檢查；四周都被包住時回傳 None；略過的目標不計算）。未驗證：筆電上 hsieh2024 的 URI 實際改道後的 SMD 與 PMF。
 
+## 十二、路徑判定修正與可執行的閘門選項（D-93，2026-11-04）
+- 擋路判定（`multi._in_cylinder`）：原子在拉離圓柱內（0 < t < 拉離距離、離軸 < 配體半徑 + 0.35 nm），**且** `√(t²+perp²) − perp > 0.15 nm`（拉出去會更靠近它）。`pull_path_blockers` 與 `find_exit_direction` 共用同一規則。理由：貼在配體旁邊的鄰居（t ≈ 0）不會因配體離開而更近，舊規則讓它在每個方向都算擋住（筆電 hsieh2024 URI：ALC t=0.014、MAL t=0.04 nm）。以該案 `topology.pdb` 驗證：舊規則 3 個擋路者、改道失敗；新規則原方向淨空，最佳出口 1.8°、0 個蛋白重原子。
+- 閘門 `binding path` 的選項（每個都能在介面按，`gui/actions._option_action`）：
+  | 選項 | 寫入 | 從哪一步重跑 |
+  |---|---|---|
+  | 略過 X，先算其他配體 | `binding.skip_targets[target] = true` | binding |
+  | 只算 X 單獨結合（多配體目標才有） | `binding.alone[X] = true`；`_cases_to_build` 另建 `docked_X`，`_binding_targets` 加入 `X`、略過 `multi:X` | binding（MD 依鍵沿用，只跑新的單配體 MD） |
+  | 指定 anchor 殘基，改變拉離方向 | `binding.anchor_residues[target] = "120, 145, A:163"`（需填文字；`binding.anchor_atoms_from_residues` 轉成 Cα 索引，至少 3 個） | binding |
+  | 只做 MD | `binding.enabled = false`、`binding.added = []`、`binding.alone = {}` | binding |
+- 不提供「先拉外側配體」：每個目標都從同一段 MD 終點各自拉離，其他配體始終留在口袋；依序拉離是另一個熱力學循環，目前沒有。卡片說明文字寫明這點。
+- 使用者指定 anchor 時不做自動改道（D-92 第 1 點）；指定的方向仍被擋住會回到同一張卡片。
+
