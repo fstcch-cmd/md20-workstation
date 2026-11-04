@@ -1,90 +1,151 @@
-# MD20 單機教學版工作站（開發中）
+# MD20 分子模擬教學工作站
 
 [![CI](https://github.com/fstcch-cmd/md20-workstation/actions/workflows/ci.yml/badge.svg)](https://github.com/fstcch-cmd/md20-workstation/actions/workflows/ci.yml)
 
 > © HCC Lab, National Kaohsiung University of Science and Technology. All rights reserved.
 > 本 repo 暫時公開，只供持續整合（CI）測試使用。沒有附授權，請勿重製、散布或用於其他用途。
 
-> **最新版本：[v0.1.0a15](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a15)**，2026-11-03 發行，含 Windows 與 macOS 安裝檔，是教學預覽版。
-> 學生操作說明在 [`docs/students/WINDOWS.md`](docs/students/WINDOWS.md) 和 [`docs/students/MAC.md`](docs/students/MAC.md)，有繁中、English、日本語、한국어 四種版本。
-> 測試機的安裝與回報看 [`docs/WINDOWS_QUICKSTART.md`](docs/WINDOWS_QUICKSTART.md)。接手開發看 [`docs/HANDOFF.md`](docs/HANDOFF.md)，現況看 [`docs/STATUS.md`](docs/STATUS.md)。
+**最新版本 [v0.1.0a15](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a15)**（2026-11-04，教學預覽版，Windows 與 macOS）
 
-MD20 讓學生在自己的筆電上做完分子對接、系統建模、分子動力學與增強取樣。以 Windows 為優先，NVIDIA、AMD、內建顯示晶片或只有 CPU 都能跑。
-環境安裝、拓撲、PDB 修復、驗收與圖表都自動完成，每個自動決定都會記下理由。
+MD20 讓學生在自己的筆電上，從分子對接一路做到分子動力學與結合自由能，最後得到一份可以直接讀的報告。
+安裝環境、修 PDB、建拓撲、平衡驗收、畫圖、寫方法段落都由程式完成。程式每做一個自動決定，都會記下理由；遇到需要人判斷的地方就停下來，列出可以選的做法。
+以 Windows 為優先，NVIDIA、AMD、內建顯示晶片或只有 CPU 都能跑。介面與報告有繁體中文、English、日本語、한국어 四種語言。
 
-## 快速開始
+## 安裝（學生用，不需要 git）
 
-**一般使用者（不需要 git）**：到 [Releases](https://github.com/fstcch-cmd/md20-workstation/releases) 下載最新版。
-- Windows：下載 `MD20-Windows-<版本>.zip`，解壓縮後雙擊 `Install-MD20.cmd`。程式會裝到 `%LOCALAPPDATA%\MD20`，桌面會多一個 `MD20-GUI.cmd`。命令列是 `%LOCALAPPDATA%\MD20\md20.cmd`。
-- macOS：下載 `MD20-macOS-<版本>.zip`，雙擊解壓縮，在終端機執行 `bash ~/Downloads/MD20-<版本>/Install-MD20.command`。程式會裝到 `~/MD20`，桌面會多一個 `MD20-GUI.command`。命令列是 `~/MD20/md20`。
+到 [Releases](https://github.com/fstcch-cmd/md20-workstation/releases) 下載最新版。需要約 8 GB 的磁碟空間與網路。
 
-**開發者（git clone）**：
+| | Windows | macOS |
+|---|---|---|
+| 下載 | `MD20-Windows-<版本>.zip`，右鍵「解壓縮全部」 | `MD20-macOS-<版本>.zip`，雙擊解壓縮 |
+| 安裝 | 雙擊 `Install-MD20.cmd` | 終端機執行 `bash ~/Downloads/MD20-<版本>/Install-MD20.command` |
+| 開啟介面 | 雙擊桌面的 `MD20-GUI.cmd` | 雙擊桌面的 `MD20-GUI.command` |
+| 命令列 | `%LOCALAPPDATA%\MD20\md20.cmd` | `~/MD20/md20` |
+
+安裝約 15 到 30 分鐘，最後會自動跑一次 `md20 doctor` 檢查顯示卡。介面在瀏覽器的 http://127.0.0.1:8020 打開。
+計算進行時不要關掉那個黑色主控台視窗（macOS 是終端機視窗），關掉會一起結束計算。重新打開後按「開始或繼續」，會從中斷的地方接著算。
+
+選用工具，只裝一次，各要數 GB：
+- 胜肽摺疊（OmegaFold）：雙擊解壓資料夾裡的 `Install-Folding.cmd`（macOS 是 `Install-Folding.command`），或在介面「電腦狀態」頁按「一鍵安裝」。
+- 粗粒化 Martini 3：在「電腦狀態」頁按「一鍵安裝」，或執行 `md20 setup-cg --yes`。會一起下載力場檔。
+
+逐步說明在 [`docs/students/`](docs/students/)，四種語言各有 Windows 與 Mac 版。
+
+## 可以做什麼
+
+| 功能 | 說明 |
+|---|---|
+| 分子對接 | AutoDock Vina。一次對接一個配體，或多個配體同時放進同一個口袋。有晶體配體時先做 redocking 確認可信度 |
+| 高通量前期篩選 | 從 Excel 或 CSV 化合物庫（100 到 500 個）自動下載 3D 結構，快速對接、畫排名圖，勾選要進入正式對接的化合物 |
+| 分子動力學 | OpenMM。自動修受體、配體參數化（OpenFF，失敗時改用 GAFF2）、十二面體水盒、平衡驗收，失敗會自動延長或回滾重試 |
+| 結合自由能 | SMD 拉離加傘狀採樣，WHAM 與 MBAR、bootstrap 誤差。可以只挑某個配體計算；做完報告後還能回來加做別的配體，或同一個配體多做幾次，報告會整合 |
+| 胜肽 | 在配體欄直接貼序列。10 個殘基以上先預測結構再對接；預測信心太低會停下來問 |
+| 膜系統 | 膜蛋白、胜肽或小分子在膜表面接觸（不穿膜）、純膜 |
+| 長時間與粗粒化 | 全原子最長 10 µs，分段存檔、可續跑。Martini 3 粗粒化可以跑到微秒以上，報告標註為珠子層級 |
+| 報告 | 單一 HTML 檔，每張圖都附「怎麼讀」與「這個專案看到什麼」，方法段落可以直接貼進論文 |
+
+功能的驗證程度不一樣。哪些在真實引擎上跑過、哪些只有測試、哪些還沒做，都寫在 [`docs/STATUS.md`](docs/STATUS.md)。
+膜、摺疊、粗粒化與長時間模擬是新功能，結果請當作初步。
+
+## 圖形介面
+
+首頁有四種模式：
+- **教學模式一**：論文中的六個代謝物同時對接 NF-κB p65（hsieh2024）。
+- **教學模式二**：甘胺酸豐富的胜肽對接 Keap1（hsieh2025）。
+- **快速模式**：輸入受體和配體，選研究目標，其餘參數依個案建議。
+- **專業模式**：每個參數都能改，改的同時檢查是否合理；膜、摺疊、長時間與粗粒化在這裡設定。
+
+其他常用的地方：
+- 首頁「專案資料夾」：指定專案要存在哪裡（例如空間較大的 D 槽），也可以直接打開別人給你的專案或流程資料夾。程式會記住這個選擇。
+- 首頁「最近的流程」：列出存過的所有流程，可以搜尋。未完成的點進去按「開始或繼續」。
+- 流程頁「結合自由能（SMD＋傘狀採樣）」：選配體計算、同一配體再做一次、重新整理報告。
+- 右上角：資源模式（省資源、平衡、全速）與語言。
+
+## 命令列
+
+```text
+md20 doctor                                  檢查硬體與套件，跑 20 秒 benchmark，估算 ns/day 與完成時間
+md20 gui                                     打開圖形介面（只有本機能連；教室要分享才加 --host 0.0.0.0）
+md20 pipeline example > my.json             產生全流程設定範本
+md20 pipeline run my.json --project classA   跑全流程：對接、MD、結合自由能、報告（專案名稱用英文字母和數字）
+md20 resume                                  重開機或當機後，續跑所有未完成的流程
+md20 validate hsieh2024                      HCC Lab 論文的教學案例設定（hsieh2025 是胜肽）
+md20 screen template                         高通量篩選的化合物庫 Excel 範本
+md20 fold <序列>                             預測胜肽結構
+md20 setup-fold --yes / md20 setup-cg --yes  安裝選用工具（不加 --yes 只列出會做的事）
+md20 demo                                    不需要 OpenMM，用模擬後端跑一遍，產生圖、決策紀錄與報告
+md20 --mode background pipeline run ...      省資源模式（background、balanced、full）
+```
+
+專案預設存在「文件」裡的 `MD20_Projects`。在介面指定過別的資料夾後，命令列也會用同一個；要臨時改用其他資料夾就加 `--dir <路徑>`。
+設定檔每個欄位的意思在 [`docs/WORKFLOW.md`](docs/WORKFLOW.md)。
+
+## 實測
+
+MSI Cyborg 14 筆電（RTX 4060 Laptop 8 GB、Windows 11）：24k 原子水盒約 600 ns/day。胰蛋白酶加苯甲脒（3PTB）的 classroom 等級全流程，包含 apo 與複合物各 2 ns MD、SMD 與傘狀採樣，共 76.5 分鐘。
+其他機器的紀錄在 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)。
+
+使用時請留意：
+- classroom 等級的結合自由能只用來示範流程，報告不輸出 ΔG°。要比較數值請用 teaching 以上的等級，並看報告裡的收斂檢查。
+- 多配體系統中拉一個配體時，其他配體留在口袋裡，量到的是共存時的結合強度，不能直接和單獨結合比較。
+- 預測的胜肽結構不是實驗結構，報告會這樣標註。
+
+## 文件
+
+| 文件 | 內容 |
+|---|---|
+| [`docs/students/`](docs/students/) | 學生安裝與操作步驟（四種語言） |
+| [`docs/TEACHING.md`](docs/TEACHING.md) | 上課怎麼用：教學案例、可以帶學生討論的問題 |
+| [`docs/STATUS.md`](docs/STATUS.md) | 每個版本的內容，以及驗證程度（跑過、只有測試、未完成） |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | 每項修改的理由、被否決的做法與證據 |
+| [`docs/specs/`](docs/specs/) | 各子系統的規格，給審查者看 |
+| [`docs/WORKFLOW.md`](docs/WORKFLOW.md) | 流程設定檔的欄位 |
+| [`docs/WINDOWS_QUICKSTART.md`](docs/WINDOWS_QUICKSTART.md) | 測試機的安裝與回報 |
+| [`docs/HANDOFF.md`](docs/HANDOFF.md) | 接手開發的人先讀這份 |
+
+## 開發
+
 ```powershell
 # Windows（PowerShell 5.1 即可）
-powershell -ExecutionPolicy Bypass -File installer\install.ps1      # 有 NVIDIA 顯示卡時用 cuda，否則用 opencl
+powershell -ExecutionPolicy Bypass -File installer\install.ps1      # 有 NVIDIA 顯示卡用 -Gpu cuda，否則 -Gpu opencl
 ```
 ```bash
 # macOS 或 Linux
 bash installer/install.sh
+pytest                                  # 沒有 OpenMM 時只跑純 Python 測試，整合測試自動跳過
 ```
 
-安裝器內含 micromamba。它會建立 `md20` 環境、安裝套件、下載 Vina，最後執行一次 `md20 doctor`。舊版不刪除，會移到 `_to_delete`。
-圖形介面在 http://127.0.0.1:8020 。首頁有四種模式：教學模式一（多種小分子）、教學模式二（胜肽）、快速模式和專業模式。
-右上角有兩個選單。資源選單有「省資源：可同時寫報告」、「平衡（預設）」、「全速：電腦閒置時」三個選項，從下一個計算步驟起生效。語言選單有 English、繁體中文、日本語、한국어。
-計算進行時，請不要關閉啟動 GUI 的黑色主控台視窗（macOS 是終端機視窗）。關掉它會一起結束計算。重新開啟後按「開始／繼續」，會從中斷的地方接著算。
-
-```text
-md20 gui                         # 圖形介面（瀏覽器）：四種模式、即時曲線、改選 pose、看報告
-                                 #   預設只有本機能連（127.0.0.1）。教室要分享請加 --host 0.0.0.0，同一網路的人都能操作
-md20 pipeline example > my.json  # 全流程範本：docking → MD（apo 與 docked）→ SMD 與傘狀採樣 → 報告
-md20 pipeline run my.json --project classA   # 專案名稱請用英文字母和數字，中文名稱會被改成英數代碼的資料夾
-md20 doctor                      # 診斷硬體、平台和套件，跑 20 秒 benchmark，估 ns/day 與完成時間
-md20 --mode background pipeline run my.json --project classA   # 資源模式：background（省資源）、balanced（預設）或 full（全速）
-md20 validate hsieh2024          # HCC Lab 論文的教學案例設定（hsieh2024 多配體，hsieh2025 胜肽）
-md20 resume                      # 重開機或當機後，續跑所有未完成的流程
-md20 project new classA
-md20 build --project classA --case kinase --receptor 1ABC.pdb --ligand lig_ref.sdf --pose vina_pose.sdf
-md20 run   --project classA --case kinase_xxxxxx --tier classroom
-md20 status --project classA
-md20 report --project classA --case kinase_xxxxxx --bundle    # HTML 報告和可重現包
-md20 queue add --project classA --case kinase_xxxxxx --tier teaching --replicas 3
-md20 queue run --project classA --hours 22-7                   # 只在夜間跑。改用電池或建立 PAUSE 檔時會暫停
-md20 demo                        # 不需要 OpenMM，用合成後端跑完整流程，產生圖表、決策日誌與報告
-md20 screen template             # 高通量篩選的化合物庫 Excel 範本（name 加上 smiles、pubchem_cid、inchikey、chembl_id、ccd 或 sdf 其中一欄）
-md20 pipeline example --screen   # 含篩選的全流程範本：100–500 個化合物自動下載 3D → 快速對接 → 看圖勾選 → 正式對接 → MD
-```
-
-## 專業模式的新功能（v0.1.0a9 起，初步）
-- **輸入序列一鍵摺疊**：在快速模式的配體欄直接貼胜肽序列（例如 `MEL GIGAVLKVLTTGLPALISWIKRKRQQ`），10 個殘基以上會自動先預測結構再對接；命令列 `md20 fold <序列>`。摺疊工具需另外安裝一次（數 GB）：雙擊 `Install-Folding.cmd`（macOS `Install-Folding.command`），或在介面「電腦狀態」頁按「一鍵安裝」。規格：`docs/specs/structure_prediction.md`。
-- **膜系統**：膜蛋白、膜表面接觸（胜肽或分子在膜上方，不穿膜）、純膜。在專業模式的「膜」群組設定。規格：`docs/specs/membrane.md`。
-- **長時間模擬**：專業模式最長 10 µs；超過 100 ns 會先列出天數與硬碟用量，超過 1 µs 要確認。粗粒化工具：`md20 setup-cg --yes`。規格：`docs/specs/long_timescale.md`。
-- **粗粒化 Martini 3**：專業模式「膜系統」群組的「模擬解析度」選粗粒化，可以跑膜蛋白、膜表面胜肽、純膜或水中蛋白到微秒以上，報告標註珠子層級。工具與力場檔一次安裝：「電腦狀態」頁一鍵安裝或 `md20 setup-cg --yes`。規格：`docs/specs/long_timescale.md` §9。
-- **結合自由能選配體、報告後加做**：表單可選要拉哪些配體（多配體系統也可以只拉一個，其他留在口袋）；報告產生後，在流程頁「結合自由能」面板加做別的配體或同一配體多做一次，報告整合每一次與平均。關掉 GUI 再開，首頁會列出所有存過的流程。規格：`docs/specs/multi_ligand.md` 第十節。
-
-## 架構
+安裝器內含 micromamba，會建立 `md20` 環境、安裝套件、下載 Vina。舊版不刪除，移到 `_to_delete`。
 
 ```
 md20/
-  util/       跨平台路徑、原子寫檔、檔案鎖（Windows 用 msvcrt，POSIX 用 fcntl）、便宜指紋、決策日誌
-  env/        Doctor：硬體探測、OpenMM 平台階梯 CUDA→HIP→OpenCL→CPU（真的建 Context）、benchmark
-  project/    專案、case、run 的檔案庫，取代 Google Drive JSON 加 lease。階段由完成檔推斷
-  build/      受體檢查與 PDBFixer 修復、配體參考與 pose 映射、參數階梯（OpenFF→GAFF2）、真空煙霧測試、
-              Modeller 組裝、溶劑化、位置約束、三態閘門（PASS / AUTO_FIXED / NEEDS_HUMAN）
-  engine/     可續跑的 chunk 引擎（自 v6.1 移植）。自癒 watchdog 遇到 NaN 或溫度失控時回滾、dt 減半再重試
-              HMR、各 tier 的預設 protocol、驗收與自動延長。Backend 抽象層有 OpenMM 和 Fake 兩種
-  analysis/   log 解析、驗收、自動圖表（PNG+SVG+plotly HTML）
-  sampling/   0913 `MDH` 函式庫（WHAM、MBAR、overlap、bootstrap），window 規劃與智慧補窗、SMD、PMF 涵蓋與持平檢查
-  report/     自含的 HTML 報告（方法段落自動產生）、可重現包、workflow 總報告
-  docking/    Vina independent 與 simultaneous、受體 PDBQT、Meeko 配體、pose 分析與推薦。
-              library.py 和 screen.py 負責高通量前期篩選：化合物庫下載、批次對接、排名與圖
-  validation/ HCC Lab 論文教學案例（hsieh2024、hsieh2025）
-  advisor.py  依個案建議參數與合理性檢查
-  workflow.py 全流程協調（每步可續跑）
-  gui/        NiceGUI 介面：四種模式、教學頁、四種語言
+  env/        硬體偵測、OpenMM 平台選擇（CUDA、HIP、OpenCL、CPU，實際建 Context 確認）、benchmark
+  project/    專案、case、run 的檔案庫
+  build/      受體修復、配體參數化、組裝與溶劑化、膜、摺疊、粗粒化建模、三態閘門
+  engine/     分段可續跑的模擬引擎；遇到 NaN 或溫度失控會回滾並減半時間步重試
+  analysis/   軌跡分析、驗收、圖表
+  sampling/   SMD、傘狀採樣、WHAM 與 MBAR、補窗與收斂檢查
+  docking/    Vina、受體 PDBQT、Meeko、pose 分析、高通量篩選
+  report/     HTML 報告、方法段落、圖說
+  gui/        NiceGUI 介面
+  workflow.py 全流程協調，每一步都能續跑
   cli.py      命令列
-tests/        純 Python 測試（任何機器都能跑），以及 OpenMM 和 Vina 整合測試（有 openmm 時自動啟用，CI 在三個平台實際執行）
+tests/        純 Python 測試在任何機器都能跑；OpenMM 與 Vina 的整合測試在 CI 的 Windows、macOS、Linux 上實際執行
+tools/        GUI 截圖與瀏覽器點擊自我測試（gui_preview.py）等
 ```
 
-## 狀態
+開發規則：
+- 每項修改的理由寫進 `docs/DECISIONS.md`，規格寫進 `docs/specs/`，和程式碼放在同一個 commit。
+- 自動決定分三種狀態：通過、已自動修正、需要人決定。條件不足時寧可停下來，不猜。
+- 每次 push 後，CI 會把各平台的測試結果貼在該 commit 的留言；被跳過的整合測試不算通過。
 
-驗證狀態分三級，寫在 `docs/STATUS.md`。每個決定的理由與證據在 `docs/DECISIONS.md`。設定檔說明在 `docs/WORKFLOW.md`，硬體實測在 `docs/COMPATIBILITY.md`，課程對照在 `docs/TEACHING.md`。
+## English summary
+
+MD20 is a teaching workstation for molecular docking, molecular dynamics and binding free energy on a student's own
+laptop (Windows first; NVIDIA, AMD, integrated graphics or CPU only). It installs its own environment, repairs
+structures, parametrises ligands, checks equilibration, draws the figures and writes a report in English, Traditional
+Chinese, Japanese or Korean. Every automatic decision is logged with its reason, and the run stops with options when a
+decision needs a person. Download the installer from
+[Releases](https://github.com/fstcch-cmd/md20-workstation/releases); step-by-step guides are in
+[`docs/students/`](docs/students/) (`WINDOWS.en.md`, `MAC.en.md`). What has been verified on real engines, and what has
+not, is listed in [`docs/STATUS.md`](docs/STATUS.md).
