@@ -9,6 +9,7 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **D-88 專案資料夾指定、開啟任何專案；GUI 瀏覽器自我驗證**（使用者 11/04 09:08）：完成，併入 v0.1.0a14 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-04 09:10 | 見 DECISIONS D-88 |
 | **D-87 指定配體做 SMD、報告後加做與整合、首頁找回流程，發行 v0.1.0a14**（使用者 11/04 08:42）：完成，待 CI GUI 測試與筆電 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-04 08:45 | 見 DECISIONS D-87 |
 | **D-86 粗粒化 Martini 3 一鍵流程，發行 v0.1.0a13**（使用者 11/03 23:32）：完成，CI 三 OS 真工具測試；待筆電 GPU 實測 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-03 23:35 | 見 DECISIONS D-86 |
 | **D-85 胜肽直接貼序列自動摺疊＋一鍵安裝＋教學文件，發行 v0.1.0a12**（使用者 11/03 23:15）：完成，待筆電實測 `Install-Folding.cmd` | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-03 23:20 | 見 DECISIONS D-85 |

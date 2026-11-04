@@ -44,6 +44,31 @@ UI = {
                     "{folder}에 저장된 모든 워크플로를 최신순으로 보여 줍니다. 행을 클릭하면 그 워크플로로 돌아갑니다. 미완료 "
                     "워크플로는 '시작 또는 계속'을 누르면 멈춘 곳부터 이어서 진행하고, 완료된 워크플로는 보고서 열기, 결합 자유 에너지 "
                     "추가, 보고서 다시 만들기를 할 수 있습니다."),
+    "folder_title": ("專案資料夾", "Projects folder", "プロジェクトのフォルダー", "프로젝트 폴더"),
+    "folder_now": ("目前存放在：{folder}", "Saved in: {folder}", "保存先：{folder}", "저장 위치: {folder}"),
+    "folder_help": ("新的專案會存在這個資料夾，下次打開 MD20 也會用它。可以換到別的磁碟（例如空間較大的 D:），或打開別人給你的專案資料夾。",
+                    "New projects are saved in this folder, and MD20 opens it again next time. You can move to another drive "
+                    "(for example D: with more space) or open a project folder someone gave you.",
+                    "新しいプロジェクトはこのフォルダーに保存し、次に MD20 を開くときもこのフォルダーを使います。別のドライブ（空きの多い D: "
+                    "など）に変えたり、ほかの人からもらったプロジェクトのフォルダーを開いたりできます。",
+                    "새 프로젝트는 이 폴더에 저장되며 다음에 MD20을 열 때도 이 폴더를 씁니다. 다른 드라이브(공간이 넉넉한 D: 등)로 "
+                    "바꾸거나 다른 사람에게 받은 프로젝트 폴더를 열 수 있습니다."),
+    "folder_path": ("資料夾路徑（可貼上，例如 D:\\MD20_Projects）", "Folder path (paste one, e.g. D:\\MD20_Projects)",
+                    "フォルダーのパス（貼り付け可、例：D:\\MD20_Projects）", "폴더 경로(붙여 넣기 가능, 예: D:\\MD20_Projects)"),
+    "folder_browse": ("瀏覽…", "Browse…", "参照…", "찾아보기…"),
+    "folder_use": ("存到這個資料夾", "Save projects here", "ここに保存する", "여기에 저장"),
+    "folder_open": ("開啟這個專案或流程", "Open this project or workflow", "このプロジェクト／ワークフローを開く", "이 프로젝트 또는 워크플로 열기"),
+    "folder_recent": ("最近用過的資料夾", "Recent folders", "最近使ったフォルダー", "최근 사용한 폴더"),
+    "folder_switched": ("已切換到 {folder}", "Switched to {folder}", "{folder} に切り替えました", "{folder}(으)로 바꿨습니다"),
+    "folder_bad": ("這個資料夾不能用：{why}", "This folder cannot be used: {why}", "このフォルダーは使えません：{why}",
+                   "이 폴더는 쓸 수 없습니다: {why}"),
+    "folder_no_dialog": ("這台電腦無法開啟資料夾視窗，請直接貼上路徑。", "No folder dialog is available on this computer. Paste the path instead.",
+                         "このコンピューターではフォルダーの画面を開けません。パスを貼り付けてください。",
+                         "이 컴퓨터에서는 폴더 창을 열 수 없습니다. 경로를 붙여 넣으십시오."),
+    "folder_nothing": ("這個資料夾裡沒有 MD20 的專案。要把新專案存在這裡，請按「{use}」。",
+                       "There are no MD20 projects in this folder. To save new projects here, press {use}.",
+                       "このフォルダーには MD20 のプロジェクトがありません。新しいプロジェクトをここに保存するには「{use}」を押してください。",
+                       "이 폴더에는 MD20 프로젝트가 없습니다. 새 프로젝트를 여기에 저장하려면 '{use}'을 누르십시오."),
     "search": ("搜尋專案或流程", "Search projects or workflows", "プロジェクトやワークフローを検索", "프로젝트 또는 워크플로 검색"),
     "no_recent": ("還沒有流程。", "No workflows yet.", "ワークフローはまだありません。", "아직 워크플로가 없습니다."),
     "open": ("開啟", "Open", "開く", "열기"), "start": ("開始", "Start", "開始", "시작"),

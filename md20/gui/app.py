@@ -103,6 +103,26 @@ def set_resource_mode(mode: str) -> None:
     os.environ["MD20_RESOURCE_MODE"] = d["resource_mode"]
 
 
+def switch_projects_dir(path: str | Path) -> Path:
+    """D-88: use another projects folder (chosen or opened by the user); the interface language and resource mode
+    follow along, and the choice is kept for the next start (gui/folders.py)."""
+    from . import folders
+    from ..util import atomic_write_json
+    new = Path(path)
+    new.mkdir(parents=True, exist_ok=True)
+    keep_lang, keep_mode = lang(), resource_mode()
+    STATE["projects_dir"] = new
+    STATE["lang"] = None
+    sp = new / "gui_settings.json"
+    d = load_json(sp, {})
+    if "lang" not in d or "resource_mode" not in d:
+        d.setdefault("lang", keep_lang)
+        d.setdefault("resource_mode", keep_mode)
+        atomic_write_json(d, sp)
+    folders.remember(new)
+    return new
+
+
 def set_lang(code: str) -> None:
     from ..util import atomic_write_json
     STATE["lang"] = code if code in LANG_NAMES else "en"
@@ -318,7 +338,7 @@ def _install_button(kind: str, L: str):
         log.set_text(head + "\n" + text)
 
     def go():
-        start_install(kind, default_projects_dir() / "_tools")
+        start_install(kind, Path(STATE["projects_dir"]) / "_tools")
         poll()
     ui.button(pick(TOOL_TEXT["install_now"], L), on_click=go).props(f"color=primary no-caps data-testid=install-{kind}")
     ui.timer(2.0, poll)

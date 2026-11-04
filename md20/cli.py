@@ -518,7 +518,8 @@ def main(argv=None) -> int:
     kill_children_on_exit()          # D-69: a closed window must not leave vina.exe running
     _utf8_console()
     ap = argparse.ArgumentParser(prog="md20", description=f"MD20 teaching workstation {__version__}")
-    ap.add_argument("--dir", default=str(default_projects_dir()), help="projects root directory")
+    ap.add_argument("--dir", default=None, help="projects root directory (default: the folder chosen in the GUI, "
+                    "else ~/Documents/MD20_Projects)")
     ap.add_argument("--mode", choices=["background", "balanced", "full"], default="balanced",
                     help="資源模式：background（不干擾使用者）/ balanced / full（整台電腦）")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -582,6 +583,9 @@ def main(argv=None) -> int:
     rp.add_argument("--run"); rp.add_argument("--bundle", action="store_true"); rp.set_defaults(fn=cmd_report)
     m = sub.add_parser("demo"); m.add_argument("--dir"); m.set_defaults(fn=cmd_demo)
     a = ap.parse_args(argv)
+    if a.dir is None and a.cmd != "demo":                # D-88: same projects folder as the GUI chose last time
+        from .gui.folders import saved_projects_dir
+        a.dir = str(saved_projects_dir())
     os.environ["MD20_RESOURCE_MODE"] = a.mode          # D-68: Vina and other helpers follow the chosen mode
     return int(a.fn(a) or 0)
 

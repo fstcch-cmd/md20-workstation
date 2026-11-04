@@ -88,7 +88,8 @@ def main(out: Path) -> int:
             br.close()
     finally:
         proc.terminate()
-    return stability(out)
+    rc = stability(out)
+    return rc or e2e(out)
 
 
 def extras(pg, base: str, out: Path, code: str) -> None:
@@ -202,6 +203,136 @@ def stability(out: Path) -> int:
     for m in problems:
         print(" -", m)
     (out / "stability.txt").write_text("OK\n" if not problems else "\n".join(problems) + "\n", encoding="utf-8")
+    return 0 if not problems else 1
+
+
+def build_e2e(root: Path) -> tuple[str, str]:
+    """A finished all-ligands workflow (hsieh2024-like): MD complete, PGA pulled once, report written."""
+    from md20.project.store import Project
+    from md20.util.jsonio import atomic_write_json
+    from md20.workflow import Workflow, example_config
+    cfg = copy.deepcopy(example_config()); cfg["name"] = "multi_demo"
+    cfg["ligands"] = [{"name": n, "smiles": "CCO"} for n in ("PGA", "CAR", "GLU")]
+    cfg["md"]["systems"] = ["apo", "docked_multi"]
+    cfg["binding"] = {"enabled": True, "ligands": ["PGA"], "multi": True, "config": {}}
+    proj = Project.create(root, "multi")
+    wf = Workflow(proj, cfg)
+    st = wf.state()
+    st["steps"]["md_cases"] = {"status": "PASS", "cases": {"docked_multi": {"case_id": "c1", "mode": "docked_multi",
+                                                                            "ligands": ["PGA", "CAR", "GLU"]}}}
+    st["steps"]["md_runs"] = {"status": "PASS", "runs": {"docked_multi": {"status": "COMPLETE", "case_id": "c1", "run_ids": []}}}
+    st["steps"]["binding"] = {"status": "PASS", "results": {"multi:PGA": {
+        "status": "PASS", "ligand": "PGA", "context": "multi:docked_multi", "co_ligands": ["CAR", "GLU"], "replicas": 1,
+        "delta_pmf_kj_mol": 18.0, "delta_pmf_err_kj_mol": 1.5, "dG_standard_kj_mol": -9.5, "dG_err_kj_mol": 1.6,
+        "dG_standard_kcal_mol": -2.27, "dG_withheld": None, "per_replica": [], "caveats": [], "figures": {}}}}
+    atomic_write_json(st, wf.state_path)
+    return proj.dir.name, wf.name
+
+
+def e2e(out: Path) -> int:
+    """D-87/D-88 self-check with clicks in a real browser (MD20_GUI_FAKE_RUN replaces the chemistry):
+    the binding panel lists the three ligands of the all-ligands system, adds CAR, adds one more run to PGA and
+    rebuilds the report; the projects-folder card opens another folder and switches to a new one, and the choice
+    is saved for the next start.  Every check that fails is printed and makes the job fail."""
+    import json
+    from playwright.sync_api import sync_playwright
+    root = Path(tempfile.mkdtemp(prefix="md20e2e_"))
+    other = Path(tempfile.mkdtemp(prefix="md20other_"))
+    fresh = Path(tempfile.mkdtemp(prefix="md20fresh_")) / "new_projects"
+    folders_file = Path(tempfile.mkdtemp(prefix="md20cfg_")) / "gui_folders.json"
+    project, name = build_e2e(root)
+    oproj, oname = build_e2e(other)
+    port = _free_port()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
+    env["MD20_GUI_FAKE_RUN"] = "2"
+    env["MD20_GUI_FOLDERS"] = str(folders_file)
+    proc = subprocess.Popen([sys.executable, "-m", "md20", "--dir", str(root), "gui", "--port", str(port), "--no-browser"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+    base = f"http://127.0.0.1:{port}"
+    problems: list[str] = []
+    wf_dir = root / project / "workflows" / name
+
+    def cfg():
+        return json.loads((wf_dir / "config.json").read_text(encoding="utf-8"))
+
+    def check(cond, msg):
+        if not cond:
+            problems.append(msg)
+        print("E2E", "ok " if cond else "FAIL", msg)
+    try:
+        for _ in range(240):
+            try:
+                urllib.request.urlopen(base + "/", timeout=2); break
+            except Exception:  # noqa: BLE001
+                if proc.poll() is not None:
+                    print(proc.stdout.read().decode(errors="ignore")[-4000:]); return 1
+                time.sleep(0.5)
+        with sync_playwright() as p:
+            br = p.chromium.launch()
+            pg = br.new_page(viewport={"width": 1400, "height": 1000})
+            pg.goto(f"{base}/wf/{project}/{name}", wait_until="networkidle", timeout=60000)
+            pg.get_by_test_id("binding-panel").locator(".q-expansion-item__container > .q-item").first.click()
+            pg.wait_for_timeout(1500)
+            panel = pg.get_by_test_id("binding-panel")
+            for tk in ("multi:PGA", "multi:CAR", "multi:GLU"):
+                check(panel.locator("tr", has_text=tk).count() == 1, f"binding panel lists {tk}")
+            pg.screenshot(path=str(out / "e2e_binding_panel.png"), full_page=True)
+            panel.locator("tr", has_text="multi:CAR").locator(".q-checkbox").first.click()
+            pg.get_by_test_id("binding-add").click()
+            pg.wait_for_timeout(4000)
+            check("multi:CAR" in (cfg().get("binding") or {}).get("added", []), "Compute the selected ligands writes binding.added")
+            st = json.loads((wf_dir / "state.json").read_text(encoding="utf-8"))
+            check((st["steps"].get("binding") or {}).get("results", {}).get("multi:PGA", {}).get("status") == "PASS",
+                  "the finished PGA result is kept")
+            pg.wait_for_timeout(3000)                   # let the 2 s stand-in run end before the next button
+            panel.locator("tr", has_text="multi:CAR").locator(".q-checkbox").first.click()
+            panel.locator("tr", has_text="multi:PGA").locator(".q-checkbox").first.click()
+            pg.get_by_test_id("binding-more").click()
+            pg.wait_for_timeout(4000)
+            check((cfg().get("binding") or {}).get("target_replicas", {}).get("multi:PGA") == 2,
+                  "One more SMD run sets target_replicas[multi:PGA] = 2")
+            pg.wait_for_timeout(3000)
+            with pg.context.expect_page(timeout=60000) as newtab:
+                pg.get_by_test_id("report-rebuild").click()
+            rep = newtab.value
+            rep.wait_for_load_state("networkidle", timeout=120000)
+            check("ΔG" in rep.content(), "Rebuild the report opens a report with the binding results")
+            rep.close()
+            st = json.loads((wf_dir / "state.json").read_text(encoding="utf-8"))
+            check(Path((st["steps"].get("report") or {}).get("path", "")).is_file(), "the rebuilt report is on disk")
+            # projects folder: open another folder (one project, one workflow → straight to it)
+            pg.goto(base + "/", wait_until="networkidle")
+            check(str(root) in pg.get_by_test_id("folder-now").inner_text(), "home shows the current projects folder")
+            pg.get_by_test_id("folder-path").locator("input").fill(str(other / oproj))
+            pg.get_by_test_id("folder-open").click()
+            pg.wait_for_url("**/wf/**", timeout=30000)
+            check(pg.url.rstrip("/").endswith(f"/wf/{oproj}/{oname}"), f"opening a project folder goes to its workflow ({pg.url})")
+            # save new projects in a folder that does not exist yet
+            pg.goto(base + "/", wait_until="networkidle")
+            pg.get_by_test_id("folder-path").locator("input").fill(str(fresh))
+            pg.get_by_test_id("folder-use").click()
+            pg.wait_for_timeout(2500)
+            pg.goto(base + "/", wait_until="networkidle")
+            check(str(fresh) in pg.get_by_test_id("folder-now").inner_text(), "the projects folder switches to the new one")
+            saved = json.loads(folders_file.read_text(encoding="utf-8")) if folders_file.is_file() else {}
+            check(saved.get("projects_dir") == str(fresh) and str(other) in saved.get("recent", []),
+                  "the choice and the recent folders are saved for the next start")
+            pg.screenshot(path=str(out / "e2e_folders.png"), full_page=True)
+            br.close()
+    except Exception as exc:  # noqa: BLE001
+        problems.append(f"{type(exc).__name__}: {exc}")
+        print("E2E FAIL", type(exc).__name__, exc)
+    finally:
+        proc.terminate()
+        try:
+            log = proc.communicate(timeout=10)[0].decode(errors="ignore")
+        except subprocess.TimeoutExpired:
+            proc.kill(); log = ""
+    if "Traceback" in log:
+        problems.append("server printed a Traceback")
+        print(log[-6000:])
+    print("E2E", "OK" if not problems else "FAILED")
+    (out / "e2e.txt").write_text("OK\n" if not problems else "\n".join(problems) + "\n", encoding="utf-8")
     return 0 if not problems else 1
 
 

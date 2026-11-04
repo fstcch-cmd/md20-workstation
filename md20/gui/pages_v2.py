@@ -58,7 +58,7 @@ def _doctor_dict() -> dict:
 
 # --------------------------------------------------------------------------------------------- home
 @ui.page("/")
-def home():
+def home(q: str = ""):
     L = lang()
     _header()
     with ui.column().classes("w-full max-w-6xl mx-auto gap-4 p-4"):
@@ -72,6 +72,7 @@ def home():
                     ui.label(tx(m["title"], L)).classes("text-lg font-semibold")
                     ui.label(tx(m["text"], L)).classes("text-sm md20-muted")
                     ui.button(t("open", L), on_click=lambda r=m["route"]: ui.navigate.to(r)).props("flat no-caps color=primary")
+        _folder_card(L)
         ui.label(t("recent", L)).classes("md20-section")
         rows = list_workflows(Path(STATE["projects_dir"]))
         if not rows:
@@ -102,10 +103,75 @@ def home():
                       "status": status_text(r), "report": "✔" if r.get("has_report") else "—",
                       "binding": str(r["binding_done"]) if r.get("binding_done") else "—"}
                      for r in rows]
-            flt = ui.input(t("search", L)).props("clearable dense data-testid=recent-search").classes("w-72")
+            flt = ui.input(t("search", L), value=q or "").props("clearable dense data-testid=recent-search").classes("w-72")
             tbl = ui.table(columns=cols, rows=shown, row_key="key", pagination=15).props(no_data()).classes("w-full md20-card")
             flt.bind_value_to(tbl, "filter")
             tbl.on("rowClick", lambda e: ui.navigate.to(f"/wf/{e.args[1]['project']}/{e.args[1]['workflow']}"))
+
+
+def _folder_card(L: str):
+    """D-88: choose where projects are saved, open a project or workflow folder from anywhere, recent folders."""
+    from . import folders
+    from .app import switch_projects_dir
+    with ui.card().classes("w-full md20-card p-4").props("data-testid=folder-card"):
+        ui.label(t("folder_title", L)).classes("md20-section")
+        ui.label(t("folder_now", L, folder=str(STATE["projects_dir"]))).classes("text-sm font-mono").props("data-testid=folder-now")
+        ui.label(t("folder_help", L)).classes("md20-why")
+        with ui.row().classes("w-full items-end gap-2 no-wrap"):
+            path_in = ui.input(t("folder_path", L)).props("clearable data-testid=folder-path").classes("flex-grow")
+
+            async def browse():
+                from nicegui import run as nrun
+                got = await nrun.io_bound(folders.pick_folder, str(STATE["projects_dir"]))
+                if got is None:
+                    ui.notify(t("folder_no_dialog", L), type="warning")
+                elif got:
+                    path_in.value = got
+            ui.button(t("folder_browse", L), on_click=browse).props("outline no-caps data-testid=folder-browse")
+
+        def use_here():
+            ok, why = folders.check_folder(path_in.value or "")
+            if not ok:
+                ui.notify(t("folder_bad", L, why=_why(why, L)), type="negative"); return
+            new = switch_projects_dir(why)
+            ui.notify(t("folder_switched", L, folder=str(new)), type="positive")
+            ui.navigate.to("/")
+
+        def open_it(target: str | None = None):
+            info = folders.classify(target or path_in.value or "")
+            if info["kind"] == "missing":
+                ui.notify(t("folder_bad", L, why=_why("missing", L)), type="negative"); return
+            if info["kind"] == "empty_folder":
+                ui.notify(t("folder_nothing", L, use=t("folder_use", L)), type="warning"); return
+            switch_projects_dir(info["projects_dir"])
+            if info["kind"] == "workflow":
+                ui.navigate.to(f"/wf/{info['project']}/{info['workflow']}"); return
+            if info["kind"] == "project":
+                wfs = folders.project_workflows(info["projects_dir"], info["project"])
+                if len(wfs) == 1:
+                    ui.navigate.to(f"/wf/{info['project']}/{wfs[0]}"); return
+                ui.navigate.to(f"/?q={info['project']}"); return
+            ui.navigate.to("/")
+        with ui.row().classes("gap-2"):
+            ui.button(t("folder_use", L), on_click=use_here).props("color=primary no-caps data-testid=folder-use")
+            ui.button(t("folder_open", L), on_click=lambda: open_it()).props("outline no-caps data-testid=folder-open")
+        rec = [r for r in folders.recent() if r != str(STATE["projects_dir"])]
+        if rec:
+            ui.label(t("folder_recent", L)).classes("text-sm")
+            with ui.row().classes("gap-2"):
+                for r in rec:
+                    ui.button(r, on_click=lambda r=r: open_it(r)).props("flat dense no-caps").classes("font-mono text-xs")
+
+
+def _why(code: str, L: str) -> str:
+    texts = {"empty": ("沒有填路徑", "no path given", "パスが空です", "경로가 비어 있습니다"),
+             "relative": ("要寫完整路徑（例如 D:\\MD20_Projects）", "give a full path (e.g. D:\\MD20_Projects)",
+                          "完全なパスを書いてください（例：D:\\MD20_Projects）", "전체 경로를 쓰십시오(예: D:\\MD20_Projects)"),
+             "not_a_folder": ("這是檔案，不是資料夾", "it is a file, not a folder", "フォルダーではなくファイルです", "폴더가 아니라 파일입니다"),
+             "missing": ("找不到這個資料夾", "the folder does not exist", "フォルダーが見つかりません", "폴더가 없습니다")}
+    if code.startswith("not_writable"):
+        return pick(("沒有寫入權限", "no permission to write", "書き込み権限がありません", "쓰기 권한이 없습니다"), L) + code[len("not_writable"):]
+    return pick(texts.get(code, (code,) * 4), L)
 
 
 # --------------------------------------------------------------------------------------------- teaching
