@@ -15,6 +15,7 @@ from ..util import default_projects_dir, load_json, safe_name
 from ..workflow import Workflow
 from .logic import Runner, config_from_form, list_workflows, pose_table, set_pose_choice, screen_table
 from .actions import apply_gate_action, resample_range, select_screen_ligands
+from . import actions as ACT
 from ..docking.screen import echart_screen, echart_ranking
 from .views import (gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html,
                     coverage_targets, coverage_chart, coverage_summary)
@@ -325,6 +326,124 @@ def _install_button(kind: str, L: str):
     return note
 
 
+BIND_STATUS = {"PASS": ("已完成", "Done", "完了", "완료"), "PLANNED": ("待計算", "To run", "未計算", "계산 예정"),
+               "NOT_STARTED": ("未計算", "Not computed", "未計算", "계산 안 함"), "PENDING": ("待計算", "To run", "未計算", "계산 예정"),
+               "PAUSED": ("暫停", "Paused", "一時停止", "일시 정지"), "NEEDS_HUMAN": ("需要決定", "Needs a decision", "判断が必要", "결정 필요"),
+               "SKIPPED": ("不計算", "Not computed (see report)", "計算しない", "계산 안 함")}
+
+
+def _binding_panel(wf: Workflow, project: str, name: str):
+    """D-87: binding free energy per ligand, also after the report — add ligands, add one more SMD run to a finished
+    one, and rebuild the report from everything computed so far."""
+    L = lang()
+    card = ui.expansion(_("結合自由能（SMD＋傘狀採樣）：選配體、加做、整合報告",
+                          "Binding free energy (SMD and umbrella sampling): choose ligands, add runs, update the report",
+                          "結合自由エネルギー（SMD と傘サンプリング）：リガンドの選択、追加、レポートの更新",
+                          "결합 자유 에너지(SMD와 우산 샘플링): 리간드 선택, 추가 계산, 보고서 갱신"),
+                       value=False).classes("w-full md20-card").props("data-testid=binding-panel")
+    with card:
+        ui.label(_("MD 做完後，可以一次選一個或幾個配體計算結合自由能；報告產生後也可以回來加做別的配體，或讓同一個配體多做一次"
+                   "（新的亂數種子），報告會整合全部結果。多配體系統裡拉一個配體時，其他配體留在口袋裡，結果標為「與其他配體共存」。",
+                   "After the MD you can compute binding free energy for one or several ligands at a time. After the report you "
+                   "can come back to add other ligands, or run the same ligand once more with a new random seed; the report "
+                   "combines every result. In the all-ligands system the other ligands stay in the pocket while one is pulled, "
+                   "and the result is labelled 'with the other ligands'.",
+                   "MD の後、1 つまたは複数のリガンドの結合自由エネルギーを計算できます。レポートの後でも戻って別のリガンドを追加したり、"
+                   "同じリガンドをもう 1 回（新しい乱数の種で）計算したりでき、レポートはすべての結果をまとめます。全リガンドの系で 1 つを"
+                   "引き離すとき、ほかのリガンドはポケットに残り、結果は「ほかのリガンドと共存」と表示します。",
+                   "MD가 끝나면 리간드 하나 또는 여러 개의 결합 자유 에너지를 계산할 수 있습니다. 보고서가 나온 뒤에도 돌아와서 다른 "
+                   "리간드를 추가하거나 같은 리간드를 새 난수 시드로 한 번 더 계산할 수 있으며, 보고서는 모든 결과를 합칩니다. 모든 리간드 "
+                   "계에서 하나를 당길 때 다른 리간드는 포켓에 남고, 결과는 '다른 리간드와 공존'으로 표시합니다.")).classes("text-sm")
+        tbl = ui.table(columns=[{"name": k, "label": l, "field": k, "align": "left"} for k, l in (
+            ("target", _("目標", "Target", "対象", "대상")), ("ligand", _("配體", "Ligand", "リガンド", "리간드")),
+            ("context", _("情境", "Context", "状況", "상황")), ("status", _("狀態", "Status", "状態", "상태")),
+            ("runs", _("SMD 次數", "SMD runs", "SMD の回数", "SMD 횟수")), ("dg", "ΔG° (kJ mol⁻¹)"))],
+            rows=[], row_key="target", selection="multiple").props("dense flat").props(no_data()).classes("w-full")
+        note = ui.input(option_text("備註（為什麼選這些）", L)).classes("w-96")
+
+        def rows():
+            out = []
+            for c in ACT.binding_candidates(wf):
+                dg = "—"
+                if c["dG_kj"] is not None:
+                    dg = f"{c['dG_kj']:.1f}" + (f" ± {c['dG_err']:.1f}" if c["dG_err"] is not None else "")
+                elif c["status"] == "PASS" and c["dG_withheld"]:
+                    dg = _("不輸出（見報告）", "not reported (see report)", "出力しない（レポート参照）", "출력 안 함(보고서 참조)")
+                out.append({"target": c["target"], "ligand": c["ligand"],
+                            "context": pick(ACT.CONTEXT_TEXT[c["context"]], lang()) +
+                                       (f" ({', '.join(c['co_ligands'])})" if c["co_ligands"] else ""),
+                            "status": pick(BIND_STATUS.get(c["status"], (c["status"],) * 4), lang())
+                                      + ("" if c["md_complete"] else " · " + _("MD 未完成", "MD not finished", "MD 未完了", "MD 미완료")),
+                            "runs": str(c["runs"] or "—"), "dg": dg})
+            return out
+
+        def refresh():
+            new = rows()
+            if new != tbl.rows:
+                keep = {r["target"] for r in tbl.selected}
+                tbl.rows = new
+                tbl.selected = [r for r in new if r["target"] in keep]
+                tbl.update()
+
+        def busy() -> bool:
+            job = RUNNER.get(wf)
+            if job and job.thread and job.thread.is_alive():
+                ui.notify(t("busy", lang()), type="warning")
+                return True
+            return False
+
+        def add_targets():
+            if busy():
+                return
+            try:
+                r = ACT.add_binding_targets(wf, [x["target"] for x in tbl.selected], note=note.value or "")
+            except ValueError as exc:
+                ui.notify(str(exc), type="negative"); return
+            _start(wf)
+            ui.notify(_(f"開始計算：{', '.join(r['added'])}。完成後報告會自動更新。",
+                        f"Computing {', '.join(r['added'])}. The report is updated when it finishes.",
+                        f"{', '.join(r['added'])} の計算を始めました。終わるとレポートが更新されます。",
+                        f"{', '.join(r['added'])} 계산을 시작했습니다. 끝나면 보고서가 갱신됩니다."), type="positive")
+            refresh()
+
+        def one_more():
+            if busy():
+                return
+            sel = [x["target"] for x in tbl.selected]
+            if len(sel) != 1:
+                ui.notify(_("請只選一個已完成的目標。", "Select exactly one finished target.", "完了した対象を 1 つだけ選んでください。",
+                            "완료된 대상을 하나만 고르십시오."), type="warning"); return
+            try:
+                r = ACT.add_smd_run(wf, sel[0], note=note.value or "")
+            except ValueError as exc:
+                ui.notify(str(exc), type="negative"); return
+            _start(wf)
+            ui.notify(_(f"{r['target']} 開始第 {r['runs']} 次 SMD。", f"Run {r['runs']} of {r['target']} started.",
+                        f"{r['target']} の {r['runs']} 回目の SMD を始めました。", f"{r['target']}의 {r['runs']}번째 SMD를 시작했습니다."),
+                      type="positive")
+            refresh()
+
+        def rebuild():
+            if busy():
+                return
+            try:
+                ACT.refresh_report(wf, lang())
+            except Exception as exc:  # noqa: BLE001
+                ui.notify(f"{type(exc).__name__}: {exc}", type="negative"); return
+            ui.notify(_("報告已重新整理。", "The report has been rebuilt.", "レポートを作り直しました。", "보고서를 다시 만들었습니다."),
+                      type="positive")
+            ui.navigate.to(f"/report/{project}/{name}?lang={lang()}", new_tab=True)
+        with ui.row().classes("gap-2"):
+            ui.button(_("計算選取的配體", "Compute the selected ligands", "選んだリガンドを計算", "선택한 리간드 계산"),
+                      on_click=add_targets).props("color=primary no-caps data-testid=binding-add")
+            ui.button(_("選取的配體再做一次 SMD", "One more SMD run for the selected ligand", "選んだリガンドの SMD をもう 1 回",
+                        "선택한 리간드 SMD 한 번 더"), on_click=one_more).props("outline no-caps data-testid=binding-more")
+            ui.button(_("重新整理報告", "Rebuild the report", "レポートを作り直す", "보고서 다시 만들기"),
+                      on_click=rebuild).props("outline no-caps data-testid=report-rebuild")
+        refresh()
+        ui.timer(5.0, refresh)
+
+
 def _start(wf: Workflow):
     platform = "FAKE" if os.environ.get("MD20_GUI_FAKE_RUN") else _platform()   # test stand-in (D-74)
     policy = PausePolicy(pause_file=wf.project.dir / "PAUSE", pause_on_battery=True,
@@ -538,6 +657,7 @@ def workflow_page(project: str, name: str):
             ui.button(t("pause", L), on_click=lambda: (wf.project.dir / "PAUSE").touch()).props("outline")
             report_btn = ui.button(t("open_report", L),
                                    on_click=lambda: ui.navigate.to(f"/report/{project}/{name}?lang={lang()}", new_tab=True)).props("outline")
+        _binding_panel(wf, project, name)
         steps = ui.table(columns=[{"name": k, "label": l, "field": k, "align": "left",
                                    **({"style": "white-space: normal; max-width: 560px"} if k == "message" else {})}
                                   for k, l in (("step", t("step", L)), ("status", t("status", L)), ("at", t("time", L)),

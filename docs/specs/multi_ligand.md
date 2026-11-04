@@ -96,3 +96,17 @@ D-61：`tests/test_softcore.py`（OpenMM：軟核解開穿環、保持限制在�
 比較順序：對接層其他疑點數 → 檢查與剛體微調能否解開（tier 0／1／2）→ 排除的配體數 → 剩餘重疊與穿環 → 被微調的配體數 → 最短接觸 → 分數。
 取第一名（AUTO_FIXED，理由列出前三名；`state["least_risk_poses"]`），之後照常經過幾何檢查、剛體微調、軟核鬆弛與最小化後穿環檢查；
 全部解不開才回到本檔第二節的「排除哪個配體」閘門。使用者手動選的碰撞姿勢同樣交給這條路徑。redocking 自檢失敗仍然停下。
+
+## 十、選配體做結合自由能、報告後加做、多次 SMD 整合（D-87，2026-11-04）
+- 使用者（11/04 08:38）：hsieh2024 多配體對接時無法指定單一配體做 SMD；要能在報告後再加做別的配體、報告整合多次 SMD，關掉 GUI 再開要能找回專案。
+- 原因（實作前）：計算核心早已支援在共同複合物中拉一個配體（WP9，`multi:<配體>`），但 GUI 只在系統含 `docked_single` 時開啟結合計算，且一律把全部配體填進 `binding.ligands`；教學模式一預設關閉。
+- 設定：
+  - 表單：`binding.ligands` 由「要計算結合自由能的配體」多選決定；不選時單一配體系統全算、只有多配體系統時算第一個；`binding.multi` = 是否模擬多配體系統。
+  - 報告後：`binding.added`（目標鍵，例如 `multi:CAR`）——即使 `binding.enabled` 為 false 也只計算這些；`binding.target_replicas`（目標 → 次數）——同一目標多做幾次。兩者列入 `DECISION_KEYS`。
+- 執行：已 PASS 的目標若次數已足就跳過；加次數時舊的各次由 `finished_result` 直接讀回（不重算），新的一次用新的種子（`seed + 1000·i`）與下一個 MD 重複當起點。輸出資料夾 `binding_replica_dir`：只有一次時用目標資料夾本身；做過一次後再加，第一次留在原處、新的放 rep2、rep3…；一開始就規劃多次則用 rep1、rep2…。
+- 重開：`gui/actions.py` 的 `add_binding_targets`、`add_smd_run` 只把 binding 步驟標為 PENDING（保留已完成結果）並移除 report；`refresh_report` 不計算、直接由目前狀態重建報告。
+- 報告：結果表加「情境」（單獨／與其他配體共存）與「SMD 次數」；次數 > 1 時列出各次 ΔPMF、ΔG° 與「平均、誤差取重複間標準誤與 bootstrap 合併誤差的較大者」的說明。
+- 首頁：`list_workflows` 依更新時間由新到舊、全部列出（分頁、搜尋），狀態用 `workflow_status`（完成、需要決定、未完成），標示報告是否存在、已完成 ΔG° 數，以及上次擁有者程序已不存在（中斷）。
+- 被否決：整段重開 binding 步驟（會丟掉已完成目標的狀態）；每次加做都另開新流程（MD 要重跑，報告也分散）。
+- 測試：`tests/test_binding_targets.py`、`tests/test_report_v2.py::test_report_combines_several_smd_runs`。未驗證：實際 GPU 上多配體 SMD 的時間；GUI 面板以 CI 的 GUI 測試確認可開啟。
+

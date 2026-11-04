@@ -152,3 +152,17 @@ def test_interpret_md_flags_drift_and_unbinding():
     assert "not reached a plateau" in texts and "left or moved away" in texts
     assert sum(x["level"] == "caution" for x in f) == 2
     assert I.binding({"A": {"delta_pmf_kj_mol": 95.0}})[-1]["level"] == "caution"
+
+
+def test_report_combines_several_smd_runs(tmp_path):
+    """D-87: a target run twice shows each run and the combined value; the context column says alone / with others."""
+    wf = make_wf(tmp_path, "en")
+    st = wf.state()
+    r = st["steps"]["binding"]["results"]["BEN"]
+    r.update({"status": "PASS", "replicas": 2, "context": "single", "delta_pmf_kj_mol": 24.0, "delta_pmf_err_kj_mol": 1.0,
+              "per_replica": [{"delta_pmf_kj_mol": 23.0, "delta_pmf_err_kj_mol": 1.0, "dG_standard_kj_mol": None},
+                              {"delta_pmf_kj_mol": 25.0, "delta_pmf_err_kj_mol": 1.2, "dG_standard_kj_mol": None}]})
+    atomic_write_json(st, wf.state_path)
+    html = build_workflow_report(wf).read_text(encoding="utf-8")
+    assert "Each SMD and umbrella-sampling run" in html and "23.0 ± 1.0" in html and "25.0 ± 1.2" in html
+    assert "SMD runs" in html and ">Alone<" in html

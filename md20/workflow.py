@@ -134,6 +134,7 @@ DECISION_KEYS: tuple[tuple[str, ...], ...] = (
     ("multi_ligand",), ("md", "long_run_confirmed"), ("md", "long_run"),
     ("md", "membrane", "oriented"),        # gate `membrane orientation` one-click choice (D-80)
     ("md", "resolution"), ("md", "membrane", "surface_distance_nm"),   # coarse-grained gates (D-86)
+    ("binding", "added"), ("binding", "target_replicas"),               # targets and extra SMD runs chosen later (D-87)
 )
 LIGAND_DECISION_KEYS = ("cpp_override", "cpp_evidence", "target_location", "fold_accept_low", "fold_upload", "fold_engine",
                         "fold_accept_rmsd", "fold_receptor_seq")
@@ -1535,20 +1536,27 @@ class Workflow:
 
     def _binding_targets(self, runs: dict, built: dict) -> tuple[list[dict], dict[str, list[str]]]:
         """(targets, contexts).  Single-ligand cases → key = ligand name (backward compatible);
-        WP9: every ligand of a docked_multi case is pulled from the shared complex → key = "multi:<ligand>"."""
+        WP9: every ligand of a docked_multi case is pulled from the shared complex → key = "multi:<ligand>".
+        D-87: `binding.added` holds target keys chosen later in the GUI (after the report, one ligand at a time);
+        they run even when binding.enabled is false, and only they are added."""
         b = self.cfg.get("binding", {})
-        wanted = b.get("ligands") or None
+        enabled = bool(b.get("enabled"))
+        added = set(b.get("added") or [])
+        wanted = (set(b["ligands"]) if b.get("ligands") else None) if enabled else set()
         targets, ctx = [], {"single": []}
+
+        def take(key: str, lig: str) -> bool:
+            return key in added or (enabled and (wanted is None or lig in wanted))
         for key, c in built.items():
             if key not in runs:
                 continue
             if c["mode"] == "docked_single":
                 for n in c["ligands"]:
-                    if wanted is None or n in wanted:
+                    if take(n, n):
                         targets.append({"key": n, "ligand": n, "run_key": key, "others": []})
                         ctx["single"].append(n)
-            elif c["mode"] == "docked_multi" and b.get("multi", True):
-                names = [n for n in c["ligands"] if wanted is None or n in wanted]
+            elif c["mode"] == "docked_multi" and (b.get("multi", True) or any(a.startswith("multi:") for a in added)):
+                names = [n for n in c["ligands"] if take(f"multi:{n}", n)]
                 ctx[f"multi:{key}"] = []
                 for n in names:
                     targets.append({"key": f"multi:{n}", "ligand": n, "run_key": key,
@@ -1561,7 +1569,7 @@ class Workflow:
         from types import SimpleNamespace
         from .sampling.multi import compare_binding, aggregate_binding_replicas
         b = self.cfg.get("binding", {})
-        if not b.get("enabled"):
+        if not b.get("enabled") and not b.get("added"):
             return {}
         if self._solvent() == "gbn2":
             msg = ("隱式溶劑（GBn2）不做 SMD／傘狀採樣：拉離過程的去溶劑化能障在連續介質模型下會失真，PMF 與 ΔG° 不可信。")
@@ -1578,9 +1586,11 @@ class Workflow:
                    if v.get("status") == "PASS"}
         cfg = self._binding_config(b)
         targets, contexts = self._binding_targets(runs, built)
+        per_target = b.get("target_replicas") or {}            # D-87: more SMD/umbrella runs for one target
         for t in targets:
             name, key = t["key"], t["run_key"]
-            if results.get(name, {}).get("status") == "PASS":
+            want = max(1, int(per_target.get(name) or b.get("replicas", 1)))
+            if results.get(name, {}).get("status") == "PASS" and int(results[name].get("replicas") or 1) >= want:
                 continue
             case = self.project.case(runs[key]["case_id"])
             bm = load_json(case.build_dir / "build_manifest.json", {})
@@ -1605,7 +1615,7 @@ class Workflow:
                 if not orec or not orec.get("heavy_atom_indices"):
                     self._block("binding", f"{name}：共同口袋中的配體 {o} 沒有原子索引，無法檢查拉離路徑。")
                 others[o] = orec["heavy_atom_indices"]
-            n_rep = max(1, int(b.get("replicas", 1)))
+            n_rep = want
             md_runs = runs[key]["run_ids"]
             reps, paused = [], False
             for i in range(n_rep):
@@ -1613,9 +1623,9 @@ class Workflow:
                 rdir = case.dir / "runs" / md_runs[i % len(md_runs)]
                 rcfg = BindingConfig(**{**cfg.to_dict(), "seed": cfg.seed + 1000 * i,
                                         "extra_windows": list((b.get("manual_windows") or {}).get(name, []))})
-                odir = self.dir / "binding" / name.replace(":", "_")
+                odir = binding_replica_dir(self.dir / "binding" / name.replace(":", "_"), i, n_rep)
                 res = run_binding(bm["system_xml"], bm["topology_pdb"], rdir / "stages" / "production" / "production_state.xml",
-                                  odir if n_rep == 1 else odir / f"rep{i + 1}",
+                                  odir,
                                   ligand_indices=lrec["heavy_atom_indices"], ligand_resname=mname, config=rcfg, platform_name=platform.name,
                                   platform_properties=platform.properties, decisions=self.dec, should_pause=should_pause,
                                   progress_cb=progress_cb, other_ligand_indices=others or None)
@@ -1640,6 +1650,7 @@ class Workflow:
             if len(reps) > 1:
                 self.dec.record("binding.replicas", name, f"{len(reps)} replicas", agg["why"])
             results[name] = {"status": "PASS", "ligand": t["ligand"], "context": "single" if not t["others"] else f"multi:{key}",
+                             "finished_at": now_iso(),
                              "co_ligands": t["others"], "replicas": len(reps), "delta_pmf_kj_mol": agg["delta_pmf"],
                              "delta_pmf_err_kj_mol": agg["delta_pmf_err"],
                              "dG_standard_kj_mol": dG, "dG_err_kj_mol": agg["dG_err"] if dG is not None else None,
@@ -1888,6 +1899,16 @@ class Workflow:
         rep = build_workflow_report(self)
         self._mark("report", path=str(rep))
         return {"status": "COMPLETE", "report": str(rep), "analysis": summ}
+
+
+def binding_replica_dir(base: Path, i: int, n_rep: int) -> Path:
+    """Output folder of SMD/umbrella replica i (0-based) of one target.  One replica: the target folder itself (as
+    before D-87).  When a target that ran once gets more runs, its first run stays where it is (no recomputation)
+    and the new ones go to rep2, rep3 …; a target planned with several runs uses rep1, rep2 …"""
+    legacy = (base / "binding_manifest.json").is_file()
+    if i == 0 and (n_rep == 1 or legacy):
+        return base
+    return base / f"rep{i + 1}"
 
 
 # ---------------------------------------------------------------------- resume support (WP11)

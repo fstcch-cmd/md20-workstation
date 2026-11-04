@@ -269,10 +269,120 @@ def apply_gate_action(wf, action: dict, text: str = "") -> dict:
 
 # ------------------------------------------------------------------------------- umbrella: manual range resampling
 def binding_dirs(wf, target: str) -> list:
+    """Every finished or started SMD/umbrella run of one target: the target folder itself (single run, or the first
+    run kept in place when more were added, D-87) and rep1, rep2 …"""
     from pathlib import Path
     tdir = Path(wf.dir) / "binding" / target.replace(":", "_")
-    reps = sorted(p for p in tdir.glob("rep*") if p.is_dir())
-    return reps or ([tdir] if tdir.is_dir() else [])
+    reps = sorted((p for p in tdir.glob("rep*") if p.is_dir()), key=lambda p: int(p.name[3:] or 0) if p.name[3:].isdigit() else 0)
+    first = [tdir] if (tdir / "binding_manifest.json").is_file() else []
+    return first + reps or ([tdir] if tdir.is_dir() else [])
+
+
+# ------------------------------------------------------------------------------- D-87: binding targets after the report
+CONTEXT_TEXT = {"single": ("單獨與蛋白結合", "bound alone", "単独で結合", "단독 결합"),
+                "multi": ("其他配體都在口袋裡", "with the other ligands in the pocket", "ほかのリガンドもポケットにある状態",
+                          "다른 리간드도 포켓에 있는 상태")}
+
+
+def binding_candidates(wf) -> list[dict]:
+    """Every ligand that can be pulled, from the finished MD cases: target key, ligand, context, MD done or not, and
+    what has been computed so far (status, runs, ΔG°)."""
+    st = wf.state()["steps"]
+    cases = (st.get("md_cases") or {}).get("cases") or {}
+    runs = (st.get("md_runs") or {}).get("runs") or {}
+    res = (st.get("binding") or {}).get("results") or {}
+    b = wf.cfg.get("binding") or {}
+    added = set(b.get("added") or [])
+    wanted = set(b.get("ligands") or [])
+    out = []
+    for key, c in cases.items():
+        mode = c.get("mode")
+        if mode not in ("docked_single", "docked_multi"):
+            continue
+        for n in c.get("ligands") or []:
+            tk = n if mode == "docked_single" else f"multi:{n}"
+            r = res.get(tk) or {}
+            planned = tk in added or (b.get("enabled") and (not wanted or n in wanted)
+                                      and (mode == "docked_single" or b.get("multi", True)))
+            out.append({"target": tk, "ligand": n, "case": key, "context": "single" if mode == "docked_single" else "multi",
+                        "co_ligands": [m for m in c.get("ligands") or [] if m != n],
+                        "md_complete": (runs.get(key) or {}).get("status") == "COMPLETE",
+                        "status": r.get("status") or ("PLANNED" if planned else "NOT_STARTED"),
+                        "runs": int(r.get("replicas") or 0), "dG_kj": r.get("dG_standard_kj_mol"),
+                        "dG_err": r.get("dG_err_kj_mol"), "dG_withheld": r.get("dG_withheld"),
+                        "delta_pmf": r.get("delta_pmf_kj_mol"), "finished_at": r.get("finished_at")})
+    return out
+
+
+def _reopen_binding(wf) -> None:
+    """Keep every finished target, mark the binding step pending and drop only the report."""
+    st = wf.state()
+    b = st["steps"].get("binding")
+    if b:
+        b["status"] = "PENDING"
+    st["steps"].pop("report", None)
+    atomic_write_json(st, wf.state_path)
+
+
+def add_binding_targets(wf, targets: list[str], note: str = "") -> dict:
+    """The student picks one or more ligands to pull after the MD (or after the report): they go to
+    `binding.added`; finished targets and their windows are kept; the next run computes only the new ones and
+    rebuilds the report with all of them."""
+    cand = {c["target"]: c for c in binding_candidates(wf)}
+    targets = [t for t in targets if t]
+    bad = [t for t in targets if t not in cand]
+    if not targets or bad:
+        raise ValueError("沒有可以計算的配體：" + ", ".join(bad) if bad else "請至少選一個配體")
+    not_ready = [t for t in targets if not cand[t]["md_complete"]]
+    if not_ready:
+        raise ValueError("這些配體的分子動力學還沒跑完，請先完成 MD：" + ", ".join(not_ready))
+    cfg = load_json(wf.dir / "config.json", wf.cfg)
+    b = cfg.setdefault("binding", {})
+    b["added"] = sorted(set(b.get("added") or []) | set(targets))
+    if any(t.startswith("multi:") for t in targets):
+        b["multi"] = True
+    atomic_write_json(cfg, wf.dir / "config.json")
+    wf.cfg = cfg
+    _reopen_binding(wf)
+    ctx = "；".join(f"{t}（{CONTEXT_TEXT[cand[t]['context']][0]}" +
+                   (f"，共存：{', '.join(cand[t]['co_ligands'])}" if cand[t]["co_ligands"] else "") + "）" for t in targets)
+    wf.dec.record("gui.binding", "add targets", targets,
+                  f"使用者加做結合自由能（SMD＋傘狀採樣）：{ctx}。已完成的目標與其 window 保留不重算，報告重新整理後納入全部結果。"
+                  + (f" 使用者備註：{note}" if note else ""), kind="human")
+    return {"added": targets, "config": cfg}
+
+
+def add_smd_run(wf, target: str, note: str = "") -> dict:
+    """One more independent SMD/umbrella run of a finished target (new seed, starting from the next MD replica):
+    the earlier runs are reused, the new one is added, ΔG° becomes the mean over all runs with their spread."""
+    res = ((wf.state()["steps"].get("binding") or {}).get("results") or {}).get(target)
+    if not res or res.get("status") != "PASS":
+        raise ValueError(f"{target} 還沒有完成的結合自由能結果；先完成第一次")
+    n = int(res.get("replicas") or 1) + 1
+    cfg = load_json(wf.dir / "config.json", wf.cfg)
+    b = cfg.setdefault("binding", {})
+    b.setdefault("target_replicas", {})[target] = n
+    if not b.get("enabled") and target not in (b.get("added") or []):
+        b["added"] = sorted(set(b.get("added") or []) | {target})
+    atomic_write_json(cfg, wf.dir / "config.json")
+    wf.cfg = cfg
+    _reopen_binding(wf)
+    wf.dec.record("gui.binding", target, f"run {n}",
+                  f"使用者為 {target} 加做第 {n} 次獨立的 SMD＋傘狀採樣（新的亂數種子）。前 {n - 1} 次保留，報告的 ΔG° 改為全部 "
+                  f"{n} 次的平均與誤差（取重複間標準誤與 bootstrap 合併誤差的較大者）。" + (f" 使用者備註：{note}" if note else ""),
+                  kind="human")
+    return {"target": target, "runs": n}
+
+
+def refresh_report(wf, lang: str | None = None):
+    """Rebuild the report from what is on disk (no calculation); used after targets were added or runs finished."""
+    from ..report.workflow_report import build_workflow_report
+    from ..util import now_iso
+    path = build_workflow_report(wf, lang=lang)
+    st = wf.state()
+    st["steps"]["report"] = {"status": "PASS", "path": str(path), "at": now_iso()}
+    atomic_write_json(st, wf.state_path)
+    return path
 
 
 def load_windows(odir) -> tuple[dict, dict]:

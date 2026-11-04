@@ -968,6 +968,10 @@ def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None) ->
     return out
 
 
+_CTX_TEXT = {"single": ("單獨結合", "Alone", "単独", "단독"),
+             "multi": ("與其他配體共存", "With the other ligands", "ほかのリガンドと共存", "다른 리간드와 공존")}
+
+
 def _binding(doc: Doc, wf, vals, f, goal) -> str:
     doc.section = tx(SECTION["binding"]["title"], doc.lang)
     L = doc.lang
@@ -982,15 +986,35 @@ def _binding(doc: Doc, wf, vals, f, goal) -> str:
     trs = [[_esc(n), pm(r.get("delta_pmf_kj_mol"), r.get("delta_pmf_err_kj_mol")),
             pm(r.get("dG_standard_kj_mol"), r.get("dG_err_kj_mol")) if r.get("dG_standard_kj_mol") is not None else tx(("不輸出", "not reported", "出力しない", "출력 안 함"), L),
             _fmt(r.get("dG_standard_kcal_mol"), 1) if r.get("dG_standard_kcal_mol") is not None else "—",
-            _fmt(r.get("r_min_nm"), 3), _fmt(r.get("max_force"), 0), _fmt(r.get("work"), 1)] for n, r in b.items()]
+            _fmt(r.get("r_min_nm"), 3), _fmt(r.get("max_force"), 0), _fmt(r.get("work"), 1),
+            _esc(tx(_CTX_TEXT["multi" if str(r.get("context", "")).startswith("multi") else "single"], L)),
+            str(r.get("replicas") or 1)] for n, r in b.items() if r.get("status", "PASS") == "PASS"]
     out = doc.table([tx(("配體", "Ligand", "リガンド", "리간드"), L), "ΔPMF (kJ mol⁻¹)", "ΔG° (kJ mol⁻¹)", "ΔG° (kcal mol⁻¹)",
                      tx(("結合距離（nm）", "Bound distance (nm)", "結合距離（nm）", "결합 거리 (nm)"), L),
                      tx(("SMD 最大拉力（kJ mol⁻¹ nm⁻¹）", "SMD peak force (kJ mol⁻¹ nm⁻¹)", "SMD の最大の力（kJ mol⁻¹ nm⁻¹）", "SMD 최대 힘 (kJ mol⁻¹ nm⁻¹)"), L),
-                     tx(("SMD 功（kJ mol⁻¹）", "SMD work (kJ mol⁻¹)", "SMD の仕事（kJ mol⁻¹）", "SMD 일 (kJ mol⁻¹)"), L)],
-                    trs, ("結合自由能結果", "Binding free-energy results", "結合自由エネルギーの結果", "결합 자유 에너지 결과"), {1, 2, 3, 4, 5, 6})
+                     tx(("SMD 功（kJ mol⁻¹）", "SMD work (kJ mol⁻¹)", "SMD の仕事（kJ mol⁻¹）", "SMD 일 (kJ mol⁻¹)"), L),
+                     tx(("情境", "Context", "状況", "상황"), L), tx(("SMD 次數", "SMD runs", "SMD の回数", "SMD 횟수"), L)],
+                    trs, ("結合自由能結果", "Binding free-energy results", "結合自由エネルギーの結果", "결합 자유 에너지 결과"), {1, 2, 3, 4, 5, 6, 8})
     start = len(doc.collected)
     for name, r in b.items():
+        if r.get("status", "PASS") != "PASS":
+            continue
         out += f"<h3>{_esc(name)}</h3>"
+        per = r.get("per_replica") or []
+        if len(per) > 1:          # D-87: every SMD/umbrella run of this target, then the combined value above
+            prs = [[str(i + 1), pm(p_.get("delta_pmf_kj_mol"), p_.get("delta_pmf_err_kj_mol")),
+                    pm(p_.get("dG_standard_kj_mol"), p_.get("dG_err_kj_mol")) if p_.get("dG_standard_kj_mol") is not None else "—"]
+                   for i, p_ in enumerate(per)]
+            out += doc.table([tx(("第幾次", "Run", "回", "회차"), L), "ΔPMF (kJ mol⁻¹)", "ΔG° (kJ mol⁻¹)"], prs,
+                             ("各次 SMD＋傘狀採樣", "Each SMD and umbrella-sampling run", "各回の SMD と傘サンプリング",
+                              "각 회차의 SMD와 우산 샘플링"), {1, 2})
+            out += "<p>" + _esc(tx((f"上表 {len(per)} 次各自獨立（不同亂數種子、不同 MD 起點）；結果表的數值是平均，誤差取重複之間的標準誤與 bootstrap 合併誤差的較大者。",
+                                    f"The {len(per)} runs above are independent (different seeds and MD starting points). The results table gives "
+                                    "their mean; its error is the larger of the standard error between runs and the combined bootstrap error.",
+                                    f"上の {len(per)} 回はそれぞれ独立です（乱数の種と MD の出発点が異なる）。結果表の値は平均で、誤差は回どうしの標準誤差と"
+                                    "ブートストラップを合わせた誤差の大きい方です。",
+                                    f"위의 {len(per)}회는 서로 독립입니다(난수 시드와 MD 출발점이 다름). 결과 표의 값은 평균이며, 오차는 회차 간 표준오차와 "
+                                    "부트스트랩 합산 오차 중 큰 쪽입니다."), L)) + "</p>"
         out += _binding_figures(doc, name, r)
         if r.get("dG_withheld"):
             out += (f"<p class=warn>{_esc(tx(('ΔG° 不輸出的原因', 'Why ΔG° is not reported', 'ΔG° を出力しない理由', 'ΔG°를 출력하지 않는 이유'), L))}"

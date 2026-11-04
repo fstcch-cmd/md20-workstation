@@ -238,6 +238,11 @@ def _screen_label(a: dict | None, lang: str = "en") -> str:
 
 
 def list_workflows(projects_dir: Path) -> list[dict]:
+    """Every workflow saved under the projects folder, newest first (D-87: found again after the GUI was closed).
+    status: COMPLETE (report written), NEEDS_HUMAN, INCOMPLETE (stopped part-way: press Run/continue), NEW;
+    `interrupted`: the last owner process is gone although no report exists (window closed or computer restarted)."""
+    from ..workflow import workflow_status
+    from ..util.locks import OwnerLock
     out = []
     root = Path(projects_dir)
     if not root.is_dir():
@@ -247,11 +252,23 @@ def list_workflows(projects_dir: Path) -> list[dict]:
         if not wroot.is_dir():
             continue
         for w in sorted(wroot.iterdir()):
+            if not (w / "config.json").is_file():
+                continue
             st = load_json(w / "state.json", {})
             steps = st.get("steps", {})
             last = max(steps.items(), key=lambda kv: kv[1].get("at", ""), default=(None, {}))
-            out.append({"project": pdir.name, "workflow": w.name, "last_step": last[0] or "—", "status": last[1].get("status", "—"),
-                        "updated": to_local(st.get("updated_at", ""))})
+            status = workflow_status(st)
+            lock = load_json(w / "running.json", {})
+            running = bool(lock.get("pid")) and OwnerLock._alive(lock["pid"])
+            rep = (steps.get("report") or {}).get("path") or ""
+            bres = (steps.get("binding") or {}).get("results") or {}
+            out.append({"project": pdir.name, "workflow": w.name, "last_step": last[0] or "—",
+                        "status": "RUNNING" if running else status, "step_status": last[1].get("status", "—"),
+                        "updated": to_local(st.get("updated_at", "")), "updated_iso": st.get("updated_at", ""),
+                        "has_report": bool(rep) and Path(rep).is_file(),
+                        "binding_done": sum(1 for v in bres.values() if v.get("status") == "PASS"),
+                        "interrupted": bool(lock.get("pid")) and not running and status != "COMPLETE"})
+    out.sort(key=lambda r: r["updated_iso"] or "", reverse=True)
     return out
 
 
@@ -329,8 +346,9 @@ def config_from_mode(*, mode: str, name: str, values: dict, pdb_id: str = "", re
                      ligands_text: str = "", box_residue: str = "", box_center: str = "", box_size: str = "",
                      systems: list[str] | None = None, ph: float = 7.4, keep_hetero: str = "", goal: str = "teaching",
                      library_file: str = "", lang: str = "en", advanced: dict | None = None,
-                     quick_fold: list | set | None = None) -> dict:
-    """Quick or pro form → workflow config.  `values` are the advisor parameters (already merged with the
+                     quick_fold: list | set | None = None, binding_ligands: list | None = None) -> dict:
+    """Quick or pro form → workflow config.  `binding_ligands`: the ligands to pull (SMD + umbrella); empty → every
+    ligand for single-ligand systems, the first one when only the all-ligands system is simulated (D-87).  `values` are the advisor parameters (already merged with the
     recommendation); the GUI always asks before molecular dynamics (confirm_before_md).
     `advanced`: membrane, folding and long-run settings of the professional form (gui/advanced.py);
     `quick_fold`: peptide names ticked "fold this peptide" in quick mode."""
@@ -383,8 +401,14 @@ def config_from_mode(*, mode: str, name: str, values: dict, pdb_id: str = "", re
         v["docking_mode"] = "independent"
     cfg = advisor.apply(v, cfg)
     cfg["md"]["systems"] = systems
-    cfg["binding"]["enabled"] = bool(v.get("binding")) and bool(ligs) and "docked_single" in systems
-    cfg["binding"]["ligands"] = [l["name"] for l in ligs] if cfg["binding"]["enabled"] else []
+    # D-87: binding also from the all-ligands complex (each chosen ligand pulled while the others stay in the pocket)
+    cfg["binding"]["enabled"] = bool(v.get("binding")) and bool(ligs) and any(s in systems for s in ("docked_single", "docked_multi"))
+    names = [l["name"] for l in ligs]
+    chosen = [n for n in (binding_ligands or []) if n in names]
+    if cfg["binding"]["enabled"] and not chosen:
+        chosen = names if "docked_single" in systems else names[:1]
+    cfg["binding"]["ligands"] = chosen if cfg["binding"]["enabled"] else []
+    cfg["binding"]["multi"] = "docked_multi" in systems
     if library_file:
         cfg["screen"] = {"library": library_file, "exhaustiveness": 8, "n_poses": 3, "top_n": 20, "allow_partial": False,
                          "allow_name_lookup": False, "select": [], "next_mode": v.get("docking_mode", "independent")}

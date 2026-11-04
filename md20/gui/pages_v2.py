@@ -77,18 +77,34 @@ def home():
         if not rows:
             ui.label(t("no_recent", L)).classes("md20-muted")
         else:
-            cols = [{"name": "project", "label": t("project_name", L), "field": "project", "align": "left"},
-                    {"name": "workflow", "label": t("workflow_name", L), "field": "workflow", "align": "left"},
+            # D-87: every saved workflow is found again after the GUI is closed; newest first, searchable
+            ui.label(t("recent_help", L, folder=str(STATE["projects_dir"]))).classes("md20-why")
+            cols = [{"name": "project", "label": t("project_name", L), "field": "project", "align": "left", "sortable": True},
+                    {"name": "workflow", "label": t("workflow_name", L), "field": "workflow", "align": "left", "sortable": True},
+                    {"name": "status", "label": t("status", L), "field": "status", "align": "left", "sortable": True},
                     {"name": "last_step", "label": t("step", L), "field": "last_step", "align": "left"},
-                    {"name": "status", "label": t("status", L), "field": "status", "align": "left"},
-                    {"name": "updated", "label": t("time", L), "field": "updated", "align": "left"}]
+                    {"name": "report", "label": t("open_report", L), "field": "report", "align": "left"},
+                    {"name": "binding", "label": "ΔG°", "field": "binding", "align": "left"},
+                    {"name": "updated", "label": t("time", L), "field": "updated", "align": "left", "sortable": True}]
             from .app import STEP_TEXT, STATUS_TEXT, no_data
             from ..i18n import pick
+            extra = {"INCOMPLETE": ("未完成，可以繼續", "Not finished, can continue", "未完了、続けられます", "미완료, 이어서 가능"),
+                     "NEW": ("尚未開始", "Not started", "未開始", "시작 전")}
+
+            def status_text(r):
+                k = r["status"]
+                txt = pick(STATUS_TEXT.get(k) or extra.get(k) or (k,) * 4, L)
+                if r.get("interrupted"):
+                    txt += " · " + pick(("上次中斷", "interrupted last time", "前回中断", "지난번 중단"), L)
+                return txt
             shown = [{**r, "key": f"{r['project']}/{r['workflow']}",
                       "last_step": pick(STEP_TEXT[r["last_step"]], L) if r["last_step"] in STEP_TEXT else r["last_step"],
-                      "status": pick(STATUS_TEXT[r["status"]], L) if r["status"] in STATUS_TEXT else r["status"]}
-                     for r in rows[-20:][::-1]]
-            tbl = ui.table(columns=cols, rows=shown, row_key="key").props(no_data()).classes("w-full md20-card")
+                      "status": status_text(r), "report": "✔" if r.get("has_report") else "—",
+                      "binding": str(r["binding_done"]) if r.get("binding_done") else "—"}
+                     for r in rows]
+            flt = ui.input(t("search", L)).props("clearable dense data-testid=recent-search").classes("w-72")
+            tbl = ui.table(columns=cols, rows=shown, row_key="key", pagination=15).props(no_data()).classes("w-full md20-card")
+            flt.bind_value_to(tbl, "filter")
             tbl.on("rowClick", lambda e: ui.navigate.to(f"/wf/{e.args[1]['project']}/{e.args[1]['workflow']}"))
 
 
@@ -297,6 +313,10 @@ def _form(mode: str, expand_all: bool = False):
                 w.on("blur", lambda: refresh())
             systems = ui.select({"apo": t("sys_apo", L), "docked_single": t("sys_single", L), "docked_multi": t("sys_multi", L)},
                                 value=["apo", "docked_single"], multiple=True, label=t("systems", L)).classes("w-full")
+            # D-87: which ligands get SMD + umbrella sampling (options follow the ligand box)
+            bind_sel = ui.select([], value=[], multiple=True, label=t("binding_ligands", L)).props(
+                "use-chips data-testid=binding-ligands").classes("w-full")
+            ui.label(t("binding_ligands_help", L)).classes("md20-why")
         with ui.card().classes("w-full md20-card p-4"):
             ui.label(t("hts", L)).classes("md20-section")
             ui.label(t("hts_help", L)).classes("md20-why")
@@ -512,6 +532,9 @@ def _form(mode: str, expand_all: bool = False):
         vals = current_values(f)
         issues = advisor.check(vals, f, goal=state["goal"], lang=L)
         draft = draft_cfg()
+        names = [l["name"] for l in draft["ligands"] if isinstance(l, dict) and l.get("name")]
+        if list(bind_sel.options or []) != names:
+            bind_sel.set_options(names, value=[n for n in (bind_sel.value or []) if n in names])
         if not pro:
             render_quick_fold(draft["ligands"])
         issues += A.advanced_checks(adv_values(for_checks=True), ligands=draft["ligands"],
@@ -573,7 +596,8 @@ def _form(mode: str, expand_all: bool = False):
                                    box_residue=box_res.value or "", box_center=box_c.value or "", box_size=box_s.value or "",
                                    systems=list(systems.value or []), ph=float(ph.value or 7.4), keep_hetero=keep.value or "",
                                    goal=state["goal"], library_file=Path(state["library_file"]).name if state["library_file"] else "",
-                                   lang=L, advanced=adv_values(), quick_fold=set(state["quick_fold"]))
+                                   lang=L, advanced=adv_values(), quick_fold=set(state["quick_fold"]),
+                                   binding_ligands=list(bind_sel.value or []))
         except ValueError as exc:
             err.set_text(str(exc)); return
         proj = _project(project.value or "Projects")

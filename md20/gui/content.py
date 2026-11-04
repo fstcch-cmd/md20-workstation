@@ -33,6 +33,18 @@ UI = {
                    "선택할 수 있는 방법을 보여 줍니다."),
     "choose_mode": ("選擇工作模式", "Choose a mode", "モードを選択", "모드 선택"),
     "recent": ("最近的流程", "Recent workflows", "最近のワークフロー", "최근 워크플로"),
+    "recent_help": ("這裡列出 {folder} 裡所有存過的流程，最新的在上面。點一列就回到那個流程：未完成的按「開始或繼續」會從中斷處接著跑，"
+                    "完成的可以看報告、加做結合自由能或重新整理報告。",
+                    "Every workflow saved in {folder}, newest first. Click a row to go back to it: an unfinished one continues "
+                    "from where it stopped when you press Start or continue; a finished one lets you open the report, add binding "
+                    "free energy for more ligands, or rebuild the report.",
+                    "{folder} に保存したすべてのワークフローを新しい順に並べています。行をクリックするとそのワークフローに戻ります。"
+                    "未完了のものは「開始または再開」を押すと中断したところから続き、完了したものはレポートを開く、結合自由エネルギーを"
+                    "追加する、レポートを作り直すことができます。",
+                    "{folder}에 저장된 모든 워크플로를 최신순으로 보여 줍니다. 행을 클릭하면 그 워크플로로 돌아갑니다. 미완료 "
+                    "워크플로는 '시작 또는 계속'을 누르면 멈춘 곳부터 이어서 진행하고, 완료된 워크플로는 보고서 열기, 결합 자유 에너지 "
+                    "추가, 보고서 다시 만들기를 할 수 있습니다."),
+    "search": ("搜尋專案或流程", "Search projects or workflows", "プロジェクトやワークフローを検索", "프로젝트 또는 워크플로 검색"),
     "no_recent": ("還沒有流程。", "No workflows yet.", "ワークフローはまだありません。", "아직 워크플로가 없습니다."),
     "open": ("開啟", "Open", "開く", "열기"), "start": ("開始", "Start", "開始", "시작"),
     "create_start": ("建立並開始", "Create and start", "作成して開始", "생성 후 시작"),
@@ -72,6 +84,24 @@ UI = {
                   "空欄にするとタンパク質全体を探索します。これはブラインドドッキングで、結果の信頼性は低くなります。",
                   "비워 두면 단백질 전체를 탐색합니다. 이는 블라인드 도킹이며 결과의 신뢰도가 낮습니다."),
     "goal": ("研究目標", "Study goal", "研究の目的", "연구 목표"),
+    "binding_ligands": ("要計算結合自由能（SMD＋傘狀採樣）的配體", "Ligands for binding free energy (SMD and umbrella sampling)",
+                        "結合自由エネルギー（SMD と傘サンプリング）を計算するリガンド", "결합 자유 에너지(SMD와 우산 샘플링)를 계산할 리간드"),
+    "binding_ligands_help": ("每個配體各要跑一次 SMD 與傘狀採樣，很花時間。不選就用預設：單一配體系統全部計算，只有多配體系統時只算第一個。"
+                             "在多配體系統裡拉一個配體時，其他配體留在口袋裡，結果是「共存時」的結合強度，不能和單獨結合直接比。"
+                             "做完報告後，也可以在流程頁再加做其他配體。",
+                             "Each ligand needs its own SMD and umbrella sampling, which takes time. Leave it empty for the default: "
+                             "every ligand with single-ligand systems, the first one when only the all-ligands system runs. In the "
+                             "all-ligands system the other ligands stay in the pocket while one is pulled, so the result is the "
+                             "binding strength in their presence and cannot be compared directly with binding alone. More ligands "
+                             "can be added on the workflow page after the report.",
+                             "リガンドごとに SMD と傘サンプリングを 1 回ずつ行うので時間がかかります。空欄なら既定値です。単一リガンドの系は全部、"
+                             "全リガンドの系だけのときは最初の 1 つを計算します。全リガンドの系で 1 つを引き離すとき、ほかのリガンドはポケットに残るので、"
+                             "結果は「共存しているとき」の結合の強さで、単独の結合とは直接比べられません。レポートの後でも、ワークフローのページで"
+                             "ほかのリガンドを追加できます。",
+                             "리간드마다 SMD와 우산 샘플링을 한 번씩 하므로 시간이 걸립니다. 비워 두면 기본값입니다. 단일 리간드 계는 모두, "
+                             "모든 리간드 계만 있으면 첫 번째 하나를 계산합니다. 모든 리간드 계에서 하나를 당길 때 다른 리간드는 포켓에 남으므로 "
+                             "결과는 '함께 있을 때'의 결합 세기이며 단독 결합과 직접 비교할 수 없습니다. 보고서 뒤에도 워크플로 페이지에서 "
+                             "다른 리간드를 추가할 수 있습니다."),
     "systems": ("要模擬的系統", "Systems to simulate", "シミュレーションする系", "시뮬레이션할 시스템"),
     "sys_apo": ("只有蛋白（對照）", "Protein alone (reference)", "タンパク質のみ（対照）", "단백질만(대조)"),
     "sys_single": ("每個配體分別與蛋白", "Each ligand with the protein", "リガンドごとにタンパク質と", "리간드별로 단백질과 함께"),
