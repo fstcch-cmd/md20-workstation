@@ -50,6 +50,68 @@ def pull_path_blockers(anchor_com: np.ndarray, ligand_xyz: np.ndarray, others: d
     return out
 
 
+def sphere_directions(n: int = 600) -> np.ndarray:
+    """Unit vectors spread evenly over the whole sphere (Fibonacci lattice)."""
+    i = np.arange(n) + 0.5
+    z = 1.0 - 2.0 * i / n
+    r = np.sqrt(np.maximum(0.0, 1.0 - z * z))
+    phi = i * math.pi * (3.0 - math.sqrt(5.0))
+    return np.stack([r * np.cos(phi), r * np.sin(phi), z], axis=1)
+
+
+def _in_cylinder(points: np.ndarray, origin: np.ndarray, u: np.ndarray, length: float, radius: float) -> np.ndarray:
+    v = np.asarray(points, float) - origin
+    t = v @ u
+    perp = np.linalg.norm(v - np.outer(t, u), axis=1)
+    return (t > 0) & (t < length) & (perp < radius)
+
+
+def find_exit_direction(ligand_xyz: np.ndarray, others: dict[str, np.ndarray], protein_xyz: np.ndarray, *,
+                        pull_distance_nm: float, default_u: np.ndarray | None = None, clearance_nm: float = 0.35,
+                        n_dirs: int = 600) -> dict | None:
+    """D-92: when the default exit (pocket anchor → ligand) runs through another ligand, look for the exit that
+    crosses no other ligand and the fewest protein heavy atoms (the open mouth of the pocket).  Ties go to the
+    direction closest to the default.  None when every direction passes through another ligand."""
+    lig_com = ligand_xyz.mean(0)
+    radius = (float(np.max(np.linalg.norm(ligand_xyz - lig_com, axis=1))) if len(ligand_xyz) > 1 else 0.0) + clearance_nm
+    oth = np.concatenate([np.asarray(v, float) for v in others.values()]) if others else np.zeros((0, 3))
+    prot = np.asarray(protein_xyz, float) if protein_xyz is not None and len(protein_xyz) else np.zeros((0, 3))
+    d0 = None if default_u is None else np.asarray(default_u, float) / max(np.linalg.norm(default_u), 1e-9)
+    best = None
+    for u in sphere_directions(n_dirs):
+        if len(oth) and _in_cylinder(oth, lig_com, u, pull_distance_nm, radius).any():
+            continue
+        n_prot = int(_in_cylinder(prot, lig_com, u, pull_distance_nm, radius).sum()) if len(prot) else 0
+        ang = float(np.degrees(np.arccos(np.clip(u @ d0, -1, 1)))) if d0 is not None else 0.0
+        key = (n_prot, ang)
+        if best is None or key < best[0]:
+            best = (key, u)
+    if best is None:
+        return None
+    (n_prot, ang), u = best
+    return {"u": u, "protein_atoms_in_path": n_prot, "angle_from_default_deg": round(ang, 1), "radius_nm": round(radius, 3)}
+
+
+def anchor_for_direction(ca_idx: np.ndarray, ca_xyz: np.ndarray, ligand_com: np.ndarray, u: np.ndarray, *,
+                         lateral_nm: float = 0.9, min_atoms: int = 4, max_angle_deg: float = 25.0) -> dict | None:
+    """Cα atoms behind the ligand along −u, so that the anchor COM → ligand COM vector points along u (the CV pulls the
+    ligand out that way).  Widens the lateral window until at least `min_atoms` are found; None if the resulting
+    direction is more than `max_angle_deg` off."""
+    v = np.asarray(ca_xyz, float) - ligand_com
+    t = v @ u
+    perp = np.linalg.norm(v - np.outer(t, u), axis=1)
+    for lat in (lateral_nm, lateral_nm * 1.3, lateral_nm * 1.7):
+        sel = (t < -0.3) & (t > -2.0) & (perp < lat)
+        if sel.sum() >= min_atoms:
+            com = ca_xyz[sel].mean(0)
+            w = ligand_com - com
+            ang = float(np.degrees(np.arccos(np.clip((w / max(np.linalg.norm(w), 1e-9)) @ u, -1, 1))))
+            if ang <= max_angle_deg:
+                return {"anchor_indices": [int(i) for i in np.asarray(ca_idx)[sel]], "angle_deg": round(ang, 1),
+                        "lateral_nm": round(lat, 2)}
+    return None
+
+
 def _sig(a: float | None, b: float | None) -> float | None:
     if a is None or b is None:
         return None

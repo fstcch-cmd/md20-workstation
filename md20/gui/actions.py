@@ -48,6 +48,9 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
     m = re.match(r"md\.restraints:\s*(standard|gentle|hold_backbone)\b", option)
     if m:
         return _act(option, [{"path": ["md", "restraints"], "value": m.group(1)}], "md_runs")
+    if name in ("binding path", "binding target") and ev.get("target") and option.startswith("略過 "):
+        # D-92: leave this target out and go on with the others; finished targets are reused from their files
+        return _act(option, [{"path": ["binding", "skip_targets", ev["target"]], "value": True}], "binding")
     if option.startswith("binding.enabled: false"):
         return _act(option, [{"path": ["binding", "enabled"], "value": False}], "binding")
     # pocket metal before docking: "metal_policy: {ZN: bonded}…"
@@ -339,6 +342,9 @@ def add_binding_targets(wf, targets: list[str], note: str = "") -> dict:
     cfg = load_json(wf.dir / "config.json", wf.cfg)
     b = cfg.setdefault("binding", {})
     b["added"] = sorted(set(b.get("added") or []) | set(targets))
+    if isinstance(b.get("skip_targets"), dict):           # choosing a skipped target again brings it back (D-92)
+        for t_ in targets:
+            b["skip_targets"].pop(t_, None)
     if any(t.startswith("multi:") for t in targets):
         b["multi"] = True
     atomic_write_json(cfg, wf.dir / "config.json")

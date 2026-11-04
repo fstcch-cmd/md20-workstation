@@ -110,3 +110,16 @@ D-61：`tests/test_softcore.py`（OpenMM：軟核解開穿環、保持限制在�
 - 被否決：整段重開 binding 步驟（會丟掉已完成目標的狀態）；每次加做都另開新流程（MD 要重跑，報告也分散）。
 - 測試：`tests/test_binding_targets.py`、`tests/test_report_v2.py::test_report_combines_several_smd_runs`。未驗證：實際 GPU 上多配體 SMD 的時間；GUI 面板以 CI 的 GUI 測試確認可開啟。
 
+## 十一、拉離路徑被其他配體擋住時自動改道（D-92，2026-11-04）
+- 使用者（11/04 11:26，筆電截圖）：hsieh2024 的 `multi:URI` 停在「拉離路徑被其他配體擋住：ALC 4 個、MAL 5 個重原子在圓柱內」，列了三個選項，但「我也不能決定什麼、也無法進行調整」。三個選項都只是文字，沒有一個能在介面上執行。
+- 原因：自動 anchor 是配體附近 0.8 nm 內的 Cα，拉離方向是「anchor 質心 → 配體質心」。共同口袋裡，這條線常穿過另一個配體。
+- 決定（`sampling/binding._reroute_exit`、`sampling/multi.find_exit_direction`、`anchor_for_direction`）：
+  1. 只在 anchor 是自動選的、且原方向被擋時啟動；使用者自己指定 anchor 就不動。
+  2. 在 600 個均勻分布的方向中，排除拉離圓柱（長度 = 拉離距離，半徑 = 配體半徑 + 0.35 nm）內有其他配體重原子的方向；其餘取圓柱內蛋白重原子最少者（口袋開口），同分取最接近原方向者。
+  3. anchor 改為配體「後方」的 Cα：沿 −u 0.3 到 2.0 nm、離軸 0.9 nm 內（不足 4 個時放寬到 1.2、1.5 nm），要求 anchor → 配體方向與 u 夾角 ≤ 25°，並以新 anchor 重做路徑檢查，必須淨空才採用。
+  4. 在 DecisionLog 記為 AUTO_FIXED，寫明原本擋住的配體、改道角度、路徑上的蛋白原子數與新 anchor；`binding_manifest.json` 的 `reroute` 保存同樣內容。
+  5. 找不到淨空出口才停下來；閘門 `binding path` 有可以按的選項「略過這個配體，先算其他配體」（`binding.skip_targets`），與「只做 MD」。之後在結合自由能面板再選這個配體，會取消略過。
+- 科學說明：PMF 是沿這條路徑的距離 CV 量的；不同出口的能障可能不同，但結合自由能（ΔG°）是狀態函數，前提是路徑可逆、採樣收斂，報告的收斂檢查照常判斷。穿過另一個配體得到的是推開它的功，所以那種方向一律排除。
+- 被否決：直接沿原方向拉並加註（數值不是本配體的結合自由能）；要使用者手動輸入 anchor 原子編號（教學情境做不到）。
+- 測試：`tests/test_multi_binding.py`（出口避開其他配體且不朝蛋白牆、新 anchor 通過路徑檢查；四周都被包住時回傳 None；略過的目標不計算）。未驗證：筆電上 hsieh2024 的 URI 實際改道後的 SMD 與 PMF。
+

@@ -263,6 +263,56 @@ def _unwrap_near(xyz: np.ndarray, ref: np.ndarray, box: np.ndarray) -> np.ndarra
     return np.asarray(ref) + np.array([min_image(np.asarray(x) - ref, box) for x in xyz])
 
 
+def _reroute_exit(top, pos, box, anchor, ligand, other_ligand_indices, masses, gi, pull_distance_nm):
+    """D-92: the automatic pocket anchor pulls the ligand away from the pocket centre.  In a shared pocket that line can
+    run through another ligand (the work would then be pushing it aside).  Look for an exit that crosses no other
+    ligand and the fewest protein heavy atoms, and put the anchor behind the ligand on that line.  Returns
+    (anchor, groups info, reroute record or None).  If no free exit or no usable anchor is found, nothing changes and
+    the path gate below stops as before."""
+    from .multi import pull_path_blockers, find_exit_direction, anchor_for_direction
+    box = np.asarray(box, float) if box is not None else None
+    def unwrap(x, ref):
+        return _unwrap_near(x, ref, box) if box is not None else np.asarray(x, float)
+    lig_xyz = np.asarray(pos[ligand], float)
+    lc = lig_xyz.mean(0)
+    lig_xyz = unwrap(lig_xyz, lc)
+    lc = lig_xyz.mean(0)
+    others = {k: unwrap(pos[np.array(v, dtype=int)], lc) for k, v in other_ligand_indices.items() if v}
+    acom = unwrap(((masses[anchor, None] * pos[anchor]).sum(0) / masses[anchor].sum())[None], lc)[0]
+    blk = pull_path_blockers(acom, lig_xyz, others, pull_distance_nm=pull_distance_nm)
+    if not blk:
+        return anchor, gi, None
+    atoms = list(top.atoms())
+    spect = {int(i) for v in other_ligand_indices.values() for i in v}
+    lig_set = {int(i) for i in ligand}
+    prot_res = {a.residue.index for a in atoms if a.name == "CA" and a.element is not None and a.element.symbol == "C"}
+    prot_heavy = np.array([a.index for a in atoms if a.residue.index in prot_res and a.index not in lig_set
+                           and a.index not in spect and a.element is not None and a.element.symbol != "H"], dtype=int)
+    ca_idx = np.array([a.index for a in atoms if a.name == "CA" and a.residue.index in prot_res
+                       and a.index not in lig_set and a.index not in spect], dtype=int)
+    if not len(ca_idx):
+        return anchor, gi, None
+    ex = find_exit_direction(lig_xyz, others, unwrap(pos[prot_heavy], lc) if len(prot_heavy) else None,
+                             pull_distance_nm=pull_distance_nm, default_u=lc - acom)
+    if ex is None:
+        return anchor, gi, None
+    new = anchor_for_direction(ca_idx, unwrap(pos[ca_idx], lc), lc, ex["u"])
+    if new is None:
+        return anchor, gi, None
+    a2 = np.array(new["anchor_indices"], dtype=int)
+    acom2 = unwrap(((masses[a2, None] * pos[a2]).sum(0) / masses[a2].sum())[None], lc)[0]
+    if pull_path_blockers(acom2, lig_xyz, others, pull_distance_nm=pull_distance_nm):
+        return anchor, gi, None
+    old = "；".join(f"{b['ligand']}（{b.get('n_atoms_in_path', '?')} 個重原子）" for b in blk)
+    why = (f"自動選的拉離方向（口袋 anchor → 配體）穿過其他配體：{old}。改從沒有其他配體的方向拉出：與原方向夾 "
+           f"{ex['angle_from_default_deg']}°，路徑上有 {ex['protein_atoms_in_path']} 個蛋白重原子（在所有不穿過其他配體的方向中最少）；"
+           f"anchor 改為配體後方的 {len(a2)} 個 Cα，anchor 到配體的方向與新方向夾 {new['angle_deg']}°。")
+    rec = {"original_blockers": blk, "angle_from_default_deg": ex["angle_from_default_deg"],
+           "protein_atoms_in_path": ex["protein_atoms_in_path"], "direction": [round(float(x), 4) for x in ex["u"]],
+           "anchor": new}
+    return a2, {**gi, "anchor_atoms": a2.tolist(), "note": why, "rerouted": True}, rec
+
+
 def _state_xyz_box(ctx):
     st = ctx.getState(getPositions=True)
     xyz = st.getPositions(asNumpy=True)._value
@@ -384,6 +434,13 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     anchor, ligand, gi = select_groups(top, pos, ligand_resname=ligand_resname, ligand_indices=ligand_indices,
                                        anchor_indices=anchor_indices, pocket_cutoff_nm=cfg.pocket_cutoff_nm,
                                        exclude_indices=[i for v in (other_ligand_indices or {}).values() for i in v])
+    if other_ligand_indices and anchor_indices is None:
+        anchor, gi, reroute = _reroute_exit(top, pos, np.array([[v.x, v.y, v.z] for v in box_vecs]) if box_vecs else None,
+                                            anchor, ligand, other_ligand_indices, masses, gi, cfg.pull_distance_nm)
+        if reroute and decisions:
+            decisions.record("binding.path", "multi-ligand exit path", "rerouted", gi["note"], kind="auto_fixed")
+    else:
+        reroute = None
     system = build_pulling_system(system, pos, anchor, ligand)
     spect = {}
     if other_ligand_indices and cfg.hold_spectators:
@@ -391,6 +448,8 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                                    {k: np.array(v, dtype=int) for k, v in other_ligand_indices.items() if v}, masses, cfg.spectator_hold_nm)
     manifest = load_json(out / "binding_manifest.json", {})
     manifest.update({"config": cfg.to_dict(), "groups": gi, "platform": platform_name, "updated_at": now_iso()})
+    if reroute:
+        manifest["reroute"] = reroute
     if decisions:
         decisions.record("binding.setup", "CV", "COM distance anchor–ligand", gi["note"] or "使用者指定 anchor 原子。",
                          k_pull=cfg.k_pull, v=cfg.pull_velocity_nm_per_ps)

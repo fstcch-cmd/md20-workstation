@@ -888,3 +888,24 @@ GATES.update({
          'タンパク質の二次構造を計算できませんでした。',
          '단백질의 이차 구조를 계산할 수 없습니다.')),
 })
+
+# D-92 binding target gates (Workflow.binding)
+GATES.update({
+    "binding path": (("結合自由能：拉離路徑", "Binding free energy: exit path", "結合自由エネルギー：引き離しの経路", "결합 자유 에너지: 당김 경로"),
+                     ("這個配體往外拉的每個方向都會碰到口袋裡的其他配體，找不到乾淨的出口。可以先略過它，算其他配體。",
+                      "Every way out for this ligand runs into another ligand in the pocket, so no clean exit was found. "
+                      "You can leave it out and compute the other ligands.",
+                      "このリガンドを引き出すどの方向にも、ポケット内の別のリガンドがあり、きれいな出口が見つかりません。"
+                      "このリガンドを飛ばして、ほかのリガンドを計算できます。",
+                      "이 리간드를 빼내는 모든 방향에 포켓 안의 다른 리간드가 있어 깨끗한 출구를 찾지 못했습니다. "
+                      "이 리간드를 건너뛰고 다른 리간드를 계산할 수 있습니다.")),
+    "binding target": (("結合自由能：無法計算", "Binding free energy: cannot be computed", "結合自由エネルギー：計算できない", "결합 자유 에너지: 계산할 수 없음"),
+                       ("這個配體的結合自由能無法計算，原因寫在訊息裡。可以先略過它，算其他配體。",
+                        "The binding free energy of this ligand cannot be computed; the message says why. You can leave it "
+                        "out and compute the other ligands.",
+                        "このリガンドの結合自由エネルギーは計算できません。理由はメッセージにあります。飛ばしてほかのリガンドを計算できます。",
+                        "이 리간드의 결합 자유 에너지는 계산할 수 없습니다. 이유는 메시지에 있습니다. 건너뛰고 다른 리간드를 계산할 수 있습니다.")),
+})
+PREFIX.append(("略過 ", ("Leave this ligand out and compute the others", "このリガンドを飛ばしてほかを計算する",
+                       "이 리간드를 건너뛰고 다른 리간드 계산")))
+

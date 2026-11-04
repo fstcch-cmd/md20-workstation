@@ -135,6 +135,7 @@ DECISION_KEYS: tuple[tuple[str, ...], ...] = (
     ("md", "membrane", "oriented"),        # gate `membrane orientation` one-click choice (D-80)
     ("md", "resolution"), ("md", "membrane", "surface_distance_nm"),   # coarse-grained gates (D-86)
     ("binding", "added"), ("binding", "target_replicas"),               # targets and extra SMD runs chosen later (D-87)
+    ("binding", "skip_targets"),                                         # targets left out at the path gate (D-92)
 )
 LIGAND_DECISION_KEYS = ("cpp_override", "cpp_evidence", "target_location", "fold_accept_low", "fold_upload", "fold_engine",
                         "fold_accept_rmsd", "fold_receptor_seq")
@@ -1545,7 +1546,11 @@ class Workflow:
         wanted = (set(b["ligands"]) if b.get("ligands") else None) if enabled else set()
         targets, ctx = [], {"single": []}
 
+        skip = set((b.get("skip_targets") or {}).keys()) if isinstance(b.get("skip_targets"), dict) else set(b.get("skip_targets") or [])
+
         def take(key: str, lig: str) -> bool:
+            if key in skip:                          # D-92: the student chose to leave this one out
+                return False
             return key in added or (enabled and (wanted is None or lig in wanted))
         for key, c in built.items():
             if key not in runs:
@@ -1631,7 +1636,11 @@ class Workflow:
                                   progress_cb=progress_cb, other_ligand_indices=others or None)
                 if res.status == "NEEDS_HUMAN":
                     results[name] = {"status": "NEEDS_HUMAN", "ligand": t["ligand"], "caveats": res.caveats}
-                    self._block("binding", f"{name} 結合自由能（replica {i + 1}）：{res.caveats[0] if res.caveats else ''}", results=results)
+                    msg = f"{name} 結合自由能（replica {i + 1}）：{res.caveats[0] if res.caveats else ''}"
+                    gate = {"name": "binding path" if "拉離路徑" in msg else "binding target", "status": "NEEDS_HUMAN",
+                            "explanation": msg, "evidence": {"target": name},
+                            "options": [f"略過 {name}，先算其他配體（binding.skip_targets）", "binding.enabled: false（只做 MD）"]}
+                    self._block("binding", msg, results=results, gates=[gate])
                 if res.status == "PAUSED":
                     paused = True
                     break

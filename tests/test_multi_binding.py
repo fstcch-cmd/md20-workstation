@@ -171,3 +171,43 @@ def test_research_tier_needs_completed_replicas(tmp_path, monkeypatch):
     assert [Path(c[0]).parts[-4] for c in calls3] == ["mdA", "mdB", "mdC"]   # from different MD replicas
     assert [Path(c[2]).name for c in calls3] == ["rep1", "rep2", "rep3"]
     assert r3["replicas"] == 3 and r3["dG_standard_kj_mol"] == -22.0 and r3["dG_err_kj_mol"] is not None
+
+
+def test_exit_direction_avoids_other_ligands_and_prefers_open_side():
+    """D-92: ligand at the origin, another ligand on +x (the default exit), protein wall on −y; the free and open exit
+    is found (no ligand inside, fewest protein atoms) and an anchor behind it points the CV that way."""
+    from md20.sampling.multi import find_exit_direction, anchor_for_direction, pull_path_blockers
+    rng = np.random.default_rng(0)
+    lig = rng.normal(0, 0.1, (8, 3))
+    others = {"ALC": np.array([[0.9, 0.0, 0.0], [1.0, 0.1, 0.0], [1.1, -0.1, 0.05]])}
+    wall = np.array([[x, -1.0 - 0.1 * k, z] for x in np.linspace(-2, 2, 9) for z in np.linspace(-2, 2, 9) for k in range(2)])
+    ex = find_exit_direction(lig, others, wall, pull_distance_nm=1.5, default_u=np.array([1.0, 0, 0]))
+    assert ex is not None
+    u = ex["u"]
+    assert pull_path_blockers(lig.mean(0) - u, lig, others, pull_distance_nm=1.5) == []
+    assert u[1] > -0.5                                       # not into the wall
+    ca = np.array([[x, y, z] for x in np.linspace(-1.5, 1.5, 7) for y in np.linspace(-1.5, 1.5, 7) for z in np.linspace(-1.5, 1.5, 7)])
+    ca = ca[np.linalg.norm(ca, axis=1) > 0.6]
+    a = anchor_for_direction(np.arange(len(ca)), ca, lig.mean(0), u)
+    assert a is not None and a["angle_deg"] <= 25 and len(a["anchor_indices"]) >= 4
+    acom = ca[a["anchor_indices"]].mean(0)
+    assert pull_path_blockers(acom, lig, others, pull_distance_nm=1.5) == []
+
+
+def test_exit_direction_none_when_surrounded():
+    from md20.sampling.multi import find_exit_direction
+    lig = np.zeros((2, 3)) + [[0, 0, 0], [0.05, 0, 0]]
+    shell = np.array([[np.cos(t) * np.sin(p), np.sin(t) * np.sin(p), np.cos(p)] for t in np.linspace(0, 2 * np.pi, 40)
+                      for p in np.linspace(0.01, np.pi - 0.01, 30)]) * 0.8
+    assert find_exit_direction(lig, {"X": shell}, None, pull_distance_nm=1.5, n_dirs=200) is None
+
+
+def test_skipped_target_is_left_out(tmp_path):
+    from md20.project import Project
+    from md20.workflow import Workflow
+    cfg = {"name": "w", "receptor": {}, "ligands": [], "md": {}, "binding": {"enabled": True, "multi": True,
+           "skip_targets": {"multi:URI": True}}}
+    wf = Workflow(Project.create(tmp_path, "p"), cfg)
+    built = {"docked_multi": {"mode": "docked_multi", "ligands": ["URI", "ALC", "MAL"]}}
+    targets, _ = wf._binding_targets({"docked_multi": {}}, built)
+    assert [t["key"] for t in targets] == ["multi:ALC", "multi:MAL"]
