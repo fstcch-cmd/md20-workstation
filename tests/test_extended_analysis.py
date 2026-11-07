@@ -47,7 +47,17 @@ def test_chemistry_helpers():
             {"xyz": [5, 0, 0], "element": "C", "res": "LEU99", "name": "CD1", "resname": "LEU"},
             {"xyz": [0, 3.5, 0], "element": "O", "res": "ASP189", "name": "OD1", "resname": "ASP"}]
     c = pose_contacts([[0, 0, 0], [4, 0, 0], [0, 0.5, 0], [20, 20, 20]], ["N", "C", "N", "C"], prot)
-    assert [x.get("kind") for x in c] == ["hbond", "hydrophobic", "ionic", None]
+    # D-97 (A5): distance alone is polar proximity, not a hydrogen bond; with the ligand charge unknown a N next to ASP
+    # is "charged proximity", never ionic/salt bridge; every applicable label is kept
+    assert [x.get("kind") for x in c] == ["charged_proximity_ligand_charge_unknown", "hydrophobic",
+                                          "charged_proximity_ligand_charge_unknown", None]
+    assert "polar_proximity" in c[0]["kinds"] and all("hbond" not in (x.get("kinds") or []) for x in c)
+    cat = pose_contacts([[0, 0, 0]], ["N"], [{"xyz": [0, 3.0, 0], "element": "O", "res": "ASP189", "name": "OD1", "resname": "ASP"}],
+                        lig_charges=[+1])
+    assert cat[0]["kind"] == "salt_bridge"                    # cationic ligand N next to ASP: opposite charges
+    an = pose_contacts([[0, 0, 0]], ["O"], [{"xyz": [0, 3.0, 0], "element": "O", "res": "ASP189", "name": "OD1", "resname": "ASP"}],
+                       lig_charges=[-1])
+    assert an[0]["kind"] == "like_charge_proximity"           # anionic ligand O next to ASP: never a salt bridge
 
 
 def test_extended_metrics_on_synthetic_trajectory():

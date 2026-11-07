@@ -361,17 +361,55 @@ def heatmap(M, path: Path, *, cmap: str = "RdBu_r", vmin=-1, vmax=1, label: str 
     return _save(fig, path)
 
 
+FP_COLOURS = {"salt_bridge": "#b8433f", "like_charge_proximity": "#8e5ea2", "charged_proximity_ligand_charge_unknown": "#e3a587",
+              "polar_proximity": "#2f6f9f", "hydrophobic": "#c9a227"}
+FP_NAMES = {"salt_bridge": "salt bridge", "like_charge_proximity": "like-charge proximity",
+            "charged_proximity_ligand_charge_unknown": "charged proximity (ligand charge unknown)",
+            "polar_proximity": "polar proximity (distance only)", "hydrophobic": "hydrophobic"}
+
+
 def fingerprint_plot(fp: dict, t, path: Path, top_n: int = 25) -> str | None:
+    """D-97: a multi-label fingerprint (schema md20.fingerprint/2) is drawn as one lane per interaction label inside
+    each residue row, so concurrent interactions stay visible; older single-class records keep the old drawing."""
     res, mat = fp.get("residues") or [], fp.get("matrix") or []
     if not res:
         return None
     from matplotlib.colors import ListedColormap
     plt = _plt()
+    t = np.asarray(fp.get("time_ns") if fp.get("time_ns") else (t if t is not None else []), float)
+    if fp.get("bitmask") is not None:
+        B = np.asarray(fp["bitmask"], np.int64)
+        order = np.argsort(-(B > 0).mean(1), kind="stable")[:top_n]
+        labs = [k for k in fp.get("labels") or [] if any(((B[order] & fp["bits"][k]) > 0).any(1))]
+        if not labs:
+            return None
+        nl = len(labs)
+        fig, ax = plt.subplots(figsize=(7.2, 0.26 * len(order) + 1.3))
+        xl_ = "Time (ns)"
+        if len(t) != B.shape[1] or len(t) < 2 or not np.all(np.diff(t) > 0):
+            t, xl_ = np.arange(1, B.shape[1] + 1, dtype=float), "Saved frame (time axis not recorded)"
+        dtw = float(np.median(np.diff(t))) if len(t) > 1 else 1.0
+        disp = fp.get("display_labels") or {}
+        for row, ri in enumerate(order):
+            for li, k in enumerate(labs):
+                on = (B[ri] & fp["bits"][k]) > 0
+                if not on.any():
+                    continue
+                y0 = row - 0.42 + li * (0.84 / nl)
+                xs = t[on] - dtw / 2
+                ax.broken_barh([(x, dtw) for x in xs], (y0, 0.84 / nl), facecolors=FP_COLOURS.get(k, "#777"), linewidth=0)
+        ax.set_ylim(len(order) - 0.5, -0.5)
+        ax.set_xlim(t[0] - dtw / 2, t[-1] + dtw / 2)
+        ax.set_yticks(range(len(order)), [disp.get(res[i], res[i]) for i in order], fontsize=7)
+        ax.set_xlabel(xl_)
+        handles = [plt.Rectangle((0, 0), 1, 1, color=FP_COLOURS.get(k, "#777")) for k in labs]
+        ax.legend(handles, [FP_NAMES.get(k, k) for k in labs], fontsize=7, ncol=2, loc="upper left", bbox_to_anchor=(0, -0.14),
+                  frameon=False)
+        return _save(fig, path)
     M = np.asarray(mat, float)
     order = np.argsort(-(M > 0).mean(1))[:top_n]
     M = M[order]
     fig, ax = plt.subplots(figsize=(7.2, 0.22 * len(order) + 1.0))
-    t = np.asarray(t if t is not None else [], float)
     xl_ = "Time (ns)"
     if len(t) < 2 or not np.all(np.diff(t) > 0):        # D-89: never stretch a broken time axis over the matrix
         t, xl_ = np.arange(1, M.shape[1] + 1, dtype=float), "Saved frame (time axis not recorded)"
@@ -380,7 +418,8 @@ def fingerprint_plot(fp: dict, t, path: Path, top_n: int = 25) -> str | None:
     ax.set_yticks(range(len(order)), [res[i] for i in order], fontsize=7)
     ax.set_xlabel(xl_)
     handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in ("#c9a227", "#2f6f9f", "#b8433f")]
-    ax.legend(handles, ["hydrophobic", "polar", "ionic"], fontsize=7, ncol=3, loc="upper left", bbox_to_anchor=(0, -0.12))
+    ax.legend(handles, ["hydrophobic", "polar (old record: distance only)", "charged proximity (old record: ligand charge not checked)"],
+              fontsize=7, ncol=2, loc="upper left", bbox_to_anchor=(0, -0.12))
     return _save(fig, path)
 
 

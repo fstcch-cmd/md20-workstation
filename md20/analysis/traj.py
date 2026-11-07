@@ -116,6 +116,56 @@ def export_centered(run_dir: Path | str, topology_pdb: Path | str, *, metal_indi
     return out
 
 
+LIGAND_STATE_THRESHOLDS = {"version": "2026-11-07.1", "pose_rmsd_A": 2.0, "escape_com_rise_A": 5.0, "escape_min_frames": 3,
+                           "source": "empirical starting values; validate per system (spec A4)"}
+
+
+def ligand_state(rmsd_A, n_contact_res, com_A, t_ns=None, *, restrained: list | None = None, thr: dict | None = None) -> dict:
+    """D-97 (A4): per-frame ligand state from contacts, pocket COM distance and RMSD together — never RMSD alone.
+
+      pose_retained           ≥ 1 contacting residue and RMSD ≤ pose_rmsd_A
+      pose_changed_in_pocket  ≥ 1 contacting residue and RMSD > pose_rmsd_A (high RMSD with contacts ≠ dissociation)
+      escape_evidence         no contacting residue for ≥ escape_min_frames consecutive frames AND the COM is
+                              ≥ escape_com_rise_A farther from the pocket than in frame 0
+      unknown                 anything else (e.g. contacts lost briefly, or lost without COM displacement)
+    Positional restraints, if any, are stated: retention under restraint is not unrestrained stability."""
+    th = {**LIGAND_STATE_THRESHOLDS, **(thr or {})}
+    r = np.asarray(rmsd_A, float)
+    n = np.asarray(n_contact_res, int)
+    c = np.asarray(com_A, float)
+    F = len(r)
+    if not (len(n) == len(c) == F) or not F:
+        return {"status": "unavailable", "reason": "series lengths differ or are empty"}
+    noc = n == 0
+    run = np.zeros(F, int)
+    for i in range(F):
+        run[i] = (run[i - 1] + 1 if i and noc[i] else (1 if noc[i] else 0))
+    # a frame belongs to a long no-contact stretch if the stretch it is in reaches escape_min_frames
+    long_ = np.zeros(F, bool)
+    i = F - 1
+    while i >= 0:
+        if run[i] >= th["escape_min_frames"]:
+            k = run[i]
+            long_[i - k + 1:i + 1] = True
+            i -= k
+        else:
+            i -= 1
+    rise = c - c[0]
+    state = np.where(~noc & (r <= th["pose_rmsd_A"]), "pose_retained",
+                     np.where(~noc, "pose_changed_in_pocket",
+                              np.where(long_ & (rise >= th["escape_com_rise_A"]), "escape_evidence", "unknown")))
+    names = ["pose_retained", "pose_changed_in_pocket", "escape_evidence", "unknown"]
+    tail = slice(F - max(1, F // 5), F)
+    return {"schema": "md20.ligand_state/1", "thresholds": th, "per_frame": state.tolist(),
+            "fraction_all": {k: round(float((state == k).mean()), 4) for k in names},
+            "fraction_final_20pct": {k: round(float((state[tail] == k).mean()), 4) for k in names},
+            "first_escape_ns": (None if not (state == "escape_evidence").any() or t_ns is None
+                                else float(np.asarray(t_ns)[int(np.argmax(state == "escape_evidence"))])),
+            "restraints": restrained or [],
+            "rmsd_reference": "first stored production frame (not the docking pose)",
+            "note": "observed state under the simulated conditions; not an equilibrium binding probability"}
+
+
 def compute_metrics(traj, ligand_groups: dict[str, list[int]] | None = None) -> dict:
     """`ligand_groups` = {name: heavy-atom indices} from build_manifest (works for peptides too);
     falls back to residue names L01, L02 … when absent."""
@@ -145,21 +195,25 @@ def compute_metrics(traj, ligand_groups: dict[str, list[int]] | None = None) -> 
         # ligand RMSD in the protein frame (no ligand re-fit): measures movement inside the pocket
         xyz = traj.xyz[:, lh, :]
         lrmsd = np.sqrt(((xyz - xyz[0]) ** 2).sum(-1).mean(-1)) * 10
-        pairs = np.array([[i, j] for i in lh for j in prot_heavy])
-        # restrict to protein atoms near the ligand in frame 0 to keep it cheap
-        d0 = md.compute_distances(traj[0], pairs)[0]
-        near_pairs = pairs[d0 < 1.2]
-        dist = md.compute_distances(traj, near_pairs) if len(near_pairs) else np.zeros((traj.n_frames, 0))
+        # D-97 (A6): complete per-frame neighbour search — a contact that forms after frame 0 is counted (the old
+        # first-frame 1.2 nm candidate filter missed it); residues are chain-aware (A:ASP189 ≠ B:ASP189)
+        from .interactions import dynamic_pairs, residue_key, display_labels
+        dyn = dynamic_pairs(traj.xyz, lh, prot_heavy, cutoff_nm=0.4)
+        near_pairs, dist = dyn["pairs"], dyn["dist"]
         contacts = (dist < 0.4)
         n_contact_res = []
         res_freq: dict[str, int] = {}
-        res_of = np.array([top.atom(j).residue.index for _, j in near_pairs]) if len(near_pairs) else np.array([])
+
+        def _rk(r):
+            return residue_key(getattr(r.chain, "chain_id", None) or str(r.chain.index), r.name, r.resSeq)
+        res_of = np.array([top.atom(int(j)).residue.index for _, j in near_pairs]) if len(near_pairs) else np.array([])
         for f in range(traj.n_frames):
             rs = set(res_of[contacts[f]].tolist()) if len(near_pairs) else set()
             n_contact_res.append(len(rs))
             for r in rs:
-                key = f"{top.residue(r).name}{top.residue(r).resSeq}"
+                key = _rk(top.residue(r))
                 res_freq[key] = res_freq.get(key, 0) + 1
+        lab = display_labels(res_freq)
         lpolar = np.array([i for i in lh if top.atom(int(i)).element.symbol in ("N", "O")], dtype=int)
         hb = []
         if len(lpolar) and len(prot_polar):
@@ -167,16 +221,25 @@ def compute_metrics(traj, ligand_groups: dict[str, list[int]] | None = None) -> 
             hd = md.compute_distances(traj, hp)
             hb = (hd < 0.35).sum(1).tolist()
         com_l = md.compute_center_of_mass(traj.atom_slice(lh))
-        pocket = sorted({j for _, j in near_pairs}) if len(near_pairs) else list(prot_heavy[:1])
+        # pocket = protein atoms within 0.4 nm of the ligand in the FIRST frame (a fixed reference region, so the COM
+        # distance is measured from the same place all run); all-frame contacts above are separate
+        p0 = [int(j) for (_, j), on in zip(near_pairs, contacts[0])] if len(near_pairs) else []
+        pocket = sorted(set(p0)) or (sorted({int(j) for _, j in near_pairs}) if len(near_pairs) else list(prot_heavy[:1]))
         com_p = md.compute_center_of_mass(traj.atom_slice(np.array(pocket)))
         out["ligands"][rn] = {
             "rmsd_in_pocket_A": lrmsd.tolist(),
             "contact_residues": n_contact_res,
             "polar_contacts": hb,
             "com_distance_to_pocket_A": (np.linalg.norm(com_l - com_p, axis=1) * 10).tolist(),
-            "contact_frequency": {k: v / traj.n_frames for k, v in sorted(res_freq.items(), key=lambda kv: -kv[1])},
+            "contact_frequency": {lab[k]: v / traj.n_frames for k, v in sorted(res_freq.items(), key=lambda kv: -kv[1])},
+            "contact_residue_ids": {lab[k]: k for k in res_freq},
+            # kept for compatibility only; the report reads `ligand_state` (D-97, A4)
             "stays_bound": bool(np.mean(lrmsd[-max(1, len(lrmsd) // 5):]) < 3.0),
+            "rmsd_reference": "first stored production frame (not the docking pose), protein-frame, no ligand refit, "
+                              "no symmetry correction",
         }
+        out["ligands"][rn]["ligand_state"] = ligand_state(lrmsd, n_contact_res, out["ligands"][rn]["com_distance_to_pocket_A"],
+                                                          t_ns)
     # WP4: ligand–ligand centroid distances (multi-ligand systems)
     names = [n for n in ligand_groups if len(ligand_groups[n])]
     if len(names) > 1:
@@ -293,7 +356,11 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
                "pbc_checks": cen.get("pbc_checks", {}),
                "rmsd_backbone_mean_A": float(np.mean(m["rmsd_backbone_A"])) if "rmsd_backbone_A" in m else None,
                "ligands": {rn: {"stays_bound": d["stays_bound"], "rmsd_last20_A": float(np.mean(d["rmsd_in_pocket_A"][-max(1, len(d["rmsd_in_pocket_A"]) // 5):])),
-                                "top_contacts": list(d["contact_frequency"].items())[:5]} for rn, d in m["ligands"].items()}}
+                                "top_contacts": list(d["contact_frequency"].items())[:5],
+                                # D-97 (A4): state from contacts + COM + RMSD; restraints stated with it
+                                "state": {k: v for k, v in (d.get("ligand_state") or {}).items() if k != "per_frame"}
+                                | {"restraints": restrained}}
+                           for rn, d in m["ligands"].items()}}
     # D-58: extended analyses (hydrogen bonds, SASA, secondary structure, PCA, clustering, correlations, fingerprint,
     # water bridges) — independent of the metrics above; a failure is recorded, never fatal
     try:

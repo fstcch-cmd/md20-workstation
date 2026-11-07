@@ -755,7 +755,7 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
         restrained = restrained or bool(s.get("restrained_production"))
         if s.get("metrics_file"):
             metrics[key] = load_json(s["metrics_file"], {})
-        bound = "; ".join(f"{rn}: {tx(('留在口袋', 'stays', 'ポケット内に留まる', '포켓에 머묾'), L) if v['stays_bound'] else tx(('離開', 'leaves', '離れる', '떠남'), L)} ({v['rmsd_last20_A']:.1f} Å)"
+        bound = "; ".join(f"{rn}: {_state_word(v, L)} (RMSD {v['rmsd_last20_A']:.1f} Å)"
                           for rn, v in (s.get("ligands") or {}).items()) or "—"
         link = ""
         if r.get("run_ids"):
@@ -965,7 +965,14 @@ def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None, na
         if (L.get("fingerprint") or {}).get("residues"):
             out += doc.figure_block(FG.fingerprint_plot(L["fingerprint"], ext[k].get("time_ns") or [], doc.figdir / f"md_fp_{k}_{rn}.png"),
                                     "fingerprint", FT.classify_fingerprint(lab(k, rn), L["fingerprint"].get("occupancy") or {}), lab(k, rn))
+            out += _persistence_html(doc, lab(k, rn), L["fingerprint"])
     wb, wf_ = {}, []
+    for k, rn in lig_keys:            # D-97: missing solvent is "unavailable", not an empty or zero chart
+        w_ = ((ext.get(k) or {}).get("ligands") or {}).get(rn, {}).get("water_bridges") or {}
+        if w_.get("status") in ("unavailable", "not_applicable"):
+            out += (f"<p class=muted>{_esc(lab(k, rn))}{colon(doc.lang)}"
+                    f"{_esc(tx(('水橋分析無法進行', 'water-bridge analysis unavailable', '水橋の解析はできません', '물 다리 분석 불가'), doc.lang))}"
+                    f"{paren(_esc(w_.get('reason', '')), doc.lang)}</p>")
     for k, rn in lig_keys:
         L = ((ext.get(k) or {}).get("ligands") or {}).get(rn) or {}
         if (L.get("water_bridges") or {}).get("count") is not None:
@@ -1140,6 +1147,61 @@ def _cooperativity_html(doc: Doc, coop: list, b: dict) -> str:
                                 for n, v in (c.get("shifts") or {}).items()],
                              ("協同自由能與循環閉合", "Cooperativity and cycle closure", "協同自由エネルギーとサイクルの閉合", "협동 자유 에너지와 순환 닫힘"), {1, 2})
     return out
+
+
+def _persistence_html(doc, name: str, fp: dict) -> str:
+    """F09/F07 (D-97): residue-level interaction persistence from the stored frames, with censoring and the reason
+    when no lifetime is identifiable; initial contacts kept vs contacts formed later."""
+    L = doc.lang
+    per = (fp.get("persistence") or {})
+    out = ""
+    ivn = fp.get("initial_vs_new") or {}
+    if ivn.get("initial") is not None:
+        disp = fp.get("display_labels") or {}
+        new = ", ".join(disp.get(r, r) for r in ivn.get("new") or []) or "—"
+        out += "<p>" + _esc(tx((f"{name}：起始幀接觸 {len(ivn['initial'])} 個殘基；之後才形成接觸的殘基：{new}。失去起始對接接觸本身不代表姿勢變差。",
+                                f"{name}: {len(ivn['initial'])} residues in contact in the first frame; residues that only come into "
+                                f"contact later: {new}. Losing an initial docking contact does not by itself make a pose worse.",
+                                f"{name}：最初のフレームで接触している残基は {len(ivn['initial'])} 個、後から接触した残基：{new}。最初のドッキングの接触を失うこと"
+                                "自体はポーズが悪くなったことを意味しません。",
+                                f"{name}: 첫 프레임에서 접촉한 잔기 {len(ivn['initial'])}개, 나중에 접촉한 잔기: {new}. 처음 도킹 접촉을 잃는 것 자체가 "
+                                "포즈가 나빠졌다는 뜻은 아닙니다."), L)) + "</p>"
+    items = per.get("items") or []
+    if per.get("status") != "computed" or not items:
+        return out
+    disp = fp.get("display_labels") or {}
+    from .figures import FP_NAMES
+    rows = []
+    for it in items:
+        lt = f"{it['lifetime_ps']:.0f} ps" if it.get("lifetime_ps") is not None else (it.get("lifetime_reason") or "—")
+        rows.append([_esc(disp.get(it["residue"], it["residue"])), _esc(FP_NAMES.get(it["label"], it["label"])),
+                     f"{(it.get('occupancy_time_weighted') or 0):.0%}", str(it["n_events"]),
+                     str(it.get("n_left_censored_excluded", 0)), _esc(lt), _esc("; ".join(it.get("limitations") or []) or "—")])
+    out += doc.table([tx(("殘基", "Residue", "残基", "잔기"), L), tx(("互作", "Interaction", "相互作用", "상호작용"), L),
+                      tx(("時間加權佔有率", "Time-weighted occupancy", "時間加重占有率", "시간 가중 점유율"), L),
+                      tx(("事件數", "Events", "イベント数", "사건 수"), L),
+                      tx(("起點即存在（排除）", "Present at start (excluded)", "開始時から存在（除外）", "시작부터 존재(제외)"), L),
+                      tx(("持續時間（1/e）", "Persistence (1/e)", "持続時間（1/e）", "지속 시간(1/e)"), L),
+                      tx(("限制", "Limitations", "制約", "제약"), L)], rows,
+                     (f"{name}：互作持續性（連續定義、儲存幀；不是配體滯留時間或 k_off）",
+                      f"{name}: interaction persistence (continuous definition, stored frames; not ligand residence time or k_off)",
+                      f"{name}：相互作用の持続性（連続の定義、保存フレーム。リガンド滞留時間や k_off ではない）",
+                      f"{name}: 상호작용 지속성(연속 정의, 저장 프레임. 리간드 체류 시간이나 k_off가 아님)"), {2, 3, 4})
+    return out
+
+
+def _state_word(v: dict, L: str) -> str:
+    """D-97 (A4): one word for the ligand-state table from `ligand_state`, never from RMSD alone."""
+    ft = ((v.get("state") or {}).get("fraction_final_20pct")) or {}
+    fa = ((v.get("state") or {}).get("fraction_all")) or {}
+    if not ft:
+        return tx(("狀態未記錄（只有 RMSD）", "state not recorded (RMSD only)", "状態の記録なし（RMSD のみ）", "상태 기록 없음(RMSD만)"), L)
+    if (fa.get("escape_evidence") or 0) > 0:
+        return tx(("有離開證據", "escape evidence", "離脱の証拠あり", "이탈 증거 있음"), L)
+    k = max(ft, key=lambda x: ft[x])
+    return tx({"pose_retained": ("維持姿勢", "pose retained", "ポーズ維持", "포즈 유지"),
+               "pose_changed_in_pocket": ("姿勢改變、仍在口袋", "pose changed, in pocket", "ポーズ変化・ポケット内", "포즈 변화, 포켓 안"),
+               "unknown": ("不明確", "unclear", "不明確", "불분명")}.get(k, (k,) * 4), L)
 
 
 def key_findings(pool: list[dict], limit: int = 10) -> list[dict]:

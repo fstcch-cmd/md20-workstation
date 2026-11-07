@@ -150,10 +150,18 @@ def test_actual_values_and_methods(tmp_path):
 def test_interpret_md_flags_drift_and_unbinding():
     t = np.linspace(0, 10, 200)
     drifting = {"time_ns": t.tolist(), "rmsd_backbone_A": (1 + 0.2 * t).tolist()}
-    f = I.md({"x": {"rmsd_backbone_mean_A": 2.0, "ligands": {"L01": {"stays_bound": False, "rmsd_last20_A": 6.0}}}}, {"x": drifting})
+    # D-97 (A4): a record WITH contact state (escape evidence) → "escape evidence"; backbone drift is still flagged
+    esc = {"stays_bound": False, "rmsd_last20_A": 6.0,
+           "state": {"fraction_all": {"escape_evidence": 0.3, "pose_retained": 0.0, "pose_changed_in_pocket": 0.0, "unknown": 0.7},
+                     "fraction_final_20pct": {"escape_evidence": 0.6, "unknown": 0.4}, "first_escape_ns": 7.0, "restraints": []}}
+    f = I.md({"x": {"rmsd_backbone_mean_A": 2.0, "ligands": {"L01": esc}}}, {"x": drifting})
     texts = " ".join(x["text"][1] for x in f)
-    assert "not reached a plateau" in texts and "left or moved away" in texts
+    assert "not reached a plateau" in texts and "escape evidence" in texts
     assert sum(x["level"] == "caution" for x in f) == 2
+    # a legacy record WITHOUT contact state must not claim the ligand left — RMSD alone cannot tell
+    g = I.md({"x": {"rmsd_backbone_mean_A": 2.0, "ligands": {"L01": {"stays_bound": False, "rmsd_last20_A": 6.0}}}}, {"x": drifting})
+    gt = " ".join(x["text"][1] for x in g)
+    assert "RMSD alone cannot tell" in gt and "left or moved away" not in gt
     assert I.binding({"A": {"delta_pmf_kj_mol": 95.0}})[-1]["level"] == "caution"
 
 

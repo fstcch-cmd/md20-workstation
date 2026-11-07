@@ -280,10 +280,13 @@ def classify_rmsd(series: dict) -> list[dict]:
                          f"{key}: RMSD가 한 차례 조정을 거쳐 2~3 Å 평탄 구간에 머뭅니다({tail[3]}). 중간 정도의 구조 조정이며 루프 이완에서 흔히 보입니다."))
         else:
             out.append(S("good",
-                         f"{key}：RMSD 進入低於 2 Å 的平台（{tail[0]}），結構穩定且已平衡。",
-                         f"{key}: RMSD levels off below 2 Å ({tail[1]}). The structure is stable and equilibrated.",
-                         f"{key}：RMSD は 2 Å 未満で平坦になっています（{tail[2]}）。構造は安定しており、平衡に達しています。",
-                         f"{key}: RMSD가 2 Å 미만에서 평탄해졌습니다({tail[3]}). 구조가 안정적이며 평형에 도달했습니다."))
+                         f"{key}：RMSD 進入低於 2 Å 的平台（{tail[0]}），相對第一幀的整體偏移小。RMSD 平台只是平衡的必要條件之一，不能單獨證明已平衡。",
+                         f"{key}: RMSD levels off below 2 Å ({tail[1]}), a small overall deviation from the first frame. An RMSD "
+                         "plateau is one necessary sign of equilibration, not proof of it.",
+                         f"{key}：RMSD は 2 Å 未満で平坦になっています（{tail[2]}）。最初のフレームからの全体のずれは小さいです。RMSD の平坦化は平衡の"
+                         "必要条件の一つにすぎず、それだけで平衡とはいえません。",
+                         f"{key}: RMSD가 2 Å 미만에서 평탄해졌습니다({tail[3]}). 첫 프레임 대비 전체 편차가 작습니다. RMSD 평탄은 평형의 필요조건 "
+                         "중 하나일 뿐이며 그것만으로 평형을 증명하지는 않습니다."))
     ref = next((k for k in means if k.lower().startswith("apo")), None)
     if ref is not None:
         for k, m in means.items():
@@ -292,14 +295,18 @@ def classify_rmsd(series: dict) -> list[dict]:
             d = m - means[ref]
             if d <= -0.3:
                 out.append(S("good",
-                             f"{k} 的平台比蛋白單獨低 {abs(d):.2f} Å（≥ 0.3），配體結合讓蛋白更穩定。",
-                             f"{k} plateaus {abs(d):.2f} Å below the protein alone (≥ 0.3), so ligand binding stabilises the protein.",
-                             f"{k} の平坦部はタンパク質単独より {abs(d):.2f} Å 低く（≥ 0.3）、リガンドの結合でタンパク質が安定しています。",
-                             f"{k} 시스템의 평탄 구간이 단백질 단독보다 {abs(d):.2f} Å 낮습니다(≥ 0.3). 리간드 결합으로 단백질이 더 안정해졌습니다."))
+                             f"{k} 的平台比蛋白單獨低 {abs(d):.2f} Å（≥ 0.3）。這是觀察到的差異；只有一條軌跡、參考構形不同時，不能推論配體讓蛋白更穩定。",
+                             f"{k} plateaus {abs(d):.2f} Å below the protein alone (≥ 0.3). This is an observed difference; with single "
+                             "trajectories and their own reference frames it does not show that the ligand stabilises the protein.",
+                             f"{k} の平坦部はタンパク質単独より {abs(d):.2f} Å 低くなっています（≥ 0.3）。これは観察された差であり、軌跡が1本ずつで基準構造も"
+                             "異なるため、リガンドがタンパク質を安定化したとはいえません。",
+                             f"{k} 시스템의 평탄 구간이 단백질 단독보다 {abs(d):.2f} Å 낮습니다(≥ 0.3). 관찰된 차이일 뿐이며, 궤적이 하나씩이고 기준 "
+                             "구조도 달라 리간드가 단백질을 안정화했다고 할 수 없습니다."))
             elif d >= 0.3:
                 out.append(S("note",
-                             f"{k} 的平台比蛋白單獨高 {d:.2f} Å（≥ 0.3），配體結合後蛋白的構形調整較大。",
-                             f"{k} plateaus {d:.2f} Å above the protein alone (≥ 0.3). The protein adjusts more with the ligand bound.",
+                             f"{k} 的平台比蛋白單獨高 {d:.2f} Å（≥ 0.3），這次模擬中有配體時蛋白相對起點偏移較大（觀察到的差異）。",
+                             f"{k} plateaus {d:.2f} Å above the protein alone (≥ 0.3): in this simulation the protein deviates more from "
+                             "its start with the ligand present (an observed difference).",
                              f"{k} の平坦部はタンパク質単独より {d:.2f} Å 高く（≥ 0.3）、リガンドが結合すると構造の調整が大きくなります。",
                              f"{k} 시스템의 평탄 구간이 단백질 단독보다 {d:.2f} Å 높습니다(≥ 0.3). 리간드가 결합하면 단백질의 구조 조정이 더 큽니다."))
             else:
@@ -1146,8 +1153,15 @@ def classify_dccm(name: str, C, ref=None) -> list[dict]:
 
 def classify_fingerprint(name: str, occ: dict) -> list[dict]:
     rows = []
-    kinds = (("ionic", ("離子", "ionic", "イオン性", "이온성")), ("polar", ("極性", "polar", "極性", "극성")),
-             ("hydrophobic", ("疏水", "hydrophobic", "疎水性", "소수성")))
+    kinds = (("salt_bridge", ("鹽橋", "salt bridge", "塩橋", "염다리")),
+             ("like_charge_proximity", ("同號電荷接近", "like-charge proximity", "同符号電荷の接近", "같은 부호 전하 근접")),
+             ("charged_proximity_ligand_charge_unknown", ("帶電殘基接近（配體電荷未知）", "charged proximity, ligand charge unknown",
+                                                          "荷電残基の接近（リガンド電荷不明）", "하전 잔기 근접(리간드 전하 미상)")),
+             ("polar_proximity", ("極性接近（只看距離）", "polar proximity, distance only", "極性の接近（距離のみ）", "극성 근접(거리만)")),
+             ("hydrophobic", ("疏水", "hydrophobic", "疎水性", "소수성")),
+             # records written before D-97 (single class; ionic did not check the ligand charge)
+             ("ionic", ("帶電接近（舊紀錄）", "charged proximity (old record)", "荷電の接近（旧記録）", "하전 근접(이전 기록)")),
+             ("polar", ("極性接近（舊紀錄）", "polar proximity (old record)", "極性の接近（旧記録）", "극성 근접(이전 기록)")))
     for kind, lab in kinds:
         for r, v in (occ.get(kind) or {}).items():
             if v >= 0.5:
@@ -1348,8 +1362,20 @@ def classify_chem_space(xy, scores, names) -> list[dict]:
               f"점수가 가장 좋은 화합물 {k}개가 화학 공간에 흩어져 있습니다. 여러 골격이 결합할 수 있습니다.")]
 
 
-_KIND_2D = {"hbond": ("氫鍵", "Hydrogen bonds", "水素結合", "수소 결합"), "ionic": ("離子作用", "Ionic", "イオン性", "이온성"),
-            "hydrophobic": ("疏水作用", "Hydrophobic", "疎水性", "소수성"), "contact": ("其他接觸", "Other contacts", "その他の接触", "기타 접촉")}
+_KIND_2D = {"salt_bridge": ("鹽橋（電荷相反）", "Salt bridges (opposite charges)", "塩橋（反対電荷）", "염다리(반대 전하)"),
+            "like_charge_proximity": ("同號電荷接近（互斥）", "Like-charge proximity (repulsive)", "同符号電荷の接近（反発）", "같은 부호 전하 근접(반발)"),
+            "charged_proximity_ligand_charge_unknown": ("帶電殘基接近（配體電荷未知，不判定鹽橋）",
+                                                        "Charged-residue proximity (ligand charge unknown; no salt bridge called)",
+                                                        "荷電残基の接近（リガンド電荷不明のため塩橋とは判定しない）",
+                                                        "하전 잔기 근접(리간드 전하 미상, 염다리로 판정하지 않음)"),
+            "polar_proximity": ("極性接近（只看距離，不是氫鍵判定）", "Polar proximity (distance only, not a hydrogen-bond assignment)",
+                                "極性の接近（距離のみ、水素結合の判定ではない）", "극성 근접(거리만, 수소 결합 판정 아님)"),
+            "hydrophobic": ("疏水作用", "Hydrophobic", "疎水性", "소수성"), "contact": ("其他接觸", "Other contacts", "その他の接触", "기타 접촉"),
+            # records written before D-97
+            "hbond": ("距離 ≤ 3.5 Å 的 N/O（舊紀錄；不是氫鍵判定）", "N/O within 3.5 Å (old record; not a hydrogen-bond assignment)",
+                      "3.5 Å 以内の N/O（旧記録、水素結合の判定ではない）", "3.5 Å 이내 N/O(이전 기록, 수소 결합 판정 아님)"),
+            "ionic": ("帶電原子接近（舊紀錄；未檢查配體電荷）", "Charged-atom proximity (old record; ligand charge not checked)",
+                      "荷電原子の接近（旧記録、リガンド電荷は未確認）", "하전 원자 근접(이전 기록, 리간드 전하 미확인)")}
 
 
 def classify_interaction_2d(name: str, cons: list[dict]) -> list[dict]:
@@ -1357,8 +1383,10 @@ def classify_interaction_2d(name: str, cons: list[dict]) -> list[dict]:
     if not hit:
         return []
     kinds = {}
-    for c in hit:
-        kinds.setdefault(c["kind"], set()).add(c["res"])
+    for c in hit:                     # D-97: every label of every partner, not only the nearest atom's single class
+        for p in c.get("partners") or [{"res": c["res"], "labels": [c["kind"]]}]:
+            for k in p.get("labels") or [c["kind"]]:
+                kinds.setdefault(k, set()).add(p["res"])
     lab = {k: _KIND_2D.get(k, (k, k, k, k)) for k in kinds}
     return [S("note",
               f"{name}：{len(hit)} 個配體原子與蛋白接觸。" + "".join(f"{lab[k][0]}：{'、'.join(sorted(v))}。" for k, v in kinds.items()),

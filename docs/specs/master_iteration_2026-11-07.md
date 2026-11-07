@@ -55,6 +55,15 @@
 | F18 實驗回饋 | 缺 | 缺 | P3，需外部資料 |
 | F19 MM/GBSA／MM/PBSA | 缺 | 缺 | P2B；本輪不做（見 §5） |
 
+## 2b. 第二批（D-97）落地摘要
+A5/A6/F07/F08/F09/A4/A12 已實作（純 Python，容器可測；真實 mdtraj 路徑交 CI）：
+- `md20/analysis/interactions.py`：統一化學判定（鹽橋需電荷相反、同號接近、配體電荷未知→不判鹽橋、極性接近只看距離不叫氫鍵、多標籤並存）、完整動態鄰居搜尋（每幀最小映像、含三斜盒、候選集合為全幀聯集）、chain-aware 殘基鍵、`initial_vs_new`、`legacy_matrix` 後備、`water_unavailable`。
+- `md20/analysis/persistence.py`：事件表、連續／間歇（物理時間允許中斷）、左右設限、Kaplan–Meier（右設限；左設限排除並計數）、節奏契約（稀疏→limited、事件不足→不給壽命）、replica 不串接、斷點不橋接。
+- `md20/analysis/extended.py`：fingerprint 改用上述模組（schema `md20.fingerprint/2`，多標籤、持續性、initial_vs_new），water bridges 缺水→`unavailable`。
+- `md20/analysis/traj.py`：`compute_metrics` 動態接觸、`ligand_state`（A4，接觸＋COM＋RMSD，約束如實標註，RMSD 參考＝第一個 production 幀）。
+- `md20/report/chem.py`：`pose_contacts` 同一化學層、用分子形式電荷。
+- 報告：多通道指紋圖、持續性表、initial-vs-new、缺水「無法進行」行；`interpret.md` 的配體狀態與 RMSD 圖說改為描述性（A4）。
+
 ## 3. 本輪實作（P0 增量）
 
 ### 3.1 科學評估（`md20/sampling/assessment.py`，新檔）

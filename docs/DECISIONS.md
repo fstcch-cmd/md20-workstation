@@ -7,6 +7,29 @@
 
 ## 2026-11-07
 
+### D-97　整合規格 P0 第二批：互作化學統一（A5）、完整動態接觸（A6）、配體狀態不靠單一 RMSD（A4）、互作持續性與設限（F09）、取樣節奏契約（A12）、初始 vs 新接觸（F07）
+- 依據同 D-96。本批對應規格 §6.4.1（F09）、A4、A5、A6、A12、F07、F08、Tests 5/6/19/25/36。
+- 新模組（純 Python，容器可測）：
+  1. `md20/analysis/interactions.py`：
+     - `pair_labels` 多標籤判定：`salt_bridge`（電荷相反 ≤ 0.40 nm）、`like_charge_proximity`（同號）、`charged_proximity_ligand_charge_unknown`（配體原子電荷未知時，不判鹽橋）、`polar_proximity`（N/O ≤ 0.35 nm，只看距離，**不叫 hbond**）、`hydrophobic`。蛋白電荷由殘基名的質子化狀態決定；配體電荷只接受原子層級正負號，未知就是 unknown（不用部分電荷正負號代替）。
+     - `dynamic_pairs`：每幀完整鄰居搜尋（最小映像，含三斜盒／菱形十二面體），候選集合為所有幀的聯集，第二遍分 chunk；chunk 大小不影響結果。無 PBC 時用三角不等式精確預篩。
+     - chain-aware `residue_key`（`A:ASP189` ≠ `B:ASP189`，含插入碼）。
+  2. `md20/analysis/persistence.py`：事件表（起訖幀與時間、長度、中斷、左右設限、視窗歸屬）、連續／間歇（允許中斷以物理時間計）、Kaplan–Meier（右設限；左設限排除並計數）、節奏契約（儲存間隔 > 允許中斷→`limited`、長度為上限；事件 < 5 或估計未落到 1/e→不給壽命）、不同 run 不串接、記錄的軌跡斷點與異常時間跳不橋接。明文：持續性不是滯留時間、不是 koff。
+- 整合：
+  3. `extended.py` fingerprint 改用上述（schema `md20.fingerprint/2`，多標籤 bitmask、`initial_vs_new`、`persistence`）；water bridges 缺水→`{"status":"unavailable"}` 而非 0。
+  4. `traj.compute_metrics` 用 `dynamic_pairs`（去掉第一幀 1.2 nm 篩選）；新增 `ligand_state`（A4）：姿勢保留／姿勢改變但在口袋／有離開證據（連續多幀無接觸且 COM 離口袋 ≥ 5 Å）／未知，由接觸＋COM＋RMSD 共同判定，約束如實標註，RMSD 參考寫明是第一個 production 幀。`stays_bound` 僅為相容保留，報告不再用它下結論。
+  5. `report/chem.pose_contacts` 用同一化學層與分子形式電荷；2D 圖著色用 display order（不是強度排名），每個原子保留所有標籤。
+  6. 報告：多通道指紋圖（每個殘基列每種互作一條 lane，並存可見）、持續性表（含設限與無壽命原因）、initial-vs-new 行、缺水「無法進行」行；`interpret.md` 配體段改讀 `ligand_state`，RMSD 圖說（「配體讓蛋白更穩定」「已平衡」）改為描述性。
+- 被否決：
+  - 用部分電荷正負號判鹽橋（規格 A5 明文禁止；部分電荷到處都有符號，會把中性基也判成帶電）。
+  - 沿用第一幀候選集合只是加大 cutoff（仍會漏掉大幅移動後進入的原子對）。
+  - 配體電荷未知時仍標 ionic（改為 `charged_proximity_ligand_charge_unknown`，等 build manifest 帶入原子電荷才可能出現鹽橋）。
+  - 持續性沿用 `extended.frame_indices` 的顯示抽幀（A12：會漏掉短中斷、扭曲長度）——改用儲存幀，顯示抽幀只給畫圖。
+  - 用 RMSD 單一門檻定 `stays_bound`／「已平衡」（A4）。
+- 測試：`tests/test_interactions.py`（14 項：電荷判定、並存標籤、跨鏈、晚形成接觸、PBC、chunk 一致、缺水；KM、設限、稀疏、不串接、壽命可辨識性）、`tests/test_extended_fingerprint_wiring.py`（2 項，以 stand-in topology 驗證 extended_metrics 接線而不需 mdtraj）、`tests/test_interactions_report.py`（1 項，報告端用真實模組輸出）、`test_extended_analysis.py` pose_contacts 斷言改為 A5 新行為、`test_report_v2.py` 配體狀態斷言更新。全套：673 passed、48 skipped。
+- 未決／交 CI：真實 mdtraj 下 `compute_metrics`／`extended_metrics` 的新路徑只有 CI openmm-stack heavy workflow 能驗；mdtraj 的 chain_id 取得（`chain.chain_id` 或索引）在真實拓撲上要確認。配體原子形式電荷寫入 build manifest（讓鹽橋能出現在配體上）仍待實作（需 RDKit）。
+- 相容性：舊的 `extended.json`（單類別 matrix）報告仍可畫（`legacy_matrix` 與舊圖說保留並標「舊紀錄」）。本 commit 未 push。
+
 ### D-96　整合規格 P0 第一批：執行狀態／科學評估／比較資格分開（A1、A2）、replica 起點語意（A9）、結構限制不算修正（A3）、決策紀錄依流程分開與摘要不截斷（A10）
 - 依據：使用者 11/07 09:39 提供的 `MD20_Claude_Code_Master_Iteration_Prompt_EN.md`（取代先前片段）。逐項複核表與 F01–F19 盤點在 `docs/specs/master_iteration_2026-11-07.md` §1–§2（每項附 `5561dd7` 的檔案與行號）。
 - 決定與理由：

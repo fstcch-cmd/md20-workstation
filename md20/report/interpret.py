@@ -204,29 +204,7 @@ def md(summaries: dict, metrics: dict | None = None, restrained: bool = False) -
                              f"{key}: 후반부에도 RMSD가 변하고 있어(드리프트 {dr:+.2f} Å) 아직 평탄 구간에 도달하지 않았습니다. 시뮬레이션을 연장하십시오."))
         for rn, l in (s.get("ligands") or {}).items():
             r20 = l.get("rmsd_last20_A")
-            if not l.get("stays_bound"):
-                out.append(F("caution",
-                             f"{key} 的配體 {rn}：最後 20 % 時間的口袋內 RMSD 為 {r20:.1f} Å（≥ 3 Å），配體離開或明顯偏離了原結合位。"
-                             "對接姿勢在動態中不穩定，不應拿對接分數當作結合證據。",
-                             f"Ligand {rn} in {key}: pocket RMSD over the last 20 % is {r20:.1f} Å (≥ 3 Å). The ligand left or "
-                             "moved away from the docked site, so the docking score is not evidence of binding.",
-                             f"{key} のリガンド {rn}：最後の 20 % のポケット内 RMSD は {r20:.1f} Å（≥ 3 Å）です。リガンドは元の結合部位を離れたか大きくずれており、"
-                             "ドッキングポーズは動的には安定していません。ドッキングスコアを結合の根拠にしないでください。",
-                             f"{key}의 리간드 {rn}: 마지막 20 % 동안 포켓 내 RMSD가 {r20:.1f} Å(≥ 3 Å)입니다. 리간드가 원래 결합 부위를 "
-                             "떠났거나 크게 벗어났으므로 도킹 점수를 결합의 근거로 볼 수 없습니다."))
-            elif r20 is not None and r20 > 2.0:
-                out.append(F("note",
-                             f"{key} 的配體 {rn}：留在口袋內，但最後 20 % 的 RMSD 為 {r20:.1f} Å，結合模式有調整。",
-                             f"Ligand {rn} in {key}: stays in the pocket, but its RMSD over the last 20 % is {r20:.1f} Å, so the binding mode shifted.",
-                             f"{key} のリガンド {rn}：ポケット内にとどまっていますが、最後の 20 % の RMSD は {r20:.1f} Å で、結合様式が変化しています。",
-                             f"{key}의 리간드 {rn}: 포켓 안에 머물지만 마지막 20 %의 RMSD가 {r20:.1f} Å이므로 결합 모드가 조정되었습니다."))
-            else:
-                out.append(F("good",
-                             f"{key} 的配體 {rn}：維持對接姿勢（最後 20 % 的 RMSD 為 {r20:.1f} Å），結合模式在模擬時間內穩定。",
-                             f"Ligand {rn} in {key}: keeps the docked pose (RMSD {r20:.1f} Å over the last 20 %). The binding mode "
-                             "is stable over the simulated time.",
-                             f"{key} のリガンド {rn}：ドッキングポーズを保っています（最後の 20 % の RMSD は {r20:.1f} Å）。結合様式はシミュレーション時間内で安定です。",
-                             f"{key}의 리간드 {rn}: 도킹 포즈를 유지합니다(마지막 20 % RMSD {r20:.1f} Å). 결합 모드가 시뮬레이션 시간 동안 안정적입니다."))
+            out += ligand_state_findings(key, rn, l)
             tc = l.get("top_contacts") or []
             if tc:
                 txt = "、".join(f"{a}（{b:.0%}）" for a, b in tc[:5])
@@ -274,6 +252,68 @@ def rigidified(items: list[dict]) -> list[dict]:
 
 
 # ----------------------------------------------------------------------------------- binding
+def ligand_state_findings(key: str, rn: str, l: dict) -> list[dict]:
+    """D-97 (A4): what the ligand did, from contacts + pocket COM + RMSD (`analysis.traj.ligand_state`).  RMSD alone
+    never decides retention or dissociation; restraints are stated; the RMSD reference is the first production frame."""
+    st = l.get("state") or {}
+    r20 = l.get("rmsd_last20_A")
+    fa, ft = st.get("fraction_all") or {}, st.get("fraction_final_20pct") or {}
+    rest = st.get("restraints") or []
+    rz = (f"（production 期間有位置約束：{', '.join(rest)}；受約束時留在口袋不代表無約束下穩定）" if rest else "")
+    re_ = (f" (positional restraints during production: {', '.join(rest)}; staying in the pocket under restraint is not "
+           "stability without restraint)" if rest else "")
+    if not fa:            # record written before D-97: RMSD only — say what it cannot tell
+        if r20 is None:
+            return []
+        lvl = "caution" if r20 >= 3.0 else "note"
+        return [F(lvl,
+                  f"{key} 的配體 {rn}：最後 20 % 的口袋內 RMSD 為 {r20:.1f} Å（參考是第一個 production 幀，不是對接姿勢）。這份紀錄沒有接觸狀態，"
+                  "單看 RMSD 無法區分「姿勢改變但仍在口袋」與「離開口袋」。",
+                  f"Ligand {rn} in {key}: pocket RMSD over the last 20 % is {r20:.1f} Å (reference: the first production frame, not "
+                  "the docking pose). This record has no contact state, and RMSD alone cannot tell a changed pose in the pocket "
+                  "from leaving it.",
+                  f"{key} のリガンド {rn}：最後の 20 % のポケット内 RMSD は {r20:.1f} Å です（基準は最初の本計算フレームで、ドッキングポーズではありません）。"
+                  "この記録には接触状態がなく、RMSD だけではポケット内でのポーズ変化と離脱を区別できません。",
+                  f"{key}의 리간드 {rn}: 마지막 20 % 포켓 내 RMSD는 {r20:.1f} Å입니다(기준은 첫 본 시뮬레이션 프레임이며 도킹 포즈가 아님). "
+                  "이 기록에는 접촉 상태가 없어 RMSD만으로는 포켓 안의 포즈 변화와 이탈을 구별할 수 없습니다.")]
+    pct = lambda d, k: f"{(d.get(k) or 0):.0%}"  # noqa: E731
+    if (fa.get("escape_evidence") or 0) > 0:
+        t0 = st.get("first_escape_ns")
+        tt = f"{t0:.2f} ns" if t0 is not None else "—"
+        return [F("caution",
+                  f"{key} 的配體 {rn}：有離開口袋的證據（連續多幀沒有任何接觸殘基且質心離口袋增加 ≥ 5 Å，首次在 {tt}；全程 {pct(fa, 'escape_evidence')} 的幀）{rz}。",
+                  f"Ligand {rn} in {key}: there is escape evidence (several consecutive frames with no contacting residue and the "
+                  f"centre of mass ≥ 5 Å farther from the pocket, first at {tt}; {pct(fa, 'escape_evidence')} of all frames){re_}.",
+                  f"{key} のリガンド {rn}：ポケットを離れた証拠があります（接触残基のない連続フレームがあり、重心がポケットから 5 Å 以上離れた。最初は {tt}、"
+                  f"全体の {pct(fa, 'escape_evidence')} のフレーム）{rz}。",
+                  f"{key}의 리간드 {rn}: 포켓을 떠난 증거가 있습니다(접촉 잔기가 없는 연속 프레임이 있고 질량중심이 포켓에서 5 Å 이상 멀어짐, 처음 {tt}, "
+                  f"전체의 {pct(fa, 'escape_evidence')} 프레임){re_}.")]
+    if (ft.get("pose_changed_in_pocket") or 0) >= 0.5:
+        return [F("note",
+                  f"{key} 的配體 {rn}：最後 20 % 時間中 {pct(ft, 'pose_changed_in_pocket')} 的幀姿勢已改變但仍有接觸殘基（RMSD 高但沒有離開口袋）{rz}。",
+                  f"Ligand {rn} in {key}: in {pct(ft, 'pose_changed_in_pocket')} of the final 20 % of frames the pose changed but "
+                  f"contacting residues remain (high RMSD without leaving the pocket){re_}.",
+                  f"{key} のリガンド {rn}：最後の 20 % のフレームのうち {pct(ft, 'pose_changed_in_pocket')} でポーズは変わりましたが接触残基は残っています"
+                  f"（RMSD は高いがポケットは離れていません）{rz}。",
+                  f"{key}의 리간드 {rn}: 마지막 20 % 프레임 중 {pct(ft, 'pose_changed_in_pocket')}에서 포즈는 바뀌었지만 접촉 잔기가 남아 있습니다"
+                  f"(RMSD는 높지만 포켓을 떠나지 않음){re_}.")]
+    if (ft.get("pose_retained") or 0) >= 0.5:
+        return [F("good" if not rest else "note",
+                  f"{key} 的配體 {rn}：最後 20 % 時間中 {pct(ft, 'pose_retained')} 的幀維持起始姿勢且有接觸殘基（參考是第一個 production 幀）{rz}。",
+                  f"Ligand {rn} in {key}: in {pct(ft, 'pose_retained')} of the final 20 % of frames it keeps its starting pose with "
+                  f"contacting residues (reference: the first production frame){re_}.",
+                  f"{key} のリガンド {rn}：最後の 20 % のフレームのうち {pct(ft, 'pose_retained')} で最初のポーズを保ち、接触残基があります"
+                  f"（基準は最初の本計算フレーム）{rz}。",
+                  f"{key}의 리간드 {rn}: 마지막 20 % 프레임 중 {pct(ft, 'pose_retained')}에서 처음 포즈를 유지하고 접촉 잔기가 있습니다"
+                  f"(기준은 첫 본 시뮬레이션 프레임){re_}.")]
+    return [F("caution",
+              f"{key} 的配體 {rn}：狀態不明確（最後 20 % 時間中 {pct(ft, 'unknown')} 的幀接觸消失但沒有質心離開的證據）{rz}。",
+              f"Ligand {rn} in {key}: the state is unclear ({pct(ft, 'unknown')} of the final 20 % of frames lose contact without "
+              f"centre-of-mass evidence of leaving){re_}.",
+              f"{key} のリガンド {rn}：状態ははっきりしません（最後の 20 % のフレームのうち {pct(ft, 'unknown')} で接触が消えていますが、重心が離れた証拠はありません）{rz}。",
+              f"{key}의 리간드 {rn}: 상태가 불분명합니다(마지막 20 % 프레임 중 {pct(ft, 'unknown')}에서 접촉이 사라졌지만 질량중심이 떠난 증거는 없음){re_}.")]
+
+
 def binding(results: dict) -> list[dict]:
     out = []
     for name, r in (results or {}).items():

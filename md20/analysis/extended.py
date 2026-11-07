@@ -180,7 +180,30 @@ def _res_label(top, i: int) -> str:
     return f"{r.name}{r.resSeq}"
 
 
-def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *, temperature_k: float = 300.0) -> dict:
+def _persistence(fp: dict, *, max_gap_ps: float = 0.0, min_occupancy: float = 0.1, top: int = 12) -> dict:
+    """F09 (D-97): residue-level persistence of each interaction label on the stored frames of this one run."""
+    from .persistence import events, survival
+    t = fp.get("time_ps")
+    if not t or len(t) != fp.get("n_frames"):
+        return {"status": "unavailable", "reason": "stored frame times are not recorded"}
+    out = {"status": "computed", "definition": "continuous" if max_gap_ps <= 0 else "intermittent", "max_gap_ps": max_gap_ps,
+           "items": []}
+    for lab, occ in (fp.get("occupancy") or {}).items():
+        for r, v in sorted(occ.items(), key=lambda kv: -kv[1])[:top]:
+            if v < min_occupancy:
+                continue
+            on = (np.asarray(fp["bitmask"][fp["residues"].index(r)]) & fp["bits"][lab]) > 0
+            ev = events(on, t, run_id="this_run", max_gap_ps=max_gap_ps)
+            sv = survival([ev])
+            out["items"].append({"residue": r, "label": lab, "occupancy_time_weighted": ev["occupancy_time_weighted"],
+                                 "n_events": len(ev["events"]), "events": ev["events"], "limitations": ev["limitations"],
+                                 "lifetime_ps": sv["lifetime_ps"], "lifetime_reason": sv.get("lifetime_reason"),
+                                 "n_left_censored_excluded": sv["n_left_censored_excluded"]})
+    return out
+
+
+def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *, temperature_k: float = 300.0,
+                     ligand_charges: dict[str, dict[int, int]] | None = None) -> dict:
     """All extended analyses for one (centred, superposed) production trajectory.  JSON-able."""
     import mdtraj as md
     top = traj.topology
@@ -249,10 +272,6 @@ def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *,
 
     out["ligands"] = {}
     polar = np.setdiff1d(top.select("protein and (element N or element O)"), lig_all)
-    prot_c = np.array([i for i in np.setdiff1d(top.select("protein and element C and sidechain"), lig_all)
-                       if top.atom(int(i)).residue.name in HYDROPHOBIC_RES], int)
-    pos = np.array([i for i in prot if (top.atom(int(i)).residue.name, top.atom(int(i)).name) in POS_ATOMS], int)
-    neg = np.array([i for i in prot if (top.atom(int(i)).residue.name, top.atom(int(i)).name) in NEG_ATOMS], int)
     water_o = top.select("water and element O")
     for rn, idx in (ligand_groups or {}).items():
         lh = np.array(idx, int)
@@ -264,7 +283,6 @@ def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *,
             except Exception as exc:  # noqa: BLE001
                 L["errors"][name] = f"{type(exc).__name__}: {exc}"
         lpolar = np.array([i for i in lh if top.atom(int(i)).element.symbol in ("N", "O")], int)
-        lcarb = np.array([i for i in lh if top.atom(int(i)).element.symbol == "C"], int)
 
         # hydrogen bonds between ligand and protein (geometric: heavy-atom distance; donor–H–acceptor from Wernet–Nilsson)
         def hbonds():
@@ -284,40 +302,33 @@ def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *,
             return {"count": [len(f) for f in frames], "occupancy": occupancy(frames, len(frames))}
         lguard("hbonds", hbonds)
 
-        # interaction fingerprint per residue: hydrogen bond, hydrophobic, ionic
+        # interaction fingerprint per residue (D-97, A5/A6): chemically defined, multi-label, complete per-frame
+        # neighbour search over the STORED frames (not the display subset `sub`), with chain-aware residue identity
         def fingerprint():
-            res_frames = {"hydrophobic": [], "ionic": [], "polar": []}
-            for kind, la, pa, cut in (("hydrophobic", lcarb, prot_c, HYDROPHOBIC_NM), ("polar", lpolar, polar, HB_DIST_NM),
-                                      ("ionic", lpolar, np.concatenate([pos, neg]).astype(int), IONIC_NM)):
-                if not len(la) or not len(pa):
-                    res_frames[kind] = [[] for _ in range(sub.n_frames)]
-                    continue
-                pairs = np.array([[i, j] for i in la for j in pa])
-                d0 = md.compute_distances(sub[0], pairs)[0]
-                pairs = pairs[d0 < 1.2] if (d0 < 1.2).any() else pairs[:0]
-                if not len(pairs):
-                    res_frames[kind] = [[] for _ in range(sub.n_frames)]
-                    continue
-                d = md.compute_distances(sub, pairs)
-                res_frames[kind] = [sorted({_res_label(top, j) for (i, j), on in zip(pairs, d[f] < cut) if on})
-                                    for f in range(sub.n_frames)]
-            residues = sorted({r for v in res_frames.values() for fr in v for r in fr})
-            occ = {k: dict(occupancy(v, sub.n_frames, top=200)) for k, v in res_frames.items()}
-            # residue × time matrix: 0 none, 1 hydrophobic, 2 polar, 3 ionic (strongest class shown)
-            mat = []
-            for r in residues:
-                row = []
-                for f in range(sub.n_frames):
-                    v = 3 if r in res_frames["ionic"][f] else (2 if r in res_frames["polar"][f] else (1 if r in res_frames["hydrophobic"][f] else 0))
-                    row.append(v)
-                mat.append(row)
-            return {"residues": residues, "matrix": mat, "occupancy": occ}
+            from . import interactions as IX
+            prot_heavy = np.array([i for i in prot if top.atom(int(i)).element is not None
+                                   and top.atom(int(i)).element.symbol != "H"], int)
+            dyn = IX.dynamic_pairs(traj.xyz, lh, prot_heavy, cutoff_nm=IX.SEARCH_NM)   # centred trajectory: complex whole
+            atoms = IX.atoms_from_topology(top, list(lh) + list(prot_heavy[np.isin(prot_heavy, dyn["pairs"][:, 1])]))
+            charges = (ligand_charges or {}).get(rn)
+            fp = IX.fingerprint(dyn, atoms, ligand_charges=charges,
+                                time_ps=(traj.time.tolist() if traj.time is not None and len(traj.time) else None))
+            fp["time_ns"] = [x / 1000.0 for x in fp["time_ps"]] if fp.get("time_ps") else list(range(traj.n_frames))
+            fp["display_labels"] = IX.display_labels(fp["residues"])
+            fp["matrix"] = IX.legacy_matrix(fp)
+            fp["initial_vs_new"] = IX.initial_vs_new(fp)
+            fp["persistence"] = _persistence(fp)
+            return fp
         lguard("fingerprint", fingerprint)
 
-        # water bridges: a water oxygen within 3.5 Å of a ligand N/O and of a protein N/O in the same frame
+        # water bridges: GEOMETRIC CANDIDATES only — a water oxygen within 3.5 Å of a ligand N/O and of a protein N/O in
+        # the same frame (no hydrogen-bond geometry).  No solvent coordinates → unavailable, never zero (D-97, A5)
         def water_bridges():
-            if not len(water_o) or not len(lpolar):
-                return {"count": [0] * sub.n_frames, "residues": []}
+            from .interactions import water_unavailable
+            if not len(water_o):
+                return water_unavailable("no water coordinates in this trajectory (solvent stripped or implicit solvent)")
+            if not len(lpolar):
+                return {"status": "not_applicable", "reason": "ligand has no N/O atoms", "count": None, "residues": None}
             counts, per_res = [], []
             for f in range(sub.n_frames):
                 X = sub.xyz[f]
@@ -330,7 +341,8 @@ def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *,
                 bridged = hit.any(1)
                 counts.append(int(bridged.sum()))
                 per_res.append(sorted({_res_label(top, polar[j]) for i in range(len(ws)) for j in np.where(hit[i])[0]}))
-            return {"count": counts, "residues": occupancy(per_res, sub.n_frames)}
+            return {"status": "computed", "definition": "geometric candidate (distance only, display frames)",
+                    "count": counts, "residues": occupancy(per_res, sub.n_frames)}
         lguard("water_bridges", water_bridges)
 
         # solvent exposure of the ligand: SASA in the complex vs alone (buried fraction)

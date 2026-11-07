@@ -63,9 +63,21 @@ def fingerprint_bits(path, n_bits: int = 1024):
 
 
 # ------------------------------------------------------------------------------------------- 2D interaction diagram
-def pose_contacts(lig_xyz, lig_elem, prot_atoms: list[dict], *, cutoff: float = 4.0) -> list[dict]:
-    """For each ligand heavy atom: nearest protein residue within the cutoff and the interaction class.
-    prot_atoms: [{"xyz", "element", "res", "name", "resname"}].  Pure numpy."""
+# display order for the ONE highlight colour of an atom; it is not a strength ranking (all labels stay in "kinds")
+KIND_DISPLAY_ORDER = ("salt_bridge", "like_charge_proximity", "charged_proximity_ligand_charge_unknown", "polar_proximity",
+                      "hydrophobic", "contact")
+
+
+def pose_contacts(lig_xyz, lig_elem, prot_atoms: list[dict], *, cutoff: float = 4.0,
+                  lig_charges: list[int] | None = None) -> list[dict]:
+    """Static pose contacts with the SAME chemistry as the trajectory fingerprint (D-97, A5; analysis/interactions.py).
+
+    For each ligand heavy atom: every protein atom within `cutoff` Å is examined (not only the nearest), and the atom
+    gets all labels that apply ("kinds"); "res" is the nearest residue (for the drawing), "kind" is the label used for
+    the highlight colour (display order, not strength).  `lig_charges` = formal charge per ligand atom (from the
+    molecule's chemistry); None = unknown → no salt bridge can be called.  Distance-only N/O pairs are
+    polar_proximity, never "hbond".  prot_atoms: [{"xyz", "element", "res", "name", "resname"}] in Å.  Pure numpy."""
+    from ..analysis.interactions import pair_labels, HYDROPHOBIC_RES
     if not prot_atoms:
         return []
     P = np.array([a["xyz"] for a in prot_atoms], float)
@@ -76,13 +88,20 @@ def pose_contacts(lig_xyz, lig_elem, prot_atoms: list[dict], *, cutoff: float = 
         if d[j] > cutoff:
             out.append({"atom": i, "res": None})
             continue
-        a = prot_atoms[j]
-        polar = el in ("N", "O") and a["element"] in ("N", "O")
-        ionic = polar and (a["resname"], a["name"]) in {("LYS", "NZ"), ("ARG", "NH1"), ("ARG", "NH2"), ("ARG", "NE"),
-                                                        ("ASP", "OD1"), ("ASP", "OD2"), ("GLU", "OE1"), ("GLU", "OE2")}
-        kind = "ionic" if ionic and d[j] <= 4.0 else ("hbond" if polar and d[j] <= 3.5 else
-                                                      ("hydrophobic" if el == "C" and a["element"] == "C" else "contact"))
-        out.append({"atom": i, "res": a["res"], "kind": kind, "distance_A": round(float(d[j]), 2)})
+        sign = None if lig_charges is None else int(np.sign(lig_charges[i]))
+        kinds, partners = set(), []
+        for k in np.nonzero(d <= cutoff)[0]:
+            a = prot_atoms[int(k)]
+            labs = pair_labels(el, sign, a["element"], a["resname"], a["name"], float(d[k]) / 10.0,
+                               sidechain_carbon=a["name"] not in ("C", "CA") and a["resname"] in HYDROPHOBIC_RES)
+            if labs:
+                kinds |= labs
+                partners.append({"res": a["res"], "atom": a["name"], "labels": sorted(labs), "distance_A": round(float(d[k]), 2)})
+        kinds = kinds or {"contact"}
+        kind = next(k for k in KIND_DISPLAY_ORDER if k in kinds)
+        out.append({"atom": i, "res": prot_atoms[j]["res"], "kind": kind, "kinds": sorted(kinds),
+                    "distance_A": round(float(d[j]), 2), "partners": partners,
+                    "ligand_charge": "unknown" if lig_charges is None else "formal charges"})
     return out
 
 
@@ -112,10 +131,14 @@ def interaction_diagram(sdf_path, receptor_pdb, out_png: Path) -> tuple[str | No
                              "res": f"{l[17:20].strip()}{int(l[22:26])}", "name": l[12:16].strip(), "resname": l[17:20].strip()})
             except ValueError:
                 continue
-    cons = pose_contacts(xyz, elem, prot)
+    # formal charges come from the molecule's chemistry (charged groups written in the SDF), not from partial charges
+    q = [m.GetAtomWithIdx(i).GetFormalCharge() for i in heavy]
+    cons = pose_contacts(xyz, elem, prot, lig_charges=q)
     mh = Chem.RemoveHs(m)
     AllChem.Compute2DCoords(mh)
-    colors = {"hbond": (0.18, 0.44, 0.62), "ionic": (0.72, 0.26, 0.25), "hydrophobic": (0.66, 0.53, 0.17), "contact": (0.6, 0.6, 0.6)}
+    colors = {"polar_proximity": (0.18, 0.44, 0.62), "salt_bridge": (0.72, 0.26, 0.25), "hydrophobic": (0.66, 0.53, 0.17),
+              "like_charge_proximity": (0.55, 0.35, 0.6), "charged_proximity_ligand_charge_unknown": (0.85, 0.55, 0.45),
+              "contact": (0.6, 0.6, 0.6), "hbond": (0.18, 0.44, 0.62), "ionic": (0.72, 0.26, 0.25)}
     hl, hc = [], {}
     for c, i_heavy in zip(cons, range(len(heavy))):
         if c.get("res"):
