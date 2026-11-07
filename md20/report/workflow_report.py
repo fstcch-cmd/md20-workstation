@@ -403,7 +403,41 @@ def _design(doc: Doc, wf) -> str:
     tab = doc.table([tx(("名稱", "Name", "名前", "이름"), L), tx(("種類", "Type", "種類", "종류"), L),
                      tx(("結構（SMILES 或序列）", "Structure (SMILES or sequence)", "構造（SMILES または配列）", "구조 (SMILES 또는 서열)"), L)],
                     rows, ("研究的配體", "Ligands studied", "対象のリガンド", "연구한 리간드")) if rows else ""
-    return _section(doc, doc.next(), "design", "", p + tab, [])
+    return _section(doc, doc.next(), "design", "", p + tab + _evidence_html(doc, wf), [])
+
+
+def _evidence_html(doc: Doc, wf) -> str:
+    """D-108 (F01): planned vs run vs what the evidence supports, before any result is shown."""
+    from . import evidence as EV
+    rows = EV.evidence_rows(wf)
+    if not rows:
+        return ""
+    L = doc.lang
+    word = {"supported": ("有證據", "supported", "裏付けあり", "근거 있음"), "limited": ("有限制", "limited", "制限あり", "제한 있음"),
+            "missing": ("缺", "missing", "欠落", "없음")}
+    cls = {"supported": "", "limited": "caution", "missing": "warn"}
+
+    def yn(v):
+        if isinstance(v, bool):
+            return tx(("是", "yes", "はい", "예"), L) if v else tx(("否", "no", "いいえ", "아니오"), L)
+        return _esc(str(v))
+    body = []
+    for r in rows:
+        why = "；".join(tx(EV.R[x], L) if x in EV.R else _esc(x) for x in r["reasons"]) or "—"
+        if r.get("detail"):
+            why += f"（{_esc(r['detail'])}）"
+        body.append([_esc(tx(EV.T[r["item"]], L)), _esc(r["subject"] or "—"), yn(r["planned"]), yn(r["done"]),
+                     f"<b class={cls[r['status']]}>{_esc(tx(word[r['status']], L))}</b>" if cls[r["status"]] else _esc(tx(word[r["status"]], L)),
+                     why])
+    sm = EV.summary(rows)
+    head = (f"<p>{_esc(tx(('證據覆蓋：', 'Evidence coverage: ', '裏付けの範囲：', '근거 범위: '), L))}"
+            f"{sm['supported']} {_esc(tx(word['supported'], L))} · {sm['limited']} {_esc(tx(word['limited'], L))} · "
+            f"{sm['missing']} {_esc(tx(word['missing'], L))}</p>")
+    return head + doc.table([tx(("項目", "Item", "項目", "항목"), L), tx(("對象", "Subject", "対象", "대상"), L),
+                             tx(("計畫", "Planned", "計画", "계획"), L), tx(("完成", "Done", "完了", "완료"), L),
+                             tx(("證據", "Evidence", "裏付け", "근거"), L), tx(("限制或缺口", "Limitation or gap", "制限・欠落", "제한 또는 공백"), L)],
+                            body, ("研究設計與證據覆蓋（計畫、實際執行、能支持什麼）", "Study design and evidence coverage (planned, run, what it supports)",
+                                   "研究デザインと裏付けの範囲（計画・実行・何を支えるか）", "연구 설계와 근거 범위(계획, 실행, 무엇을 뒷받침하는가)"))
 
 
 def _structure(doc: Doc, wf) -> str:
