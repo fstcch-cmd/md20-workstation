@@ -6,6 +6,15 @@
 ---
 
 ## 2026-11-07
+### 11/07 發行決定：a19（含 D-95–D-98），CI 全綠後推 tag；repo 維持公開
+- 使用者 11/07 11:07：「你決定」（針對：a19 發行與否、repo 公開／私人）。
+- 決定：
+  1. 版號 `0.1.0a19`（pyproject、`__init__`、README、`docs/students/*`、WINDOWS_QUICKSTART；commit `5a3fa37`）；發行說明 `docs/releases/v0.1.0a19.md`（含從未發行的 a18 內容）。
+  2. **發行條件**：`5a3fa37` 的 CI 中 openmm-stack 三 OS、pure-python 六個、installer-windows／macOS、heavy workflow 全綠（SKIPPED 的整合測試不算通過）才推 tag `v0.1.0a19`；發行流程本身再於乾淨 Windows runner（PS 5.1）解壓、安裝、刪除解壓資料夾後跑 doctor／demo 才上架（D-33）。已知隨機不穩的 CPU 整合測試（11/04 CI 紀錄）若紅，先確認是否為同一項再判斷，不直接放行。
+  3. **repo 維持公開**：私人 repo 的 release 需要登入才能下載（學生拿不到安裝檔），CI 也會計費（估計見上方 11/07 紀錄）。若之後要改私人，需要另找發行管道。
+  4. 舊的 2979908 run 不手動取消（中斷進行中的工作負載未獲允許），讓它跑完；新 run 排在它之後。
+- 被否決：立刻只為安裝程式發行（D-96–D-98 的真實引擎路徑尚未經 CI 驗證，發出去的科學輸出改變太大）；補發 a18（版號與內容對不上）。
+
 ### D-98　配體原子電荷寫進 build manifest（鹽橋終於能判在配體上，羧酸根兩個 O 都算）、docking 拒絕理由加代碼（A7：低風險後備只接受可修的幾何問題）、DevCheck 可在沙盒資料夾只跑 P0 驗證
 - 依據：`docs/specs/master_iteration_2026-11-07.md` §5 第 1、2 項；使用者 11/07 10:51 對「下一批」無偏好，採用本 session 建議（配體電荷＋A7）；使用者要求「多在沙盒或此電腦隔離驗證」。
 - 決定與理由：

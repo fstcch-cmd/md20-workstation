@@ -3,6 +3,8 @@
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
+## 待發行：v0.1.0a19（`5a3fa37` CI 全綠後推 tag；見 DECISIONS 11/07 發行決定）
+
 ## 進行中（2026-11-07，session_016gcJzAV8UjRW4ixPZLxddG）：D-98 配體原子電荷＋A7 拒絕代碼＋DevCheck P0
 - **(A)** 容器 697 passed、49 skipped（新增 24 項）。
 - **(B)** 交 CI：RDKit 共振判定（`test_rdkit_acetate_and_neutral_molecule`）、3PTB 完整流程的新斷言（heavy workflow）；另可在筆電以 `MD20-DevCheck-P0.cmd` 於沙盒資料夾隔離驗證。
