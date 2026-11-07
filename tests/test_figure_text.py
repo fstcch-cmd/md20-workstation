@@ -60,7 +60,8 @@ def test_rmsf_smd_pmf_scenarios():
     names = [f"R{i}" for i in range(50)]
     ref = np.ones(50)
     assert "most rigid" in _en(FT.classify_rmsf(names, ref, ref - 0.5 * (np.arange(50) < 3), "holo"))
-    assert "less stable overall" in _en(FT.classify_rmsf(names, ref, ref + 0.3, "holo"))
+    t = _en(FT.classify_rmsf(names, ref, ref + 0.3, "holo"))      # D-138 (R6): observation, not a causal claim
+    assert "flexibility is higher with the ligand" in t and "not a causal conclusion" in t and "less stable" not in t
     pos = np.linspace(0.4, 2.0, 300)
     two = 500 * np.exp(-((pos - 0.7) / 0.08) ** 2) + 450 * np.exp(-((pos - 1.2) / 0.08) ** 2)
     work = np.cumsum(two) * (pos[1] - pos[0])

@@ -418,10 +418,10 @@ def classify_rmsf(names: list[str], ref: np.ndarray, other: np.ndarray, label: s
     dm = float(d.mean())
     if dm >= 0.2:
         out.append(S("caution",
-                     f"{label} 的平均 RMSF 比蛋白單獨高 {dm:.2f} Å（≥ 0.2），結合讓蛋白整體變得較不穩定。",
-                     f"Mean RMSF in {label} is {dm:.2f} Å above the protein alone (≥ 0.2), so binding makes the protein less stable overall.",
-                     f"{label} の平均 RMSF はタンパク質単独より {dm:.2f} Å 高く（≥ 0.2）、結合によってタンパク質全体が不安定になっています。",
-                     f"{label}의 평균 RMSF가 단백질 단독보다 {dm:.2f} Å 높습니다(≥ 0.2). 결합으로 단백질 전체가 덜 안정해졌습니다."))
+                     f"{label} 的平均 RMSF 比蛋白單獨高 {dm:.2f} Å（≥ 0.2）：有配體時整體柔性較高。這是觀察到的差異，不是因果結論；要歸因於配體，需要條件可比且有重複間誤差。",
+                     f"Mean RMSF in {label} is {dm:.2f} Å above the protein alone (≥ 0.2): overall flexibility is higher with the ligand. This is an observed difference, not a causal conclusion; attributing it to the ligand needs comparable conditions and between-replica uncertainty.",
+                     f"{label} の平均 RMSF はタンパク質単独より {dm:.2f} Å 高く（≥ 0.2）、リガンドがあると全体の柔軟性が高くなっています。これは観察された差で、因果の結論ではありません。リガンドに帰するには、条件が比較可能で反復間の誤差があることが必要です。",
+                     f"{label}의 평균 RMSF가 단백질 단독보다 {dm:.2f} Å 높습니다(≥ 0.2). 리간드가 있을 때 전체 유연성이 더 큽니다. 관찰된 차이이며 인과 결론이 아닙니다. 리간드 때문이라고 하려면 조건이 비교 가능하고 반복 간 오차가 있어야 합니다."))
     elif not rig:
         out.append(S("note",
                      f"{label} 與蛋白單獨的柔性分佈相當（平均差 {dm:+.2f} Å），沒有明顯受結合影響的區域。",
@@ -442,11 +442,11 @@ def classify_contacts(key: str, lig: str, freq: dict) -> list[dict]:
     txt_en = ", ".join(f"{a} ({b:.0%})" for a, b in (anchors or items)[:6])
     if len(anchors) >= 3:
         return [S("good",
-                  f"{key} 的 {lig} 有 {len(anchors)} 個持續接觸的錨點殘基（≥ 75 %），分別是 {txt_zh}。結合由多個作用點穩定住。",
-                  f"{lig} in {key} has {len(anchors)} persistent anchor residues (≥ 75 %). They are {txt_en}, so binding is held "
-                  "by several contacts.",
-                  f"{key} の {lig} には持続的に接触するアンカー残基が {len(anchors)} 個あります（≥ 75 %）。{txt_zh} で、複数の接触点が結合を支えています。",
-                  f"{key}의 {lig}에는 지속적으로 접촉하는 앵커 잔기가 {len(anchors)}개 있습니다(≥ 75 %). {txt_en}이며, 여러 접촉점이 결합을 붙잡고 있습니다.")]
+                  f"{key} 的 {lig} 有 {len(anchors)} 個持續接觸的錨點殘基（≥ 75 %），分別是 {txt_zh}。配體在模擬時間內同時維持多個接觸；這描述接觸，不代表結合強度或親和力。",
+                  f"{lig} in {key} has {len(anchors)} persistent anchor residues (≥ 75 %): {txt_en}. The ligand kept several contacts "
+                  "at once during the simulation; this describes contacts, not binding strength or affinity.",
+                  f"{key} の {lig} には持続的に接触するアンカー残基が {len(anchors)} 個あります（≥ 75 %）。{txt_zh} です。シミュレーション時間内に複数の接触を同時に保っています。これは接触の記述で、結合の強さや親和性を示すものではありません。",
+                  f"{key}의 {lig}에는 지속적으로 접촉하는 앵커 잔기가 {len(anchors)}개 있습니다(≥ 75 %). {txt_en}입니다. 시뮬레이션 동안 여러 접촉을 동시에 유지했습니다. 접촉에 대한 기술이며 결합 세기나 친화도를 뜻하지 않습니다.")]
     if anchors:
         return [S("note",
                   f"{key} 的 {lig} 只有 {len(anchors)} 個持續接觸的殘基（{txt_zh}），結合依賴少數作用點，對突變或結構差異比較敏感。",
@@ -662,10 +662,10 @@ FIG.update({
                     "Fraction of time each donor–acceptor hydrogen bond exists. The arrow in each label points from donor to acceptor.",
                     "供与体と受容体の組ごとに、水素結合が存在する時間の割合です。ラベルの矢印は供与体から受容体に向いています。",
                     "주개와 받개 쌍마다 수소 결합이 존재하는 시간의 비율입니다. 표시의 화살표는 주개에서 받개 쪽을 가리킵니다."),
-        "read": ("50 % 以上是穩定氫鍵，20 % 到 50 % 是間歇氫鍵。同一殘基有好幾組氫鍵，代表那裡是關鍵作用位。",
-                 "Above 50 % is a stable hydrogen bond and 20–50 % is intermittent. Several bonds to one residue mark a key interaction site.",
-                 "50 % 以上は安定な水素結合、20〜50 % は断続的な水素結合です。1つの残基に複数の水素結合があれば、そこが重要な相互作用部位です。",
-                 "50 % 이상은 안정한 수소 결합, 20~50 %는 간헐적인 수소 결합입니다. 한 잔기에 수소 결합이 여러 개 있으면 그곳이 핵심 상호작용 부위입니다."),
+        "read": ("50 % 以上是穩定氫鍵，20 % 到 50 % 是間歇氫鍵。同一殘基有好幾組氫鍵，值得列為可驗證的假說（例如突變實驗），佔有率本身不證明它對結合是必要的。",
+                 "Above 50 % is a stable hydrogen bond and 20–50 % is intermittent. Several bonds to one residue make it a testable hypothesis (e.g. by mutation); occupancy alone does not show it is required for binding.",
+                 "50 % 以上は安定な水素結合、20〜50 % は断続的な水素結合です。1つの残基に複数の水素結合があれば、検証できる仮説（例えば変異実験）として挙げる価値があります。占有率だけでは結合に必須とは言えません。",
+                 "50 % 이상은 안정한 수소 결합, 20~50 %는 간헐적인 수소 결합입니다. 한 잔기에 수소 결합이 여러 개 있으면 검증할 가설(예: 돌연변이 실험)로 둘 만합니다. 점유율만으로 결합에 꼭 필요하다고 할 수는 없습니다."),
     },
     "com_distance": {
         "title": ("配體與口袋的質心距離", "Ligand–pocket centre-of-mass distance", "リガンドとポケットの重心間距離", "리간드-포켓 질량 중심 거리"),
@@ -1143,11 +1143,11 @@ def classify_dccm(name: str, C, ref=None) -> list[dict]:
             dz, de = ("增強" if up else "減弱"), ("stronger" if up else "weaker")
             dj, dk = ("強く" if up else "弱く"), ("강해졌습니다" if up else "약해졌습니다")
             out.append(S("note",
-                         f"與蛋白單獨相比，{name} 的長距離相關平均{dz} {abs(d):.2f}，配體改變了區域之間的協同運動。",
+                         f"與蛋白單獨相比，{name} 的長距離相關平均{dz} {abs(d):.2f}。這是有配體時觀察到的差異；相關不是因果，是否由配體造成需要重複與條件可比的比較。",
                          f"Compared with the protein alone, long-range correlation in {name} is {abs(d):.2f} {de} on average, so "
-                         "the ligand changes the coupling between regions.",
-                         f"タンパク質単独と比べて、{name} の長距離相関は平均で {abs(d):.2f} {dj}なっています。リガンドが領域間の協調運動を変えています。",
-                         f"단백질 단독과 비교해 {name}의 장거리 상관이 평균 {abs(d):.2f}만큼 {dk}. 리간드가 영역 사이의 협동 운동을 바꿉니다."))
+                         "this is a difference observed with the ligand; correlation is not causation, and attributing it to the ligand needs replicas and comparable conditions.",
+                         f"タンパク質単独と比べて、{name} の長距離相関は平均で {abs(d):.2f} {dj}なっています。リガンドがあるときに観察された差です。相関は因果ではなく、リガンドによるかどうかは反復と比較可能な条件での比較が必要です。",
+                         f"단백질 단독과 비교해 {name}의 장거리 상관이 평균 {abs(d):.2f}만큼 {dk}. 리간드가 있을 때 관찰된 차이입니다. 상관은 인과가 아니며, 리간드 때문인지는 반복과 비교 가능한 조건에서 확인해야 합니다."))
     return out
 
 
@@ -1677,17 +1677,17 @@ FIG.update({
                  "후반부에도 곡선이 변하면 흡착이나 삽입이 끝나지 않은 것입니다. 막 중심 통과는 드문 사건이며 한 번으로는 속도라고 할 수 없습니다."),
     },
     "headgroup_residence": {
-        "title": ("與頭基接觸的殘基與停留比例", "Residues in contact with the head groups and their residence",
-                  "頭部基と接触する残基と滞在の割合", "머리 부분과 접촉하는 잔기와 체류 비율"),
+        "title": ("與頭基接觸的殘基與接觸佔有率", "Residues in contact with the head groups and their contact occupancy",
+                  "頭部基と接触する残基と接触の占有率", "머리 부분과 접촉하는 잔기와 접촉 점유율"),
         "caption": ("每個殘基與脂質磷原子（或膽固醇 O3）距離 0.4 nm 以內的時間比例，依比例排序。",
                     "Fraction of time each residue spends within 0.4 nm of a lipid phosphorus (or cholesterol O3), sorted by fraction.",
                     "各残基が脂質のリン原子（またはコレステロールの O3）から 0.4 nm 以内にある時間の割合を、割合の高い順に並べています。",
                     "각 잔기가 지질의 인 원자(또는 콜레스테롤 O3)로부터 0.4 nm 이내에 있는 시간의 비율을 비율순으로 정렬했습니다."),
-        "read": ("50 % 以上是持續接觸，是吸附的錨點，常見的是帶正電的離胺酸與精胺酸。20 % 到 50 % 是間歇接觸。最後一幀仍在接觸的事件，停留時間只能算下限。",
+        "read": ("50 % 以上是持續接觸，是吸附的錨點，常見的是帶正電的離胺酸與精胺酸。20 % 到 50 % 是間歇接觸。最後一幀仍在接觸的事件，接觸持續時間只能算下限；這是接觸持續性，不是停留時間或解離速率。",
                  "Above 50 % is a persistent contact that anchors the adsorption, often positively charged lysine and arginine. "
-                 "20–50 % is intermittent. For a contact still open at the last frame the residence time is only a lower bound.",
-                 "50 % 以上は持続的な接触で吸着のアンカーです。正に帯電したリシンやアルギニンがよく見られます。20〜50 % は断続的な接触です。最後のフレームでも接触が続いている場合、滞在時間は下限値にすぎません。",
-                 "50 % 이상은 지속적인 접촉으로 흡착의 앵커이며 양전하를 띤 라이신과 아르지닌이 흔합니다. 20~50 %는 간헐적 접촉입니다. 마지막 프레임에서도 접촉 중이면 체류 시간은 하한값일 뿐입니다."),
+                 "20–50 % is intermittent. For a contact still open at the last frame the contact duration is only a lower bound; this is contact persistence, not a residence time or off-rate.",
+                 "50 % 以上は持続的な接触で吸着のアンカーです。正に帯電したリシンやアルギニンがよく見られます。20〜50 % は断続的な接触です。最後のフレームでも接触が続いている場合、接触の持続時間は下限値にすぎません。これは接触の持続性で、滞在時間や解離速度ではありません。",
+                 "50 % 이상은 지속적인 접촉으로 흡착의 앵커이며 양전하를 띤 라이신과 아르지닌이 흔합니다. 20~50 %는 간헐적 접촉입니다. 마지막 프레임에서도 접촉 중이면 접촉 지속 시간은 하한값일 뿐입니다. 접촉 지속성이며 체류 시간이나 해리 속도가 아닙니다."),
     },
     "peptide_tilt": {
         "title": ("胜肽傾角的分佈", "Distribution of the peptide tilt", "ペプチドの傾きの分布", "펩타이드 기울기 분포"),
@@ -2208,10 +2208,10 @@ def classify_headgroup(key: str, rows: list[dict]) -> list[dict]:
     op = [r["residue"] for r in rows if r.get("open_at_end") and r["fraction"] >= 0.2]
     if op:
         z, e = _jz(op)
-        out.append(S("note", f"{key}：{z} 在最後一幀仍在接觸，它們的停留時間只是下限，真正的停留更長。",
-                     f"{key}: {e} are still in contact at the last frame, so their residence times are lower bounds and the true residence is longer.",
-                     f"{key}：{z} は最後のフレームでも接触が続いているため、滞在時間は下限値で、実際の滞在はもっと長いです。",
-                     f"{key}: {e} 잔기는 마지막 프레임에서도 접촉 중이므로 체류 시간은 하한값이며 실제 체류는 더 깁니다."))
+        out.append(S("note", f"{key}：{z} 在最後一幀仍在接觸，它們的接觸持續時間只是下限（右設限），實際可能更長；這不是停留時間或解離速率。",
+                     f"{key}: {e} are still in contact at the last frame, so their contact durations are lower bounds (right-censored) and may be longer; these are not residence times or off-rates.",
+                     f"{key}：{z} は最後のフレームでも接触が続いているため、接触の持続時間は下限値（右側打ち切り）で、実際はもっと長い可能性があります。滞在時間や解離速度ではありません。",
+                     f"{key}: {e} 잔기는 마지막 프레임에서도 접촉 중이므로 접촉 지속 시간은 하한값(오른쪽 중도절단)이며 실제로는 더 길 수 있습니다. 체류 시간이나 해리 속도가 아닙니다."))
     return out
 
 

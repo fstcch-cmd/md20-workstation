@@ -6,6 +6,16 @@
 ---
 
 ## 2026-11-07
+### D-138　R6 宣稱稽核：PMF／ΔG°／進階描述子據實核對，機制與因果句改為有界觀察（只改文字）
+- **核對**（細節 `docs/specs/claims_audit.md` §1–§2）：COM 距離 CV、Jacobian `+2kT·ln r`、端點持平、完整重疊圖與 MBAR overlap、半分與累積漂移、重複一致才合格、共存與熱力學循環閉合、SMD 功不當自由能——**現況皆符合**。
+  標準態是「1 M 徑向積分、沒有方向／漏斗校正」，`binding_condition` 與 assessment 的 `permitted` 已寫明；正式參考態處理是 A8，屬協定變更，**未動、待授權**。
+- **決定**：把報告中把描述性指標寫成因果或機制結論的句子改為「觀察＋限制＋下一步證據」，四語同一限制：RMSF 升高「結合讓蛋白較不穩定」、錨點殘基「結合由多個作用點穩定住」、氫鍵「關鍵作用位」、DCCM「配體改變協同運動」、
+  水合位點「取代或保留會改變結合」、膜頭基與持續性的「停留時間」→「接觸持續時間（右設限）」，並寫明不是停留時間或解離速率。
+- **理由**：R6 要求不支持的定量／因果宣稱一律不出，保留有用的描述結果；單一比較或相關不足以歸因於配體。
+- **被否決**：把 ΔG° 的 `affinity_ranking` 直接關掉（等於改變科學判準，需使用者決定，見規格 §1 未決）。
+- **證據**：`tests/test_figure_text.py` 改為斷言新措辭且舊的「less stable」不再出現；全套 pytest 見 commit。
+- **相關檔案**：`md20/report/figure_text.py`、`md20/report/workflow_report.py`（水合位點一句）、`md20/analysis/membrane.py`、`tests/test_figure_text.py`、`docs/specs/claims_audit.md`、`docs/specs/README.md`。
+
 ### D-133　鋅鍵結模型：保留晶體配位水作為第四個鍵結配位（R5；使用者已授權改鋅模型）
 - 背景：heavy-metal `test_bonded_zinc_ca2`（3KS3，CA II）紅，HIS119:ND1–Zn 平均 0.236 nm、r0 0.202。使用者授權依證據修改鋅鍵結模型，但不准放寬 0.03 nm 門檻。
 - **重現與證據**（CI job 128427389578，`58d81bc`，D-34 埋的診斷）：GLU106:OE1 距 Zn **1.74 Å**、OE2 2.0 Å、CD 2.48 Å，20 幀全部如此；三個 Zn–N 全部拉長（2.30／2.25／2.36 Å）。

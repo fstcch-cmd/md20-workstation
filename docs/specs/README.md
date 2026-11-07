@@ -56,3 +56,4 @@
 | [licensing.md](licensing.md) | 簽章授權（第 2–3 層）：授權檔格式 v1／v2、機器碼、期限、閘門清單（擋／不擋）、功能閘門與評估版浮水印、輸出授權編號、簽章撤銷清單、不可由外部關閉、誠實限制（D-125、D-128）；md20 只留驗證、簽發端在私人 repo、格式測試向量 v1／v2（D-127） | 已實作・純 Python 測試（Windows 工具與 GUI 卡片待真機／CI） |
 | [supply_chain.md](supply_chain.md) | 外部執行檔與環境版本：Vina 單一釘選版＋sha256 驗證、執行檔身分記錄；micromamba／conda 鎖版待做（D-114，REVIEW #19） | Vina 已實作・純 Python 測試 |
 | [replicas.md](replicas.md) | 獨立重複：每個分析是否需要重複、條數取最大值（3）、報告如何呈現跨重複不確定性、開始時告知使用者（D-129）；重複計畫與告知（D-131） | 規格；§3–§5 已實作，待 CI |
+| [claims_audit.md](claims_audit.md) | 宣稱稽核（R6）：PMF／ΔG°／共存的區分、Jacobian 與標準態現況、進階描述子與機制文字改為有界觀察（D-138） | 文字已改；A8 參考態待授權 |

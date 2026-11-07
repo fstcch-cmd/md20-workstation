@@ -23,7 +23,7 @@ METRIC_LABELS = {
     "depth": ("插入深度（相對磷原子平面）", "Insertion depth (relative to the phosphate plane)",
               "挿入の深さ（リン原子面から）", "삽입 깊이(인 원자 평면 기준)"),
     "contacts": ("與頭基接觸的殘基", "Residues in contact with head groups", "頭部基と接触する残基", "머리 부분과 접촉하는 잔기"),
-    "residence": ("停留時間", "Residence time", "滞在時間", "체류 시간"),
+    "residence": ("接觸持續時間", "Contact duration", "接触の持続時間", "접촉 지속 시간"),   # D-138 (R6): not a residence time
     "tilt": ("胜肽傾角", "Peptide tilt", "ペプチドの傾き", "펩타이드 기울기"),
     "core_water": ("疏水核心中的水", "Water in the hydrophobic core", "疎水性コア中の水", "소수성 중심부의 물"),
 }

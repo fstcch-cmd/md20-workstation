@@ -1846,11 +1846,12 @@ def _hydration_tables(doc, ext: dict, lig_keys: list, lab) -> str:
                           f"{lab(k, rn)}：リガンドから 1 nm 以内の水和サイト", f"{lab(k, rn)}: 리간드 1 nm 이내의 수화 위치"), num_cols={1, 2, 3})
         stay = [x for x in h["sites"] if x["occupancy"] >= 0.8]
         out += _findings_html([FT.S("note",
-                                    f"{lab(k, rn)}：{len(stay)} 個位點八成以上時間有水。這些水可能在配體與蛋白之間搭橋；設計衍生物時，取代它們或保留它們會改變結合。",
+                                    f"{lab(k, rn)}：{len(stay)} 個位點八成以上時間有水。這些水可能在配體與蛋白之間搭橋，可作為設計衍生物的假說；水密度與佔有率不是水合自由能，取代或保留它們對結合的影響需要另外計算或實驗驗證。",
                                     f"{lab(k, rn)}: {len(stay)} sites hold a water more than 80% of the time. Such waters may bridge "
-                                    "ligand and protein; replacing or keeping them in a derivative changes the binding.",
-                                    f"{lab(k, rn)}：{len(stay)} か所で 8 割以上の時間に水がいます。これらはリガンドとタンパク質を橋渡ししている可能性があり、誘導体で置き換えるか残すかで結合が変わります。",
-                                    f"{lab(k, rn)}: {len(stay)}곳에 80% 이상의 시간 동안 물이 있습니다. 이런 물은 리간드와 단백질을 잇는 다리일 수 있어 유도체에서 치환하거나 남기면 결합이 달라집니다.")],
+                                    "ligand and protein and are a hypothesis for derivative design; water density and occupancy are not a hydration free "
+                                    "energy, so the effect of replacing or keeping them needs separate calculation or experiment.",
+                                    f"{lab(k, rn)}：{len(stay)} か所で 8 割以上の時間に水がいます。これらはリガンドとタンパク質を橋渡ししている可能性があり、誘導体設計の仮説になります。水の密度や占有率は水和自由エネルギーではないため、置き換えるか残すかの影響は別の計算や実験で確かめる必要があります。",
+                                    f"{lab(k, rn)}: {len(stay)}곳에 80% 이상의 시간 동안 물이 있습니다. 이런 물은 리간드와 단백질을 잇는 다리일 수 있어 유도체 설계의 가설이 됩니다. 물 밀도와 점유율은 수화 자유 에너지가 아니므로, 치환하거나 남길 때의 영향은 별도 계산이나 실험으로 확인해야 합니다.")],
                               doc.lang)
     return out
 
