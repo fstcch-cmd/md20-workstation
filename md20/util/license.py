@@ -1,5 +1,7 @@
-"""Signed licence for MD20 (D-125): the owner signs a licence file with a private key only the owner holds; a student
+"""Signed licence for MD20 (D-125, D-127): the owner signs a licence file with a private key only the owner holds; a student
 imports it, and the real calculations (docking, building, MD, binding free energy, folding) run only with a valid one.
+This module only VERIFIES.  Issuing licences (key generation, signing, the registry) lives in the owner's private repository
+(D-127); the file format is specified in docs/specs/licensing.md and pinned by tests/data/license_vector_v1.json.
 
 A licence file ``*.md20license`` is JSON::
 
@@ -26,7 +28,6 @@ import json
 import os
 import platform
 import re
-import secrets
 import sys
 import time
 from dataclasses import dataclass, field
@@ -39,7 +40,6 @@ from .paths import app_data_dir
 SCHEMA = "md20-license/1"
 EXT = ".md20license"
 DOMAIN = b"md20-license-v1\n"                 # domain separation: a signature over anything else never verifies as a licence
-ISSUER = "HCC Lab, NKUST"
 SCOPES = ("use", "all")
 MAX_FILE_BYTES = 64 * 1024
 CONTACT = "HCC Lab, NKUST"
@@ -175,15 +175,9 @@ def normalize_machine(code: str) -> str:
     return "-".join(h[i:i + 4] for i in range(0, 16, 4))
 
 
-# ---------------------------------------------------------------------------------------------- canonical JSON, signing
+# ---------------------------------------------------------------------------------------------- canonical JSON, verification
 def canonical(payload: dict) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-
-
-def _pss():
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.asymmetric import padding
-    return padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256()
 
 
 def _verify_with(pub_pem: bytes, message: bytes, sig: bytes) -> bool:
@@ -209,147 +203,8 @@ def signature_ok(doc: dict) -> bool:
     return any(_verify_with(k, message, sig) for k in list(TRUSTED_KEYS))
 
 
-def load_private_key(path, password: bytes | None = None):
-    """Read a PEM private key.  An encrypted key asks for its password on the terminal (never from the environment)."""
-    from cryptography.hazmat.primitives import serialization
-    data = Path(path).read_bytes()
-    try:
-        return serialization.load_pem_private_key(data, password=password)
-    except TypeError:
-        if not sys.stdin or not sys.stdin.isatty():
-            raise LicenseError(("私鑰有密碼，但這裡無法輸入密碼。", "The private key is password protected and no terminal is available to ask for it.",
-                                "秘密鍵にパスワードがありますが、入力できる端末がありません。",
-                                "개인 키에 암호가 있지만 암호를 입력할 터미널이 없습니다."))
-        import getpass
-        return serialization.load_pem_private_key(data, password=getpass.getpass("Private key password: ").encode())
-
-
 def _today() -> dt.date:
     return dt.date.today()
-
-
-def _now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
-def make_payload(licensee: str, *, expires: str | None = None, days: int | None = None, machines=(), scope: str = "use",
-                 note: str = "") -> dict:
-    """Validated payload dict (not yet signed).  ``days`` counts from today; ``expires`` is an ISO date, last valid day."""
-    licensee = str(licensee or "").strip()
-    if not licensee:
-        raise LicenseError(("需要被授權人的姓名。", "The licensee name is required.", "ライセンスを受ける人の名前が必要です。", "라이선스를 받는 사람의 이름이 필요합니다."))
-    if scope not in SCOPES:
-        raise LicenseError((f"scope 必須是 {SCOPES}。",) * 4)
-    if days is not None and expires:
-        raise LicenseError(("--days 與 --expires 只能選一個。", "Use either --days or --expires, not both.",
-                            "--days と --expires はどちらか一方だけ指定してください。", "--days와 --expires 중 하나만 지정하십시오."))
-    if days is not None:
-        if int(days) < 1:
-            raise LicenseError(("天數必須是正整數。", "Days must be a positive integer.", "日数は正の整数にしてください。", "일수는 양의 정수여야 합니다."))
-        expires = (_today() + dt.timedelta(days=int(days))).isoformat()
-    if expires:
-        try:
-            expires = dt.date.fromisoformat(str(expires)).isoformat()
-        except ValueError:
-            raise LicenseError((f"日期格式要 YYYY-MM-DD：{expires}", f"Date format must be YYYY-MM-DD: {expires}",
-                                f"日付は YYYY-MM-DD の形式にしてください：{expires}", f"날짜 형식은 YYYY-MM-DD여야 합니다: {expires}")) from None
-    else:
-        expires = None
-    try:
-        mach = sorted({normalize_machine(m) for m in (machines or ()) if str(m).strip()})
-    except ValueError as exc:
-        raise LicenseError((f"機器碼格式不對（16 個十六進位字元，如 3F9A-07C2-B15D-6E48）：{exc.args[0].rsplit(': ', 1)[-1]}",
-                            f"Bad machine code (16 hexadecimal characters, like 3F9A-07C2-B15D-6E48): {exc.args[0].rsplit(': ', 1)[-1]}",
-                            f"マシンコードの形式が正しくありません（16 桁の 16 進数、例 3F9A-07C2-B15D-6E48）：{exc.args[0].rsplit(': ', 1)[-1]}",
-                            f"머신 코드 형식이 올바르지 않습니다(16자리 16진수, 예 3F9A-07C2-B15D-6E48): {exc.args[0].rsplit(': ', 1)[-1]}")) from None
-    if scope == "all" and mach:
-        raise LicenseError(("scope all 不綁機器，不能同時指定機器碼。", "Scope all is not bound to machines; do not give machine codes.",
-                            "scope all はマシンに紐づけないため、マシンコードは指定できません。", "scope all은 컴퓨터에 묶지 않으므로 머신 코드를 지정할 수 없습니다."))
-    return {"schema": SCHEMA, "id": secrets.token_hex(8), "licensee": licensee, "issued_at": _now_iso(), "expires": expires,
-            "machines": mach, "scope": scope, "note": str(note or ""), "issuer": ISSUER}
-
-
-def sign_payload(payload: dict, private_key) -> dict:
-    """Sign with the owner's private key (an object from load_private_key) and check that this program would accept it."""
-    pad, algo = _pss()
-    sig = private_key.sign(DOMAIN + canonical(payload), pad, algo)
-    doc = {"payload": payload, "sig": base64.b64encode(sig).decode("ascii")}
-    if not signature_ok(doc):
-        raise LicenseError(("這把私鑰不是本程式信任的擁有者金鑰（公鑰不符），簽出的授權檔不會被接受。",
-                            "This private key does not match a public key this program trusts; the licence it signs would be rejected.",
-                            "この秘密鍵は本プログラムが信頼する所有者の公開鍵と一致しません。署名したライセンスは受け付けられません。",
-                            "이 개인 키는 이 프로그램이 신뢰하는 소유자 공개 키와 맞지 않습니다. 서명한 라이선스는 거부됩니다."))
-    return doc
-
-
-def write_license(doc: dict, out: Path | str) -> Path:
-    out = Path(out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return out
-
-
-def issue(key_path, licensee: str, *, out: Path | str | None = None, password: bytes | None = None, key=None, **kw) -> tuple[Path, dict]:
-    """Owner side: read the private key (read only), sign, write ``<out>`` (default ``<name>.md20license`` here)."""
-    payload = make_payload(licensee, **kw)
-    doc = sign_payload(payload, key if key is not None else load_private_key(key_path, password))
-    if out is None:
-        from .paths import safe_name
-        out = Path.cwd() / (safe_name(licensee) + EXT)
-    return write_license(doc, out), payload
-
-
-def read_batch_csv(path) -> list[dict]:
-    """Rows of ``name, days-or-date, machine code (optional)``.  A header row (second cell neither a number nor a date)
-    is skipped.  UTF-8, with or without BOM (Excel writes one)."""
-    import csv
-    rows = []
-    with open(path, newline="", encoding="utf-8-sig") as fh:
-        for n, r in enumerate(csv.reader(fh), 1):
-            cells = [c.strip() for c in r]
-            if not any(cells):
-                continue
-            name, term, mach = (cells + ["", "", ""])[:3]
-            if n == 1 and term and not re.fullmatch(r"\d+", term) and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", term):
-                continue
-            if not name:
-                raise LicenseError((f"第 {n} 列沒有姓名。", f"Row {n} has no name.", f"{n} 行目に名前がありません。", f"{n}행에 이름이 없습니다."))
-            row = {"name": name, "machine": mach}
-            if re.fullmatch(r"\d+", term):
-                row["days"] = int(term)
-            elif term:
-                row["expires"] = term
-            rows.append(row)
-    return rows
-
-
-def issue_batch(key_path, csv_path, out_dir, *, password: bytes | None = None, scope: str = "use", note: str = "") -> list[dict]:
-    from .paths import safe_name
-    key = load_private_key(key_path, password)
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    done, used = [], set()
-    # every row is checked before anything is written: a bad row must not leave half a batch behind
-    prepared = [(row, make_payload(row["name"], days=row.get("days"), expires=row.get("expires"),
-                                   machines=[row["machine"]] if row.get("machine") else (), scope=scope, note=note))
-                for row in read_batch_csv(csv_path)]
-    for row, payload in prepared:
-        base = safe_name(row["name"]); name = base
-        k = 1
-        while name.lower() in used:
-            k += 1; name = f"{base}_{k}"
-        used.add(name.lower())
-        path = write_license(sign_payload(payload, key), out_dir / (name + EXT))
-        done.append({"name": row["name"], "id": payload["id"], "expires": payload["expires"], "machines": payload["machines"],
-                     "file": str(path)})
-    if done:
-        import csv
-        with open(out_dir / "issued.csv", "w", newline="", encoding="utf-8-sig") as fh:
-            w = csv.writer(fh)
-            w.writerow(["name", "id", "expires", "machine", "file"])
-            for d in done:
-                w.writerow([d["name"], d["id"], d["expires"] or "", " ".join(d["machines"]), Path(d["file"]).name])
-    return done
 
 
 # ---------------------------------------------------------------------------------------------- status

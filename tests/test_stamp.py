@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import _license_testkit as K
 from md20.util import stamp as st
 from md20.util import atomic_write_json, load_json
 
@@ -44,14 +45,14 @@ def test_figure_metadata_in_png(tmp_path: Path):
 
 def test_encrypted_provenance_only_owner_can_read(tmp_path: Path, monkeypatch):
     pytest.importorskip("cryptography")
-    priv, pub = st.keygen(tmp_path / "k")
+    priv, pub = K.stamp_keygen(tmp_path / "k")
     monkeypatch.setattr(st, "_PUB", pub)
     st.provenance_blob.cache_clear()
     blob = st.provenance_blob()
     assert blob and len(blob) > 300
     rec = st.decrypt_blob(blob, priv)
     assert rec["o"] == "HCCLab" and rec["t"] and len(rec["m"]) == 16
-    other, _ = st.keygen(tmp_path / "other")
+    other, _ = K.stamp_keygen(tmp_path / "other")
     with pytest.raises(Exception):
         st.decrypt_blob(blob, other)
     st.provenance_blob.cache_clear()

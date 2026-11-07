@@ -3,28 +3,21 @@ import urllib.request
 import pytest
 
 
-# ---- D-125: real calculations need a signed licence.  Every test gets a throw-away key pair (the owner's real private
+# ---- D-125 / D-127: real calculations need a signed licence (the signer here is only a test helper: tests/_license_testkit.py).
+# Every test gets a throw-away key pair (the owner's real private
 # key does not exist here) and a licence signed with it in a temporary licence folder.  This is done in-process by
 # patching module attributes; there is deliberately no environment variable or option that does it (see util/license.py).
 @pytest.fixture(scope="session")
 def license_keys():
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    pub = key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-    return key, pub
+    from _license_testkit import keygen_pair
+    return keygen_pair(2048)
 
 
 @pytest.fixture(scope="session")
 def _test_license_doc(license_keys):
-    from md20.util import license as L
+    from _license_testkit import make_payload, sign_payload
     key, pub = license_keys
-    old = L.TRUSTED_KEYS
-    L.TRUSTED_KEYS = [pub]
-    try:
-        return L.sign_payload(L.make_payload("pytest", scope="use", note="test licence"), key)
-    finally:
-        L.TRUSTED_KEYS = old
+    return sign_payload(make_payload("pytest", scope="use", note="test licence"), key)
 
 
 class LicenseEnv:
@@ -47,8 +40,8 @@ class LicenseEnv:
         L._reset_cache()
 
     def issue(self, name="pytest", **kw):
-        from md20.util import license as L
-        return L.sign_payload(L.make_payload(name, **kw), self.key)
+        from _license_testkit import make_payload, sign_payload
+        return sign_payload(make_payload(name, **kw), self.key)
 
 
 @pytest.fixture(autouse=True)

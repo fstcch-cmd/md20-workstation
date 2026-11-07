@@ -150,7 +150,7 @@ if ((Test-Path $Desktop) -and -not $env:MD20_NO_DESKTOP) {
     "@echo off",
     "call `"$Gui`"")
 }
-# D-125: the student's unlock tool (import the licence file).  The owner tools in installer\owner are not linked anywhere.
+# D-125: the student's unlock tool (import the licence file).  Licence signing tools are not part of this package (D-127).
 $UnlockSrc = Join-Path $Here "MD20-Unlock.cmd"
 if (Test-Path $UnlockSrc) {
   Copy-Item -Force $UnlockSrc (Join-Path $Root "MD20-Unlock.cmd")

@@ -19,7 +19,6 @@ import base64
 import getpass
 import hashlib
 import json
-import os
 import platform
 import re
 import secrets
@@ -224,20 +223,3 @@ def decrypt_blob(blob: str, private_key_pem: Path | str, password: bytes | None 
     key = serialization.load_pem_private_key(Path(private_key_pem).read_bytes(), password=password)
     pt = key.decrypt(base64.b64decode(blob), padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=b"md20"))
     return json.loads(pt)
-
-
-def keygen(out_dir: Path | str, password: bytes | None = None) -> tuple[Path, Path]:
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
-    key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
-    enc = serialization.BestAvailableEncryption(password) if password else serialization.NoEncryption()
-    priv = out / "md20_owner_private.pem"
-    pub = out / "owner_pub.pem"
-    priv.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, enc))
-    pub.write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
-    try:
-        os.chmod(priv, 0o600)
-    except OSError:
-        pass
-    return priv, pub

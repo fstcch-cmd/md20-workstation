@@ -1,4 +1,5 @@
-"""D-125: signed licence.  Real calculations need one; viewing, diagnostics and the demo do not.
+"""D-125 / D-127: signed licence.  Real calculations need one; viewing, diagnostics and the demo do not.  The product only
+verifies; tests sign with the helper in tests/_license_testkit.py (issuing lives in the owner's private repository).
 
 tests/conftest.py gives every test a throw-away key pair, patches `TRUSTED_KEYS` and installs a test licence in a temporary
 folder.  Tests that need "no licence" call `license_env.clear()`."""
@@ -17,6 +18,7 @@ import pytest
 from md20 import cli
 from md20.util import license as L
 from md20.util import stamp
+import _license_testkit as K
 
 
 @pytest.fixture
@@ -40,7 +42,7 @@ def test_issue_then_verify(license_env):
     assert st.expires == (dt.date.today() + dt.timedelta(days=30)).isoformat()
     p = doc["payload"]
     assert set(p) == {"schema", "id", "licensee", "issued_at", "expires", "machines", "scope", "note", "issuer"}
-    assert len(p["id"]) == 16 and p["schema"] == L.SCHEMA and p["issuer"] == L.ISSUER
+    assert len(p["id"]) == 16 and p["schema"] == L.SCHEMA and p["issuer"] == K.ISSUER
 
 
 def test_signature_is_rsa_pss_sha256(license_env):
@@ -85,13 +87,8 @@ def test_signed_by_another_key_is_rejected(license_env, monkeypatch):
     from cryptography.hazmat.primitives.asymmetric import rsa
     other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     monkeypatch.setattr(L, "TRUSTED_KEYS", [license_env.pub, ])
-    payload = L.make_payload("Mallory")
-    pad, algo = L._pss()
-    forged = {"payload": payload, "sig": base64.b64encode(other.sign(L.DOMAIN + L.canonical(payload), pad, algo)).decode()}
+    forged = K.sign_payload(K.make_payload("Mallory"), other)
     assert L.evaluate(forged).state == L.BAD_SIGNATURE
-    # and the signer refuses to produce a file this program would not accept
-    with pytest.raises(L.LicenseError):
-        L.sign_payload(payload, other)
 
 
 def test_a_second_trusted_key_also_works(license_env, monkeypatch):
@@ -100,14 +97,14 @@ def test_a_second_trusted_key_also_works(license_env, monkeypatch):
     new = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     new_pub = new.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
     monkeypatch.setattr(L, "TRUSTED_KEYS", [license_env.pub, new_pub])
-    assert L.evaluate(L.sign_payload(L.make_payload("New key"), new)).ok
+    assert L.evaluate(K.sign_payload(K.make_payload("New key"), new)).ok
     assert L.evaluate(license_env.issue("Old key")).ok
 
 
 def test_signature_of_an_oaep_stamp_or_other_message_is_not_a_licence(license_env):
     """Domain separation: a PSS signature over the bare payload (no DOMAIN prefix) never verifies as a licence."""
-    payload = L.make_payload("Bob")
-    pad, algo = L._pss()
+    payload = K.make_payload("Bob")
+    pad, algo = K.pss_for_signing()
     sig = license_env.key.sign(L.canonical(payload), pad, algo)
     assert L.evaluate({"payload": payload, "sig": base64.b64encode(sig).decode()}).state == L.BAD_SIGNATURE
 
@@ -139,8 +136,8 @@ def test_machine_binding(license_env, machine):
 def test_scope_all_ignores_machines_and_needs_a_signature(license_env, machine, tmp_path):
     doc = license_env.issue("Everyone", scope="all", expires="2999-12-31")
     assert L.evaluate(doc).ok
-    with pytest.raises(L.LicenseError):
-        license_env.issue("X", scope="all", machines=["1111-2222-3333-4444"])
+    both = K.make_payload("X", machines=["1111-2222-3333-4444"]); both["scope"] = "all"          # the signer refuses this; the verifier still ignores machines
+    assert L.evaluate(K.sign_payload(both, license_env.key)).ok
     forged = copy.deepcopy(license_env.issue("X", machines=["1111-2222-3333-4444"]))
     forged["payload"]["scope"] = "all"
     assert L.evaluate(forged).state == L.BAD_SIGNATURE
@@ -320,11 +317,11 @@ def test_no_environment_variable_makes_an_unsigned_licence_pass(license_env, tmp
     license_env.clear()
     for k in OUTSIDE_SWITCHES:
         monkeypatch.setenv(k, "1")
-    unsigned = L.make_payload("Mallory", scope="all")
+    unsigned = K.make_payload("Mallory", scope="all")
     license_env.put({"payload": unsigned, "sig": "AAAA"})
     from cryptography.hazmat.primitives.asymmetric import rsa
     other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    pad, algo = L._pss()
+    pad, algo = K.pss_for_signing()
     license_env.put({"payload": unsigned, "sig": base64.b64encode(other.sign(L.DOMAIN + L.canonical(unsigned), pad, algo)).decode()}, "other.md20license")
     assert not L.status().ok
     with pytest.raises(L.LicenseRequired):
@@ -352,69 +349,48 @@ def test_unlicensed_subprocess_is_refused_whatever_the_environment(tmp_path):
     assert r.returncode == 0 and len(r.stdout.strip()) == 19
 
 
-# ------------------------------------------------------------------------------------------------ CLI: install / issue
-def _keyfile(license_env, tmp_path, password=None):
-    from cryptography.hazmat.primitives import serialization
-    enc = serialization.BestAvailableEncryption(password) if password else serialization.NoEncryption()
-    p = tmp_path / "owner_private.pem"
-    p.write_bytes(license_env.key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, enc))
-    return p
-
-
-def test_cli_issue_install_status(license_env, machine, tmp_path, capsys):
+# ------------------------------------------------------------------------------------------------ CLI: install / status
+def test_cli_install_status(license_env, machine, tmp_path, capsys):
     license_env.clear()
-    key = _keyfile(license_env, tmp_path)
-    before = key.read_bytes()
     out = tmp_path / "alice.md20license"
-    assert cli.main(["license", "issue", "--key", str(key), "--name", "Alice 王", "--days", "7", "--machine", machine, "--out", str(out)]) == 0
-    assert key.read_bytes() == before and out.is_file()
-    assert "BEGIN" not in capsys.readouterr().out                      # the key is never echoed
+    out.write_text(json.dumps(license_env.issue("Alice 王", days=7, machines=[machine]), ensure_ascii=False), encoding="utf-8")
     assert cli.main(["license", "install", f'"{out}"']) == 0              # drag-and-drop adds quotes
     assert cli.main(["license", "status"]) == 0
     assert "Alice 王" in capsys.readouterr().out
-    # wrong arguments
-    assert cli.main(["license", "issue", "--key", str(key), "--name", "A", "--days", "3", "--expires", "2031-01-01"]) == 1
-    assert cli.main(["license", "issue", "--key", str(tmp_path / "nokey.pem"), "--name", "A"]) == 1
-    assert cli.main(["license", "issue", "--key", str(key), "--name", "A", "--machine", "zzz", "--out", str(tmp_path / "z.md20license")]) == 1
-    assert not (tmp_path / "z.md20license").exists()
+    other = tmp_path / "other.md20license"
+    other.write_text(json.dumps(license_env.issue("Bob", machines=["1111-2222-3333-4444"])), encoding="utf-8")
+    assert cli.main(["license", "install", str(other)]) == 1              # bound to another computer: not installed
+    assert cli.main(["license", "install", str(tmp_path / "missing.md20license")]) == 1
 
 
-def test_cli_issue_with_the_wrong_private_key_is_refused(license_env, tmp_path):
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    p = tmp_path / "other.pem"
-    p.write_bytes(other.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
-    assert cli.main(["license", "issue", "--key", str(p), "--name", "A", "--out", str(tmp_path / "a.md20license")]) == 1
-    assert not (tmp_path / "a.md20license").exists()
+# ------------------------------------------------------------------------------------------------ D-127: verification only
+SIGNING_NAMES = ("sign_payload", "issue", "issue_batch", "make_payload", "write_license", "read_batch_csv", "load_private_key", "_pss")
 
 
-def test_encrypted_private_key_needs_its_password(license_env, tmp_path):
-    key = _keyfile(license_env, tmp_path, password=b"pw")
-    with pytest.raises(L.LicenseError):                                  # no terminal in the test run
-        L.load_private_key(key)
-    assert L.load_private_key(key, b"pw")
+def test_the_product_has_no_signing_api():
+    for name in SIGNING_NAMES:
+        assert not hasattr(L, name), name
+    src = Path(L.__file__).read_text(encoding="utf-8")
+    assert ".sign(" not in src and "load_pem_private_key" not in src and "generate_private_key" not in src
+    assert not hasattr(stamp, "keygen")
 
 
-def test_issue_batch_from_csv(license_env, machine, tmp_path):
-    key = _keyfile(license_env, tmp_path)
-    rows = [["姓名", "期限", "機器碼"], ["王小明", "30", ""], ["Alice Chen", "2031-06-30", machine], ["王小明", "10", ""], ["李華", "5", ""], ["", "", ""]]
-    csv_path = tmp_path / "list.csv"
-    with open(csv_path, "w", newline="", encoding="utf-8-sig") as fh:
-        csv.writer(fh).writerows(rows)
-    out = tmp_path / "out"
-    assert cli.main(["license", "issue-batch", "--key", str(key), "--csv", str(csv_path), "--out", str(out)]) == 0
-    files = sorted(p.name for p in out.glob("*" + L.EXT))
-    assert len(files) == 4 and len(set(files)) == 4                      # duplicate names do not overwrite each other
-    docs = [json.loads(p.read_text(encoding="utf-8")) for p in out.glob("*" + L.EXT)]
-    assert all(L.evaluate(d).state in (L.VALID, L.WRONG_MACHINE) for d in docs)
-    alice = next(d for d in docs if d["payload"]["licensee"] == "Alice Chen")
-    assert alice["payload"]["machines"] == [machine] and alice["payload"]["expires"] == "2031-06-30"
-    assert sum(d["payload"]["licensee"] == "王小明" for d in docs) == 2
-    index = list(csv.reader(open(out / "issued.csv", encoding="utf-8-sig")))
-    assert index[0][0] == "name" and len(index) == 5
-    bad = tmp_path / "bad.csv"; bad.write_text("Bob,10,1234\n", encoding="utf-8")
-    assert cli.main(["license", "issue-batch", "--key", str(key), "--csv", str(bad), "--out", str(tmp_path / "o2")]) == 1
+def test_cli_has_no_issue_commands(capsys):
+    for sub in (["license", "issue", "--key", "k.pem", "--name", "A"], ["license", "issue-batch", "--key", "k.pem", "--csv", "l.csv", "--out", "o"]):
+        with pytest.raises(SystemExit):
+            cli.main(sub)
+    assert cli.main(["--dir", ".", "stamp", "keygen"]) == 1
+    out = capsys.readouterr().out
+    assert "私人工具" in out and "private signing tool" in out
+
+
+def test_no_owner_tools_ship_with_the_package():
+    root = Path(__file__).resolve().parent.parent
+    assert not (root / "installer" / "owner").exists()
+    for f in ("install.ps1", "install.sh"):
+        text = (root / "installer" / f).read_text(encoding="utf-8")
+        assert "installer/owner" not in text.replace("\\", "/") and "Issue-License" not in text
+    assert not any(p for p in (root / "installer").rglob("*") if "Issue-License" in p.name or "Unlock-This-PC" in p.name)
 
 
 # ------------------------------------------------------------------------------------------------ stamp
@@ -429,7 +405,7 @@ def test_stamp_records_the_licence_id_and_licensee(license_env):
 
 
 def test_stamp_blob_carries_the_licence_id_for_the_owner(license_env, tmp_path, monkeypatch):
-    priv, pub = stamp.keygen(tmp_path / "k")
+    priv, pub = K.stamp_keygen(tmp_path / "k")
     monkeypatch.setattr(stamp, "_PUB", pub)
     stamp.provenance_blob.cache_clear()
     license_env.clear()

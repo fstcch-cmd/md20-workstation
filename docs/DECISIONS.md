@@ -6,6 +6,26 @@
 ---
 
 ## 2026-11-07
+### D-127　簽發端搬到私人 repo；md20 只留驗證，兩邊用格式規格與測試向量對齊
+- 背景（使用者 11/07 22:10）：數位簽章（簽發）要建立在私人 repo `fstcch-cmd/md-digital-signature`，學生拿到的 md20 不應包含簽發工具或簽發程式碼。D-125 當時把簽發暫放在 md20（`md20 license issue`、`installer/owner/`），本條撤回。
+- **決定**：
+  - **md20 移除的公開 API**：`license.py` 的 `sign_payload`、`issue`、`issue_batch`、`make_payload`、`write_license`、`read_batch_csv`、`load_private_key`、`_pss`、`_now_iso`、常數 `ISSUER`；`stamp.keygen`；CLI `license issue`、`license issue-batch`；整個 `installer/owner/`（四個檔）。`license.py` 不再有任何 `.sign(`、`load_pem_private_key`、`generate_private_key`（測試檢查）。
+  - **保留**：`canonical`、`signature_ok`、`evaluate`、`machine_code`、`normalize_machine`、`status`、`install`、`require`、`LicenseRequired`、`LicenseError`、`stamp_info`；CLI `license status|machine|install`；`stamp verify|decrypt`（解密需要私鑰，屬讀取）。`md20 stamp keygen` 只印「金鑰產生已移到 HCC Lab 的私人工具」並以結束碼 1 離開（不假裝成功，避免腳本以為已產生金鑰）。
+  - **簽發端**（私人 repo，只依賴 `cryptography`）：`python -m md20sign` 的 `keygen`（RSA-3072，私鑰強制密碼加密、拒絕寫進任何 git 工作目錄、不覆蓋）、`issue`、`issue-batch`、`unlock-this-pc`（呼叫已安裝的 `md20 license install`）、`verify`、`fingerprint`；每簽一份自動存 `licenses/<年>/<編號>.md20license` 並追加 `licenses/registry.csv`；一鍵工具 `tools/owner/*.cmd|.command`。簽發端的內部細節不寫在本 repo。
+  - **格式對齊**：規格 `docs/specs/licensing.md` §2（本 repo）與簽發端 `docs/FORMAT.md`；測試向量 `tests/data/license_vector_v1.json`（簽發端 `test_vectors/v1.json` 的逐位元組副本，SHA-256 `decb823c4b3cb1ed2bf46cfc67b6d7b075a53366f864b708a1b7a96fdb70538d`）。向量是一把測試金鑰簽的三組固定 payload，只含公鑰，私鑰在產生後丟棄。`tests/test_license_vector.py`：驗證器接受每組向量、竄改任何欄位或簽章即拒絕、向量金鑰未被信任時一律拒絕、向量檔不含私鑰且不同於 `owner_pub.pem`。向量公鑰只在測試中以 monkeypatch 放進 `TRUSTED_KEYS`，**絕不加入**真正的清單。
+  - **測試如何取得授權**：測試需要簽出授權才能驗證，所以新增 `tests/_license_testkit.py`（最小的簽章 helper：`make_payload`、`sign_payload`、測試金鑰產生）。它只用 `tests/conftest.py` 產生的拋棄式金鑰，測試程式不隨套件發行（`pyproject.toml` 只打包 `md20*`），因此套件內沒有簽發能力；接受這個取捨的理由是「驗證端要被完整測到，就必須有東西能簽」。格式若與簽發端不同，向量測試會失敗。`stamp.keygen` 同理搬進 testkit（`stamp_keygen`），給戳記加密測試用。
+  - 驗證端仍不得有環境變數、設定或參數後門（`test_the_licence_module_reads_nothing_from_the_environment` 等既有測試照常通過）。
+- **被否決**：
+  - 保留 `md20 license issue` 但要求簽發端 repo 才有金鑰：簽發程式碼仍隨學生的套件散布，違反使用者要求，也讓人研究簽章流程。
+  - 把簽發邏輯做成 md20 的選用外掛（extras）：同樣會公開，且容易被誤裝。
+  - 在簽發端另寫與 md20 不同的 canonical／填充：格式漂移就是授權檔被拒；改用共用向量逼兩邊一致。
+  - 向量放私鑰讓 md20 測試自己簽：私鑰（即使是測試用）進公開 repo 會被當成漏洞掃描的目標，也讓「這把鑰匙能否被信任」變得模糊；只放公鑰與簽章。
+- **證據**：md20 `tests/test_license.py`（簽發相關測試移走；新增「產品沒有簽章 API」「CLI 沒有 issue 指令、`stamp keygen` 只印訊息」「套件不含 owner 工具」「安裝腳本不引用 owner」「install／status」）、`tests/test_license_vector.py`（7 項）、`tests/test_stamp.py`（改用 testkit）。簽發端 `tests/`：簽發→驗證、PSS 參數、竄改、批次、registry 追加與公式防護、向量、keygen 加密與不寫進 repo、unlock-this-pc 以替身 md20 呼叫。互通：簽發端簽出的檔案由 md20 `evaluate`／`install` 驗證通過（一次性腳本檢查，加上向量測試）。
+- **未驗證**：簽發端 Windows `.cmd`（PowerShell 5.1 檔案對話框、InputBox、主控台輸入密碼）與 macOS `.command` 沒有在真機跑過；`unlock-this-pc` 在真實 `md20.cmd` 之下的行為只用替身腳本測過。
+- **相關檔案**：`md20/util/license.py`、`md20/util/stamp.py`、`md20/cli.py`、`installer/owner/*`（刪除）、`installer/install.ps1`／`install.sh`／`MD20-SelfTest.cmd`（註解）、`tests/_license_testkit.py`（新）、`tests/conftest.py`、`tests/test_license.py`、`tests/test_license_vector.py`（新）、`tests/test_stamp.py`、`tests/data/license_vector_v1.json`（新）、`docs/specs/licensing.md`、`docs/specs/README.md`。
+- **未決**：發行主金鑰與第 3、4 層仍待擁有者決定；擁有者要確認持有 `owner_pub.pem` 成對的私鑰（沒有就用簽發端 `keygen` 重產，並經審查把新公鑰加進 `TRUSTED_KEYS`）；`stamp keygen` 的結束碼 1 是否要改成 0 由審查者決定。
+- **更正 D-125**：D-125 中「擁有者工具」「`md20 license issue`／`issue-batch`」「`installer/owner/*`」「`MD20-Unlock-This-PC.cmd` 在 md20 內」等敘述已過時，簽發改由私人 repo 負責；原文保留。
+
 ### D-125　第 2 層授權：擁有者簽章的授權檔，真正的計算需要有效授權（`md20 license`）
 - 背景（使用者 11/07）：repo 因 CI 費用必須公開，但 HCC Lab, NKUST 不允許別人任意使用。D-124 是第 1 層（LICENSE 條款）；本條是第 2 層：擁有者用**只有他持有的私鑰**簽發授權檔，學生匯入後才能做真正的計算。
 - **決定**：

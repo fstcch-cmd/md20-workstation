@@ -191,7 +191,7 @@ echo "MD20 GUI: http://127.0.0.1:8020  （關閉此視窗即停止 / close this 
 EOS
 chmod +x "$GUI"
 if [ -d "$HOME/Desktop" ]; then cp "$GUI" "$HOME/Desktop/MD20-GUI.command"; chmod +x "$HOME/Desktop/MD20-GUI.command"; fi
-# D-125: the student's unlock tool (import the licence file).  The owner tools in installer/owner are not linked anywhere.
+# D-125: the student's unlock tool (import the licence file).  Licence signing tools are not part of this package (D-127).
 if [ -f "$SRC/installer/MD20-Unlock.command" ]; then
   cp "$SRC/installer/MD20-Unlock.command" "$ROOT/MD20-Unlock.command"; chmod +x "$ROOT/MD20-Unlock.command"
   if [ -d "$HOME/Desktop" ]; then cp "$ROOT/MD20-Unlock.command" "$HOME/Desktop/MD20-Unlock.command"; chmod +x "$HOME/Desktop/MD20-Unlock.command"; fi
