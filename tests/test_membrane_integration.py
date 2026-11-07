@@ -46,6 +46,8 @@ def test_popc_bilayer_case_c(tmp_path):
     assert mem["builder"] == "openmm_patch_tile" and mem["n_lipids"] == 128 and mem["n_upper"] == mem["n_lower"] == 64
     assert man["restraints"]["lipid_head"]["atoms"] == 128
     assert abs(man["total_charge"]) < 1e-3 and mem["ions_by_replacement"]["salt_pairs"] > 0
+    wg = [g for g in (man.get("gates") or {}).get("gates", []) if g["name"] == "water overlaps"]
+    assert wg and wg[0]["status"] in ("PASS", "AUTO_FIXED"), wg
     xyz, box = _run_membrane_npt(res)
     heads = xyz[mem["head_atom_indices"]][None]
     th = MA.thickness_pp(heads, box[None])
@@ -72,7 +74,10 @@ def test_peptide_above_popc_case_b(tmp_path):
     assert d["deepest_nm"][0] == pytest.approx(-1.0, abs=0.25)
     # nothing in the water layer above the peptide is closer than the cutoff to the other leaflet's image
     assert box0[2] >= MB.surface_box_z(float(xyz0[:, 2].max()), centre_z=mem["centre_z_nm"], dpp_nm=3.7) - 0.6
-    xyz, box = _run_membrane_npt(res, steps=200)
+    # D-102: solvation must not leave overlapping waters (root cause of the intermittent NaN); the build gate fired
+    wg = [g for g in (man.get("gates") or {}).get("gates", []) if g["name"] == "water overlaps"]
+    assert wg and wg[0]["status"] in ("PASS", "AUTO_FIXED"), wg
+    xyz, box = _run_membrane_npt(res, steps=400)          # was 200; longer, to catch a late blow-up now that it is fixed
     assert np.isfinite(xyz).all()
 
 

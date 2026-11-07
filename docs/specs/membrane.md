@@ -1,3 +1,5 @@
+> **2026-11-07（D-102）**：膜（與一般溶劑）建模在建立 System 前加入「去水碰撞」步驟（`assemble.remove_overlapping_waters`）：OpenMM 溶劑化偶爾放出 O–O < 0.18 nm 的重疊水，最小化壓不下、MD 前幾步 NaN（Linux／Windows 皆會，依建構而定）。閘門 water overlaps：刪＝AUTO_FIXED、乾淨＝PASS、無法修＝NEEDS_HUMAN。詳見 DECISIONS D-102。
+
 # Spec: 膜系統（建膜、膜蛋白、膜表面接觸）
 
 狀態：**[部分實作，未在真實引擎驗證]**（2026-11-03，D-80）。使用者要求：專業版建膜功能要完備；也要支援「胜肽或藥物只在膜表面接觸、不穿膜」的情境。

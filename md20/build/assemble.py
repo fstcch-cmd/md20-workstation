@@ -217,6 +217,127 @@ def resolve_ions(ions: dict | None, ionic_strength_molar: float = 0.15) -> tuple
     return spec, None
 
 
+def declash_waters(o_xyz: np.ndarray, oh_xyz, box: np.ndarray | None, *, o_o_min_nm: float = 0.21,
+                   oh_min_nm: float = 0.14, hard_floor_nm: float = 0.14) -> dict:
+    """Which waters to delete so no two overlap (pure, D-102).  OpenMM's addSolvent/addMembrane occasionally places a
+    water almost on top of another (seen: O-O down to 0.178 nm, bulk is ~0.28); such a pair survives minimisation as a
+    metastable state and the forces blow up to NaN in the first MD steps.  Every MD-prep pipeline removes these.
+
+    o_xyz: (n,3) water O positions; oh_xyz: (n, k, 3) each water's H positions (for inter-molecular O-H overlap);
+    box: (3,) orthorhombic lengths or None.  Greedy by increasing distance: of each still-overlapping pair, drop the
+    higher-index water (deterministic).  Returns {"remove": [water indices], "min_oo_nm", "min_oh_inter_nm",
+    "n_pairs", "unresolvable": [(i, j, d)]}.  A pair below hard_floor where BOTH are flagged by other pairs cannot be
+    fixed by removing only one — reported, the caller blocks."""
+    n = len(o_xyz)
+    out = {"remove": [], "min_oo_nm": None, "min_oh_inter_nm": None, "n_pairs": 0, "unresolvable": []}
+    if n < 2:
+        return out
+    O = np.mod(o_xyz, box) if box is not None else o_xyz
+
+    def mind(a, b):
+        d = a - b
+        if box is not None:
+            d -= np.round(d / box) * box
+        return float(np.linalg.norm(d))
+
+    pairs = []
+    try:
+        from scipy.spatial import cKDTree
+        tO = cKDTree(O, boxsize=box) if box is not None else cKDTree(O)
+        for i, j in tO.query_pairs(o_o_min_nm, output_type="ndarray"):
+            pairs.append((mind(o_xyz[i], o_xyz[j]), int(i), int(j)))
+        if oh_xyz is not None and len(oh_xyz):
+            arr = np.asarray(oh_xyz, float)
+            k = arr.shape[1]
+            Hflat = arr.reshape(-1, 3)
+            keep = np.all(Hflat < 9e5, axis=1)                                  # padding rows (1e6) are not real H
+            H = np.mod(Hflat, box) if box is not None else Hflat
+            tH = cKDTree(H, boxsize=box) if box is not None else cKDTree(H)
+            m = tO.sparse_distance_matrix(tH, oh_min_nm, output_type="ndarray")
+            for rec in m:
+                i, hj = int(rec[0]), int(rec[1])
+                if not keep[hj]:
+                    continue
+                j = hj // k
+                if i != j:
+                    out["min_oh_inter_nm"] = min(out["min_oh_inter_nm"] or 9.9, float(rec[2]))
+                    pairs.append((mind(o_xyz[i], o_xyz[j]) - 999.0, min(i, j), max(i, j)))   # O-H clashes first
+    except Exception:  # noqa: BLE001 — no scipy (container has it; belt and braces)
+        for i in range(n):
+            for j in range(i + 1, n):
+                d = mind(o_xyz[i], o_xyz[j])
+                if d < o_o_min_nm:
+                    pairs.append((d, i, j))
+    if not pairs:
+        return out
+    oo = [p for p in pairs if p[0] > -900]
+    out["min_oo_nm"] = round(min(p[0] for p in oo), 4) if oo else None
+    if out["min_oh_inter_nm"] is not None:
+        out["min_oh_inter_nm"] = round(out["min_oh_inter_nm"], 4)
+    out["n_pairs"] = len(pairs)
+    removed: set = set()
+    for d, i, j in sorted(pairs):
+        if i in removed or j in removed:
+            continue
+        drop = max(i, j)
+        if (d if d > -900 else d + 999.0) < hard_floor_nm and min(i, j) in removed:
+            out["unresolvable"].append((i, j, round(d if d > -900 else d + 999.0, 4)))
+            continue
+        removed.add(drop)
+    out["remove"] = sorted(removed)
+    return out
+
+
+def remove_overlapping_waters(modeller, report, decisions=None, *, o_o_min_nm: float = 0.21) -> dict:
+    """D-102: delete waters OpenMM placed overlapping (build-stage repair, not an MD or model change).  AUTO_FIXED with
+    a diff when any are removed; PASS when the box is clean; NEEDS_HUMAN only if an overlap cannot be fixed by removing
+    a water (e.g. a water fused into the solute)."""
+    from openmm import unit
+    top = modeller.topology
+    xyz = np.asarray(modeller.positions.value_in_unit(unit.nanometer), float)
+    bv = top.getPeriodicBoxVectors()
+    box = np.array([bv[i][i].value_in_unit(unit.nanometer) for i in range(3)]) if bv else None
+    waters, o_idx, h_idx = [], [], []
+    for r in top.residues():
+        if r.name in {"HOH", "WAT", "TIP3", "SOL"}:
+            o = [a.index for a in r.atoms() if a.element is not None and a.element.symbol == "O"]
+            h = [a.index for a in r.atoms() if a.element is not None and a.element.symbol == "H"]
+            if o:
+                waters.append(r)
+                o_idx.append(o[0])
+                h_idx.append(h)
+    if len(waters) < 2:
+        return {"removed": 0}
+    kmax = max((len(h) for h in h_idx), default=0)
+    oh = np.full((len(waters), max(1, kmax), 3), 1e6)
+    for w, h in enumerate(h_idx):
+        for c, hi in enumerate(h):
+            oh[w, c] = xyz[hi]
+    plan = declash_waters(xyz[o_idx], oh, box, o_o_min_nm=o_o_min_nm)
+    info = {"removed": len(plan["remove"]), "min_oo_before_nm": plan["min_oo_nm"], "n_overlap_pairs": plan["n_pairs"]}
+    if plan["unresolvable"]:
+        report.add(Gate("water overlaps", NEEDS_HUMAN,
+                        f"有 {len(plan['unresolvable'])} 處水重疊無法只靠刪水修復（可能水與溶質嵌在一起，最近 "
+                        f"{min(u[2] for u in plan['unresolvable']):.3f} nm）；請檢查建模（質子化、pose 幾何）。",
+                        options=["檢查配體 pose 與受體質子化後重建"], evidence=info))
+        return info
+    if not plan["remove"]:
+        report.add(Gate("water overlaps", PASS, f"水盒沒有重疊的水（最近 O–O {plan['min_oo_nm']} nm）。", evidence=info))
+        return info
+    modeller.delete([waters[i] for i in plan["remove"]])
+    report.add(Gate("water overlaps", AUTO_FIXED,
+                    f"移除 {len(plan['remove'])} 個與其他水重疊的水（最近 O–O {plan['min_oo_nm']:.3f} nm < {o_o_min_nm} nm）："
+                    f"OpenMM 溶劑化偶爾把水放得幾乎重疊，最小化壓不下去、MD 一開始就 NaN；刪掉多餘的一個水是標準建模步驟，"
+                    f"不改力場與蛋白。", evidence=info, diff=[f"waters: -{len(plan['remove'])}"]))
+    if decisions:
+        decisions.record("build.solvate", "declash waters", info,
+                         f"移除 {len(plan['remove'])} 個重疊水（最近 O–O {plan['min_oo_nm']:.3f} nm）。原因：OpenMM "
+                         "addSolvent／addMembrane 偶爾放出幾乎重合的水（O–O 可低到 0.18 nm，正常約 0.28），"
+                         "最小化後仍是亞穩態、MD 前幾步力爆成 NaN（Linux 與 Windows 皆會，依建構而定）。刪多餘水是標準去碰撞步驟。",
+                         kind="auto_fixed")
+    return info
+
+
 def smd_padding_plan(xyz: np.ndarray, masses: np.ndarray, ca: np.ndarray, ligands: dict, padding_nm: float, *,
                      pull_nm: float, margin_nm: float, allowance_nm: float, shape: str) -> dict:
     """Pure core of `smd_padding` (D-99).  `ligands` = {name: heavy-atom indices}.  Returns a plan:
@@ -523,6 +644,14 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                              + ("，並以同種離子中和溶質淨電荷" if ion_spec["neutralize"] else "，不中和淨電荷（PME 會加均勻背景電荷）")
                              + "（離子數見 build_manifest 的 n_ions；鹽只佔原子數 < 1%，算力在水）。"
                              "padding 是溶質到自己週期影像的最小距離（OpenMM：盒寬 = 2×溶質半徑 + padding，只加一次；D-99 更正）。")
+    if not implicit:
+        # D-102: remove waters OpenMM placed overlapping (membrane + plain solvent) before the system is built, or the
+        # first MD steps NaN.  A NEEDS_HUMAN here means an overlap a water removal cannot fix (water fused into solute).
+        remove_overlapping_waters(modeller, report, decisions)
+        if not report.ok:
+            res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict(), solvent=solvent)
+            atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")
+            return res
     counts = {}
     n_water = 0
     for res_ in modeller.topology.residues():
