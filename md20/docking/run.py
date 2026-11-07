@@ -233,11 +233,25 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
         from ..util.stamp import stamp_rdkit_mol
         stamp_rdkit_mol(mol)
         w = Chem.SDWriter(str(lig_dir / f"{lig.name}_input.sdf")); w.write(mol); w.close()
+    if vina_exe is not None:
+        from .vina_cli import vina_exe_identity
+        params["vina_executable"] = vina_exe_identity(vina_exe)     # D-114: which Vina produced these poses
+    else:
+        try:
+            import vina as _v
+            params["vina_executable"] = {"python_bindings": getattr(_v, "__version__", None)}
+        except Exception:  # noqa: BLE001
+            pass
     res = DockingResult(mode=mode, receptor_pdbqt=str(rec_pdbqt), box=box.to_dict(), params=params)
 
     if decisions:
+        vid = params.get("vina_executable") or {}
         decisions.record("docking.setup", "engine", "vina python bindings" if vina_exe is None else f"vina executable {vina_exe}",
-                         "優先用 Python bindings；Windows 上 pip 套件無法編譯時改用官方執行檔（結果相同）。")
+                         "優先用 Python bindings；Windows 上 pip 套件無法編譯時改用官方執行檔（結果相同）。"
+                         + ("" if vina_exe is None else
+                            (f"執行檔 sha256 對應官方 {vid.get('asset')}。" if vid.get("asset") else
+                             "執行檔 sha256 不是已知的官方版本（自行編譯、其他版本或被修改）；結果照算，但版本無法確認。")),
+                         vina_executable=vid)
 
     def run_vina(ligand_strings):
         if vina_exe is not None:

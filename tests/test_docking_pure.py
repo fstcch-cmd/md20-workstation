@@ -157,8 +157,11 @@ def test_setup_vina_falls_back_to_pinned_release_when_api_is_rate_limited(monkey
     import urllib.error
     import urllib.request
     from md20.docking import vina_cli
+    import hashlib
     monkeypatch.setattr(vina_cli, "find_vina_exe", lambda: None)
     monkeypatch.setenv("GH_TOKEN", "t0ken")
+    monkeypatch.setenv("MD20_VINA_LATEST", "1")              # D-114: the API is opt-in; default is the pinned asset only
+    monkeypatch.setitem(vina_cli.KNOWN_SHA256, vina_cli._pinned_name(), hashlib.sha256(b"\x7fELF").hexdigest())
     seen = {}
 
     def urlopen(req, timeout=60):

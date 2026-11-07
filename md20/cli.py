@@ -317,7 +317,11 @@ def cmd_setup_vina(a):
         return 0
     except ImportError:
         pass
-    _p(f"vina 執行檔：{ensure_vina_exe()}")
+    from .docking.vina_cli import vina_exe_identity
+    exe = ensure_vina_exe()
+    vid = vina_exe_identity(exe)
+    _p(f"vina 執行檔：{exe}")
+    _p(f"  sha256 {vid.get('sha256')}；" + (f"官方 {vid['asset']}" if vid.get("asset") else "不是已知的官方版本（版本無法確認）"))
     return 0
 
 

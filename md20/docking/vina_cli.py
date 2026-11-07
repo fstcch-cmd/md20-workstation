@@ -1,10 +1,12 @@
 """AutoDock Vina command-line fallback (Windows: the pip `vina` package has no wheel and needs Boost to build).
 
 Executable search order: $MD20_VINA_EXE → <app data>/bin/vina[.exe] → `vina` on PATH.
-`ensure_vina_exe()` downloads the official binary for this OS from the latest AutoDock-Vina GitHub release.
+`ensure_vina_exe()` downloads the official binary for this OS from ONE pinned AutoDock-Vina release and checks its
+sha256 before use (D-114, REVIEW #19).  "latest" is opt-in only (MD20_VINA_LATEST=1) and is recorded as unverified.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -52,59 +54,108 @@ def ensure_vina_exe(dest_dir: Path | None = None) -> str:
     dest.mkdir(parents=True, exist_ok=True)
     target = dest / ("vina.exe" if sys.platform.startswith("win") else "vina")
     errors = []
-    for url in _candidate_urls(errors):
+    for url, want in _candidate_urls(errors):
+        tmp = target.with_name(target.name + ".part")
         try:
-            urllib.request.urlretrieve(url, target)
+            urllib.request.urlretrieve(url, tmp)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{url}: {exc}")
+            tmp.unlink(missing_ok=True)
             continue
+        got = sha256_file(tmp)
+        if want is not None and got != want:
+            # D-114: never run a binary whose bytes differ from the pinned release (corrupt proxy download, tampering)
+            tmp.unlink(missing_ok=True)
+            errors.append(f"{url}: sha256 {got[:12]}… ≠ 預期 {want[:12]}…（檔案不符，已刪除，未使用）")
+            continue
+        os.replace(tmp, target)
         target.chmod(target.stat().st_mode | stat.S_IEXEC)
         return str(target)
     raise RuntimeError("找不到或下載不到此作業系統的 AutoDock Vina 執行檔；請手動下載並設定 MD20_VINA_EXE。"
                        + ("（" + "；".join(errors[-3:]) + "）" if errors else ""))
 
 
-# Release-asset downloads (github.com/…/releases/download/…) are not subject to the REST API's 60 requests/hour
-# per-IP limit, which a classroom behind one NAT — or a CI runner pool — exhausts quickly.
-PINNED_VERSION = "v1.2.5"
-PINNED_ASSETS = {("Windows", "x86_64"): "vina_1.2.5_win.exe", ("Linux", "x86_64"): "vina_1.2.5_linux_x86_64",
-                 ("Darwin", "x86_64"): "vina_1.2.5_mac_x86_64", ("Darwin", "arm64"): "vina_1.2.5_mac_aarch64",
-                 ("Linux", "aarch64"): "vina_1.2.5_linux_aarch64"}
+# D-114 (REVIEW #19): one pinned release for every student — previously the releases API ("latest", v1.2.7 on
+# 2026-11-07) was tried first and the pinned v1.2.5 only when the API was rate-limited (60 requests/hour per IP: a
+# classroom behind one NAT), so the same class could dock with two Vina versions.  Release-asset downloads are not
+# subject to that limit.  Hashes: computed 2026-11-07 from the GitHub release assets (see DECISIONS D-114).
+PINNED_VERSION = "v1.2.7"
+_ASSET_SUFFIX = {("Windows", "x86_64"): "win.exe", ("Linux", "x86_64"): "linux_x86_64", ("Darwin", "x86_64"): "mac_x86_64",
+                 ("Darwin", "arm64"): "mac_aarch64", ("Linux", "aarch64"): "linux_aarch64"}
+PINNED_ASSETS = {k: f"vina_{PINNED_VERSION.lstrip('v')}_{v}" for k, v in _ASSET_SUFFIX.items()}
+KNOWN_SHA256 = {
+    "vina_1.2.7_win.exe": "e0c4b2715e0c1a74f6e92d0f3be0328ac97542eafbc111e6b1efad897a73cce5",
+    "vina_1.2.7_linux_x86_64": "f31f774f723bba7bbe6e9d1c47577020eea9a8da16424284c043d22593570644",
+    "vina_1.2.7_linux_aarch64": "d30c18a7d5f6f8ea9146e1cbc0aa7ade0bbb105b54ece08b4e5a7fa53edb6c62",
+    "vina_1.2.7_mac_x86_64": "9f44ccbb163223613283a75d0be53235d9e63f4da08292cb7196144f9838b7f9",
+    "vina_1.2.7_mac_aarch64": "823c2bbacf26d72183861322345f0a89736aca66c8e81054c66f93af5ad623f1",
+    # the previous pin, so an executable installed by an earlier MD20 is still identified
+    "vina_1.2.5_win.exe": "b5a23b226ee5dc1b028df04082d13a7b0e5b9b12b988bbcf9498cb351e20b38f",
+    "vina_1.2.5_linux_x86_64": "fa0126a28a9ea9162d1b161dfa92bc76e632416db28ca246278ea4b2dc6860cb",
+    "vina_1.2.5_linux_aarch64": "5bf4eba87f133b5c2d35e5e6c21c062221e2a35a91ee7fa1dbd69d341efb3516",
+    "vina_1.2.5_mac_x86_64": "de9402701fba0f69bce53aec94254a08a7044c7d1d459958896022a7f98b073d",
+    "vina_1.2.5_mac_aarch64": "4999b3133f162b66d8b21bafdb54aa53c507ed6347489844e6778dac7871ff5f",
+}
+
+
+def sha256_file(path: Path | str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def vina_exe_identity(path: Path | str) -> dict:
+    """Which official release an executable is, by sha256 (None = not an official asset we know: user-built, other
+    version, or modified).  Recorded with every docking run so results say which Vina produced them."""
+    try:
+        h = sha256_file(path)
+    except OSError as exc:
+        return {"path": str(path), "sha256": None, "asset": None, "error": str(exc)}
+    asset = next((a for a, v in KNOWN_SHA256.items() if v == h), None)
+    return {"path": str(path), "sha256": h, "asset": asset,
+            "version": ("v" + asset.split("_")[1]) if asset else None, "pinned": bool(asset and asset in PINNED_ASSETS.values())}
 
 
 def _pinned_url() -> str | None:
-    m = platform.machine().lower()
-    arch = "arm64" if m in {"arm64", "aarch64"} and platform.system() == "Darwin" else \
-           "aarch64" if m in {"arm64", "aarch64"} else "x86_64"
-    name = PINNED_ASSETS.get((platform.system(), arch))
+    name = _pinned_name()
     return f"https://github.com/ccsb-scripps/AutoDock-Vina/releases/download/{PINNED_VERSION}/{name}" if name else None
 
 
-def _candidate_urls(errors: list[str]) -> list[str]:
-    """Latest matching asset from the releases API (token used when GH_TOKEN/GITHUB_TOKEN is set), then the pinned
-    release as a fallback when the API is rate-limited or unreachable."""
-    urls = []
-    pat = _asset_pattern()
-    req = urllib.request.Request(RELEASES, headers={"Accept": "application/vnd.github+json"})
-    tok = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if tok:
-        req.add_header("Authorization", f"Bearer {tok}")
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            releases = json.loads(r.read().decode())
-        for rel in releases:
-            for a in rel.get("assets", []):
-                name = a.get("name", "")
-                if pat.search(name) and not name.endswith((".tar.gz", ".zip", ".sha256")) and "split" not in name:
-                    urls.append(a["browser_download_url"])
+def _pinned_name() -> str | None:
+    m = platform.machine().lower()
+    arch = "arm64" if m in {"arm64", "aarch64"} and platform.system() == "Darwin" else \
+           "aarch64" if m in {"arm64", "aarch64"} else "x86_64"
+    return PINNED_ASSETS.get((platform.system(), arch))
+
+
+def _candidate_urls(errors: list[str]) -> list[tuple[str, str | None]]:
+    """(url, expected sha256).  Default: only the pinned release, verified.  MD20_VINA_LATEST=1: the newest matching
+    asset from the releases API first (sha256 unknown → recorded, not verified), then the pinned release."""
+    urls: list[tuple[str, str | None]] = []
+    if os.environ.get("MD20_VINA_LATEST") == "1":
+        pat = _asset_pattern()
+        req = urllib.request.Request(RELEASES, headers={"Accept": "application/vnd.github+json"})
+        tok = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        if tok:
+            req.add_header("Authorization", f"Bearer {tok}")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                releases = json.loads(r.read().decode())
+            for rel in releases:
+                for a in rel.get("assets", []):
+                    name = a.get("name", "")
+                    if pat.search(name) and not name.endswith((".tar.gz", ".zip", ".sha256")) and "split" not in name:
+                        urls.append((a["browser_download_url"], KNOWN_SHA256.get(name)))
+                        break
+                if urls:
                     break
-            if urls:
-                break
-    except Exception as exc:  # noqa: BLE001  (HTTP 403 rate limit, offline proxy …)
-        errors.append(f"releases API: {exc}")
-    pinned = _pinned_url()
-    if pinned and pinned not in urls:
-        urls.append(pinned)
+        except Exception as exc:  # noqa: BLE001  (HTTP 403 rate limit, offline proxy …)
+            errors.append(f"releases API: {exc}")
+    pinned, name = _pinned_url(), _pinned_name()
+    if pinned and pinned not in [u for u, _ in urls]:
+        urls.append((pinned, KNOWN_SHA256.get(name)))
     return urls
 
 

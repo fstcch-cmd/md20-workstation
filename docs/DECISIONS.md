@@ -6,6 +6,18 @@
 ---
 
 ## 2026-11-07
+### D-114　Vina 執行檔只用一個釘選版本並驗 sha256（REVIEW #19 的 Vina 部分）
+- 查到的事實：`ensure_vina_exe` 先問 GitHub releases API 拿**最新**資產，API 失敗（每 IP 每小時 60 次；教室同一個 NAT 很快用完）才退回釘選的 v1.2.5。上游 2026-11-07 已到 **v1.2.7**（`git ls-remote --tags`），所以同一班 Windows 學生可能有人用 1.2.7、有人用 1.2.5，docking 結果不能直接比；而且兩條路都沒有驗證下載內容。
+- 決定：
+  - 釘選 **v1.2.7**（上游現行版；CI 帶 token 時 API 路徑本來就拿到它，多數 Windows 安裝也是），預設**不呼叫 API**；`MD20_VINA_LATEST=1` 才試最新版（記為未驗證）。
+  - `KNOWN_SHA256`：v1.2.7 與 v1.2.5 各 5 個資產（Windows x64、Linux x64/aarch64、macOS x64/arm64）。下載成 `.part` → 驗雜湊 → 相符才換名；不符刪除並報錯，不使用。
+  - `vina_exe_identity`：每次 docking 在 `params.vina_executable` 記錄 sha256 與對應的官方資產；決策紀錄寫明「官方 vX」或「不是已知官方版本」；`setup-vina` 同樣印出。
+- 證據：2026-11-07 從 `github.com/ccsb-scripps/AutoDock-Vina/releases/download/<tag>/<asset>` 下載 10 個資產計算 sha256，`file` 確認格式（PE32+ x86-64、ELF x86-64/aarch64 static、Mach-O x86_64/arm64）。雜湊值見 `md20/docking/vina_cli.py`。
+- 被否決：釘 v1.2.5（比上游舊兩版，且多數現有 Windows 安裝已是 API 給的最新版）；保留「先 API 後釘選」（版本不決定、受限流影響）；自動替換已安裝的舊執行檔（學生的結果會在不知情時換版本——改為記錄版本，由 STATUS／doctor 呈現）。
+- 未做：micromamba `latest`、conda 環境 `>=` 鎖版（`docs/specs/supply_chain.md` §2）。Linux/macOS 的 conda `vina>=1.2.5` 與 Windows 執行檔版本仍可能不同。
+- 測試：`tests/test_vina_pin.py`（5 項：預設只下載釘選版且不呼叫 API、雜湊不符被拒且不留檔、latest 需明確開啟、每個釘選資產都有雜湊、已知／未知執行檔的辨識）；`test_docking_pure` 的限流後備測試改走 opt-in 路徑。CI 的 `test_pinned_vina_assets_exist` 會以 HEAD 檢查 v1.2.7 的 5 個 URL。容器 781 passed、49 skipped。
+- 規格：`docs/specs/supply_chain.md`（新）。
+
 ### D-113　PMF 評估加入 MBAR 估計器自己的 overlap matrix（原本算了但被丟掉）
 - 查到的事實：`_mdh_legacy.mbar_pmf_1d` 每次都呼叫 `mbar.compute_overlap()` 並回傳矩陣、scalar、特徵值，但 `pmf.pmf_from_windows` 沒把它放進 `quality`；D-96 評估的 `overlap_graph` 只能用直方圖重疊（`umbrella_quality.graph_connected` 或 `histogram_overlap_matrix`）。直方圖重疊看的是樣本分布，MBAR overlap 看的是**估計器能不能在窗口間轉移權重**——兩者在 k 不同（補窗加硬）或 f_k 解得差時會不一致。
 - 決定：
