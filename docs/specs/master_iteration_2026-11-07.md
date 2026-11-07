@@ -39,7 +39,7 @@
 | F02 化合物清單、描述子、實測豐度 | 有 Lipinski／化學空間圖（`properties_plot`、`chem_space_plot`）；豐度沒進流程 | 有但不完整 | 豐度屬 P3 |
 | F03 多尺度標靶解剖 | 有離線 3D viewer（全蛋白＋配體），沒有 domain／鏈／DNA 註記層 | 有但不完整 | `gui/static/md20view.js` |
 | F04 對接穩健性與姿勢家族 | 有姿勢相似度、漏斗、位置圖（D-59） | 有但不完整 | 單次搜尋的 9 個 pose 未與獨立種子分開 |
-| F05 跨候選證據／可比性矩陣 | 只有比較表（ΔΔ） | 有但不完整 | 本輪：比較表帶資格與不比較理由 |
+| F05 跨候選證據／可比性矩陣 | 比較表帶資格與不比較理由（D-96）；候選 × 候選的可比性矩陣（每格等級與原因）在報告研究設計節（D-120） | **已實作・純 Python** | `report/comparability.py`；等級沿用 `compare_binding`（`multi.context_basis`）；MD 設定差異只列提醒（真實 binding 結果的報告渲染待 CI／筆電） |
 | F06 同步配體狀態時間線 | RMSD、接觸數、COM 分開畫 | 有但整合差 | 本輪：`ligand_state` 分段（資料層） |
 | F07 初始接觸保留 vs 新接觸 | 缺；而且 A6 讓新接觸看不到 | 缺 | 本輪：`interactions.initial_vs_new` |
 | F08 化學正確的互作熱圖／條碼 | `fingerprint_plot` 有，但 A5 定義錯、單一類別 | 有但不完整 | 本輪：多標籤指紋（資料層＋圖例） |

@@ -6,6 +6,23 @@
 ---
 
 ## 2026-11-07
+### D-120　跨候選可比性矩陣（F05）：每一對候選可以比到什麼程度、不能比的具體原因
+- 依據：master_iteration F05（只有比較表，學生看不到「哪兩個候選可以比、比到哪一級、為什麼不行」）。D-96 的比較表是**群組**判斷（同一情境內全部合格且條件相同才比），表只列「未納入」的個別原因。
+- **決定**：新模組 `md20/report/comparability.py`（純 Python），`comparability_matrix(results, md_conditions=None)` 對每一對 binding 結果給一個等級與原因清單：
+  - `ddg`（ΔΔG° 可比）｜`order`（路徑特定的 ΔPMF 井深順序）｜`descriptive`（共同口袋，只列值、不排名）｜`none`（不可比，附原因）。
+  - **不另立門檻**。`multi.py` 抽出三個共用純函式，`compare_binding` 改為呼叫它們（行為不變）：`context_basis(results, keys)`（executed／path_ok／條件簽章是否一致／是否全部有合格 ΔG°／狀態 PASS、PATH_SPECIFIC、INSUFFICIENT）、`exclusion_of(result, ok_fn)`（執行狀態、舊資料、未通過評估三種排除原因）、`cond_view(result)`（比較用的條件簽章，旁觀配體只比數量）。矩陣對每一對呼叫 `context_basis(results, [a, b])`，所以兩個候選的格子不可能和 `compare_binding` 對這兩個結果的結論不同（測試逐一窮舉 25 種組合 × 2 種溫度比對）。
+  - 原因代碼：執行狀態、舊結果待重新分析、沒有 ΔPMF、未通過取樣評估（附 D-96 評估的失敗與未知診斷，四語名稱）、不同情境（單獨結合 vs 共同口袋，或不同的共同口袋；同一配體另指向共存效應）、沒有記錄拉離條件、拉離條件不同（逐欄位列出兩邊的值：溫度、骨架約束、anchor、旁觀配體數、漏斗約束等）。`order` 格另寫「為什麼不是 ΔΔG°」（哪個結果沒有合格 ΔG°，附 `dG_withheld`）。
+  - **未知一律不算相同、不算合格**：沒有 `condition` → 不可比（兩邊都沒有也一樣，不當成「都空所以相同」）；沒有 assessment → 舊資料、不可比；共同口袋結果沒寫是哪個 case → 不假設同一個口袋。
+  - **MD 設定只當提醒，不改等級**：傳入 `md_conditions` 時，用 `analysis.common_basis.comparability`（D-106，只讀）對這一對檢查力場、水模型、溫度、系綜、約束、HMR、正式模擬長度（×1.25），差異與無法確認的欄位列在「提醒」；重複數不同或沒有記錄也列。理由：`compare_binding` 不看這些，把它們變成門檻就是新規則；但學生需要看到。
+- **報告**：研究設計節、證據覆蓋表（D-108）正下方：N × N 表（格子是等級的文字，不靠顏色）、等級說明、「每一對的原因、限制與提醒」表。≥ 2 個候選才顯示；1 個候選寫「只有一個候選，沒有比較」；沒有 binding 結果不顯示。四語（英、繁中、日、韓）。用表不用圖，所以沒有新增圖種。
+- **取捨／被否決**：
+  - **成對判斷比群組表細**：三個候選中 C 的條件不同時，`compare_binding` 的群組表整組 INSUFFICIENT（A、B 也不比），矩陣會顯示 A–B 為 ΔΔG° 可比、與 C 不可比。這是兩個結果之間真實的資格，沒有放寬任何規則，但與群組表並列時讀者可能疑惑；測試 `test_pair_is_finer_than_the_group_table_and_symmetric` 把這個差異固定下來。未決：是否要在群組表加一句說明（目前沒有）。
+  - 把 MD 設定差異當門檻（新規則，需使用者授權；列為提醒）。
+  - 另畫熱圖（格子是類別不是數值，文字格更清楚，且免新增圖種與範本）。
+  - 單獨與共同口袋的同一配體給「共存」等級（那是 `co_occupancy` 的位移，條件本來就不同；矩陣只指向它）。
+- **證據**：`tests/test_comparability_matrix.py` 42 項（全合格 → ΔΔG°、只有路徑特定且條件同 → 順序並說明為何不是 ΔΔG°、條件不同 → 不可比並列欄位、未知欄位、25 組合 × 2 溫度與 `compare_binding` 一致、成對比群組細且對稱、共同口袋描述性、MD 提醒不改等級、四語文字、報告四語渲染、單一候選）；既有 `test_multi_binding.py` 與 `test_assessment.py` 不改仍通過（抽出共用判斷的行為不變證據）；報告範本（`tools/report_template.py` 的 BEN、PGA、multi）渲染出矩陣。容器 831 passed、49 skipped。
+- **未驗證**：真實 `run_binding` 的結果（含真 assessment 與 condition）接進矩陣的報告渲染，要等 CI heavy workflow 或筆電報告；範本資料沒有 `replicas` 欄位，矩陣因此在每對旁列「重複數沒有記錄」提醒（真實結果有 `replicas`，不會出現）。
+- 檔案：`md20/report/comparability.py`（新）、`md20/sampling/multi.py`（只抽出共用判斷）、`md20/report/workflow_report.py`（`_comparability_html`，掛在 `_evidence_html` 之後）、`tests/test_comparability_matrix.py`、`docs/specs/master_iteration_2026-11-07.md`（F05 列）。
 ### D-118　約束策略智慧建議（`recommend_restraint_strategy`）：只建議，不改預設，不改任何實際 protocol
 - 做什麼：新純 Python 模組 `md20/engine/restraint_advice.py`（`advise(RestraintInputs, lang)`），依系統特徵回傳
   - `strategy`（standard 或 gentle）與 `protocol_args = {"restraints": …}`，可直接交給 `make_protocol`；

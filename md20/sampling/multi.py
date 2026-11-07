@@ -130,29 +130,60 @@ def _elig(r: dict) -> dict:
     return eligibility_of(r)
 
 
-def _cond_key(r: dict) -> str | None:
-    import json as _json
+def cond_view(r: dict) -> dict | None:
+    """The condition signature compare_binding compares (spectator list reduced to its count); None = not recorded."""
     c = (r or {}).get("condition")
     if not c:
         return None
-    c = {k: v for k, v in c.items() if k != "spectators"} | {"n_spectators": len(c.get("spectators") or [])}
+    return {k: v for k, v in c.items() if k != "spectators"} | {"n_spectators": len(c.get("spectators") or [])}
+
+
+def _cond_key(r: dict) -> str | None:
+    import json as _json
+    c = cond_view(r)
+    if c is None:
+        return None
     return _json.dumps(c, sort_keys=True)
+
+
+def exclusion_of(r: dict, ok_fn) -> tuple[str, str] | None:
+    """Why one result stays out of a comparison: (code, text), None when `ok_fn(result, eligibility)` holds.
+    code: exec_status | legacy | not_qualified.  Shared by compare_binding and the comparability matrix (D-120)."""
+    if r.get("status") != "PASS":
+        return "exec_status", f"execution status {r.get('status') or 'missing'}"
+    e = _elig(r)
+    if e.get("legacy"):
+        return "legacy", "no stored assessment: awaiting reanalysis (D-96)"
+    if not ok_fn(r, e):
+        return "not_qualified", "; ".join((r.get("assessment") or {}).get("reasons") or []) or "not eligible"
+    return None
 
 
 def _not_compared(keys, results, why_fn) -> list[dict]:
     out = []
     for k in keys:
-        r = results.get(k) or {}
-        if r.get("status") != "PASS":
-            out.append({"key": k, "why": f"execution status {r.get('status') or 'missing'}"})
-            continue
-        e = _elig(r)
-        if e.get("legacy"):
-            out.append({"key": k, "why": "no stored assessment: awaiting reanalysis (D-96)"})
-        elif not why_fn(r, e):
-            reasons = "; ".join((r.get("assessment") or {}).get("reasons") or []) or "not eligible"
-            out.append({"key": k, "why": reasons})
+        x = exclusion_of(results.get(k) or {}, why_fn)
+        if x:
+            out.append({"key": k, "why": x[1]})
     return out
+
+
+def context_basis(results: dict, keys: list[str]) -> dict:
+    """The eligibility judgement compare_binding applies inside one single-ligand-type context (D-96), as a pure function:
+    executed = PASS with a ΔPMF; path_ok = executed and the assessment allows a path-specific ΔPMF; cond_bad = the
+    path_ok results do not share one condition signature (or one has none); use_dG = at least two path_ok, same
+    conditions and every ΔG° qualified.  status: PASS (ΔΔG°) | PATH_SPECIFIC (ΔPMF order) | INSUFFICIENT.
+    The comparability matrix (D-120) calls this on each pair, so it can never grade differently from the table."""
+    executed = [k for k in keys if (results.get(k) or {}).get("status") == "PASS"
+                and results[k].get("delta_pmf_kj_mol") is not None]
+    path_ok = [k for k in executed if _elig(results[k]).get("delta_pmf_path_specific")]
+    conds = {_cond_key(results[k]) for k in path_ok}
+    cond_bad = len(conds) > 1 or None in conds
+    enough = len(path_ok) >= 2 and not cond_bad
+    use_dG = enough and all(_elig(results[k]).get("dG_standard") and results[k].get("dG_standard_kj_mol") is not None
+                            for k in path_ok)
+    return {"executed": executed, "path_ok": path_ok, "cond_bad": cond_bad, "enough": enough, "use_dG": use_dG,
+            "status": ("PASS" if use_dG else "PATH_SPECIFIC") if enough else "INSUFFICIENT"}
 
 
 def compare_binding(results: dict, *, contexts: dict[str, list[str]]) -> dict:
@@ -167,9 +198,8 @@ def compare_binding(results: dict, *, contexts: dict[str, list[str]]) -> dict:
     Larger ΔPMF / more negative ΔG° = deeper well / more favourable."""
     out = {"contexts": {}, "co_occupancy": [], "notes": []}
     for ctx, keys in contexts.items():
-        executed = [k for k in keys if (results.get(k) or {}).get("status") == "PASS"
-                    and results[k].get("delta_pmf_kj_mol") is not None]
-        path_ok = [k for k in executed if _elig(results[k]).get("delta_pmf_path_specific")]
+        basis = context_basis(results, keys)
+        executed, path_ok = basis["executed"], basis["path_ok"]
         excluded = _not_compared(keys, results, lambda r, e: e.get("delta_pmf_path_specific"))
         if ctx.startswith("multi"):
             vals = [{"key": k, "delta_pmf_kj_mol": results[k]["delta_pmf_kj_mol"],
@@ -185,9 +215,8 @@ def compare_binding(results: dict, *, contexts: dict[str, list[str]]) -> dict:
             out["contexts"][ctx] = {"status": "DESCRIPTIVE", "values": vals, "not_compared": excluded,
                                     "why": w[0], "why_i18n": w}
             continue
-        conds = {_cond_key(results[k]) for k in path_ok}
         ok = path_ok
-        cond_bad = len(conds) > 1 or None in conds
+        cond_bad = basis["cond_bad"]
         if len(ok) < 2 or cond_bad:
             if keys:
                 if cond_bad and len(ok) >= 2:
@@ -207,7 +236,7 @@ def compare_binding(results: dict, *, contexts: dict[str, list[str]]) -> dict:
                 out["contexts"][ctx] = {"status": "INSUFFICIENT", "keys": ok, "not_compared": excluded,
                                         "why": w[0], "why_i18n": w}
             continue
-        use_dG = all(_elig(results[k]).get("dG_standard") and results[k].get("dG_standard_kj_mol") is not None for k in ok)
+        use_dG = basis["use_dG"]
         if use_dG:
             val = {k: float(results[k]["dG_standard_kj_mol"]) for k in ok}       # lower = more favourable
             err = {k: results[k].get("dG_err_kj_mol") for k in ok}
