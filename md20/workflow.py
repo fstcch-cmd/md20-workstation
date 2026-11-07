@@ -111,6 +111,15 @@ def _openmm_available() -> bool:
     return importlib.util.find_spec("openmm") is not None
 
 
+def _live_mark(wf_dir, key: str, build_dir) -> None:
+    """D-104: tell the GUI which case is being built, so its 3D tab can follow the build (membrane snapshots)."""
+    try:
+        from .build.live3d import mark_current
+        mark_current(wf_dir, key, build_dir)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class WorkflowBlocked(RuntimeError):
     """A step needs a human decision; message explains which and why."""
 
@@ -1353,6 +1362,7 @@ class Workflow:
             if spec["key"] in built and built[spec["key"]].get("status") == "PASS":
                 continue
             case = self.project.new_case(f"{self.name}_{spec['key']}")
+            _live_mark(self.dir, spec["key"], case.build_dir)
             s, lmap = self._build_one(case, raw, spec["ligands"], {**sel["ligands"], **(spec.get("picks") or {})})
             built[spec["key"]] = {"case_id": case.case_id, "mode": spec["mode"], "ligands": spec["ligands"], "ligand_map": lmap,
                                   "status": s["status"], "blocking": s.get("blocking"), "blocking_detail": s.get("blocking_detail")}
@@ -1426,6 +1436,7 @@ class Workflow:
             if built.get(key, {}).get("status") == "PASS":
                 continue
             case = self.project.new_case(f"{self.name}_{key}")
+            _live_mark(self.dir, key, case.build_dir)
             recs, blocked = [], None
             for i, l in enumerate(solutes, 1):
                 r = self._membrane_solute(l, case.build_dir, i)

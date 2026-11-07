@@ -152,6 +152,14 @@ addMembrane 路徑用膜片自己的磷平面（`patch_geometry`），格點路�
 - 自由能：沿膜法線的 PMF（沿用傘狀採樣，CV 為配體質心到膜中心的 z 距離，加側向圓柱約束；與 `binding_funnel_restraints.md` 共用）尚未做。
 - 四種語言的指標名稱：`METRIC_LABELS`；閘門標題與說明在 `md20/gui/gate_text.py`。報告與圖表還沒有接上。
 
+## 6b. 建膜即時 3D（D-104）
+狀態：**[已實作・待 CI]**。
+- 建模寫 `<build>/live3d/NN_<stage>.json`＋`index.json`：`solute`（定向／放置後，附兩個磷原子目標平面）、`bilayer`（加膜後）、`declashed`（去水碰撞後）。workflow 在建每個 case 前寫 `<wf>/live3d_current.json`。
+- 場景：水、氫不畫；頭基（P、N、膽固醇 O3）全畫；尾鏈原子等距抽樣使總原子 ≤ 9000；離子小點；≤ 60 殘基胜肽全重原子，否則 Cα 骨架；盒子線框；座標 Å（`md20view.js` 的單位）。
+- GUI 3D 分頁每 3 秒重讀目標清單，「建膜中（即時）」排第一，新階段寫入即重畫（不必重新整理頁面）。
+- 快照失敗不影響建模。
+- 審查問題：9000 原子上限在一般筆電瀏覽器是否流暢？是否需要在 MD 平衡（膜 NPT）時也每個 chunk 更新一張？
+
 ## 7. 與長時間模擬的關係
 見 `long_timescale.md`：全原子膜蛋白在 RTX 4060 筆電估計每天 50–150 ns（未實測）；微秒級以上的膜現象（抗生素破壞膜、脂質重排）走粗粒化 Martini 3。
 

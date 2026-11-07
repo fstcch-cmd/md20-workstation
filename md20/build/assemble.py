@@ -612,9 +612,11 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
             from . import membrane as MB
             try:
                 if mplan.type == "bilayer":
-                    modeller, membrane_info = MB.build_bilayer(ff, mplan, ion_spec=ion_spec, report=report, decisions=decisions)
+                    modeller, membrane_info = MB.build_bilayer(ff, mplan, ion_spec=ion_spec, report=report, decisions=decisions,
+                                                               live_dir=out_dir)
                 else:
-                    membrane_info = MB.add_membrane(modeller, ff, mplan, ion_spec=ion_spec, report=report, decisions=decisions)
+                    membrane_info = MB.add_membrane(modeller, ff, mplan, ion_spec=ion_spec, report=report, decisions=decisions,
+                                                    live_dir=out_dir)
             except Exception as exc:  # noqa: BLE001
                 report.add(Gate("membrane builder", NEEDS_HUMAN, f"建膜失敗：{type(exc).__name__}: {exc}",
                                 options=["md.membrane.lipids: mammalian", "回報給老師"]))
@@ -647,7 +649,15 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
     if not implicit:
         # D-102: remove waters OpenMM placed overlapping (membrane + plain solvent) before the system is built, or the
         # first MD steps NaN.  A NEEDS_HUMAN here means an overlap a water removal cannot fix (water fused into solute).
-        remove_overlapping_waters(modeller, report, decisions)
+        wat = remove_overlapping_waters(modeller, report, decisions)
+        if mplan is not None and report.ok and (membrane_info or {}).get("lipid_atom_ranges"):
+            # D-104: last live 3D snapshot of a membrane build; indices recomputed because waters were deleted
+            from . import membrane as MB
+            from .live3d import snapshot_modeller
+            n0 = int(membrane_info["lipid_atom_ranges"][0][0])
+            lip = MB.lipid_atom_indices(modeller.topology, n0)
+            snapshot_modeller(out_dir, "declashed", modeller, lipid_indices=lip, head_indices=MB.head_atoms(modeller.topology, lip),
+                              note=f"removed {int((wat or {}).get('removed', 0))} waters")
         if not report.ok:
             res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict(), solvent=solvent)
             atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")

@@ -48,6 +48,11 @@ def test_popc_bilayer_case_c(tmp_path):
     assert abs(man["total_charge"]) < 1e-3 and mem["ions_by_replacement"]["salt_pairs"] > 0
     wg = [g for g in (man.get("gates") or {}).get("gates", []) if g["name"] == "water overlaps"]
     assert wg and wg[0]["status"] in ("PASS", "AUTO_FIXED"), wg
+    # D-104: live 3D snapshots of the real build (bilayer, then after the water de-clash), all 128 heads drawn
+    from md20.build.live3d import read_index, latest_scene
+    assert [s["stage"] for s in read_index(tmp_path)["stages"]] == ["bilayer", "declashed"]
+    sc, _ = latest_scene(tmp_path)
+    assert sum(a["k"] == "H" for a in sc["atoms"]) == 128 and not any(a["r"] == "HOH" for a in sc["atoms"])
     xyz, box = _run_membrane_npt(res)
     heads = xyz[mem["head_atom_indices"]][None]
     th = MA.thickness_pp(heads, box[None])
@@ -77,6 +82,13 @@ def test_peptide_above_popc_case_b(tmp_path):
     # D-102: solvation must not leave overlapping waters (root cause of the intermittent NaN); the build gate fired
     wg = [g for g in (man.get("gates") or {}).get("gates", []) if g["name"] == "water overlaps"]
     assert wg and wg[0]["status"] in ("PASS", "AUTO_FIXED"), wg
+    # D-104: the placed peptide with the target phosphate planes comes first, before the slow bilayer step
+    from md20.build.live3d import read_index
+    import json as _json
+    idx = read_index(tmp_path)
+    assert [s["stage"] for s in idx["stages"]] == ["solute", "bilayer", "declashed"]
+    first = _json.loads((tmp_path / "live3d" / idx["stages"][0]["file"]).read_text(encoding="utf-8"))
+    assert len(first["planes"]) == 2 and all(a["k"] in ("P", "L") for a in first["atoms"])
     xyz, box = _run_membrane_npt(res, steps=400)          # was 200; longer, to catch a late blow-up now that it is fixed
     assert np.isfinite(xyz).all()
 

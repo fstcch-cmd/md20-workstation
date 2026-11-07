@@ -773,14 +773,30 @@ def prepare_solute(modeller, plan: MembranePlan, report: GateReport, decisions=N
     return info
 
 
+def target_planes_nm(plan: MembranePlan) -> list[float]:
+    """z of the phosphate planes the builder will make (membrane centre at z = 0), for the live 3D view (D-104)."""
+    if plan.builder == "openmm_addmembrane" and plan.single_lipid:
+        try:
+            g = patch_geometry(plan.single_lipid)
+            return [g["lower_p_z_nm"], g["upper_p_z_nm"]] if "lower_p_z_nm" in g else [-g["upper_p_z_nm"], g["upper_p_z_nm"]]
+        except Exception:  # noqa: BLE001
+            pass
+    half = (plan.reference.get("dpp_nm") or 3.8) / 2
+    return [-half, half]
+
+
 def add_membrane(modeller, forcefield, plan: MembranePlan, *, ion_spec: dict, report: GateReport,
-                 decisions=None, platform=None) -> dict:
-    """Case A and B: build the bilayer around (or below) the solute already in the Modeller.  Edits the Modeller."""
+                 decisions=None, platform=None, live_dir=None) -> dict:
+    """Case A and B: build the bilayer around (or below) the solute already in the Modeller.  Edits the Modeller.
+    `live_dir` (D-104): the build folder; a 3D snapshot is written there after placement and after the bilayer."""
     from openmm import unit, Vec3
     info = {"plan": plan.to_dict()}
     info.update(prepare_solute(modeller, plan, report, decisions))
     if not report.ok:
         return info
+    if live_dir is not None:
+        from .live3d import snapshot_modeller
+        snapshot_modeller(live_dir, "solute", modeller, planes_nm=target_planes_nm(plan))
     n0 = modeller.topology.getNumAtoms()
     xyz = _xyz(modeller)
     dpp = plan.reference.get("dpp_nm") or 3.8
@@ -809,11 +825,25 @@ def add_membrane(modeller, forcefield, plan: MembranePlan, *, ion_spec: dict, re
         if not report.ok:
             return info
     _finish_info(modeller, n0, plan, info)
+    _live_bilayer(live_dir, modeller, info)
     if decisions:
         decisions.record("build.membrane", "bilayer", {"builder": info["builder"], "lipids": info.get("lipid_counts")},
                          f"{plan.type} 膜系統：{info['builder']}，{info.get('n_lipids')} 個脂質，盒子 "
                          f"{' × '.join(f'{v:.2f}' for v in info.get('box_nm', []))} nm；溫度 {plan.temperature_k:g} K。")
     return info
+
+
+def _live_bilayer(live_dir, modeller, info: dict) -> None:
+    if live_dir is None:
+        return
+    from .live3d import snapshot_modeller, ranges_to_indices
+    hz = info.get("centre_z_nm")
+    planes = []
+    if hz is not None and info.get("dpp_initial_nm"):
+        planes = [hz - info["dpp_initial_nm"] / 2, hz + info["dpp_initial_nm"] / 2]
+    snapshot_modeller(live_dir, "bilayer", modeller, lipid_indices=ranges_to_indices(info.get("lipid_atom_ranges")),
+                      head_indices=info.get("head_atom_indices") or (), planes_nm=planes,
+                      note=f"{info.get('n_lipids')} lipids")
 
 
 def _finish_info(modeller, n0: int, plan: MembranePlan, info: dict) -> None:
@@ -841,8 +871,15 @@ def _finish_info(modeller, n0: int, plan: MembranePlan, info: dict) -> None:
                  "box_nm": [float(vecs[i][i].value_in_unit(__import__("openmm").unit.nanometer)) for i in range(3)] if vecs else []})
 
 
-def build_bilayer(forcefield, plan: MembranePlan, *, ion_spec: dict, report: GateReport, decisions=None):
+def build_bilayer(forcefield, plan: MembranePlan, *, ion_spec: dict, report: GateReport, decisions=None, live_dir=None):
     """Case C: a bilayer with water and ions, no solute.  Returns (modeller, info)."""
+    modeller, info = _build_bilayer(forcefield, plan, ion_spec=ion_spec, report=report, decisions=decisions)
+    if report.ok and info.get("lipid_atom_ranges") is not None:
+        _live_bilayer(live_dir, modeller, info)
+    return modeller, info
+
+
+def _build_bilayer(forcefield, plan: MembranePlan, *, ion_spec: dict, report: GateReport, decisions=None):
     from openmm import app, unit, Vec3
     info = {"plan": plan.to_dict()}
     if plan.builder != "openmm_patch_tile":

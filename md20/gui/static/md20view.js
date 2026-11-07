@@ -1,6 +1,7 @@
 /* MD20 offline molecule viewer — dependency-free Canvas 2D (HCC Lab, NKUST).
  * Scene JSON: {atoms:[{e,n,r,s,k}], bonds:[[i,j]], frames:[[x,y,z,...]], interactions:{frames:[[[i,j,t]]]}}
- *   k = "L" ligand | "P" pocket side chain | "T" Cα trace | "M" metal
+ *   k = "L" ligand | "P" pocket side chain | "T" Cα trace | "M" metal | "H" lipid head | "A" lipid tail | "I" ion (D-104)
+ *   optional: planes:[z] phosphate planes and box:[lx,ly,lz] (Å, drawn as outlines), center:[x,y,z], extent
  *   t = "h" H-bond candidate | "c" hydrophobic contact | "m" metal coordination (geometric, computed in Python)
  * Drag = rotate, wheel = zoom, ▶ = play frames, interaction and surface toggles (labels from scene.ui).  No network, no WebGL required. */
 (function () {
@@ -8,12 +9,15 @@
   var CPK = {C: "#909090", N: "#3050F8", O: "#FF0D0D", S: "#FFFF30", P: "#FF8000", H: "#FFFFFF", F: "#90E050",
              Cl: "#1FF01F", Br: "#A62929", I: "#940094", Zn: "#7D80B0", Fe: "#E06633", Mg: "#8AFF00", Ca: "#3DFF00",
              Cu: "#C88033", Mn: "#9C7AC7", Na: "#AB5CF2"};
-  var RAD = {L: 0.42, P: 0.28, T: 0.0, M: 0.75};
+  var RAD = {L: 0.42, P: 0.28, T: 0.0, M: 0.75, H: 0.9, A: 0.35, I: 0.55};
   var VDW = {C: 1.7, N: 1.55, O: 1.52, S: 1.8, P: 1.8, Zn: 1.39, Fe: 1.4, Mg: 1.73, Ca: 1.9};
   var HYD = {ALA: 1, VAL: 1, LEU: 1, ILE: 1, MET: 1, PHE: 1, TRP: 1, PRO: 1, TYR: 1, CYS: 1};
   var ICOL = {h: "#FFD23F", c: "#B0B8C0", m: "#C77DFF"};
 
   function color(a) {
+    if (a.k === "H") return a.e === "N" ? "#5B7BFF" : "#FF9A2E";
+    if (a.k === "A") return "#8C8F94";
+    if (a.k === "I") return "#B57BFF";
     if (a.k === "L" && a.e === "C") return "#33C24A";
     return CPK[a.e] || "#FF1493";
   }
@@ -26,13 +30,14 @@
     var focus = scene.atoms.map(function (a, i) { return a.k === "L" ? i : -1; }).filter(function (i) { return i >= 0; });
     if (!focus.length) focus = scene.atoms.map(function (_, i) { return i; });
     focus.forEach(function (i) { cx += xyz[3 * i]; cy += xyz[3 * i + 1]; cz += xyz[3 * i + 2]; cnt++; });
-    this.ctr = [cx / cnt, cy / cnt, cz / cnt];
+    this.ctr = scene.center || [cx / cnt, cy / cnt, cz / cnt];
     var r = 0;
     for (var i = 0; i < n; i++) {
       var d = Math.hypot(xyz[3 * i] - this.ctr[0], xyz[3 * i + 1] - this.ctr[1], xyz[3 * i + 2] - this.ctr[2]);
       if (scene.atoms[i].k !== "T" && d > r) r = d;
     }
-    this.extent = Math.max(r, 6);
+    this.extent = scene.extent || Math.max(r, 6);
+    if (scene.planes || scene.box) this.rot = mul(rotX(-1.35), this.rot);   // membrane: look from the side
     this._bind(); this.draw();
   }
 
@@ -117,6 +122,7 @@
       }
     });
     g.globalAlpha = 1;
+    this._outlines(g);
     var inter = this.s.interactions && this.s.interactions.frames ? this.s.interactions.frames[this.f] || [] : [];
     if (this.showInter && inter.length) {
       g.lineWidth = 1.6;
@@ -141,6 +147,40 @@
       g.fillStyle = "#E8EEF4"; g.font = "12px sans-serif";
       var t = this.s.times_ps ? (" · " + this.s.times_ps[this.f].toFixed(0) + " ps") : "";
       g.fillText("frame " + (this.f + 1) + "/" + this.s.frames.length + t, 8, this.c.height - 8);
+    }
+  };
+
+  MD20View.prototype._pt = function (x, y, z) {
+    var R = this.rot, W = this.c.width, H = this.c.height, sc = this.zoom * 0.45 * Math.min(W, H) / this.extent;
+    x -= this.ctr[0]; y -= this.ctr[1]; z -= this.ctr[2];
+    return [W / 2 + sc * (R[0] * x + R[1] * y + R[2] * z), H / 2 - sc * (R[3] * x + R[4] * y + R[5] * z)];
+  };
+
+  MD20View.prototype._outlines = function (g) {      // D-104: phosphate planes (dashed) and the periodic box
+    var s = this.s, self = this;
+    if (!s.planes && !s.box) return;
+    var xyz = s.frames[this.f], n = s.atoms.length, lo = [1e9, 1e9], hi = [-1e9, -1e9];
+    for (var i = 0; i < n; i++) for (var k = 0; k < 2; k++) {
+      lo[k] = Math.min(lo[k], xyz[3 * i + k]); hi[k] = Math.max(hi[k], xyz[3 * i + k]);
+    }
+    if (s.box) { var c0 = (lo[0] + hi[0]) / 2, c1 = (lo[1] + hi[1]) / 2;
+      lo = [c0 - s.box[0] / 2, c1 - s.box[1] / 2]; hi = [c0 + s.box[0] / 2, c1 + s.box[1] / 2]; }
+    function quad(z) {
+      var c = [[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]]].map(function (q) { return self._pt(q[0], q[1], z); });
+      g.beginPath(); g.moveTo(c[0][0], c[0][1]);
+      for (var j = 1; j < 4; j++) g.lineTo(c[j][0], c[j][1]);
+      g.closePath(); g.stroke();
+    }
+    g.lineWidth = 1.4; g.strokeStyle = "#FFB04D"; g.setLineDash([6, 4]);
+    (s.planes || []).forEach(quad);
+    g.setLineDash([]);
+    if (s.box) {
+      var zl = this.ctr[2] - s.box[2] / 2, zh = this.ctr[2] + s.box[2] / 2;
+      g.strokeStyle = "#4A5868"; g.lineWidth = 1; quad(zl); quad(zh);
+      [[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]]].forEach(function (q) {
+        var a = self._pt(q[0], q[1], zl), b = self._pt(q[0], q[1], zh);
+        g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+      });
     }
   };
 

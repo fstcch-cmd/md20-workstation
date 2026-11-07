@@ -252,6 +252,29 @@ def stability(out: Path) -> int:
     return 0 if not problems else 1
 
 
+def _demo_membrane_scene(stage: str) -> dict:
+    """Synthetic bilayer for the live-3D check (D-104): a 4 × 4 nm patch of head and tail atoms and a small peptide."""
+    import numpy as np
+    from md20.build.live3d import membrane_scene, STAGE_TEXT
+    atoms, xyz, lip, heads = [], [], [], []
+    for k in range(6):                                    # peptide above the membrane
+        atoms.append({"e": "C", "n": "CA", "r": "GLY", "s": str(k + 1), "c": "P"}); xyz.append([1.5 + 0.38 * k, 2.0, 3.2])
+    if stage != "solute":
+        rng = np.random.default_rng(1)
+        for leaf, z in ((1, 1.9), (-1, -1.9)):
+            for gx in range(8):
+                for gy in range(8):
+                    x, y = 0.25 + 0.5 * gx, 0.25 + 0.5 * gy
+                    heads.append(len(atoms)); lip.append(len(atoms))
+                    atoms.append({"e": "P", "n": "P", "r": "POPC", "s": str(len(atoms)), "c": "M"}); xyz.append([x, y, z])
+                    for t in range(1, 9):
+                        lip.append(len(atoms))
+                        atoms.append({"e": "C", "n": f"C{t}", "r": "POPC", "s": str(len(atoms)), "c": "M"})
+                        xyz.append([x + rng.normal(0, 0.05), y + rng.normal(0, 0.05), z - leaf * 0.2 * t])
+    return membrane_scene(atoms, np.array(xyz), lipid_indices=lip, head_indices=heads, planes_nm=[-1.9, 1.9],
+                          box_nm=[4.0, 4.0, 8.0], stage=stage, lang_labels=STAGE_TEXT[stage])
+
+
 def build_e2e(root: Path) -> tuple[str, str]:
     """A finished all-ligands workflow (hsieh2024-like): MD complete, PGA pulled once, report written."""
     from md20.project.store import Project
@@ -374,6 +397,26 @@ def e2e(out: Path) -> int:
                 ok = False
             check(ok, "the 3D viewer draws on a canvas inside the tab")
             pg.screenshot(path=str(out / "e2e_3d.png"), full_page=True)
+            # D-104: a membrane build in progress appears in the open 3D tab by itself and redraws after each step
+            from md20.build import live3d as LV
+            bdir = root / "_live_case" / "build"
+            LV.mark_current(wf_dir, "membrane_demo", bdir)
+            LV.write_stage(bdir, "solute", _demo_membrane_scene("solute"))
+            pg.wait_for_timeout(4500)
+            src1 = fr.first.get_attribute("src") or ""
+            check("&t=" in src1, f"the live membrane build is shown without reloading the page ({src1})")
+            try:
+                inner.locator("canvas").first.wait_for(timeout=20000)
+                ok = True
+            except Exception:  # noqa: BLE001
+                ok = False
+            check(ok, "the live membrane scene draws on a canvas")
+            time.sleep(1.1)
+            LV.write_stage(bdir, "bilayer", _demo_membrane_scene("bilayer"))
+            pg.wait_for_timeout(4500)
+            src2 = fr.first.get_attribute("src") or ""
+            check(src2 != src1, "the 3D tab redraws when the next build step is written")
+            pg.screenshot(path=str(out / "e2e_3d_live.png"), full_page=True)
             # projects folder: open another folder (one project, one workflow → straight to it)
             pg.goto(base + "/", wait_until="networkidle")
             check(str(root) in pg.get_by_test_id("folder-now").inner_text(), "home shows the current projects folder")

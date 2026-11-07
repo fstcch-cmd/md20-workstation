@@ -848,23 +848,53 @@ def workflow_page(project: str, name: str):
             with ui.tab_panel(t_time):
                 time_box = ui.column().classes("w-full gap-1")
             with ui.tab_panel(t_3d):
-                targets = viewer_targets(wf, lang=L)
-                if not targets:
-                    ui.label(_("建模完成後就能看 3D 結構，正式模擬完成後可以播放軌跡。",
-                               "The 3D structure appears after building. The trajectory can be played after production.",
-                               "系の構築が終わると 3D 構造を表示できます。本計算が終わるとトラジェクトリを再生できます。",
-                               "계 구축이 끝나면 3D 구조를 볼 수 있습니다. 본 계산이 끝나면 궤적을 재생할 수 있습니다.")).classes("text-gray-500")
-                else:
-                    pick3d = ui.select({i: t["label"] for i, t in enumerate(targets)}, value=0, label=_("結構", "Structure", "構造", "구조")).classes("w-96")
-                    # D-94: a real <iframe> element.  ui.html() sanitises with DOMPurify since NiceGUI 3.0 and
-                    # dropped the iframe, so the 3D tab was empty (laptop 11/07).
-                    frame = ui.element("iframe").style("width:100%;height:560px;border:0").props('data-testid="viewer-frame"')
+                # D-104: the list is refreshed every few seconds, so a membrane build shows up while it runs
+                # ("live" target first) and the view redraws after each build step
+                empty3d = ui.label(_("建模完成後就能看 3D 結構，正式模擬完成後可以播放軌跡。建膜時會即時顯示每一步。",
+                                     "The 3D structure appears after building. The trajectory can be played after production. "
+                                     "A membrane build is shown live, step by step.",
+                                     "系の構築が終わると 3D 構造を表示できます。本計算が終わるとトラジェクトリを再生できます。膜の構築中は各段階をライブで表示します。",
+                                     "계 구축이 끝나면 3D 구조를 볼 수 있습니다. 본 계산이 끝나면 궤적을 재생할 수 있습니다. 막 구축 중에는 각 단계를 실시간으로 보여 줍니다.")
+                                   ).classes("text-gray-500")
+                pick3d = ui.select({}, label=_("結構", "Structure", "構造", "구조")).classes("w-96")
+                # D-94: a real <iframe> element.  ui.html() sanitises with DOMPurify since NiceGUI 3.0 and
+                # dropped the iframe, so the 3D tab was empty (laptop 11/07).
+                frame = ui.element("iframe").style("width:100%;height:560px;border:0").props('data-testid="viewer-frame"')
+                v3 = {"targets": [], "src": None}
 
-                    def show3d():
-                        frame._props["src"] = f"/viewer?project={project}&name={name}&i={pick3d.value}"
+                def show3d():
+                    tg = v3["targets"]
+                    if pick3d.value is None or not 0 <= int(pick3d.value) < len(tg):
+                        return
+                    t3 = tg[int(pick3d.value)]
+                    src = f"/viewer?project={project}&name={name}&i={pick3d.value}" + (f"&t={t3.get('stamp')}" if t3["mode"] == "live" else "")
+                    if src != v3["src"]:
+                        v3["src"] = src
+                        frame._props["src"] = src
                         frame.update()
-                    pick3d.on_value_change(lambda _: show3d())
+
+                def refresh3d():
+                    tg = viewer_targets(wf, lang=lang())
+                    old = v3["targets"]
+                    prev = old[int(pick3d.value)] if pick3d.value is not None and 0 <= int(pick3d.value) < len(old) else None
+                    v3["targets"] = tg
+                    opts = {i: t3["label"] for i, t3 in enumerate(tg)}
+                    sel = None
+                    if prev is not None:
+                        sel = next((i for i, t3 in enumerate(tg) if (t3["mode"], t3["key"]) == (prev["mode"], prev["key"])), None)
+                    if (prev is None or prev["mode"] == "live") and tg and tg[0]["mode"] == "live":
+                        sel = 0                                   # follow the build while it is being watched
+                    if sel is None and tg:
+                        sel = 0
+                    if opts != pick3d.options or sel != pick3d.value:
+                        pick3d.set_options(opts, value=sel)
+                    empty3d.set_visibility(not tg)
+                    pick3d.set_visibility(bool(tg))
+                    frame.set_visibility(bool(tg))
                     show3d()
+                pick3d.on_value_change(lambda _: show3d())
+                refresh3d()
+                ui.timer(3.0, refresh3d)
         cards_sig = {"v": None}
         scr_sig = {"v": None}
         cov_sig = {"v": None}

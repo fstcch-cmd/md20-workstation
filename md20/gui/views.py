@@ -416,6 +416,22 @@ def _viewer_caption(s: dict, lang: str) -> str:
         "근사한 것이며 용매 접근 표면이 아닙니다."), lang)
 
 
+def _membrane_caption(scene: dict, lang: str) -> str:
+    """D-104 live membrane build: what is drawn and what is left out."""
+    s = scene.get("summary", {})
+    stage = pick(tuple(scene["stage_label"]), lang) if scene.get("stage_label") else scene.get("stage", "")
+    nh, nt, ntot = s.get("n_lipid_heads", 0), s.get("n_tail_atoms_shown", 0), s.get("n_tail_atoms", 0)
+    return stage + pick((
+        f"。橘色是脂質頭基（{nh} 個），灰色點是尾鏈原子（畫出 {nt}／{ntot} 個），水不畫，離子是小紫點。"
+        "建模時每完成一步會自動更新。拖曳旋轉、滾輪縮放。",
+        f". Orange: lipid head atoms ({nh}). Grey dots: tail atoms ({nt} of {ntot} drawn). Water is not drawn and ions "
+        "are small purple dots. The view updates after each build step. Drag to rotate and scroll to zoom.",
+        f"。橙は脂質の頭部（{nh} 個）、灰色の点は尾部の原子（{ntot} 個中 {nt} 個を表示）です。水は描かず、イオンは小さな紫の点です。"
+        "建模の各段階が終わるたびに更新されます。ドラッグで回転、ホイールで拡大と縮小ができます。",
+        f". 주황색은 지질 머리 원자({nh}개), 회색 점은 꼬리 원자({ntot}개 중 {nt}개 표시)입니다. 물은 그리지 않고 이온은 작은 보라색 점입니다. "
+        "모델링 단계가 끝날 때마다 갱신됩니다. 드래그하면 회전하고 휠로 확대하거나 축소합니다."), lang)
+
+
 VIEWER_BUTTONS = {"interactions": ("互作", "Interactions", "相互作用", "상호작용"),
                   "surface": ("表面", "Surface", "表面", "표면")}
 
@@ -429,9 +445,10 @@ def viewer_html(scene: dict, *, title: str = "MD20 3D", standalone: bool = True,
     data = json.dumps(scene, separators=(",", ":")).replace("</", "<\\/")
     import hashlib
     uid = "md20v" + hashlib.sha1(data.encode()).hexdigest()[:10]
-    cap = _viewer_caption(scene.get("summary", {}), lang)
+    cap = _membrane_caption(scene, lang) if scene.get("stage") else _viewer_caption(scene.get("summary", {}), lang)
     body = (f'<div id="{uid}" style="width:100%;max-width:900px;min-height:{height_px}px;background:#111418;border-radius:6px"></div>'
-            f'<p style="font-size:12px;color:#667">{html.escape(cap)}</p>' + interaction_table_html(scene, lang=lang) +
+            f'<p style="font-size:12px;color:#667">{html.escape(cap)}</p>' +
+            ("" if scene.get("stage") else interaction_table_html(scene, lang=lang)) +
             f"<script>{js}</script><script>md20Mount(document.getElementById('{uid}'), {data});</script>")
     if not standalone:
         return body
@@ -443,12 +460,34 @@ TARGET_START = ("建模起始結構", "Built starting structure", "構築した�
 TARGET_TRAJ = ("正式模擬軌跡", "Production trajectory", "本計算の軌跡", "본 시뮬레이션 궤적")
 
 
+TARGET_LIVE = ("建膜中（即時）", "Membrane build (live)", "膜の構築中（ライブ）", "막 구축 중(실시간)")
+
+
+def live_target(wf, *, lang: str = "zh") -> dict | None:
+    """D-104: the membrane build in progress (or the last one), from <wf>/live3d_current.json and the case's
+    live3d/index.json.  `stamp` changes whenever a new stage is written, so the GUI knows when to redraw."""
+    from ..build.live3d import current, read_index
+    cur = current(wf.dir)
+    if not cur.get("build_dir"):
+        return None
+    idx = read_index(cur["build_dir"])
+    if not idx.get("stages"):
+        return None
+    st = idx["stages"][-1]
+    return {"key": cur.get("key", ""), "mode": "live", "build_dir": cur["build_dir"], "stamp": idx.get("updated_at"),
+            "label": f"{cur.get('key', '')}{colon(lang)}{pick(TARGET_LIVE, lang)} · {pick(tuple(st.get('label') or ()) or st['stage'], lang)}"}
+
+
 def viewer_targets(wf, *, lang: str = "zh") -> list[dict]:
-    """Cases that can be shown: built start structure always; production trajectory when the run finished."""
+    """Cases that can be shown: the membrane build in progress (D-104), built start structure always; production
+    trajectory when the run finished."""
     from ..workflow import manifest_ligands
     steps = wf.state().get("steps", {})
     runs = (steps.get("md_runs") or {}).get("runs") or {}
     out = []
+    lt = live_target(wf, lang=lang)
+    if lt is not None:
+        out.append(lt)
     for key, c in ((steps.get("md_cases") or {}).get("cases") or {}).items():
         try:
             case = wf.project.case(c["case_id"])
@@ -468,6 +507,12 @@ def viewer_targets(wf, *, lang: str = "zh") -> list[dict]:
 
 
 def scene_for(target: dict, *, max_frames: int = 60) -> dict:
+    if target["mode"] == "live":
+        from ..build.live3d import latest_scene
+        scene, _ = latest_scene(target["build_dir"])
+        if scene is None:
+            raise FileNotFoundError("live3d")
+        return scene
     if target["mode"] == "traj":
         return scene_from_run(target["run_dir"], target["topology_pdb"], ligand_indices=target["ligand_indices"] or None,
                               max_frames=max_frames)

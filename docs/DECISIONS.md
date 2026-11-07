@@ -6,6 +6,21 @@
 ---
 
 ## 2026-11-07
+### D-104　建膜即時 3D：建模每一步寫一個小場景，GUI 的 3D 分頁自己跟著更新
+- 使用者需求（11/07）：「建膜過程要有即時 3D 顯示」（之前只有建模完成後的起始結構與正式軌跡）。
+- **決定**：
+  - 新模組 `md20/build/live3d.py`（不 import OpenMM）。membrane 建模在三個時點寫場景到 `<build>/live3d/`：①`solute` 溶質定向（膜蛋白）或放到膜上方（表面），**附上磷原子層將來的位置（虛線框）**——addMembrane 是最慢的一步，學生在它開始前就能先看定向對不對；②`bilayer` 加入脂雙層後；③`declashed` D-102 去水碰撞後（附刪掉幾個水）。`index.json` 記錄各階段與時間。
+  - 場景內容：水一律不畫（數萬個原子會蓋掉一切）、氫不畫；脂質頭基（P、N、膽固醇 O3）全部畫，尾鏈原子**等距抽樣**到總數 ≤ 9000（Canvas 2D 不用 WebGL）；離子小點；≤ 60 殘基的胜肽畫全部重原子，較大的蛋白畫 Cα 骨架；週期盒畫線框。說明文字寫明畫了幾個尾鏈原子、水沒畫。
+  - workflow 開始建某個 case 前寫 `<wf>/live3d_current.json`（case 要建完才記進 state.json，GUI 需要提前知道）。`views.viewer_targets` 把「建膜中（即時）」放在清單第一個；3D 分頁每 3 秒重讀清單，新階段寫入時 iframe 自動重載（`&t=<時間戳>`），使用者正在看即時畫面時會自動跟著建模走，選了別的結構就不搶。
+  - 快照寫入失敗**不會中斷建模**（`snapshot_modeller` 吞掉例外）：3D 是方便，不是閘門。
+- **被否決的做法**：
+  - 在 addMembrane 進行中顯示：OpenMM 的 addMembrane 是單一呼叫，內部沒有回呼，做不到；以「之前（含目標平面）／之後」代替。
+  - Mol\*／NGL：需要 CDN 或打包數 MB 的 JS，離線筆電與課堂網路不可靠；中期藍圖第 4 階段再評估。先沿用 D-94 的離線 Canvas viewer，加膜用的原子種類與線框。
+  - 每步寫 PDB：有水時檔案數十 MB、瀏覽器解析慢；改寫已經抽樣好的 JSON 場景（數百 KB）。
+- **證據／測試**：`tests/test_live3d.py`（8 項：水與氫不畫、頭基／尾鏈／離子分類、尾鏈抽樣上限、大蛋白變骨架、索引順序與重建取代、OpenMM topology 介面、快照失敗不中斷、GUI 目標與說明文字）。`tests/test_membrane_integration.py`（CI 真實 OpenMM）：情境 C 的階段為 bilayer→declashed 且 128 個頭基都畫出；情境 B 為 solute→bilayer→declashed 且第一張有兩個目標平面。`tools/gui_preview.py`（CI 真瀏覽器）：已開啟的 3D 分頁在寫入建膜場景後**不重新整理頁面**就顯示、canvas 有畫、下一階段寫入後重畫。容器 752 passed。
+- **未決**：MD 平衡階段（膜 NPT）的即時軌跡尚未接（目前正式模擬完成後才能播放）；膜的厚度／每脂質面積即時曲線可接 `analysis/membrane.py`，下一步。
+- 檔案：`md20/build/live3d.py`（新）、`md20/build/membrane.py`、`md20/build/assemble.py`、`md20/workflow.py`、`md20/gui/views.py`、`md20/gui/app.py`、`md20/gui/static/md20view.js`、`tools/gui_preview.py`、測試兩檔。規格：`docs/specs/membrane.md` §即時 3D。
+
 ### D-103　GUI 斷線的根因：計算和 GUI 共用一個 Python 程序 → 計算改成獨立子程序，狀態與進度一律從檔案讀回
 - 使用者需求（11/07，見下方「新功能需求」）：「使用 UI 介面時很容易斷線，需要增強穩定性」。
 - **調查（讀程式，session_016gcJz7pQmKkZzkUxg6SqVs）**，找到三個原因：
