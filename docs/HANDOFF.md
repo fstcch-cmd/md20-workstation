@@ -5,6 +5,37 @@
 
 ## 0. 新 session 第一步
 
+> **2026-11-07 第六個 session（session_016gcJz8q8wadWxHb24EMCKt，Opus 5.5→4.8）交接。使用者即將關閉 session。**
+>
+> **所有已審查成果已 push：md20 main `650bc65`（origin 同步）、私人 repo `md-digital-signature` `3a68598`。** 觸發的 CI run 42384880862。
+>
+> **⚠ 進行中但未落地（session 關閉時三個子代理仍在跑、分支無 commit → 實作已遺失，但規格都在 main，照規格重做）：**
+> - **D-128 授權第 3 層**（等級 tier／功能 features／席次 seats／max_version／簽章撤銷清單 revoked.json／評估版浮水印／輸出蓋授權編號）：規格散見 D-125、設計文件 https://claude.ai/artifact/222jyPJRrE1Pzspv7shAS6 ；同時改 md20（驗證）與私人 repo（簽發），格式升 v2、v1 仍可驗、測試向量兩邊逐位元組相同。
+> - **D-130 重複分析彙總＋報告不確定性**、**D-131 重複計畫＋開始前告知**：完整規格在 **`docs/specs/replicas.md`（D-129，已 push）**。核心缺口：`Workflow.analyse` 只讀 `run_ids[0]`，重複跑了卻只用第一條。
+>
+> **本 session 已完成並 push：**
+> - 授權第 1 層 LICENSE（D-124）、第 2 層簽章驗證＋閘門＋學生一鍵解鎖＋GUI 卡片（D-125）、簽發端搬私人 repo、md20 只留驗證（D-127）。
+> - 膜 NaN：D-115 離子落在重疊水上（D-102 加更正）、D-126 只檢查溶劑單價離子（結構 Zn/Mg/Ca 不碰）。580cbff 膜診斷 32 次 0 NaN。
+> - D-111/D-112/D-121 CI 修紅；D-113 MBAR overlap、D-114 Vina 釘選、D-116 SMD 接觸釋放、D-117 micromamba 釘選、D-118/D-123 約束建議、D-119 補窗、D-120 可比性矩陣、D-122 自動行動報告。
+> - CLAUDE.md 加 frontend-design／Playwright 自動使用規則（使用者 22:57）。
+> - **D-132（R7）**：pyproject／README 原寫 a19，實際最新發行是 **a17**（a18/a19 從未發行）→ 據實改正。
+>
+> **使用者 23:01 上傳規格「MD20: Evidence-Driven Repair and Next-Generation Development」（見下方 NEXT_SESSION_PROMPT 全文連結與重點），授權事項：**
+> - 並行把規格 R1–R8 全部做完（與授權、重複分析並行）。
+> - **已授權改鋅鍵結模型參數**（R5；依證據調 `md20/build/metal.py` 的 Zn–N 參數並補驗證測試，不是放寬門檻）。
+> - push 回到「累積到一輪 CI 空檔批次推」。
+>
+> **規格 R1–R8 對本地現況的核對（0379df3，給下個 session 直接接）：**
+> - **R1 分析所有重複**＝D-129/D-130/D-131（重做）。要補：獨立性階層、不串接重複邊界做事件壽命、保留失敗/排除重複與理由、區分 within-trajectory 與 between-replica 不確定性、autocorrelation/block 方法。
+> - **R2 統一科學評估**（本地未修，真缺口）：`md20/report/evidence.py` 仍以 `COMPLETE`／`PASS+非空ΔG` 標 supported，和 `assess_pmf` 嚴格資格不一致 → 全部走同一套版本化評估。
+> - **R3 分析解析度 vs 繪圖**：部分已做（`traj.py` 有 streaming 全解析度＋`choose_stride`）；要查 extended 分析與 persistence 是否吃全解析度、common_basis 250 幀上限據實標註。
+> - **R4 快取版本化**（本地未修）：`workflow.analyse` 以 `analysis_manifest status==PASS` 驅動重用，缺依賴指紋 → 加 input hash/schema 版本指紋，只重算分析不重跑 MD。
+> - **R5 物理模型**：鋅已授權修（見上）；膜 artifact validator（diag 退出碼 0 不能當科學驗收）待做。
+> - **R6/R8**：大致符合現有設計；R8 bounded autonomy 的 assess→propose→authorize→execute→reassess ledger 待建。
+> - **R7**：D-132 已對齊版本；capability manifest 待做。
+>
+> ---
+>
 > **2026-11-07 第五個 session（session_016gcJz8q8wadWxHb24EMCKt，Opus 5.5 主 session＋Sonnet 5.5 子代理）交接。**
 >
 > **⚠ 兩個 repo：** 產品 `fstcch-cmd/md20-workstation`（目前公開，使用者之後會轉私人）與**私人** `fstcch-cmd/md-digital-signature`（數位簽章／授權的簽發端，2026-11-07 使用者建立）。新 session 要兩個都 `add_repo`（push）並 clone。後者的角色、規則與進度見它自己的 `README.md`／`CLAUDE.md`，以及本 repo `docs/specs/licensing.md`（第 2 層合併後才有）與 D-124／D-125。
