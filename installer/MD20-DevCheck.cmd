@@ -63,6 +63,9 @@ Run 'full workflow 3PTB on this GPU (docking, MD, analysis, SMD/umbrella, report
   $env:MD20_HEAVY = '1'
   & $mamba run -p "$root\envs\md20" python -m pytest -q -rxs tests/test_workflow_integration.py -k full_workflow
 }
+Run 'membrane NaN diagnosis on this Windows CPU (2 builds x 4 runs)' {
+  & $mamba run -p "$root\envs\md20" python (Join-Path $script:srcdir 'tools\diag_membrane_nan.py') (Join-Path $out 'membrane_diag') --builds 2 --seeds 1,2,3
+}
 Pop-Location
 if (-not $only_p0) {
 Push-Location $app
@@ -81,4 +84,13 @@ Pop-Location
 Run 'nvidia-smi' { nvidia-smi }
 Write-Host ""; Write-Host "===== SUMMARY ====="
 $results.GetEnumerator() | ForEach-Object { Write-Host ("{0,-40} {1}" -f $_.Key, $_.Value) }
+# housekeeping (user 11/07: clean up regularly): the downloaded source in %TEMP%, logs beyond the newest 3, and the
+# stray file pip wrote when "meeko>=0.5" was a redirection (fixed in the installer; old installs left it behind)
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $src, "$src.zip"
+Get-ChildItem $base -Filter 'devcheck_*.log' | Sort-Object Name -Descending | Select-Object -Skip 3 | ForEach-Object {
+  Remove-Item -Force -ErrorAction SilentlyContinue $_.FullName
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue ($_.FullName -replace '\.log$', '')
+}
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $base '0.5')
+Write-Host "cleaned: downloaded source, logs older than the newest 3"
 Stop-Transcript | Out-Null

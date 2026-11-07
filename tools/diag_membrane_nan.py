@@ -8,7 +8,11 @@ were hottest just before (residue, chain, nearest non-bonded neighbour).  Separa
   dynamics   several velocity seeds from one build
   minimise   500 iterations (the test) vs 5000 (the workflow's minimise stage)
 
-Usage:  python tools/diag_membrane_nan.py OUT_DIR [--builds 3] [--seeds 1,2,3] [--steps 200]
+Round 2 (cross-OS): --from-builds DIR runs the dynamics on builds made elsewhere (DIR/build*/system.xml +
+topology.pdb), so "the structure built on Windows is bad" and "the dynamics on Windows is bad" can be told apart.
+Every build also records what each chain is (residues, z range) and the closest intermolecular water contacts.
+
+Usage:  python tools/diag_membrane_nan.py OUT_DIR [--builds 3] [--seeds 1,2,3] [--steps 200] [--from-builds DIR]
 Set OPENMM_CPU_THREADS=1 in the environment for a single-threaded (deterministic summation) pass.
 Writes OUT_DIR/diag.json and prints one line per run plus a summary.  Not a test; changes nothing in md20.
 """
@@ -76,6 +80,48 @@ def _snapshot(ctx, unit):
     return xyz, v, f, box, pe
 
 
+def structure_stats(top, xyz, box) -> dict:
+    """Chains (residue names, counts, z range) and intermolecular water contacts right after the build."""
+    chains: dict = {}
+    for r in top.residues():
+        c = chains.setdefault(r.chain.id, {"n_res": 0, "resnames": {}, "atoms": []})
+        c["n_res"] += 1
+        c["resnames"][r.name] = c["resnames"].get(r.name, 0) + 1
+        c["atoms"].extend(a.index for a in r.atoms())
+    for c in chains.values():
+        z = xyz[c.pop("atoms"), 2]
+        c["z_nm"] = [round(float(z.min()), 3), round(float(z.max()), 3)]
+        c["resnames"] = dict(sorted(c["resnames"].items(), key=lambda kv: -kv[1])[:4])
+    ow = [(a.index, a.residue.chain.id, a.residue.index) for a in top.atoms() if a.residue.name == "HOH" and a.element is not None and a.element.symbol == "O"]
+    hw = [(a.index, a.residue.chain.id, a.residue.index) for a in top.atoms() if a.residue.name == "HOH" and a.element is not None and a.element.symbol == "H"]
+    out = {"chains": chains, "box_nm": [round(float(x), 3) for x in box]}
+    try:
+        from scipy.spatial import cKDTree
+        O = np.mod(xyz[[i for i, _, _ in ow]], box)
+        H = np.mod(xyz[[i for i, _, _ in hw]], box)
+        tO = cKDTree(O, boxsize=box)
+        pairs = tO.query_pairs(0.24, output_type="ndarray")
+        d = np.linalg.norm(((O[pairs[:, 0]] - O[pairs[:, 1]]) + box / 2) % box - box / 2, axis=1) if len(pairs) else np.zeros(0)
+        cross = [ow[i][1] != ow[j][1] for i, j in pairs] if len(pairs) else []
+        out["water_OO_lt_0.24"] = int(len(pairs))
+        out["water_OO_lt_0.22"] = int((d < 0.22).sum())
+        out["water_OO_min"] = round(float(d.min()), 4) if len(d) else None
+        out["water_OO_lt_0.24_cross_chain"] = int(sum(cross))
+        tH = cKDTree(H, boxsize=box)
+        close = tO.sparse_distance_matrix(tH, 0.14, output_type="ndarray")
+        inter = [(int(i), int(j), float(dd)) for i, j, dd in close if ow[int(i)][2] != hw[int(j)][2]]
+        out["water_OH_inter_lt_0.14"] = len(inter)
+        out["water_OH_inter_min"] = round(min(x[2] for x in inter), 4) if inter else None
+        by = {}
+        for i, j, _ in inter:
+            k = f"{ow[i][1]}-{hw[j][1]}"
+            by[k] = by.get(k, 0) + 1
+        out["water_OH_inter_lt_0.14_by_chain"] = by
+    except Exception as exc:  # noqa: BLE001
+        out["water_stats_error"] = f"{type(exc).__name__}: {exc}"
+    return out
+
+
 def run_one(res, atoms, nb, *, min_iter: int, seed: int, steps: int, unit) -> dict:
     from md20.engine.backend import OpenMMBackend
     t0 = time.time()
@@ -128,6 +174,7 @@ def main(argv=None) -> int:
     ap.add_argument("--seeds", default="1,2,3")
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--long-min", type=int, default=5000)
+    ap.add_argument("--from-builds", default=None, help="run dynamics on builds in this folder instead of building")
     a = ap.parse_args(argv)
     from openmm import app, unit, Platform, version
     from md20.build import membrane as MB
@@ -140,13 +187,24 @@ def main(argv=None) -> int:
         report["cpu_threads_property"] = Platform.getPlatformByName("CPU").getPropertyDefaultValue("Threads")
     except Exception:  # noqa: BLE001
         pass
-    for k in range(a.builds):
-        bdir = out / f"build{k}"
+    try:
+        report["platforms"] = [Platform.getPlatform(i).getName() for i in range(Platform.getNumPlatforms())]
+    except Exception:  # noqa: BLE001
+        pass
+    import types
+    sources = sorted(Path(a.from_builds).glob("build*")) if a.from_builds else [None] * a.builds
+    report["from_builds"] = a.from_builds
+    for k, src in enumerate(sources):
+        bdir = src if src is not None else out / f"build{k}"
         t0 = time.time()
-        rec: dict = {"build": k}
+        rec: dict = {"build": k, "source": str(src) if src else "built here"}
         try:
-            res = MB.build_membrane_system(bdir, {"type": "surface", "lipids": "mammalian", "surface_distance_nm": 1.0},
-                                           peptide_sequence="KLAKLAK")
+            if src is None:
+                res = MB.build_membrane_system(bdir, {"type": "surface", "lipids": "mammalian", "surface_distance_nm": 1.0},
+                                               peptide_sequence="KLAKLAK")
+            else:
+                res = types.SimpleNamespace(status="(loaded)", system_xml=str(bdir / "system.xml"),
+                                            topology_pdb=str(bdir / "topology.pdb"))
             rec["status"] = res.status
             rec["build_seconds"] = round(time.time() - t0, 1)
             pdb = app.PDBFile(res.topology_pdb)
@@ -155,8 +213,11 @@ def main(argv=None) -> int:
             rec["xyz_sha"] = hashlib.sha256(np.round(xyz, 3).tobytes()).hexdigest()[:16]
             rec["n_water"] = sum(1 for r in pdb.topology.residues() if r.name == "HOH")
             atoms, nb = _atoms(pdb.topology), _bonded(pdb.topology)
-            man = json.loads((bdir / "build_manifest.json").read_text(encoding="utf-8"))
+            man = json.loads((bdir / "build_manifest.json").read_text(encoding="utf-8")) if (bdir / "build_manifest.json").exists() else {}
             rec["box_nm"] = man.get("membrane", {}).get("box_nm")
+            bv = pdb.topology.getPeriodicBoxVectors().value_in_unit(unit.nanometer)
+            rec["structure"] = structure_stats(pdb.topology, xyz, np.array([bv[0][0], bv[1][1], bv[2][2]]))
+            print(f"build{k} STRUCT " + json.dumps(rec["structure"], ensure_ascii=False), flush=True)
             rec["runs"] = []
             for s in seeds:
                 r = run_one(res, atoms, nb, min_iter=500, seed=s, steps=a.steps, unit=unit)
@@ -175,7 +236,7 @@ def main(argv=None) -> int:
     runs = [r for b in report["builds"] for r in b.get("runs", [])]
     nan = [r for r in runs if r["nan_at_step"]]
     shas = sorted({b.get("xyz_sha") for b in report["builds"] if b.get("xyz_sha")})
-    print(f"SUMMARY threads={report['platform_threads']} builds={len(report['builds'])} distinct_starts={len(shas)} "
+    print(f"SUMMARY from={a.from_builds or 'here'} platforms={report.get('platforms')} threads={report['platform_threads']} builds={len(report['builds'])} distinct_starts={len(shas)} "
           f"runs={len(runs)} nan={len(nan)} nan_500={sum(1 for r in nan if r['min_iter'] == 500)} "
           f"nan_long={sum(1 for r in nan if r['min_iter'] != 500)}", flush=True)
     for r in nan:
