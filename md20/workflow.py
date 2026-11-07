@@ -1956,6 +1956,8 @@ class Workflow:
     def run(self, make_factory: Callable, platform, *, should_pause=None, progress_cb=None) -> dict:
         """Resumable driver.  One owner at a time (stale owner locks are taken over); hardware changes are logged —
         chunks resume from platform-independent State XML, so a run started on CUDA can finish on OpenCL/CPU."""
+        from .util.license import require
+        require("workflow")            # D-125: real calculations need a signed licence (raises LicenseRequired)
         from .util.locks import OwnerLock
         lock = OwnerLock(self.dir / "running.json")
         try:

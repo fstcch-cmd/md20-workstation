@@ -6,6 +6,35 @@
 ---
 
 ## 2026-11-07
+### D-125　第 2 層授權：擁有者簽章的授權檔，真正的計算需要有效授權（`md20 license`）
+- 背景（使用者 11/07）：repo 因 CI 費用必須公開，但 HCC Lab, NKUST 不允許別人任意使用。D-124 是第 1 層（LICENSE 條款）；本條是第 2 層：擁有者用**只有他持有的私鑰**簽發授權檔，學生匯入後才能做真正的計算。
+- **決定**：
+  - 新模組 `md20/util/license.py`。授權檔 `*.md20license` 是 JSON：`{"payload": {...}, "sig": base64}`。payload：`schema`（`md20-license/1`）、`id`（隨機 16 位十六進位）、`licensee`、`issued_at`、`expires`（ISO 日期，含當天；null＝不到期）、`machines`（機器碼清單，空＝不綁機器）、`scope`（`use` 或 `all`）、`note`、`issuer`。
+  - **簽章**：RSA-PSS，SHA-256，MGF1-SHA256，最大 salt。被簽的訊息是 `b"md20-license-v1\n"` ＋ canonical JSON（`sort_keys`、`separators=(",",":")`、`ensure_ascii=False`、UTF-8）。前綴是領域分離，讓任何別的簽章（含對裸 payload 的簽章）都不會被當成授權。驗證用套件內 `md20/util/owner_pub.pem`；`TRUSTED_KEYS` 是清單，將來換鑰時可放兩把公鑰。簽發時程式會用 `TRUSTED_KEYS` 驗證剛簽出的檔案，私鑰不符就拒絕產出（避免擁有者簽出一堆被拒的檔）。
+  - **同一把 RSA 金鑰做 OAEP 加密與 PSS 簽章**：擁有者不需要新的設定，也不用把新公鑰交給開發者；兩者用不同的填充（OAEP label `md20` 與 PSS）和不同的訊息前綴，標準做法上不建議混用同一把鑰，但這裡沒有已知的跨用途攻擊路徑：簽章只在擁有者的簽發指令裡產生，`stamp decrypt` 是對擁有者自己本機檔案的解密，不會對外提供簽章或解密服務。風險是理論上的。**被否決**：另生 Ed25519 金鑰。理論上更乾淨，但要擁有者另做一次金鑰保管，再把公鑰交給開發者放進 repo；現階段沒有這個必要。若之後要換，`TRUSTED_KEYS` 已能同時放兩把。
+  - **機器碼**：`3F9A-07C2-B15D-6E48` 形式（64 位）。由 OS 的 machine id（Windows `MachineGuid`、Linux `/etc/machine-id`、macOS `IOPlatformUUID`；取不到時用主機名稱）、OS 名稱與 CPU 架構加鹽後取 SHA-256。不含可讀個資，也不隨使用者帳號改變（所以不沿用 `stamp._machine_hash` 的使用者名稱）。
+  - **存放**：`<app data>/license/*.md20license`（`app_data_dir()`）；另搜尋套件內 `md20/util/licenses/`（目前空；將來若要開源，擁有者簽一份 `scope: all` 放進去即可，仍需擁有者簽章）。多份授權時，有任何一份有效就通過；否則回報最有資訊的失敗（過期 > 機器不符 > 簽章錯誤 > 沒有）。
+  - `status()` 回傳 有效／過期／機器不符／簽章錯誤／沒有授權（`LicenseStatus`），附四語說明與機器碼。`scope: all` 不檢查機器（仍檢查期限）；`all` 不能同時指定機器碼。
+  - **不可由外部關掉**：`license.py` 完全不讀環境變數、設定檔或命令列參數（測試檢查原始碼沒有 `environ`／`getenv`／`argv`）。公鑰、驗證結果、是否檢查都沒有外部開關。程序內測試用 pytest monkeypatch 改模組屬性 `TRUSTED_KEYS` 與 `license_dir`。授權檔的存放位置會跟著 `app_data_dir()` 的環境變數（`XDG_DATA_HOME`、`LOCALAPPDATA`）走，這只決定去哪個資料夾找檔案，沒簽章的檔案照樣被拒。
+- **閘門（只擋真正的計算）**：
+  - 擋：`Workflow.run`（對接、建模、MD、結合、摺疊步驟都經過這裡；用 FakeBackend 也一樣擋，因為對接與建模是真的計算）；`make_backend_factory(fake=False)`（真引擎）；CLI `build`、`run`（非 `--fake`）、`queue run`（非 `--fake`）、`pipeline run`、`resume`（有東西要續跑時）、`fold`；GUI：`Runner.start_process` 在啟動子程序前擋，`gui.worker._real_run` 在子程序裡再擋一次，`Runner.start`（執行緒）經 `Workflow.run`。CLI 以結束碼 **13** 離開並印四語說明、機器碼與匯入方式；GUI 每頁頂端顯示授權卡片（說明、機器碼、複製鈕、上傳 `.md20license` 的匯入元件，不用 alert／confirm），按開始時另跳通知，不啟動任何程序。
+  - 不擋：`demo`、`doctor`、`drivers`、`status`、`report`（讀既有結果）、`stamp`、`setup-vina`／`setup-fold`／`setup-cg`（含安裝後的試摺）、`project`、`validate`（只寫設定檔）、`screen template`（只寫範本）、`pipeline example`、`queue add|list`、`resume --list`、`license ...`、GUI 開啟與瀏覽、報告重新整理；`MD20_GUI_FAKE_RUN` 的假計算（不做化學計算）；`run --fake`／`queue run --fake`（等同 demo 的合成後端）。
+  - 與使用者規格的差異：規格列了 `screen`、`validate` 為計算指令，實際上這兩個只寫範本與設定檔，且 CI 的 installer-windows 會呼叫 `screen template`，所以不擋。`queue` 只擋 `run`。
+- **CLI**：`md20 license status`（四語）、`machine`（只印機器碼）、`install FILE`（驗證通過才複製進 app data；拖放時的引號會去掉）、`issue --key PRIVATE.pem --name 姓名 [--days N | --expires YYYY-MM-DD] [--machine 碼 ...] [--scope use|all] [--note] [--out FILE]`、`issue-batch --key ... --csv 名單.csv --out 資料夾`（CSV：姓名、天數或日期、機器碼可空；UTF-8，Excel 的 BOM 可；有標題列會略過；全部列先檢查才寫檔；同名不覆蓋；另寫 `issued.csv` 索引）。私鑰只讀取，不複製、不印、不記錄；加密的私鑰在終端機問密碼（不從環境變數讀）。
+- **一鍵工具**：學生 `installer/MD20-Unlock.cmd`（拖放或雙擊選檔 → `license install`；先顯示並複製機器碼）與 `.command`；擁有者 `installer/owner/MD20-Issue-License.cmd`（選私鑰；單人用輸入框，Unicode 姓名經 UTF-8 CSV 傳給 `issue-batch`，不經過 cmd 命令列編碼；批次選 CSV）、`MD20-Unlock-This-PC.cmd`（替本機簽 3650 天、綁本機並安裝）與 `.command`。安裝程式只把學生的 Unlock 複製到安裝根目錄與桌面；owner 工具留在 `app\installer\owner`，沒有捷徑。
+- **戳記**：`stamp_record()` 的 `_md20` 多 `lic: {id, who}`（授權 id 與被授權人姓名，沒有其他資料；沒有有效授權時省略）；加密來源紀錄多 `lid`（授權 id，只有擁有者能解）。授權安裝時清掉 `provenance_blob` 快取。
+- **誠實限制**：原始碼公開，會改程式的人可以刪掉檢查（`require()` 呼叫、`Workflow.run` 的閘門、換掉 `owner_pub.pem`）；函式庫層（直接呼叫 `build_case`、`run_protocol` 等）不擋，只擋入口。電腦時鐘調回去可以延長期限。機器碼綁定可以靠改 machine id 規避。這一層的作用是門檻與證據：規避即違反 D-124 的授權條款，而輸出都帶授權 id。授權檔本身不保密：知道 id 的人不能偽造，但可以把整份檔複製給別人用（未綁機器時）；要防就簽時綁機器碼。
+- **CI 是否需要簽授權**：**不需要**。逐一檢查：`pure-python`、`openmm-stack`、`heavy`、`paper-docking`、`report-template` 都只跑 pytest（行程內，`tests/conftest.py` 的 autouse fixture 自產測試金鑰對、patch `TRUSTED_KEYS` 與授權資料夾、安裝一份測試授權）或 `demo`、`doctor`、`setup-*`、`pipeline example`、`screen template`（都不擋）；`gui-preview` 以 `MD20_GUI_FAKE_RUN` 假計算；`installer-macos`／`installer-windows`／release 驗證跑 `doctor`、`demo`、`pipeline example`、`screen template` 與開 GUI。手動的 `diag-membrane` 呼叫底層建模函式，不經閘門。**將來若有 CI job 在子程序裡跑真正的計算**（例如 `md20 pipeline run`），做法是擁有者用私鑰簽一份 CI 專用授權（`scope: use`，設期限），把檔案內容放進 GitHub Secret `MD20_CI_LICENSE`，工作流程第一步寫出成檔再 `md20 license install`。**不為此開後門**。本機的自測腳本 `MD20-SelfTest.cmd` 步驟 5 會跑 `pipeline run`，擁有者的筆電要先執行一次 `MD20-Unlock-This-PC.cmd`；自測新增 `license status` 一步。
+- **被否決**：
+  - 環境變數或命令列參數（如 `MD20_LICENSE=off`、`--no-license`）給 CI 與開發使用：公開原始碼裡的後門，等於告訴所有人怎麼繞過。
+  - 把公鑰或授權目錄做成可由設定檔覆寫：同上。
+  - 線上授權伺服器：需要常駐服務與網路，學生在教室常離線，維運成本高於這個階段的需要。
+  - 機器碼含使用者名稱（沿用 `_machine_hash`）：換帳號就失效。
+  - 在 `build_case`、`run_protocol` 等函式庫層加閘門：測試與開發會到處被擋，也擋不住會改程式的人；入口加閘門已足以達成「門檻＋證據」。
+- **證據**：`tests/test_license.py`（簽發→驗證、RSA-PSS 參數、領域分離、canonical JSON 穩定、竄改每個欄位、簽章被改或缺少、別把金鑰簽的、第二把可信金鑰、過期（含當天與隔天）、機器綁定與正規化、scope all、內建目錄的 all 授權、多份授權的狀態挑選、四語訊息、安裝只複製有效檔、CLI 各指令的擋與不擋、`Workflow.run` 即使用假後端也擋、GUI 入口擋而假計算不擋、worker 以四語回報、`issue`／`issue-batch`、錯的私鑰被拒、加密私鑰、**一長串看似相關的環境變數都不能讓未簽授權通過**、**以真實擁有者公鑰在乾淨子程序執行 `md20 run` 結束碼 13**、原始碼不含 `environ`／`getenv`／`argv`、戳記帶授權 id）。
+- **未驗證**：Windows 的 `.cmd` 工具（PowerShell 5.1 的檔案對話框、InputBox、加密私鑰在 `micromamba run` 之下是否能問密碼）與 macOS `.command` 沒有在真機跑過；GUI 授權卡片與上傳匯入沒有在真 NiceGUI 上渲染（容器裝不了 NiceGUI；只用替身確認程式能執行），要等 CI 的 `test_gui_server`、`gui-preview` 與筆電。
+- **未決**：擁有者要在 `LICENSE`／README 說明授權申請窗口（主 session 處理）；是否要在報告 HTML 頁尾也印授權 id（目前只在 JSON 戳記與加密紀錄）；`scope: all` 的內建授權何時簽、放進哪個版本；私鑰的備份與遺失時的換鑰流程（需要擁有者決定）。
+- 檔案：`md20/util/license.py`（新）、`md20/util/stamp.py`、`md20/workflow.py`、`md20/engine/factory.py`、`md20/cli.py`、`md20/gui/app.py`、`md20/gui/logic.py`、`md20/gui/worker.py`、`installer/MD20-Unlock.cmd`／`.command`、`installer/owner/*`、`installer/install.ps1`／`install.sh`／`MD20-SelfTest.cmd`、`tests/conftest.py`、`tests/test_license.py`、`pyproject.toml`（package-data）、`docs/specs/licensing.md`、`docs/students/LICENSE*.md`。
 ### D-126　離子對水檢查只限溶劑化加入的單價離子；580cbff 結果
 - 580cbff 膜診斷（run 42374753967，含 D-115）：Windows 0/16、Linux 0/16 NaN；對照組（run 42370315375，無 D-115）：Windows 1/16、Linux 2/16。方向支持 D-115，樣本仍小，持續觀察。
 - 580cbff CI：openmm-stack Ubuntu、Windows 與 heavy full_workflow 轉綠。heavy-metal 紅：HIS119:ND1–Zn 平均 0.2324 nm、r0 0.202，差 0.0304 略超門檻 0.03（上一輪通過），屬已知鋅鍵長偏差（D-32／D-34），不放寬測試。

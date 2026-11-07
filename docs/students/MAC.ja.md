@@ -1,5 +1,7 @@
 [繁中](MAC.md) · [English](MAC.en.md) · [日本語](MAC.ja.md) · [한국어](MAC.ko.md)
 
+ライセンス：実際の計算にはライセンスファイルが必要です。入手と取り込みは [UNLOCK.ja.md](UNLOCK.ja.md) を見てください。
+
 # MD20 学生向け操作ガイド：macOS
 
 macOS 12 以降（Apple Silicon の M1–M4 または Intel）、8 GB 以上の空きディスク容量、インターネット接続が必要です。Mac には CUDA がないため、OpenCL または CPU で計算します。NVIDIA 搭載のノートパソコンより遅くなります。**授業の課題では classroom 等級を使ってください。**

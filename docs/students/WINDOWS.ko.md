@@ -1,5 +1,7 @@
 [繁中](WINDOWS.md) · [English](WINDOWS.en.md) · [日本語](WINDOWS.ja.md) · [한국어](WINDOWS.ko.md)
 
+라이선스: 실제 계산에는 라이선스 파일이 필요합니다. 받는 방법과 가져오는 방법은 [UNLOCK.ko.md](UNLOCK.ko.md)를 보십시오.
+
 # MD20 학생용 사용 안내: Windows
 
 Windows 10 또는 11, 8 GB 이상의 여유 디스크 공간, 인터넷 연결이 필요합니다. NVIDIA 그래픽카드가 있으면 자동으로 GPU(CUDA)로 계산합니다. NVIDIA 그래픽카드가 없어도 OpenCL 또는 CPU로 실행되지만 느립니다.

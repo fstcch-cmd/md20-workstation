@@ -22,6 +22,7 @@ from ..i18n import pick, colon, paren, LANGS, LANG_NAMES, QUASAR_LANG
 from .gate_text import gate_title, gate_general, option_text
 
 from ..util.timeutil import to_local
+from ..util import license as LIC
 RUNNER = Runner()
 STATE: dict = {"projects_dir": default_projects_dir(), "platform": None, "doctor": None, "lang": None}
 
@@ -167,6 +168,46 @@ def _platform():
     return STATE["platform"]
 
 
+def _license_card():
+    """D-125: when no valid licence is installed, a card on every page says so, shows this computer's machine code and
+    offers an import button (an upload, not a browser dialog).  Browsing, reports and diagnostics stay open."""
+    st = LIC.status()
+    if st.ok:
+        return
+    L = lang()
+    with ui.card().classes("w-full max-w-5xl mx-auto md20-card").style("border-left: 4px solid #b5651d").props("data-testid=license-card"):
+        ui.label(_("需要 MD20 授權", "MD20 licence needed", "MD20 のライセンスが必要です", "MD20 라이선스가 필요합니다")).classes("md20-section")
+        ui.label(st.message(L)).classes("text-sm")
+        ui.label(pick(LIC.HOWTO, L)).classes("text-sm")
+        with ui.row().classes("items-center gap-2"):
+            ui.label(pick(LIC.MACHINE_LABEL, L) + colon(L)).classes("text-sm")
+            ui.label(st.machine_code).classes("text-sm font-mono").props("data-testid=machine-code")
+            ui.button(icon="content_copy", on_click=lambda: (ui.run_javascript(f"navigator.clipboard.writeText('{st.machine_code}')"), ui.notify(st.machine_code))
+                      ).props("flat dense")
+        result = ui.column().classes("gap-0")
+
+        async def got(e):
+            fname, data = await _upload_payload(e)
+            import tempfile
+            tmp = Path(tempfile.mkdtemp(prefix="md20lic_")) / "upload.md20license"
+            tmp.write_bytes(data[:LIC.MAX_FILE_BYTES + 1])
+            result.clear()
+            try:
+                new = LIC.install(tmp)
+            except LIC.LicenseError as exc:
+                with result:
+                    ui.label(pick(exc.texts, L)).classes("text-sm text-negative").style("white-space: pre-line")
+                return
+            finally:
+                tmp.unlink(missing_ok=True)
+            ui.notify(pick(LIC.INSTALLED, L).format(licensee=new.licensee, expires=new.expires or pick(LIC.NO_EXPIRY, L)), type="positive")
+            ui.navigate.reload()
+        ui.upload(on_upload=got, auto_upload=True, label=_("匯入授權檔 (.md20license)", "Import licence file (.md20license)",
+                                                           "ライセンスファイル (.md20license) を取り込む",
+                                                           "라이선스 파일(.md20license) 가져오기")
+                  ).props("accept=.md20license,.json flat bordered color=blue-grey-7 data-testid=license-upload").classes("w-full")
+
+
 def _header():
     L = lang()
     ui.add_head_html(CSS)
@@ -188,6 +229,7 @@ def _header():
                           "計算可以使用多少電腦資源", "How much of this computer a calculation may use",
                           "計算にこのパソコンの資源をどれだけ使うか", "계산에 이 컴퓨터 자원을 얼마나 쓸지"))
             ui.select(LANG_NAMES, value=L, on_change=change).props("dense dark borderless options-dense data-testid=lang-select").classes("w-28")
+    _license_card()
     # D-67: wherever the user goes (home, system page, another language), the running calculation is one click away
     job = RUNNER.running(STATE["projects_dir"])
     if job is not None:
@@ -417,7 +459,8 @@ def _binding_panel(wf: Workflow, project: str, name: str):
                 r = ACT.add_binding_targets(wf, [x["target"] for x in tbl.selected], note=note.value or "")
             except ValueError as exc:
                 ui.notify(str(exc), type="negative"); return
-            _start(wf)
+            if getattr(_start(wf), "blocked", False):
+                return
             ui.notify(_(f"開始計算：{', '.join(r['added'])}。完成後報告會自動更新。",
                         f"Computing {', '.join(r['added'])}. The report is updated when it finishes.",
                         f"{', '.join(r['added'])} の計算を始めました。終わるとレポートが更新されます。",
@@ -435,7 +478,8 @@ def _binding_panel(wf: Workflow, project: str, name: str):
                 r = ACT.add_smd_run(wf, sel[0], note=note.value or "")
             except ValueError as exc:
                 ui.notify(str(exc), type="negative"); return
-            _start(wf)
+            if getattr(_start(wf), "blocked", False):
+                return
             ui.notify(_(f"{r['target']} 開始第 {r['runs']} 次 SMD。", f"Run {r['runs']} of {r['target']} started.",
                         f"{r['target']} の {r['runs']} 回目の SMD を始めました。", f"{r['target']}의 {r['runs']}번째 SMD를 시작했습니다."),
                       type="positive")
@@ -465,13 +509,31 @@ def _binding_panel(wf: Workflow, project: str, name: str):
         ui.timer(5.0, refresh)
 
 
+class _Blocked:
+    """What `_start` returns when no valid licence is installed (D-125): nothing was started.  It has the attributes the
+    callers read from a job, so they carry on to the workflow page, where the licence card is shown."""
+    blocked = True
+
+    def __init__(self, wf: Workflow):
+        self.wf = wf
+        self.thread = None
+
+    def alive(self) -> bool:
+        return False
+
+
 def _start(wf: Workflow):
     """D-103: the calculation runs in its own process (md20.gui.worker): it never holds the GUI's GIL, and its
     status and progress are files the GUI reads back after a reconnect or restart.  The worker probes the OpenMM
     platform and builds the pause policy itself (same settings as before: PAUSE file, battery, resource guard)."""
     (wf.project.dir / "PAUSE").unlink(missing_ok=True)
     os.environ["MD20_RESOURCE_MODE"] = resource_mode()
-    return RUNNER.start_process(wf)
+    from ..util.license import LicenseRequired
+    try:
+        return RUNNER.start_process(wf)
+    except LicenseRequired:
+        ui.notify(pick(LIC.BLOCKED_SHORT, lang()), type="negative", close_button=True)
+        return _Blocked(wf)
 
 
 def _gate_buttons(wf: Workflow, card: dict):
@@ -658,7 +720,8 @@ def workflow_page(project: str, name: str):
                         ui.notify(t("busy", lang()), type="warning"); return
                     if go:
                         apply_gate_action(wf, go)
-                    _start(wf)
+                    if getattr(_start(wf), "blocked", False):
+                        return
                     ui.notify(_("已確認，開始分子動力學。", "Confirmed. Molecular dynamics is starting.",
                                 "確認しました。分子動力学を始めます。", "확인했습니다. 분자동역학을 시작합니다."), type="positive")
                 go_btn = _("進入分子動力學", "Proceed to molecular dynamics", "分子動力学に進む", "분자동역학으로 진행")

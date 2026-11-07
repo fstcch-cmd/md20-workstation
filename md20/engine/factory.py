@@ -9,6 +9,8 @@ def make_backend_factory(case, protocol, *, fake: bool = False, platform=None, r
         from .backend import FakeBackend
         return lambda spec, dt: FakeBackend(timestep_fs=dt, temperature_k=spec.temperature_k, ensemble=spec.ensemble,
                                             seed=spec.seed)
+    from ..util.license import require
+    require("md")                      # D-125: the real engine needs a signed licence; the Fake backend (demo) does not
     from .backend import OpenMMBackend
     if platform is None:
         from ..env import choose_platform

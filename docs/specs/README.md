@@ -53,4 +53,5 @@
 | `report_language.md` | 報告用語規範：每張圖的通用說明（圖說、如何判讀、情境句型與門檻；D-54） |
 | `multi_ligand.md` | 多配體同時對接 → MD：穿環、重疊、漂浮的檢查與處置順序、力場一致性、報告版型（D-60） |
 | [figures.md](figures.md) | 自動產圖規則：時間軸、圖例在圖外、每條線命名、顏色一致、多系列改小圖、細線＋移動平均（D-89） | 已實作・純 Python 與繪圖測試 |
+| [licensing.md](licensing.md) | 簽章授權（第 2 層）：擁有者 RSA-PSS 簽發授權檔、機器碼、期限、閘門清單（擋／不擋）、不可由外部關閉、誠實限制（D-125） | 已實作・純 Python 測試（Windows 工具與 GUI 卡片待真機／CI） |
 | [supply_chain.md](supply_chain.md) | 外部執行檔與環境版本：Vina 單一釘選版＋sha256 驗證、執行檔身分記錄；micromamba／conda 鎖版待做（D-114，REVIEW #19） | Vina 已實作・純 Python 測試 |

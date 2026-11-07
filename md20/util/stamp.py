@@ -68,11 +68,24 @@ def provenance_blob() -> str:
         from cryptography.hazmat.primitives.asymmetric import padding
     except ImportError:
         return ""
-    payload = json.dumps({"o": "HCCLab", "v": _version(), "t": _T0, "m": _machine_hash(), "s": _SESSION,
-                          "py": platform.python_version(), "os": platform.system()[:3]}, separators=(",", ":")).encode()
+    rec = {"o": "HCCLab", "v": _version(), "t": _T0, "m": _machine_hash(), "s": _SESSION,
+           "py": platform.python_version(), "os": platform.system()[:3]}
+    lic = _license_info()
+    if lic:
+        rec["lid"] = lic["id"]          # D-125: which licence this output was made under (encrypted, owner-readable)
+    payload = json.dumps(rec, separators=(",", ":")).encode()
     key = serialization.load_pem_public_key(_PUB.read_bytes())
     ct = key.encrypt(payload, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=b"md20"))
     return base64.b64encode(ct).decode()
+
+
+def _license_info() -> dict | None:
+    """{"id", "who"} of the valid MD20 licence (D-125), or None.  Never raises: a stamp must not break a write."""
+    try:
+        from .license import stamp_info
+        return stamp_info()
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def stamp_record() -> dict:
@@ -81,6 +94,9 @@ def stamp_record() -> dict:
     blob = provenance_blob()
     if blob:
         d["p"] = blob
+    lic = _license_info()
+    if lic:
+        d["lic"] = {"id": lic["id"], "who": lic["who"]}      # licence id and licensee name only (D-125)
     return d
 
 
@@ -172,7 +188,8 @@ def find_markers(path: Path | str) -> dict:
     if "REMARK 999 P " in text:
         found["hidden"].append("PDB REMARK 999")
         found["blob"] = "".join(l[13:].strip() for l in text.splitlines() if l.startswith("REMARK 999 P "))
-    m = re.search(r'"_md20":\s*\{[^}]*"p":\s*"([A-Za-z0-9+/=]+)"', text)
+    # the stamp holds one nested object (``lic``, D-125), and json.dumps(sort_keys=True) may put it before "p"
+    m = re.search(r'"_md20":\s*\{(?:[^{}]|\{[^{}]*\})*?"p":\s*"([A-Za-z0-9+/=]+)"', text)
     if m:
         found["hidden"].append("JSON _md20")
         found["blob"] = found["blob"] or m.group(1)

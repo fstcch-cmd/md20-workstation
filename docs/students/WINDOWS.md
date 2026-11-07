@@ -1,5 +1,7 @@
 [繁中](WINDOWS.md) · [English](WINDOWS.en.md) · [日本語](WINDOWS.ja.md) · [한국어](WINDOWS.ko.md)
 
+授權：真正的計算需要授權檔，取得與匯入見 [UNLOCK.md](UNLOCK.md)。
+
 # MD20 學生操作說明：Windows
 
 你需要 Windows 10 或 11、至少 8 GB 的可用磁碟空間，以及網路。有 NVIDIA 顯示卡時，程式會自動用 GPU（CUDA）計算。沒有 NVIDIA 顯示卡也能跑，會改用 OpenCL 或 CPU，只是比較慢。

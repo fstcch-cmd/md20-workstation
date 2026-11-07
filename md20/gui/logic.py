@@ -14,6 +14,7 @@ from pathlib import Path
 
 from ..i18n import pick, paren, LANGS
 from ..util import load_json, safe_name
+from ..util.license import LicenseRequired
 from ..workflow import Workflow, WorkflowBlocked, example_config, SYSTEM_MODES
 
 
@@ -243,6 +244,8 @@ class Runner:
                                 "일시 정지했습니다. '시작 또는 계속'을 누르면 멈춘 곳부터 이어서 실행합니다."))
             except WorkflowBlocked as exc:
                 job.status, job.message = "NEEDS_HUMAN", str(exc)
+            except LicenseRequired as exc:
+                job.status, job.message = "ERROR", exc.texts()
             except Exception as exc:  # noqa: BLE001
                 job.status, job.message = "ERROR", f"{type(exc).__name__}: {exc}\n{traceback.format_exc()[-2000:]}"
         job.thread = threading.Thread(target=target, name=f"md20-{wf.name}", daemon=True)
@@ -251,6 +254,9 @@ class Runner:
 
     def start_process(self, wf: Workflow) -> Job | ProcessJob:
         key = f"{wf.project.dir}::{wf.name}"
+        if not os.environ.get("MD20_GUI_FAKE_RUN"):      # the stand-in does no chemistry (D-74); a real run needs a licence
+            from ..util.license import require
+            require("gui")                               # D-125: raises LicenseRequired before any process is started
         busy = self.running(wf.project.dir.parent)
         if busy is not None:                   # D-67: one calculation at a time, also across GUI restarts
             return busy

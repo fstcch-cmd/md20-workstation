@@ -1,5 +1,7 @@
 [繁中](MAC.md) · [English](MAC.en.md) · [日本語](MAC.ja.md) · [한국어](MAC.ko.md)
 
+授權：真正的計算需要授權檔，取得與匯入見 [UNLOCK.md](UNLOCK.md)。
+
 # MD20 學生操作說明：macOS
 
 你需要 macOS 12 以上（Apple Silicon M1–M4 或 Intel 都可以）、至少 8 GB 的可用磁碟空間，以及網路。Mac 沒有 CUDA，程式會用 OpenCL 或 CPU 計算，速度比 NVIDIA 筆電慢。**課堂案例請用 classroom 等級。**

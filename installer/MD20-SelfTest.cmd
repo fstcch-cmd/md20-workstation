@@ -87,6 +87,8 @@ if (-not (Test-Path $md20)) {
   Run '2 doctor' { & $md20 doctor } | Out-Null
   Run '2b drivers plan' { & $md20 drivers plan } | Out-Null
   Run '3 demo' { & $md20 demo } | Out-Null
+  # D-125: real calculations need a signed licence; without one step 5 stops with exit code 13 (owner: run MD20-Unlock-This-PC.cmd once)
+  Run '3b license status' { & $md20 license status } | Out-Null
 
   Step '4 GUI'
   $gui = Join-Path $root 'MD20-GUI.cmd'

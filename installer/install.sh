@@ -191,12 +191,18 @@ echo "MD20 GUI: http://127.0.0.1:8020  （關閉此視窗即停止 / close this 
 EOS
 chmod +x "$GUI"
 if [ -d "$HOME/Desktop" ]; then cp "$GUI" "$HOME/Desktop/MD20-GUI.command"; chmod +x "$HOME/Desktop/MD20-GUI.command"; fi
+# D-125: the student's unlock tool (import the licence file).  The owner tools in installer/owner are not linked anywhere.
+if [ -f "$SRC/installer/MD20-Unlock.command" ]; then
+  cp "$SRC/installer/MD20-Unlock.command" "$ROOT/MD20-Unlock.command"; chmod +x "$ROOT/MD20-Unlock.command"
+  if [ -d "$HOME/Desktop" ]; then cp "$ROOT/MD20-Unlock.command" "$HOME/Desktop/MD20-Unlock.command"; chmod +x "$HOME/Desktop/MD20-Unlock.command"; fi
+fi
 echo "[4/4] Doctor ..."; "$ROOT/md20" doctor
 if [ "${MD20_WITH_FOLD:-}" = "1" ]; then   # D-85: also install peptide folding (several GB) and fold one test peptide
   echo "[+] 胜肽摺疊工具 Peptide folding (OmegaFold) ..."
   "$ROOT/md20" setup-fold --engine omegafold --yes --warmup || echo "!! 摺疊工具沒有裝好；之後雙擊 Install-Folding.command。 / Folding was not installed; double-click Install-Folding.command later."
 fi
 echo
+echo "授權 Licence：真正的計算需要 HCC Lab 簽發的授權檔；雙擊 MD20-Unlock.command 匯入。 / Real calculations need a licence file from HCC Lab; double-click MD20-Unlock.command to import it."
 echo "完成 Done."
 echo "  圖形介面 GUI：雙擊桌面的 MD20-GUI.command（或 or: ${GUI}）"
 echo "  命令列 Command line：$ROOT/md20 doctor | demo | pipeline ..."
