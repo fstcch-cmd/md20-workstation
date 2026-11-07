@@ -38,6 +38,8 @@ class BindingConfig:
     max_refine_rounds: int = 6
     max_extensions_per_window: int = 2   # a window with few effective samples is extended at most this often
     max_new_per_round: int = 12
+    # D-101: plan the first windows from the SMD force curve (denser/stiffer where it is steep) instead of a uniform grid
+    smd_informed_windows: bool = True
     extra_windows: list = field(default_factory=list)   # manual "resample a–b": [{"center", "k"}] from plan_range
     window_equil_ps: float = 10.0
     window_prod_ps: float = 50.0
@@ -635,7 +637,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         atomic_write_json(smd, smd_file)
     del ctx, integ
     # ------------------------------------------------------------------ umbrella windows (adaptive, coarse → fine)
-    from .adaptive import plan_refinement, coverage_view, continuity_report
+    from .adaptive import plan_refinement, coverage_view, continuity_report, gap_alerts, plan_from_smd
     eq_steps = int(cfg.window_equil_ps * 1000 / cfg.timestep_fs)
     pr_steps = int(cfg.window_prod_ps * 1000 / cfg.timestep_fs)
     samples: dict[float, np.ndarray] = {}
@@ -648,12 +650,37 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     def wfile(c: float, kind: str) -> Path:
         return wdir / f"w_{c:.4f}_{kind}"
 
-    def write_coverage(status: str) -> None:
-        """Live data for the GUI coverage chart, rewritten after every window."""
+    alerts_seen: set = set()
+    planned_now: list = []
+
+    def write_coverage(status: str) -> list:
+        """Live data for the GUI coverage chart, rewritten after every window (D-101: + early gap alerts, and the
+        coverage figure is written every time, so a message that points at it never points at nothing)."""
         view = coverage_view(samples, ks) if len(samples) >= 1 else {}
+        alerts = gap_alerts(samples, ks, planned=planned_now, temperature_k=cfg.temperature_k,
+                            target_overlap=cfg.target_overlap, k_max=cfg.k_umbrella_max) if len(samples) >= 2 else []
+        fig = {}
+        if samples:
+            try:
+                from ..analysis.plots import plot_umbrella_histograms
+                fig = plot_umbrella_histograms(samples, out / "umbrella_coverage", breaks=view.get("breaks") or [],
+                                               alerts=alerts, cv_range=(d0, d0 + cfg.pull_distance_nm))
+            except Exception as exc:  # noqa: BLE001
+                fig = {"error": f"{type(exc).__name__}: {exc}"}
         atomic_write_json({"status": status, "updated_at": now_iso(), "d0_nm": d0,
-                           "cv_range_nm": [d0, d0 + cfg.pull_distance_nm], "rounds": refine_log, **view},
+                           "cv_range_nm": [d0, d0 + cfg.pull_distance_nm], "rounds": refine_log,
+                           "planned_centers": sorted(planned_now), "alerts": alerts, "figure": fig,
+                           "message": ("SMD 拉離中或尚未開始，還沒有任何 window 的樣本。" if not samples else ""), **view},
                           out / "coverage.json")
+        for al in alerts:                                     # each new gap is logged once, when it is first seen
+            key = tuple(al["windows"])
+            if key not in alerts_seen:
+                alerts_seen.add(key)
+                if decisions is not None:
+                    decisions.record("binding.umbrella", "gap alert", {"nm": [al["lo"], al["hi"]], "cause": al["cause"]},
+                                     f"{al['lo']:.3f}–{al['hi']:.3f} nm 的取樣開始不連續（相鄰 window 重疊 {al['overlap']:.2f}）：{al['why']}。"
+                                     f"{al['action']}。", kind="auto")
+        return alerts
 
     def sim_window(c: float, k: float, start_xml: str, seed: int, equilibrate: bool) -> tuple[np.ndarray, str]:
         """One window; a NaN blow-up (OpenMM raises) is retried once from the same start after a short restrained
@@ -731,11 +758,12 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         np.save(npy, arr)
         samples[c], finals[c], ks[c] = arr, str(wfile(c, "final.xml")), float(k)
         atomic_write_json({f"{kc:.4f}": kv for kc, kv in ks.items()}, k_file)
-        write_coverage("RUNNING")
+        alerts = write_coverage("RUNNING")
         if progress_cb:
-            progress_cb({"stage": "umbrella", "window": len(samples), "n": max(len(samples), len(centers)),
+            progress_cb({"stage": "umbrella", "window": len(samples), "n": max(len(samples), len(planned_now)),
                          "mean": float(arr.mean()), "k": float(k), "continuous": continuity_report(samples)["continuous"]
-                         if len(samples) >= 2 else None})
+                         if len(samples) >= 2 else None,
+                         "alerts": [{k_: a[k_] for k_ in ("lo", "hi", "cause")} for a in alerts]})
         return True
 
     def extend_window(c: float, rnd: int) -> bool:
@@ -762,9 +790,38 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         return min(cands)[1]
 
     centers = [float(c) for c in smd["plan"]["centers_nm"]]
-    for w, c in enumerate(centers):
-        if not run_window(c, smd["window_starts"][str(w)]["path"], cfg.seed + 17 * (w + 1), cfg.k_umbrella):
-            return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[manifest.get("reason", "")])
+    # D-101: the first windows follow the SMD force curve (denser and stiffer where steep, centres aimed uphill).
+    # Computed once and stored in smd.json; a run that already started windows on the uniform grid keeps it.
+    informed = smd.get("informed_plan")
+    started_uniform = any(wfile(c, "cv.npy").is_file() for c in centers) and informed is None
+    if informed is None and cfg.smd_informed_windows and not started_uniform and (out / "smd.tsv").is_file():
+        try:
+            tsv = np.loadtxt(out / "smd.tsv", delimiter="\t", ndmin=2)
+            informed = plan_from_smd(tsv[:, 2], tsv[:, 3], d0, d0 + cfg.pull_distance_nm, k0=cfg.k_umbrella,
+                                     k_max=cfg.k_umbrella_max, temperature_k=cfg.temperature_k,
+                                     target_overlap=cfg.target_overlap, max_windows=cfg.max_windows)
+        except Exception as exc:  # noqa: BLE001
+            informed = {"uniform": True, "notes": [f"力曲線讀取失敗（{type(exc).__name__}），沿用等距規劃。"], "centers": [], "k": []}
+        smd["informed_plan"] = informed
+        atomic_write_json(json.loads(json.dumps(smd, default=_np_default)), smd_file)
+        if decisions is not None:
+            decisions.record("binding.windows", "initial plan from SMD", {"n": len(informed.get("centers") or []),
+                             "regions": informed.get("regions")},
+                             ("依 SMD 力曲線規劃第一批 window：" + " ".join(informed.get("notes") or [])
+                              + f"共 {len(informed.get('centers') or [])} 個（等距規劃為 {len(centers)} 個）。陡的地方 k 依 F′²/4kT 提高、"
+                              "中心往上坡預先偏移，讓 window 一開始就留在原位，減少事後補窗的輪數。")
+                             if not informed.get("uniform") else " ".join(informed.get("notes") or []))
+    if informed and not informed.get("uniform") and informed.get("centers"):
+        first = list(zip([float(c) for c in informed["centers"]], [float(k) for k in informed["k"]]))
+        planned_now[:] = [c for c, _ in first]
+        for w, (c, k) in enumerate(first):
+            if not run_window(c, start_for(c), cfg.seed + 17 * (w + 1), k):
+                return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[manifest.get("reason", "")])
+    else:
+        planned_now[:] = centers
+        for w, c in enumerate(centers):
+            if not run_window(c, smd["window_starts"][str(w)]["path"], cfg.seed + 17 * (w + 1), cfg.k_umbrella):
+                return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[manifest.get("reason", "")])
     # manual "resample a–b" windows requested by the user (GUI coverage chart → plan_range → config)
     manual = []
     for i, ew in enumerate(cfg.extra_windows or []):
@@ -815,6 +872,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             if not extend_window(float(e["center"]), rnd + 1):
                 return BindingResult(status="PAUSED", d_bound_nm=d0, smd=smd, caveats=[manifest.get("reason", "")])
             ext_count[float(e["center"])] = ext_count.get(float(e["center"]), 0) + 1
+        planned_now.extend(float(i["center"]) for i in rp.insert)
         for j, ins in enumerate(rp.insert):
             c = float(ins["center"])
             if not run_window(c, start_for(c), cfg.seed + 7919 * (rnd + 1) + j, float(ins["k"])):
@@ -891,6 +949,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     from ..analysis.plots import plot_pmf
     res.figures["pmf"] = plot_pmf(g, Wv, err, out / "pmf")
     res.figures["smd"] = _plot_smd(out / "smd.tsv", out / "smd_force_work")
+    res.figures["umbrella_coverage"] = load_json(out / "coverage.json", {}).get("figure") or {}
     res.caveats = [
         f"拉離與每個 window 期間，蛋白骨架施加 {cfg.backbone_restraint_scale * 1000:.0f} kJ/mol/nm² 位置限制"
         f"（避免整顆蛋白被拖走）；PMF 不包含蛋白構形重排的自由能。",
@@ -930,7 +989,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     reasons = []
     q = res.pmf["quality"]
     if not q.get("graph_connected", True):
-        reasons.append("window 重疊圖不連通：有一段距離沒有任何兩個 window 的取樣互相重疊（見直方圖）")
+        reasons.append("window 重疊圖不連通：有一段距離沒有任何兩個 window 的取樣互相重疊（見傘狀採樣覆蓋圖 umbrella_coverage.png，紅色區段）")
     if not pres.converged:
         xc = q.get("solver_cross_check") or {}
         if xc.get("abs_diff_kj_mol") is not None:

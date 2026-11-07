@@ -1080,7 +1080,7 @@ def _binding(doc: Doc, wf, vals, f, goal) -> str:
 
 def _binding_manifest_pmf(r: dict) -> dict:
     figs = r.get("figures") or {}
-    anchor = next((figs[k]["png"] for k in ("pmf", "smd", "histograms") if figs.get(k)), None)
+    anchor = next((figs[k]["png"] for k in ("pmf", "smd", "histograms", "umbrella_coverage") if (figs.get(k) or {}).get("png")), None)
     bdir = Path(anchor).parent if anchor else None
     return ((load_json(bdir / "binding_manifest.json", {}) if bdir else {}).get("result") or {}).get("pmf") or {}
 
@@ -1121,7 +1121,13 @@ def _binding_figures(doc: Doc, name: str, r: dict) -> str:
     # D-96: every caption reads ONE assessment — the stored one, else re-assessed from the stored PMF fields (a report
     # rebuild, no MD); missing fields stay unknown, so legacy data come out as "awaiting reanalysis"
     asm = _assessment_for(r)
-    if figs.get("histograms"):
+    # D-101: the coverage figure (written after every window, breaks red / alerts orange) is preferred; it exists even
+    # when the run stopped before the PMF
+    cov_fig = figs.get("umbrella_coverage") or (({"png": str(bdir / "umbrella_coverage.png")}
+                                                  if bdir and (bdir / "umbrella_coverage.png").is_file() else None))
+    if cov_fig and cov_fig.get("png"):
+        out += doc.figure_block(cov_fig["png"], "umbrella", FT.classify_umbrella(pm.get("coverage") or {}, name, asm), name)
+    elif figs.get("histograms"):
         out += doc.figure_block(figs["histograms"]["png"], "umbrella", FT.classify_umbrella(pm.get("coverage") or {}, name, asm), name)
     if (pm.get("overlap_matrix") or {}).get("matrix"):
         o = pm["overlap_matrix"]

@@ -109,6 +109,30 @@ def _stats(samples: dict[float, np.ndarray], ks: dict[float, float], discard_fra
     return sorted(out, key=lambda w: w.mu)
 
 
+def aim_by_response(ws: list, lo: float, hi: float, k: float, kT: float, target_overlap: float) -> dict | None:
+    """Local linear inverse of the windows' response μ(c) at one k (D-101; spec §8 question 3): with ≥ 2 windows of
+    that k around a hole, fit μ = μ₀ + g·(c − c₀) and place centres so the windows land IN the hole.  None when the
+    windows barely respond (g < 0.15: they are stuck — a real barrier at this k) or there is too little to fit."""
+    pts = [(w.center, w.mu) for w in ws if abs(w.k - k) < 1e-6]
+    if len(pts) < 2:
+        return None
+    cs, mus = np.array([p[0] for p in pts]), np.array([p[1] for p in pts])
+    if np.ptp(cs) < 1e-4:
+        return None
+    g = float(np.polyfit(cs, mus, 1)[0])
+    if g < 0.15:
+        return None
+    lo, hi = min(lo, hi), max(lo, hi)
+    step = spacing_for_overlap(math.sqrt(kT / k), target_overlap)
+    n = max(1, int(math.ceil((hi - lo) / step)))
+    out = []
+    for i in range(n):
+        t = lo + (hi - lo) * (i + 0.5) / n
+        j = int(np.argmin(np.abs(mus - t)))
+        out.append(float(cs[j] + (t - mus[j]) / g))
+    return {"centers": out, "slope": g}
+
+
 def plan_refinement(samples: dict[float, np.ndarray], ks: dict[float, float] | float, *, temperature_k: float = 300.0,
                     target_overlap: float = 0.2, min_effective_samples: float = 100.0, k_max: float = 5000.0,
                     max_new_per_round: int = 12, max_total_windows: int = 60, discard_fraction: float = 0.1,
@@ -139,6 +163,11 @@ def plan_refinement(samples: dict[float, np.ndarray], ks: dict[float, float] | f
                           + ("…" if len(short) > 6 else "") + "；不再延長，誤差由 bootstrap 反映。")
     # --- neighbours in μ order
     proposals: list[dict] = []
+    cont = continuity_report(samples, discard_fraction=discard_fraction)
+
+    def _break_in(lo_: float, hi_: float) -> bool:
+        return any(bl < max(lo_, hi_) and bh > min(lo_, hi_) for bl, bh in cont["breaks"])
+
     for a, b in zip(st[:-1], st[1:]):
         ovl = empirical_overlap(np.asarray(samples[a.center]), np.asarray(samples[b.center]))
         pair = {"left": a.center, "right": b.center, "mu": [round(a.mu, 4), round(b.mu, 4)], "overlap": round(ovl, 3)}
@@ -154,6 +183,30 @@ def plan_refinement(samples: dict[float, np.ndarray], ks: dict[float, float] | f
         # window still samples a full Gaussian; what opens holes is sliding past a change of curvature into a well
         k_new = max(min(a.k, b.k), slope ** 2 / (4.0 * kT))
         k_new = float(min(k_new, k_max))
+        # D-101 futility: windows were already placed between these two means and slid out
+        tried_in = [w for w in st if a.mu < w.center < b.mu and w.center not in (a.center, b.center)]
+        if tried_in and not _break_in(lo, hi):
+            pair["histogram_continuous"] = True
+            plan.notes.append(f"{a.center:.3f}/{b.center:.3f} nm 成對重疊 {ovl:.2f} 偏低，但中間已有 window 且合併直方圖在此連續："
+                              "取樣已連續（成對重疊被滑動的 window 拉低），不再加 window。")
+            continue
+        in_hole = [w for w in tried_in if min(lo, hi) - 1e-3 <= w.center <= max(lo, hi) + 1e-3]   # aimed at THIS hole
+        if k_new >= k_max - 1e-6:
+            aimed = aim_by_response(in_hole + [a, b], lo, hi, k_max, kT, target_overlap)
+            if aimed is not None:
+                why = (f"{lo:.3f}–{hi:.3f} nm：k 已在上限，改用已跑 window 的實際反應 μ(c)（dμ/dc ≈ {aimed['slope']:.2f}）反解中心，"
+                       f"讓 window 落在洞裡（不再只偏移 1σ）。")
+                for c in aimed["centers"]:
+                    proposals.append({"center": round(float(c), 4), "k": round(k_max, 1), "why": why, "gap": (b.mu - a.mu) + 0.5})
+                hole = {"between": [a.center, b.center], "mu": [round(a.mu, 4), round(b.mu, 4)], "overlap": round(ovl, 3),
+                        "hole_nm": [round(lo, 4), round(hi, 4)], "n_new": len(aimed["centers"]), "k_new": round(k_max, 1),
+                        "aimed_by_response": True}
+                plan.holes.append(hole)
+                continue
+        if in_hole and k_new >= k_max - 1e-6 and all(w.k >= k_max - 1e-6 for w in in_hole) and len(in_hole) >= 3:
+            plan.notes.append(f"{lo:.3f}–{hi:.3f} nm：已在 k 上限 {k_max:.0f} 放過 window 仍滑走（曲率比彈簧陡）；不再加 window。")
+            plan.unsamplable.append([round(min(lo, hi), 4), round(max(lo, hi), 4)])
+            continue
         sig_new = math.sqrt(kT / k_new)
         step = spacing_for_overlap(sig_new, target_overlap)
         span = b.mu - a.mu
@@ -183,12 +236,13 @@ def plan_refinement(samples: dict[float, np.ndarray], ks: dict[float, float] | f
                                   "why": f"CV 範圍端點 {edge:.3f} nm 沒被取樣（最近的 window 只到 {w.mu + sign * w.sd:.3f} nm）；補端點 window。"})
     # --- the pooled histogram is the ground truth: pairwise overlap can look fine while nothing sits on a barrier top
     #     (a window there with k < |F''| slides off to both sides and overlaps both neighbours)
-    cont = continuity_report(samples, discard_fraction=discard_fraction)
     plan.notes.append(f"合併直方圖斷點：{cont['breaks'] or '無'}")
     centres_all = np.array([w.center for w in st])
     for lo, hi in cont["breaks"]:
         mid = 0.5 * (lo + hi)
         if any(lo - 1e-3 <= p["center"] <= hi + 1e-3 for p in proposals):
+            continue
+        if any(ul <= hi and uh >= lo for ul, uh in plan.unsamplable):
             continue
         near = [by_c[c] for c in centres_all[np.argsort(np.abs(centres_all - mid))[:2]]]
         k_near = max(w.k for w in near)
@@ -197,7 +251,10 @@ def plan_refinement(samples: dict[float, np.ndarray], ks: dict[float, float] | f
             k_near = max(k_near, max(w.k for w in tried))
             if k_near < k_max - 1e-6:
                 k_near = k_max / 2.0                    # doubling below jumps straight to k_max: no slow escalation
-        if k_near >= k_max - 1e-6:
+        # D-101: "at k_max" only proves futility when a k_max window was actually placed IN the break (an SMD-informed
+        # plan starts steep stretches at k_max, so neighbours at k_max alone prove nothing)
+        tried_kmax = [w for w in tried if w.k >= k_max - 1e-6]
+        if k_near >= k_max - 1e-6 and len(tried_kmax) >= 2:
             plan.notes.append(f"{lo:.3f}–{hi:.3f} nm 在 k 上限 {k_max:.0f} 仍取樣不到（能障曲率比彈簧陡）；"
                               "不再加 window。可提高 k_max，或接受此段 PMF 不連續（ΔG° 不輸出）。")
             plan.unsamplable.append([lo, hi])
@@ -235,7 +292,8 @@ def plan_refinement(samples: dict[float, np.ndarray], ks: dict[float, float] | f
     if len(proposals) > len(plan.insert):
         plan.budget_exhausted = True
         plan.notes.append(f"還有 {len(proposals) - len(plan.insert)} 個缺口未補（每輪上限 {max_new_per_round}、總上限 {max_total_windows}）。")
-    plan.continuous = (all(p["overlap"] >= target_overlap for p in plan.pairs) and cont["continuous"]
+    pair_ok = all(p["overlap"] >= target_overlap or p.get("histogram_continuous") for p in plan.pairs)
+    plan.continuous = (pair_ok and cont["continuous"] and not plan.unsamplable
                        and not any("端點" in p["why"] for p in proposals))
     plan.done = plan.continuous and not plan.extend
     plan.redundant = sorted(set(plan.redundant))
@@ -335,3 +393,143 @@ def coverage_view(samples: dict[float, np.ndarray], ks: dict[float, float] | flo
     cont = continuity_report(samples, discard_fraction=discard_fraction)
     return {"edges": [round(float(e), 4) for e in edges], "pooled": pooled.tolist(), "windows": wins,
             "breaks": cont["breaks"], "continuous": cont["continuous"]}
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# D-101: plan the first windows from the SMD force curve (prevention), and say early where a gap is opening (alerts)
+def smd_slope_profile(d_nm, force, lo: float, hi: float, *, bin_nm: float = 0.05) -> dict:
+    """Mean SMD force per CV bin (kJ/mol/nm) — an estimate of the free-energy slope F′ along the path.
+
+    The pulling force k_pull·(r0 − d) balances F′ plus friction (∝ pulling speed), so this OVER-estimates |F′| by the
+    dissipative part; used only to decide where windows must be denser/stiffer, never as a free energy."""
+    d, f = np.asarray(d_nm, float), np.asarray(force, float)
+    edges = np.arange(lo, hi + bin_nm, bin_nm)
+    mids, mean = [], []
+    for a, b in zip(edges[:-1], edges[1:]):
+        m = (d >= a) & (d < b)
+        if m.sum() >= 3:
+            mids.append(0.5 * (a + b))
+            mean.append(float(np.mean(f[m])))
+    return {"x": np.array(mids), "slope": np.array(mean), "bin_nm": bin_nm}
+
+
+def plan_from_smd(d_nm, force, lo: float, hi: float, *, k0: float, k_max: float, temperature_k: float,
+                  target_overlap: float, max_windows: int) -> dict:
+    """Initial windows that anticipate the slope instead of a uniform grid: in each stretch k ≥ F′²/(4kT) (drift ≲ 2σ,
+    the refinement rule), spacing from the target overlap at the local σ, centre shifted uphill by F′/k (≤ 1σ) so the
+    window samples around its intended place.  Falls back to a uniform plan when the SMD curve is too sparse.
+    Returns {"centers", "k", "targets", "regions", "notes", "uniform": bool}."""
+    kT = KB_KJ_MOL_K * temperature_k
+    prof = smd_slope_profile(d_nm, force, lo, hi)
+    notes = []
+    if len(prof["x"]) < 3:
+        notes.append("SMD 力曲線的點太少，沿用等距規劃。")
+        return {"centers": [], "k": [], "targets": [], "regions": [], "notes": notes, "uniform": True}
+
+    def slope_at(x: float) -> float:
+        return float(np.interp(x, prof["x"], prof["slope"]))
+
+    s0 = math.sqrt(kT / k0)
+
+    def k_at(x: float) -> float:
+        # a window slides DOWNHILL (towards the bound side, smaller CV): its k must hold it against the steepest slope
+        # it could slide into — the stretch from 3σ₀ below to 1σ₀ above its place, not the slope at one point
+        # (a window at the top of a wall sees a flat slope there and slides all the way down).
+        xs = np.linspace(max(lo, x - 3 * s0), min(hi, x + s0), 13)
+        s = max(abs(slope_at(v)) for v in xs)
+        return float(min(k_max, max(k0, s * s / (4.0 * kT))))
+
+    def build(scale: float) -> tuple[list, list, list]:
+        t, out_t = lo, []
+        while t <= hi + 1e-9:
+            out_t.append(t)
+            # the step must suit the stiffest stretch it crosses (else a flat start jumps over the start of a wall)
+            step = scale * spacing_for_overlap(math.sqrt(kT / k_at(t)), target_overlap)
+            for _ in range(8):
+                kk = max(k_at(x) for x in np.linspace(t, min(hi, t + step), 9))
+                new = scale * spacing_for_overlap(math.sqrt(kT / kk), target_overlap)
+                if new >= step - 1e-9:
+                    break
+                step = new
+            t += step
+        if out_t[-1] < hi - 1e-6:
+            out_t.append(hi)
+        ks_ = [k_at(t) for t in out_t]
+        cs = [t + float(np.clip(slope_at(t) / kk, -math.sqrt(kT / kk), math.sqrt(kT / kk))) for t, kk in zip(out_t, ks_)]
+        return out_t, ks_, cs
+
+    scale = 1.0
+    targets, ks_, centers = build(scale)
+    while len(targets) > max_windows and scale < 4.0:
+        scale *= 1.15
+        targets, ks_, centers = build(scale)
+    if scale > 1.0:
+        notes.append(f"依力曲線需要的 window 超過上限 {max_windows}，間距放寬為 ×{scale:.2f}（之後由補窗處理殘餘缺口）。")
+    steep = [round(float(x), 3) for x, s in zip(prof["x"], prof["slope"]) if s * s / (4.0 * kT) > k0]
+    regions = []
+    if steep:
+        a = b = steep[0]
+        for x in steep[1:]:
+            if x - b <= prof["bin_nm"] + 1e-9:
+                b = x
+            else:
+                regions.append([a, b]); a = b = x
+        regions.append([a, b])
+        notes.append("力曲線陡的區段（預先加密、加硬）：" + "、".join(f"{p:.2f}–{q:.2f} nm" for p, q in regions) + "。")
+    return {"centers": [round(c, 4) for c in centers], "k": [round(k, 1) for k in ks_], "targets": [round(t, 4) for t in targets],
+            "regions": regions, "notes": notes, "uniform": False, "spacing_scale": round(scale, 3)}
+
+
+def bimodality(x) -> float:
+    """Sarle's bimodality coefficient (skew² + 1)/(kurtosis + 3(n−1)²/((n−2)(n−3))); > 0.555 suggests two modes."""
+    x = np.asarray(x, float)
+    n = len(x)
+    if n < 20 or np.std(x) <= 0:
+        return 0.0
+    z = (x - x.mean()) / x.std()
+    g, k = float(np.mean(z ** 3)), float(np.mean(z ** 4)) - 3.0
+    return float((g * g + 1.0) / (k + 3.0 * (n - 1) ** 2 / ((n - 2) * (n - 3))))
+
+
+def gap_alerts(samples: dict[float, np.ndarray], ks: dict[float, float], *, planned=None, temperature_k: float = 300.0,
+               target_overlap: float = 0.2, k_max: float = 5000.0, discard_fraction: float = 0.1) -> list[dict]:
+    """Early warning after every finished window: neighbouring FINISHED windows (in planned order — a window not yet
+    run is pending, not a gap) whose sampled distributions overlap less than the target, each with a likely cause and
+    what the automatic refinement will do.  Pure; written to coverage.json and the live progress line."""
+    stats = {w.center: w for w in _stats(samples, ks, discard_fraction)}
+    breaks = continuity_report(samples, discard_fraction=discard_fraction)["breaks"] if len(samples) >= 2 else []
+    order = sorted(set(float(c) for c in (planned or [])) | set(stats))
+    done = [c for c in order if c in stats]
+    out = []
+    for i in range(len(done) - 1):
+        a, b = done[i], done[i + 1]
+        if any(a < c < b and c not in stats for c in order):
+            continue                                    # a planned window between them has not run yet
+        L, R = sorted((stats[a], stats[b]), key=lambda w: w.mu)
+        ov = empirical_overlap(np.asarray(samples[L.center])[int(len(samples[L.center]) * discard_fraction):],
+                               np.asarray(samples[R.center])[int(len(samples[R.center]) * discard_fraction):])
+        lo_, hi_ = sorted((L.mu + L.sd, R.mu - R.sd))
+        in_break = any(bl < hi_ + 1e-9 and bh > lo_ - 1e-9 for bl, bh in breaks)
+        # only what the user should see early: a real hole (pooled histogram break) or overlap under half the target;
+        # a pair just under the target is routine refinement work, not news
+        if ov >= target_overlap or (ov >= 0.5 * target_overlap and not in_break):
+            continue
+        cause, why = "spacing", "兩個 window 的取樣分佈離得太遠（間距大於目標重疊所需）"
+        drifted = [w for w in (L, R) if abs(w.drift) > 2 * w.sd]
+        bim = [w for w in (L, R) if bimodality(samples[w.center]) > 0.555]
+        if bim:
+            cause, why = "barrier", (f"window {bim[0].center:.3f} nm 內出現雙峰：兩峰之間是能障頂端，彈簧不夠硬（k {bim[0].k:.0f}）"
+                                     "就會往兩邊滑")
+        elif drifted:
+            w = drifted[0]
+            cause, why = "drift", (f"window {w.center:.3f} nm 被自由能斜坡推走 {w.drift:+.3f} nm（約 {abs(w.drift) / w.sd:.1f}σ，"
+                                   f"斜率約 {w.slope:.0f} kJ/mol/nm）")
+        if max(L.k, R.k) >= k_max - 1e-6 and cause in ("barrier", "drift"):
+            cause += "_at_kmax"
+            why += f"；k 已到上限 {k_max:.0f}，再加 window 也補不起來，需要提高 k_umbrella_max 或改用其他取樣法"
+        lo, hi = L.mu + L.sd, R.mu - R.sd
+        out.append({"lo": round(float(min(lo, hi)), 4), "hi": round(float(max(lo, hi)), 4), "overlap": round(float(ov), 3),
+                    "windows": [round(L.center, 4), round(R.center, 4)], "cause": cause, "why": why,
+                    "action": ("自動補窗會在這段放更硬、預先偏移的 window" if not cause.endswith("_at_kmax")
+                               else "自動補窗無法處理；請在覆蓋圖上指定區間補採樣並提高 k，或回報老師")})
+    return out

@@ -148,13 +148,33 @@ def plot_overview(stage_frames: dict[str, pd.DataFrame], out_base: Path | str, *
     return _save(fig, Path(out_base))
 
 
-def plot_umbrella_histograms(samples_by_center: dict[float, np.ndarray], out_base: Path | str, *, unit: str = "nm") -> dict:
+def plot_umbrella_histograms(samples_by_center: dict[float, np.ndarray], out_base: Path | str, *, unit: str = "nm",
+                             breaks=None, alerts=None, cv_range=None) -> dict:
+    """D-101: the coverage figure every gap message points to — per-window histograms, the pooled count, the target
+    CV range, breaks (red) and early gap alerts (orange).  Written after every window, so it always exists."""
     plt = _mpl()
-    fig, ax = plt.subplots(figsize=(7.2, 2.8))
-    for i, (c, x) in enumerate(sorted(samples_by_center.items())):
-        ax.hist(np.asarray(x), bins=40, histtype="step", color=PALETTE[i % len(PALETTE)], linewidth=1.2)
+    fig, ax = plt.subplots(figsize=(7.2, 3.0))
+    allx = np.concatenate([np.asarray(x, float) for x in samples_by_center.values()]) if samples_by_center else np.zeros(0)
+    if allx.size:
+        lo, hi = float(allx.min()), float(allx.max())
+        if cv_range:
+            lo, hi = min(lo, cv_range[0]), max(hi, cv_range[1])
+        edges = np.linspace(lo, hi if hi > lo else lo + 1e-3, 121)
+        pooled, _ = np.histogram(allx, bins=edges)
+        ax.fill_between(0.5 * (edges[:-1] + edges[1:]), pooled, step="mid", color="0.85", lw=0, label="all windows")
+        for i, (c, x) in enumerate(sorted(samples_by_center.items())):
+            ax.hist(np.asarray(x), bins=edges, histtype="step", color=PALETTE[i % len(PALETTE)], linewidth=1.0)
+    for a_, b_ in (breaks or []):
+        ax.axvspan(a_, b_, color="#d62728", alpha=0.25, lw=0)
+    for al in (alerts or []):
+        ax.axvspan(al["lo"], al["hi"], color="#ff7f0e", alpha=0.18, lw=0)
+    if cv_range:
+        for v in cv_range:
+            ax.axvline(v, color=_INK2, lw=0.8, ls=":")
     ax.set_xlabel(f"Collective variable ({unit})"); ax.set_ylabel("Counts")
-    ax.set_title("Umbrella windows — overlap check (gaps mean missing windows)", loc="left", fontsize=10)
+    n_b, n_a = len(breaks or []), len(alerts or [])
+    state = ("continuous" if not n_b and not n_a else f"{n_b} break(s) red, {n_a} alert(s) orange")
+    ax.set_title(f"Umbrella coverage: {len(samples_by_center)} windows; {state}", loc="left", fontsize=10)
     return _save(fig, Path(out_base))
 
 

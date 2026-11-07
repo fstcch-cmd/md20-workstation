@@ -36,7 +36,9 @@ class StageMeter:
             return "  " + " | ".join(parts)
         if st == "umbrella" and ev.get("window") is not None:
             n = ev.get("n_windows", ev.get("n"))
-            return f"  [umbrella] window {ev['window']}" + (f" of {n}" if n else "")
+            al = ev.get("alerts") or []
+            warn = ("  ! gap " + ", ".join(f"{a['lo']:.2f}-{a['hi']:.2f} nm ({a.get('cause', '')})" for a in al[:3])) if al else ""
+            return f"  [umbrella] window {ev['window']}" + (f" of {n}" if n else "") + warn
         if st == "smd" and ev.get("force") is not None:
             r = ev.get("r_nm", ev.get("r0"))
             return f"  [smd] r {float(r):.3f} nm | force {float(ev['force']):.0f} kJ/mol/nm" if r is not None else None

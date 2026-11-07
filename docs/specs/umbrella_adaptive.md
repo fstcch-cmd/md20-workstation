@@ -4,6 +4,8 @@
 `tests/test_umbrella_manual.py`）；真實 OpenMM 的 SMD＋umbrella 路徑（`test_binding_integration`、全流程）待 CI。
 > **2026-11-03 更新**：真實路徑已跑過——heavy workflow（3PTB 全流程含 binding）在 c868014 全綠；筆電 RTX 4060 classroom 實跑 13 → 40 window（6 輪內連續）。後續修正見 D-62（PMF 涵蓋）、D-63（拉速 0.005）、D-65（末端持平）。補窗起始仍等距、未利用 SMD 力曲線（未做）。
 
+> **2026-11-07 更新（D-101）**：第一批 window 改由 SMD 力曲線規劃（`plan_from_smd`：陡段加硬加密、F′ 取下坡 3σ₀ 範圍最大值、間距依跨過的最硬區段）；每個 window 後的斷點提示（`gap_alerts`：drift／barrier／spacing／at_kmax，只提示重疊 < 目標一半或合併直方圖斷點）進 GUI 進度列、覆蓋圖摘要、CLI 與決策紀錄；覆蓋圖 `umbrella_coverage.png` 每個 window 後都輸出，報告優先使用；補窗新增「直方圖已連續就停止插入」「k 上限需在斷點內實際試過」「k 上限時以 μ(c) 局部線性反解中心」（回答 §8 問題 3）。合成剖面比較見 DECISIONS D-101。
+
 ## 1. 問題
 Colab 版與本專案舊版的 umbrella sampling 常出現**取樣不連續**：合併所有 window 的 CV 直方圖有空洞，WHAM/MBAR 把兩段
 PMF 以任意常數接起來，圖上出現台階或斷點，ΔPMF/ΔG° 失真。

@@ -914,6 +914,11 @@ def workflow_page(project: str, name: str):
                     w, nw = ls["umbrella"]["window"], ls["umbrella"]["n"]
                     umb = paren(_(f"傘狀採樣窗口 {w}，共 {nw} 個", f"umbrella window {w} of {nw}",
                                   f"アンブレラサンプリング {nw} ウィンドウ中 {w} 番目", f"엄브렐라 샘플링 윈도우 {nw}개 중 {w}번째"), L)
+                    al = ls["umbrella"].get("alerts") or []
+                    if al:                                   # D-101: a gap is news now, not after the round
+                        rng = "、".join(f"{a['lo']:.2f}–{a['hi']:.2f}" for a in al[:3])
+                        umb += _(f" ⚠ {rng} nm 取樣不連續，見「傘狀採樣覆蓋」分頁", f" ⚠ gap at {rng} nm, see the coverage tab",
+                                 f" ⚠ {rng} nm で途切れ。カバー範囲タブを参照", f" ⚠ {rng} nm 끊김, 커버리지 탭 참조")
                 prog.set_text(f"{pg['stage']}{colon(L)}{pg['pct']}%" + eta + umb)
                 bar.set_value((pg["pct"] or 0) / 100.0)
             tg = coverage_targets(wf, lang=L)

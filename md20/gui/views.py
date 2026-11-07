@@ -178,7 +178,8 @@ def live_series(history: list[dict], *, max_points: int = 600) -> dict:
         elif st == "umbrella":
             n = h.get("n_windows", h.get("n"))
             out["umbrella"] = {"window": h.get("window"), "n": n,
-                               "pct": round(100.0 * h["window"] / n, 1) if n else None}
+                               "pct": round(100.0 * h["window"] / n, 1) if n else None,
+                               "alerts": h.get("alerts") or []}          # D-101: early gap alerts
         elif st == "docking":
             out["progress"] = {"stage": "docking", "pct": round(100.0 * h.get("i", 0) / max(1, h.get("n", 1)), 1),
                                "case": h.get("ligand", "")}
@@ -533,11 +534,25 @@ def coverage_chart(cov: dict, *, lang: str = "zh") -> dict:
             "series": series, "grid": {"left": 60, "right": 20}}
 
 
+_ALERT_CAUSE = {
+    "spacing": ("window 間距太大，會自動補", "windows too far apart; will be filled automatically", "ウィンドウの間隔が広すぎます。自動で補います", "윈도우 간격이 너무 넓어 자동으로 보완합니다"),
+    "drift": ("window 被斜坡推走，會用較硬的 k 補", "a window was pushed down the slope; will be filled with a stiffer k", "ウィンドウが斜面で押し流されました。硬い k で補います", "윈도우가 경사에 밀려났습니다. 더 강한 k로 보완합니다"),
+    "barrier": ("window 內雙峰，表示這裡是能障頂端", "a window is bimodal: a barrier top lies here", "ウィンドウ内に二つの山があり、ここがエネルギー障壁の頂上です", "윈도우 안에 봉우리가 두 개라 여기가 에너지 장벽의 꼭대기입니다"),
+    "drift_at_kmax": ("k 已到上限仍被推走，需要人工處理", "pushed away even at the k limit; needs your decision", "k の上限でも押し流されます。判断が必要です", "k 상한에서도 밀려납니다. 판단이 필요합니다"),
+    "barrier_at_kmax": ("k 已到上限仍是雙峰，需要人工處理", "bimodal even at the k limit; needs your decision", "k の上限でも二つの山があります。判断が必要です", "k 상한에서도 봉우리가 두 개입니다. 판단이 필요합니다"),
+}
+
+
 def coverage_summary(cov: dict, *, lang: str = "zh") -> str:
     """One short paragraph: status, number of windows, gaps, and the last automatic window round."""
     rounds = cov.get("rounds") or []
     sep, st = _sep(lang), cov.get("status", "")
     n_win = len(cov.get("windows") or [])
+    if not n_win:                                   # D-101: say why the chart is empty instead of showing nothing
+        return pick(("還沒有任何 window 的樣本：SMD 拉離中或尚未開始。第一個 window 完成後這裡會出現直方圖。",
+                     "No window has samples yet: SMD is pulling or has not started. The histogram appears after the first window.",
+                     "まだどのウィンドウにもサンプルがありません。SMD の引き離し中か、まだ始まっていません。最初のウィンドウが終わるとヒストグラムが表示されます。",
+                     "아직 어떤 윈도우에도 샘플이 없습니다. SMD 당김 중이거나 아직 시작되지 않았습니다. 첫 윈도우가 끝나면 히스토그램이 나타납니다."), lang)
     parts = [pick((f"狀態：{st}。", f"Status: {st}.", f"状態：{st}。", f"상태: {st}."), lang),
              pick((f"共 {n_win} 個窗口。", f"{n_win} window{_pl(n_win)}.", f"ウィンドウは {n_win} 個です。", f"윈도우 {n_win}개."), lang)]
     if cov.get("continuous"):
@@ -546,6 +561,12 @@ def coverage_summary(cov: dict, *, lang: str = "zh") -> str:
         gaps = sep.join(f"{a:.3f}–{b:.3f} nm" for a, b in cov.get("breaks") or [])
         parts.append(pick((f"斷點（紅色）：{gaps}。", f"Gaps (red): {gaps}.", f"切れ目（赤）：{gaps}。",
                            f"끊긴 구간(빨간색): {gaps}."), lang))
+    for al in cov.get("alerts") or []:
+        cause = pick(_ALERT_CAUSE.get(al.get("cause", ""), (al.get("cause", ""),) * 4), lang)
+        parts.append(pick((f"⚠ {al['lo']:.3f}–{al['hi']:.3f} nm 取樣開始不連續（{cause}）。",
+                           f"⚠ Sampling is breaking up at {al['lo']:.3f}–{al['hi']:.3f} nm ({cause}).",
+                           f"⚠ {al['lo']:.3f}–{al['hi']:.3f} nm でサンプリングが途切れ始めています（{cause}）。",
+                           f"⚠ {al['lo']:.3f}–{al['hi']:.3f} nm에서 샘플링이 끊기기 시작했습니다({cause})."), lang))
     if rounds:
         last = rounds[-1]
         r, n_ins, n_ext = last["round"], len(last.get("insert") or []), len(last.get("extend") or [])
