@@ -124,22 +124,26 @@ def classify_rejections(i: PoseInfo, *, best: float, score_window: float, min_co
                         ll_max: float) -> list[dict]:
     """Structured rejections: [{"code", "rule", "text"}] (D-98, A7)."""
     r = []
+    # D-110: each rejection carries language-neutral `params`; the Chinese `text` stays for callers that read it,
+    # the report renders the sentence in the user's language from `rule` + `params` (REJECT_RULES in report)
     if i.score > best + score_window:
-        r.append({"code": MODEL_LIMITATION, "rule": "score_window",
+        r.append({"code": MODEL_LIMITATION, "rule": "score_window", "params": {"gap": round(i.score - best, 1), "window": score_window},
                   "text": f"分數差 {i.score - best:.1f} > {score_window} kcal/mol"})
     if i.contacts_per_ligand is not None:
         shallow = [k for k, c in enumerate(i.contacts_per_ligand) if c < min_contacts]
         if shallow:
             r.append({"code": HYPOTHESIS_CHANGE, "rule": "shallow_ligand",
+                      "params": {"ligands": [k + 1 for k in shallow], "min_contacts": min_contacts},
                       "text": "配體 " + ",".join(str(k + 1) for k in shallow) + f" 接觸 < {min_contacts}（一深一淺）"})
     elif i.contacts < min_contacts:
-        r.append({"code": HYPOTHESIS_CHANGE, "rule": "surface_pose", "text": f"接觸 {i.contacts} < {min_contacts}（可能在表面）"})
+        r.append({"code": HYPOTHESIS_CHANGE, "rule": "surface_pose", "params": {"contacts": i.contacts, "min_contacts": min_contacts},
+                  "text": f"接觸 {i.contacts} < {min_contacts}（可能在表面）"})
     if i.min_ll_distance is not None:
         if i.min_ll_distance < ll_min:
-            r.append({"code": GEOMETRY_REPAIRABLE, "rule": "ligand_clash",
+            r.append({"code": GEOMETRY_REPAIRABLE, "rule": "ligand_clash", "params": {"distance": round(i.min_ll_distance, 1), "limit": ll_min},
                       "text": f"配體間 {i.min_ll_distance:.1f} Å < {ll_min}（碰撞）"})
         elif i.min_ll_distance > ll_max:
-            r.append({"code": HYPOTHESIS_CHANGE, "rule": "not_co_occupying",
+            r.append({"code": HYPOTHESIS_CHANGE, "rule": "not_co_occupying", "params": {"distance": round(i.min_ll_distance, 1), "limit": ll_max},
                       "text": f"配體間 {i.min_ll_distance:.1f} Å > {ll_max}（未共同佔據口袋）"})
     return r
 

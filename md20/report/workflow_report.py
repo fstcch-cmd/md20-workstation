@@ -586,6 +586,31 @@ _REJ_CODE = {"geometry_repairable": ("可由建模修正的幾何問題", "geome
              "hypothesis_change": ("假設不成立", "the hypothesis does not hold", "仮定が成り立たない", "가정이 성립하지 않음")}
 
 
+def _reject_sentence(r: dict, L: str) -> str:
+    """D-110: the docking rejection in the interface language from its rule + params; falls back to the stored
+    Chinese text for an older manifest that has no params."""
+    rule, pr = r.get("rule"), r.get("params")
+    if not rule or pr is None:
+        return str(r.get("text") or "")
+    if rule == "score_window":
+        return tx((f"分數差 {pr['gap']} > {pr['window']} kcal/mol", f"score {pr['gap']} worse than the best by > {pr['window']} kcal/mol",
+                   f"スコア差 {pr['gap']} > {pr['window']} kcal/mol", f"점수 차 {pr['gap']} > {pr['window']} kcal/mol"), L)
+    if rule == "shallow_ligand":
+        ls = ",".join(str(x) for x in pr["ligands"])
+        return tx((f"配體 {ls} 接觸 < {pr['min_contacts']}（一深一淺）", f"ligand {ls} has < {pr['min_contacts']} contacts (one deep, one shallow)",
+                   f"リガンド {ls} の接触 < {pr['min_contacts']}（片方が浅い）", f"리간드 {ls} 접촉 < {pr['min_contacts']}(한쪽이 얕음)"), L)
+    if rule == "surface_pose":
+        return tx((f"接觸 {pr['contacts']} < {pr['min_contacts']}（可能在表面）", f"{pr['contacts']} contacts < {pr['min_contacts']} (may be on the surface)",
+                   f"接触 {pr['contacts']} < {pr['min_contacts']}（表面の可能性）", f"접촉 {pr['contacts']} < {pr['min_contacts']}(표면일 수 있음)"), L)
+    if rule == "ligand_clash":
+        return tx((f"配體間 {pr['distance']} Å < {pr['limit']}（碰撞）", f"ligands {pr['distance']} Å apart < {pr['limit']} (clash)",
+                   f"リガンド間 {pr['distance']} Å < {pr['limit']}（衝突）", f"리간드 간 {pr['distance']} Å < {pr['limit']}(충돌)"), L)
+    if rule == "not_co_occupying":
+        return tx((f"配體間 {pr['distance']} Å > {pr['limit']}（未共同佔據口袋）", f"ligands {pr['distance']} Å apart > {pr['limit']} (not co-occupying the pocket)",
+                   f"リガンド間 {pr['distance']} Å > {pr['limit']}（ポケットを共有していない）", f"리간드 간 {pr['distance']} Å > {pr['limit']}(포켓을 공유하지 않음)"), L)
+    return str(r.get("text") or "")
+
+
 def _used_pose_rejections(sel: dict, entry: str, L: str) -> str:
     """D-98 (A7): a used pose that docking had rejected keeps its original reasons in the report, with their class,
     whether it was taken by the least-risk fallback or chosen by a person; the build's repair is reported separately."""
@@ -599,7 +624,7 @@ def _used_pose_rejections(sel: dict, entry: str, L: str) -> str:
                    "低リスクの代替として選択（推奨ではない）", "저위험 대안으로 선택(추천 아님)"), L) if v.get("fallback") else
                tx(("依使用者指定", "Chosen by the user", "ユーザーの指定", "사용자 지정"), L))
         items = ("；" if L in ("zh", "ja") else "; ").join(
-            f"{r.get('text')}{paren(tx(_REJ_CODE.get(r.get('code'), (r.get('code'),) * 4), L), L)}" for r in rej)
+            f"{_reject_sentence(r, L)}{paren(tx(_REJ_CODE.get(r.get('code'), (r.get('code'),) * 4), L), L)}" for r in rej)
         head = tx(("選用的第 {r} 名姿勢在對接層被排除；原始理由（保留）", "The used pose (rank {r}) was rejected at docking; original reasons (kept)",
                    "使用したポーズ（順位 {r}）はドッキングで除外されました。元の理由（保持）", "사용한 포즈(순위 {r})는 도킹에서 제외되었습니다. 원래 이유(유지)"), L)
         tail = tx(("建模後的幾何修正與檢查見下方多配體幾何表", "The repair and re-check during the build are in the multi-ligand geometry table below",

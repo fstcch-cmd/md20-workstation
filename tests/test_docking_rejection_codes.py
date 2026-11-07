@@ -106,3 +106,19 @@ def test_explicit_human_choice_is_unaffected(tmp_path):
     sel = _choose(wf, _entry(tmp_path, [_pose(1, -10.0, HYPOTHESIS_CHANGE)]))
     assert sel["ligands"]["A"]["rank"] == 1 and sel["ligands"]["A"]["fallback"] is False
     assert sel["ligands"]["A"]["docking_rejections"][0]["code"] == HYPOTHESIS_CHANGE   # still on record for the report
+
+
+def test_rejections_carry_params_for_four_language_rendering():
+    """D-110: each rejection carries language-neutral params so the report can render it in any language."""
+    kw = dict(best=-10.0, score_window=1.0, min_contacts=10, ll_min=3.3, ll_max=4.5)
+    clash = classify_rejections(_joint(1, -10.0, 2.0), **kw)[0]
+    assert clash["rule"] == "ligand_clash" and clash["params"] == {"distance": 2.0, "limit": 3.3}
+    far = classify_rejections(_joint(1, -10.0, 6.0), **kw)[0]
+    assert far["rule"] == "not_co_occupying" and far["params"]["distance"] == 6.0
+    low = classify_rejections(_joint(1, -8.0, 4.0), **kw)[0]
+    assert low["rule"] == "score_window" and low["params"] == {"gap": 2.0, "window": 1.0}
+    # the report renderer produces a non-Chinese sentence from rule + params, and falls back to text without params
+    from md20.report.workflow_report import _reject_sentence
+    en = _reject_sentence(clash, "en")
+    assert "clash" in en and "配體" not in en and "2.0" in en
+    assert _reject_sentence({"text": "舊的中文理由"}, "en") == "舊的中文理由"   # old manifest, no params

@@ -24,7 +24,7 @@
 ## 進行中（2026-11-07，session_016gcJzAV8UjRW4ixPZLxddG）：D-98 配體原子電荷＋A7 拒絕代碼＋DevCheck P0
 - **(A)** 容器 697 passed、49 skipped（新增 24 項）。
 - **(B)** 交 CI：RDKit 共振判定（`test_rdkit_acetate_and_neutral_molecule`）、3PTB 完整流程的新斷言（heavy workflow）；另可在筆電以 `MD20-DevCheck-P0.cmd` 於沙盒資料夾隔離驗證。
-- **(C)** 胜肽配體原子電荷仍未記錄；docking 拒絕文字只有中文。
+- **(C)** 胜肽配體原子電荷仍未記錄；docking 拒絕理由已四語（D-110）；pose 推薦 prose 仍照 D-55 以中文記錄＋展開翻譯。
 
 ## 整合規格 P0（D-95、D-96、D-97，2026-11-07，已 push、未發行）
 已 push 到 main，HEAD **`ba4d7da`**。**未發行**（對外版本是 **a17**——a18 實際上從未發行，見 DECISIONS 11/07 紀錄）。這批是科學正確性修正，不是新 phase。

@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
+import math
+
 import numpy as np
 
 from . import _mdh_legacy as mdh
@@ -126,3 +128,27 @@ def pmf_from_windows(samples_by_center: dict[float, np.ndarray], *, force_consta
         res.figures["histograms"] = plot_umbrella_histograms(samples_by_center, out / "umbrella_histograms")
         res.figures["pmf"] = plot_pmf(grid[finite], pmf[finite], err[finite] if err is not None else None, out / "pmf")
     return res
+
+# moved from the removed sampling/runner.py (D-109, REVIEW #17); the workflow uses sampling/binding.py
+KB = 0.00831446261815324  # kJ mol⁻¹ K⁻¹ (same value as the removed runner)
+
+
+def binding_summary(grid: np.ndarray, pmf: np.ndarray, err: np.ndarray | None, r_start: float, r_end: float, temperature_k: float) -> dict:
+    """Well depth from the PMF plus honest caveats (1-D PMF ≠ standard binding free energy without corrections)."""
+    m = np.isfinite(pmf)
+    g, p = grid[m], pmf[m]
+    i_min = int(np.argmin(p))
+    bulk = p[g >= g.max() - 0.15]  # last 0.15 nm as "bulk"
+    bulk_mean = float(bulk.mean()) if len(bulk) else float(p[-1])
+    delta = bulk_mean - float(p[i_min])
+    kT = KB * temperature_k
+    e_min = float(err[m][i_min]) if err is not None else None
+    e_bulk = float(np.mean(err[m][g >= g.max() - 0.15])) if err is not None and len(bulk) else None
+    err_delta = math.sqrt((e_min or 0) ** 2 + (e_bulk or 0) ** 2) if err is not None else None
+    interp = (f"PMF 井深 {delta:.1f} kJ/mol（≈ {delta / 4.184:.1f} kcal/mol，{delta / kT:.1f} kT）。"
+              "這是沿一維 COM 距離的平均力位能，反映配體離開口袋的能量代價；要換算成標準結合自由能還需要體積／取向的標準態校正與充分收斂，"
+              "教學 tier 的短視窗只適合比較不同配體的相對強弱。")
+    return {"r_min_nm": float(g[i_min]), "pmf_min_kj_mol": float(p[i_min]), "bulk_pmf_kj_mol": bulk_mean,
+            "delta_pmf_kj_mol": delta, "delta_pmf_kcal_mol": delta / 4.184, "delta_pmf_kT": delta / kT,
+            "err_kj_mol": err_delta, "r_start_nm": r_start, "r_end_nm": r_end, "interpretation": interp}
+

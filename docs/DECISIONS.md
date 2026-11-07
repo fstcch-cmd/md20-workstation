@@ -6,6 +6,19 @@
 ---
 
 ## 2026-11-07
+### D-110　docking 拒絕理由四語化（STATUS (C)）：理由帶語言中立的 params，報告依語言渲染
+- 問題：`classify_rejections` 的 `text` 只有中文，報告「選用姿勢的原始拒絕理由」對英／日／韓使用者仍是中文。
+- **決定**：每個拒絕 dict 加 `params`（數值，如距離、接觸數、分數差），`text`（中文）保留給既有讀取者；報告 `_reject_sentence(rule, params)` 用四語模板渲染，舊 manifest（無 params）退回 `text`。拒絕分類碼（可修幾何／模型限制／假設不成立）本來就四語。
+- **範圍**：pose 推薦的整段 prose（`recommendation.reason`）仍照 D-55 慣例（中文記錄，其他語言在「以中文記錄」展開區顯示），不在本次；本次只處理被明列為缺口的「拒絕理由」。
+- **證據**：`tests/test_docking_rejection_codes.py` 新增 params 與四語渲染測試（英文句子不含中文、無 params 時退回）。
+- 檔案：`md20/docking/poses.py`、`md20/report/workflow_report.py`、測試。
+
+### D-109　移除無呼叫者的 `sampling/runner.py`（REVIEW #17）：把仍被用到的 `binding_summary` 搬到 `sampling/pmf.py`
+- 背景：REVIEW #17 標記 `sampling/runner.py` 無呼叫者、其 window 以 SMD 殘留的 `smd_r0/smd_k` 運行、PMF 參數對不上，標「勿用，下一輪移除」。實際 workflow 用 `sampling/binding.py`。
+- **決定**：刪除 `runner.py`；其中唯一仍被 `__init__` 匯出並有測試用到的 `binding_summary`（PMF 井深＋誠實 caveats）搬到 `pmf.py`，常數值不變。`run_smd/run_umbrella/SMDSpec/UmbrellaSpec`（對不上的那套）一併移除，無其他呼叫者。
+- **證據**：`tests/test_sampling.py`（`binding_summary` 測試）通過；全庫匯入無殘留引用。
+- 檔案：刪 `md20/sampling/runner.py`；改 `md20/sampling/pmf.py`、`md20/sampling/__init__.py`。
+
 ### D-108　研究設計與證據覆蓋矩陣（F01）：報告開頭先說「計畫了什麼、實際跑了什麼、證據能支持到哪裡」
 - 依據：master_iteration F01（報告有流程與設定，沒有「預定 vs 實際 vs 缺口」）。
 - **決定**：`md20/report/evidence.py`（純讀 state/config）逐項產生：對接（每個配體是否選出姿勢）、MD（每個系統是否完成）、重複（完成數 vs 計畫；只有一條 → 有限制）、軌跡分析（正式模擬有約束、部分分析失敗 → 有限制）、慢運動與 MSM（依 D-105 資格）、系統比較（依 D-106 可比性；沒有紀錄 → 有限制）、結合自由能（ΔG° 不輸出 → 有限制並附原因）。三級：有證據／有限制／缺；**讀不到的欄位一律不算有證據**。表放在「研究設計」節，結果之前。
