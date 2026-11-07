@@ -130,6 +130,12 @@ def _elig(r: dict) -> dict:
     return eligibility_of(r)
 
 
+def _claim_ok(r: dict, claim: str) -> bool:
+    """D-134: every eligibility decision in a comparison goes through the one versioned claim record."""
+    from .assessment import claim_eligible
+    return claim_eligible(r, claim)
+
+
 def cond_view(r: dict) -> dict | None:
     """The condition signature compare_binding compares (spectator list reduced to its count); None = not recorded."""
     c = (r or {}).get("condition")
@@ -176,11 +182,11 @@ def context_basis(results: dict, keys: list[str]) -> dict:
     The comparability matrix (D-120) calls this on each pair, so it can never grade differently from the table."""
     executed = [k for k in keys if (results.get(k) or {}).get("status") == "PASS"
                 and results[k].get("delta_pmf_kj_mol") is not None]
-    path_ok = [k for k in executed if _elig(results[k]).get("delta_pmf_path_specific")]
+    path_ok = [k for k in executed if _claim_ok(results[k], "path_specific")]
     conds = {_cond_key(results[k]) for k in path_ok}
     cond_bad = len(conds) > 1 or None in conds
     enough = len(path_ok) >= 2 and not cond_bad
-    use_dG = enough and all(_elig(results[k]).get("dG_standard") and results[k].get("dG_standard_kj_mol") is not None
+    use_dG = enough and all(_claim_ok(results[k], "dG_standard") and results[k].get("dG_standard_kj_mol") is not None
                             for k in path_ok)
     return {"executed": executed, "path_ok": path_ok, "cond_bad": cond_bad, "enough": enough, "use_dG": use_dG,
             "status": ("PASS" if use_dG else "PATH_SPECIFIC") if enough else "INSUFFICIENT"}
@@ -302,7 +308,7 @@ def compare_binding(results: dict, *, contexts: dict[str, list[str]]) -> dict:
             if r.get("status") != "PASS" or rs.get("status") != "PASS" or r.get("delta_pmf_kj_mol") is None \
                     or rs.get("delta_pmf_kj_mol") is None:
                 continue
-            if not (_elig(r).get("delta_pmf_path_specific") and _elig(rs).get("delta_pmf_path_specific")):
+            if not (_claim_ok(r, "path_specific") and _claim_ok(rs, "path_specific")):
                 out["co_occupancy"].append({"ligand": name, "context": ctx, "shift_kj_mol": None, "status": "NOT_ELIGIBLE",
                                             "why": f"{name}：單獨或共同口袋的 ΔPMF 未通過取樣評估（或為舊資料待重新分析），不計算位移。",
                                             "why_i18n": (f"{name}：單獨或共同口袋的 ΔPMF 未通過取樣評估（或為舊資料待重新分析），不計算位移。",
@@ -477,7 +483,7 @@ def cooperativity(results: dict, contexts: dict[str, list[str]]) -> list[dict]:
             r, name = results.get(k) or {}, (results.get(k) or {}).get("ligand")
             rs = results.get(singles.get(name, ""), {})
             if r.get("status") == "PASS" and rs.get("status") == "PASS" \
-                    and _elig(r).get("delta_pmf_path_specific") and _elig(rs).get("delta_pmf_path_specific"):
+                    and _claim_ok(r, "path_specific") and _claim_ok(rs, "path_specific"):
                 legs[name] = (r, rs)      # D-96: unqualified or legacy legs count as missing
         names = sorted(legs)
         missing = sorted({(results.get(k) or {}).get("ligand", k.split(":", 1)[-1]) for k in keys} - set(names))
@@ -495,7 +501,7 @@ def cooperativity(results: dict, contexts: dict[str, list[str]]) -> list[dict]:
                                 "넣으십시오.")})
             continue
         use_dG = all(r.get("dG_standard_kj_mol") is not None and rs.get("dG_standard_kj_mol") is not None
-                     and _elig(r).get("dG_standard") and _elig(rs).get("dG_standard") for r, rs in legs.values())
+                     and _claim_ok(r, "dG_standard") and _claim_ok(rs, "dG_standard") for r, rs in legs.values())
 
         def leg(name):
             r, rs = legs[name]

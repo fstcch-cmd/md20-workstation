@@ -1,9 +1,16 @@
-"""D-108 (F01): research design and evidence coverage — what was planned, what actually ran, and what the evidence can
-support, one row per item, so a reader sees the gaps before the results.
+"""D-108 (F01) / D-134 (R2): research design and evidence coverage — what was planned, what actually ran, and what the
+evidence can support, one row per item, so a reader sees the gaps before the results.
 
-status: "supported" (ran and passed its checks) | "limited" (ran; a stated limitation narrows what it shows) |
-        "missing" (planned, not run or failed) — never "supported" by default: a field that cannot be read is "limited"
-        with the reason "not recorded".
+Execution and science are separate (D-134).  Every row carries
+  execution_status  "ran" | "not_run"            — did the calculation finish; says nothing about its validity
+  assessment        None | {state pass/fail/unknown, source, thresholds_version, evidence_ids, failed, unknown}
+  claim             None | the claim the row is judged against (dG_standard | path_specific | diagnostic_curve)
+  claim_eligibility None | bool                   — may that claim be stated
+and the backward-compatible `status` the report renderer uses:
+  "supported" the assessment supports the stated claim (or a plain check passed) | "limited" ran; a stated limitation
+  narrows what it shows | "missing" planned, not run or failed | "ran" execution only — finished, no scientific claim.
+Never "supported" by default: a field that cannot be read is "limited" with the reason "not recorded"; a binding result
+is "supported" only through `sampling.assessment.claim_status` — the same record captions, the summary and the comparison read.
 Pure: reads the workflow's state.json / config and the analysis files it points to.
 """
 from __future__ import annotations
@@ -40,11 +47,65 @@ R = {
     "auto_open": ("補窗後仍有斷點", "breaks remain after refinement", "補窓の後も途切れが残る", "보충 후에도 끊김이 남음"),
     "auto_incomplete": ("補窗尚未完成", "refinement not finished", "補窓が未完了", "보충이 끝나지 않음"),
     "not_selected": ("沒有選出姿勢", "no pose selected", "ポーズが選ばれていない", "포즈가 선택되지 않음"),
+    # D-134 (R2): execution is not a scientific claim; binding rows read the one versioned assessment
+    "execution_only": ("只代表模擬跑完，不是科學上已通過的結論", "the simulation finished; that is execution, not a validated conclusion",
+                       "計算が終わっただけで、科学的に検証された結論ではない", "계산이 끝났을 뿐 과학적으로 검증된 결론이 아님"),
+    "assess_legacy": ("評估缺漏或舊版，需重新分析", "assessment missing or from an older version: reanalysis needed",
+                      "評価がないか旧版：再解析が必要", "평가가 없거나 구버전: 재분석 필요"),
+    "assess_failed": ("取樣評估未通過", "the sampling assessment failed", "取得評価が不合格", "샘플링 평가 미통과"),
+    "assess_unknown": ("部分取樣診斷沒有紀錄，視為未知", "some sampling diagnostics are not recorded and count as unknown",
+                       "一部の取得診断が記録されておらず、不明として扱う", "일부 샘플링 진단이 기록되지 않아 미상으로 취급"),
+    "path_specific_only": ("只有沿這條拉離路徑的 PMF（描述性），不是標準 ΔG°",
+                           "only the PMF along this pulling path (descriptive), not a standard ΔG°",
+                           "この引き離し経路に沿った PMF（記述的）だけで、標準 ΔG° ではない",
+                           "이 당김 경로를 따른 PMF(기술적)일 뿐 표준 ΔG°가 아님"),
+    "no_curve": ("沒有 PMF 曲線", "no PMF curve", "PMF 曲線がない", "PMF 곡선 없음"),
+}
+# the claim a row is judged against (what the row may say when its status is "supported")
+C = {
+    "dG_standard": ("標準結合自由能 ΔG°（1 M 徑向近似）", "standard binding free energy ΔG° (1 M radial approximation)",
+                    "標準結合自由エネルギー ΔG°（1 M 動径近似）", "표준 결합 자유 에너지 ΔG°(1 M 방사 근사)"),
+    "path_specific": ("沿拉離路徑的 PMF 井深（路徑特定，不是內在親和力）", "PMF well depth along the pulling path (path-specific, not an intrinsic affinity)",
+                      "引き離し経路に沿った PMF の井戸の深さ（経路固有、固有の親和性ではない）",
+                      "당김 경로를 따른 PMF 우물 깊이(경로 특이적, 고유 친화도 아님)"),
+    "diagnostic_curve": ("診斷用 PMF 曲線（不比較、不排名）", "diagnostic PMF curve (not compared, not ranked)",
+                         "診断用の PMF 曲線（比較も順位づけもしない）", "진단용 PMF 곡선(비교·순위 없음)"),
 }
 
 
-def _row(item, subject, planned, done, status, reasons=()):
-    return {"item": item, "subject": subject, "planned": planned, "done": done, "status": status, "reasons": list(reasons)}
+def _row(item, subject, planned, done, status, reasons=(), *, assessment=None, claim=None, claim_eligibility=None,
+         requested=None, requested_eligible=None):
+    """claim = the strongest claim the row may state; requested = the claim the study asked for (they differ when the
+    evidence supports only a weaker statement)."""
+    return {"item": item, "subject": subject, "planned": planned, "done": done, "status": status, "reasons": list(reasons),
+            "execution_status": "ran" if done else "not_run", "assessment": assessment, "claim": claim,
+            "claim_eligibility": claim_eligibility, "requested_claim": requested or claim,
+            "requested_eligible": claim_eligibility if requested_eligible is None else requested_eligible}
+
+
+def _binding_row(t: str, r: dict) -> dict:
+    """The binding row is decided by the SAME claim_status record as the comparison, captions and summary."""
+    from ..sampling.assessment import claim_status
+    dg, path = claim_status(r, "dG_standard"), claim_status(r, "path_specific")
+    asm = {"state": path["assessment"], "source": path["assessment_source"], "thresholds_version": path["thresholds_version"],
+           "evidence_ids": path["evidence_ids"], "failed": path["failed"], "unknown": path["unknown"],
+           "overrides": path["overrides"]}
+    if not path["executed"]:
+        return _row("binding", t, True, False, "missing", ("not_run",), assessment=asm, claim="dG_standard", claim_eligibility=False)
+    if dg["eligible"]:
+        return _row("binding", t, True, True, "supported", assessment=asm, claim="dG_standard", claim_eligibility=True)
+    if path["eligible"]:
+        reasons = ["path_specific_only"] + (["dg_withheld"] if r.get("dG_withheld") or r.get("dG_standard_kj_mol") is None else [])
+        row = _row("binding", t, True, True, "limited", reasons, assessment=asm, claim="path_specific", claim_eligibility=True,
+                   requested="dG_standard", requested_eligible=False)
+    else:
+        reasons = list(path["reasons"]) + (["dg_withheld"] if r.get("dG_withheld") else [])
+        row = _row("binding", t, True, True, "limited", reasons, assessment=asm,
+                   claim="diagnostic_curve", claim_eligibility=claim_status(r, "diagnostic_curve")["eligible"],
+                   requested="dG_standard", requested_eligible=False)
+    if r.get("dG_withheld"):
+        row["detail"] = r["dG_withheld"]
+    return row
 
 
 def evidence_rows(wf) -> list[dict]:
@@ -61,11 +122,13 @@ def evidence_rows(wf) -> list[dict]:
     # molecular dynamics, replicas
     cases = (st.get("md_cases") or {}).get("cases") or {}
     runs = (st.get("md_runs") or {}).get("runs") or {}
-    planned_reps = int(md.get("replicas") or 1)
+    from ..engine.replica_plan import configured_replicas
+    planned_reps = configured_replicas(cfg)[0]          # D-131: the plan the workflow actually runs (default 3), not "or 1"
     for key in cases:
         r = runs.get(key) or {}
         done = r.get("status") == "COMPLETE"
-        rows.append(_row("md", key, True, done, "supported" if done else "missing", () if done else ("not_run",)))
+        # D-134: COMPLETE is execution status, not a scientific claim → "ran", never "supported"
+        rows.append(_row("md", key, True, done, "ran" if done else "missing", ("execution_only",) if done else ("not_run",)))
         if done:
             n = len(r.get("run_ids") or [])
             if n < planned_reps:
@@ -107,13 +170,7 @@ def evidence_rows(wf) -> list[dict]:
     targets = set(res) | set(b.get("added") or [])
     for t in sorted(targets):
         r = res.get(t) or {}
-        if r.get("status") != "PASS":
-            rows.append(_row("binding", t, True, False, "missing", ("not_run",)))
-        elif r.get("dG_standard_kj_mol") is None:
-            rows.append(_row("binding", t, True, True, "limited", ("dg_withheld",), ))
-            rows[-1]["detail"] = r.get("dG_withheld")
-        else:
-            rows.append(_row("binding", t, True, True, "supported"))
+        rows.append(_binding_row(t, r))
         if r.get("status") == "PASS":          # D-122 (F17): what the automatic refinement did, from the run's own files
             from . import auto_actions as AA
             st_, why_, done_ = AA.evidence_status(AA.summarize(AA.result_dir(r)))
@@ -122,7 +179,7 @@ def evidence_rows(wf) -> list[dict]:
 
 
 def summary(rows: list[dict]) -> dict:
-    out = {"supported": 0, "limited": 0, "missing": 0}
+    out = {"supported": 0, "limited": 0, "missing": 0, "ran": 0}
     for r in rows:
         out[r["status"]] = out.get(r["status"], 0) + 1
     return out

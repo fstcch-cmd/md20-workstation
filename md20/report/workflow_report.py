@@ -414,8 +414,9 @@ def _evidence_html(doc: Doc, wf) -> str:
         return ""
     L = doc.lang
     word = {"supported": ("有證據", "supported", "裏付けあり", "근거 있음"), "limited": ("有限制", "limited", "制限あり", "제한 있음"),
-            "missing": ("缺", "missing", "欠落", "없음")}
-    cls = {"supported": "", "limited": "caution", "missing": "warn"}
+            "missing": ("缺", "missing", "欠落", "없음"),
+            "ran": ("已執行", "ran", "実行済み", "실행됨")}          # D-134: execution only, not a scientific claim
+    cls = {"supported": "", "limited": "caution", "missing": "warn", "ran": ""}
 
     def yn(v):
         if isinstance(v, bool):
@@ -426,16 +427,25 @@ def _evidence_html(doc: Doc, wf) -> str:
         why = "；".join(tx(EV.R[x], L) if x in EV.R else _esc(x) for x in r["reasons"]) or "—"
         if r.get("detail"):
             why += f"（{_esc(r['detail'])}）"
+        claim = "—"
+        if r.get("claim"):          # D-134: the strongest claim the evidence allows; a shortfall against the requested one is named
+            claim = _esc(tx(EV.C[r["claim"]], L)) + ("" if r.get("claim_eligibility") else f" ({_esc(tx(('不成立', 'not supported', '成立せず', '성립 안 함'), L))})")
+            if r.get("requested_claim") not in (None, r["claim"]):
+                claim += (f"<br><span class=muted>{_esc(tx(('未達', 'not reached', '未達', '미달'), L))}{colon(L)}"
+                          f"{_esc(tx(EV.C[r['requested_claim']], L))}</span>")
         body.append([_esc(tx(EV.T[r["item"]], L)), _esc(r["subject"] or "—"), yn(r["planned"]), yn(r["done"]),
                      f"<b class={cls[r['status']]}>{_esc(tx(word[r['status']], L))}</b>" if cls[r["status"]] else _esc(tx(word[r["status"]], L)),
-                     why])
+                     claim, why])
     sm = EV.summary(rows)
     head = (f"<p>{_esc(tx(('證據覆蓋：', 'Evidence coverage: ', '裏付けの範囲：', '근거 범위: '), L))}"
             f"{sm['supported']} {_esc(tx(word['supported'], L))} · {sm['limited']} {_esc(tx(word['limited'], L))} · "
-            f"{sm['missing']} {_esc(tx(word['missing'], L))}</p>")
+            f"{sm['missing']} {_esc(tx(word['missing'], L))}"
+            + (f" · {sm['ran']} {_esc(tx(word['ran'], L))}" if sm.get("ran") else "") + "</p>")
     return head + doc.table([tx(("項目", "Item", "項目", "항목"), L), tx(("對象", "Subject", "対象", "대상"), L),
                              tx(("計畫", "Planned", "計画", "계획"), L), tx(("完成", "Done", "完了", "완료"), L),
-                             tx(("證據", "Evidence", "裏付け", "근거"), L), tx(("限制或缺口", "Limitation or gap", "制限・欠落", "제한 또는 공백"), L)],
+                             tx(("證據", "Evidence", "裏付け", "근거"), L),
+                             tx(("評估的說法", "Claim assessed", "評価する主張", "평가하는 주장"), L),
+                             tx(("限制或缺口", "Limitation or gap", "制限・欠落", "제한 또는 공백"), L)],
                             body, ("研究設計與證據覆蓋（計畫、實際執行、能支持什麼）", "Study design and evidence coverage (planned, run, what it supports)",
                                    "研究デザインと裏付けの範囲（計画・実行・何を支えるか）", "연구 설계와 근거 범위(계획, 실행, 무엇을 뒷받침하는가)")) \
         + _comparability_html(doc, wf)
@@ -1138,9 +1148,14 @@ def _binding(doc: Doc, wf, vals, f, goal) -> str:
     if not b:
         return _section(doc, doc.next(), "binding", params, "", [])
     pm = lambda v, e: "—" if v is None else (f"{v:.1f} ± {e:.1f}" if e is not None else f"{v:.1f}")  # noqa: E731
+    # D-134 (R2): a ΔG° number is shown as ΔG° only when the one claim_status record qualifies it
+    ok_dg = {n: _claim_of(r, "dG_standard")["eligible"] for n, r in b.items()}
+    not_qual = tx(("不作為 ΔG°（取樣評估未通過或缺漏）", "not a ΔG° (sampling assessment failed or missing)",
+                   "ΔG° として扱わない（取得評価が不合格または欠落）", "ΔG°로 쓰지 않음(샘플링 평가 미통과 또는 누락)"), L)
     trs = [[_esc(n), pm(r.get("delta_pmf_kj_mol"), r.get("delta_pmf_err_kj_mol")),
-            pm(r.get("dG_standard_kj_mol"), r.get("dG_err_kj_mol")) if r.get("dG_standard_kj_mol") is not None else tx(("不輸出", "not reported", "出力しない", "출력 안 함"), L),
-            _fmt(r.get("dG_standard_kcal_mol"), 1) if r.get("dG_standard_kcal_mol") is not None else "—",
+            (pm(r.get("dG_standard_kj_mol"), r.get("dG_err_kj_mol")) if ok_dg[n] else
+             (not_qual if r.get("dG_standard_kj_mol") is not None else tx(("不輸出", "not reported", "出力しない", "출력 안 함"), L))),
+            _fmt(r.get("dG_standard_kcal_mol"), 1) if (r.get("dG_standard_kcal_mol") is not None and ok_dg[n]) else "—",
             _fmt(r.get("r_min_nm"), 3), _fmt(r.get("max_force"), 0), _fmt(r.get("work"), 1),
             _esc(tx(_CTX_TEXT["multi" if str(r.get("context", "")).startswith("multi") else "single"], L)),
             str(r.get("replicas") or 1)] for n, r in b.items() if r.get("status", "PASS") == "PASS"]
@@ -1158,7 +1173,7 @@ def _binding(doc: Doc, wf, vals, f, goal) -> str:
         per = r.get("per_replica") or []
         if len(per) > 1:          # D-87: every SMD/umbrella run of this target, then the combined value above
             prs = [[str(i + 1), pm(p_.get("delta_pmf_kj_mol"), p_.get("delta_pmf_err_kj_mol")),
-                    pm(p_.get("dG_standard_kj_mol"), p_.get("dG_err_kj_mol")) if p_.get("dG_standard_kj_mol") is not None else "—"]
+                    pm(p_.get("dG_standard_kj_mol"), p_.get("dG_err_kj_mol")) if (p_.get("dG_standard_kj_mol") is not None and ok_dg[name]) else "—"]
                    for i, p_ in enumerate(per)]
             out += doc.table([tx(("第幾次", "Run", "回", "회차"), L), "ΔPMF (kJ mol⁻¹)", "ΔG° (kJ mol⁻¹)"], prs,
                              ("各次 SMD＋傘狀採樣", "Each SMD and umbrella-sampling run", "各回の SMD と傘サンプリング",
@@ -1197,18 +1212,22 @@ def _binding_manifest_pmf(r: dict) -> dict:
 
 
 def _assessment_for(r: dict) -> dict | None:
-    """D-96: the ONE assessment every caption, summary and table of a binding result reads — the stored one, else
-    re-assessed from the stored PMF fields (a report rebuild, no MD); missing fields stay unknown, so legacy data
-    come out as not qualified.  None when nothing at all is stored."""
+    """D-96/D-134: the ONE assessment every caption, summary and table of a binding result reads (assessment.resolve_assessment):
+    the stored one, else re-assessed from the stored PMF fields (a report rebuild, no MD) and marked legacy — its
+    diagnostics are shown but the result stays NOT eligible until reanalysed.  None when nothing at all is stored."""
     if r.get("assessment"):
         return r["assessment"]
     pm = _binding_manifest_pmf(r)
     if not pm:
         return None
-    from ..sampling.assessment import assess_pmf
-    a = assess_pmf(pm, dG_withheld=r.get("dG_withheld"), has_dG=r.get("dG_standard_kj_mol") is not None)
-    a["reassessed_from_manifest"] = True
-    return a
+    from ..sampling.assessment import resolve_assessment
+    return resolve_assessment(r, pm)[0]
+
+
+def _claim_of(r: dict, claim: str) -> dict:
+    """D-134: the versioned claim record of one binding result (same function the evidence matrix and comparison use)."""
+    from ..sampling.assessment import claim_status
+    return claim_status(r, claim, pmf=None if r.get("assessment") else _binding_manifest_pmf(r))
 
 
 def _binding_figures(doc: Doc, name: str, r: dict) -> str:

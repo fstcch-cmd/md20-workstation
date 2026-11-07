@@ -1291,7 +1291,10 @@ _DIAG_NAME = {
 
 def classify_assessment(name: str, a: dict | None) -> list[dict]:
     """One overall sentence from the D-96 Assessment — the only place an overall sampling statement is made."""
-    if not a:
+    # D-134: a re-assessed legacy result lists the diagnostics that fail / are unknown (below) but stays unqualified; when
+    # every diagnostic reads fine, the only thing missing is the stored qualification → the "awaits reanalysis" sentence
+    from ..sampling.assessment import REQUIRED_PATH
+    if not a or (a.get("legacy") and not [i for i in (a.get("failed") or []) + (a.get("unknown") or []) if i in REQUIRED_PATH]):
         return [S("caution",
                   f"{name}：這個結果沒有取樣品質評估（D-96 之前的舊資料），待重新分析；不做任何比較或排名。",
                   f"{name}: this result has no sampling assessment (written before D-96) and awaits reanalysis; it is not "

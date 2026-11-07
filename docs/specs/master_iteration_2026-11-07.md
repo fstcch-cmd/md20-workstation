@@ -83,6 +83,8 @@ A5/A6/F07/F08/F09/A4/A12 已實作（純 Python，容器可測；真實 mdtraj �
 - 資格：`delta_pmf_curve`（診斷曲線永遠可顯示）、`delta_pmf_path_specific`（所有必要診斷 pass）、`dG_standard`（再加上 ΔG° 沒被撤回）、`affinity_ranking`（只有 ΔG° 合格才可能）。
 - 門檻集中在 `THRESHOLDS`（帶版本 `2026-11-07.2`（D-113 新增 `mbar_overlap_edge_min`；原為 `2026-11-07.1`） 與每項來源說明），可由 config 覆寫；不是普遍定律。
 
+> **D-134 更新**：評估紀錄現在由 `claim_status` 以「說法」為單位對外提供，證據矩陣、圖說、摘要、比較、GUI 全部讀同一份；規格見 [assessment.md](assessment.md)。
+
 ### 3.2 比較（`sampling/multi.py`）
 - `compare_binding`：只用 `assessment.eligibility` 合格者；舊結果沒有 assessment →「待重新分析」；單獨情境：ΔG° 全部合格才做 ΔΔG°，否則 ΔPMF 只在路徑特定合格且條件簽章一致時列順序，用語「沿各自拉離路徑的井深較深／較淺，不是內在親和力」，不出現「最強」；multi 情境一律 `DESCRIPTIVE`（列值，不排名）。
 - 共同佔據位移、協同循環：雙方都要路徑特定合格且條件一致；用語不再說「可能有協同或互斥」。
