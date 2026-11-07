@@ -1,6 +1,6 @@
 # 獨立重複（replicas）：哪些分析需要、需要幾條、報告怎麼呈現不確定性
 
-狀態：**§3–§5（重複計畫與開始前告知）已實作（D-131，待 CI）；§2 的分析彙總與報告由另一個代理同時實作。** 規格 D-129，2026-11-07。 使用者 22:51 授權：「根據每一個分析思考哪些需要重複、哪些不需要；需要重複的取最大值，在一開始模擬時就告訴使用者會多花時間，確保報告完整。」
+狀態：**§3–§5（重複計畫與開始前告知）已實作（D-131，待 CI）；§2 的分析彙總與報告已實作（D-130 重做，§7，待 CI；其中 §2 表的 ΔRMSF 信賴區間、DCCM、tICA／MSM 合併、DSSP、水合、膜指標的跨重複彙總尚未做，見 §7 限制）。** 規格 D-129，2026-11-07。 使用者 22:51 授權：「根據每一個分析思考哪些需要重複、哪些不需要；需要重複的取最大值，在一開始模擬時就告訴使用者會多花時間，確保報告完整。」
 
 ## 1. 缺口（查到的事實）
 - `Workflow.analyse()` 只讀 `r["run_ids"][0]`：RMSD、RMSF、接觸、指紋、持續性、PCA／地形、DCCM、tICA／MSM、水合、膜指標、系統比較（D-106 共同基底、ΔRMSF）全部只看**第一條**軌跡；其餘重複跑了卻沒有進報告。
@@ -61,3 +61,27 @@
 - **補跑**：`run_md` 發現某系統已 COMPLETE 但條數少於 `md.replicas`，就沿用同一個 `replica_group` 呼叫 `run_replicas`，它從檔案判斷哪幾條 COMPLETE 並跳過，只新建缺的 `replica_index`；`set_replicas` 只丟掉 `analysis` 與 `report` 兩步，不動 `md_runs`、`binding`。測試：已有 1 條 → 補到 3 條，原本那條的 `run.json` 未被改動。
 - **每條的獨立性（照 `run_replicas` 現況）**：第 i 條的 seed = 基礎 seed 2026 + 1000×i；每條從同一個建好的系統開始，各自做最小化、加熱與平衡，初速由自己的 seed 產生（不是從同一個平衡後結構分出去）。
 - **限制**：粗粒化（`md.resolution: cg`）目前每個系統只跑 1 條，計畫卡片只告知這點，沒有選項；GUI 卡片在 NiceGUI 上的渲染要等 CI／筆電。
+
+## 7. 實作（D-130 重做）：每一條重複都分析，跨重複彙總與報告
+- **關係**：case → 獨立 MD 重複（`run_replicas`，各自 seed）→ 後代（SMD 拉動、傘狀採樣視窗）。只有第二層算「重複」；同一條母軌跡拉出的拉動與視窗只列在該重複底下，**不增加條數**。輸出 schema `md20.replica_set/1` 把這個關係與 `concatenation: never` 寫在檔案裡。
+- **純函式模組 `md20/analysis/replica_set.py`**（只依賴 numpy）：
+  - 每個觀測量先宣告 estimand，再彙總。每條重複先算出**一個數**（後半段時間平均、每殘基接觸占有率、是／否結果），才跨重複算平均、樣本標準差（n−1）、SEM 與 Student-t 95 % CI（自由度 n−1；t 分位數用內建表，df 1 到 30 與 scipy 一致到 4 位，更大的 df 以 1/df 內插；scipy 不是相依套件）。**n 是重複的條數，不是幀數**；同一條軌跡的幀有自相關，不當成獨立樣本。
+  - 目前涵蓋：主鏈 RMSD、蛋白質 Rg、每殘基 Cα RMSF（平均、SD、CI，逐殘基）；每個配體的口袋 RMSD、接觸殘基數、極性接觸、質心距離（後半段平均）；`stays_bound`（舊旗標）與 `in_pocket_final20`（由 `ligand_state` 最後 20 %：留在口袋的狀態占 ≥ 0.5 → 是；離開證據占 ≥ 0.5 → 否；其餘 → 未知，不計入 n）的 **k／n**；每個接觸殘基的占有率（平均、SD、CI、占有率 ≥ 0.5 的條數 k／n；某條完全沒碰到記 0）。
+  - **n = 1**：`between_replica = {status: unavailable, reason: 「單一軌跡無法估計重複間不確定性」}`，SD、SEM、CI 都是 `null`，絕不給區間。n = 2 照算但標 `below_recommended_n`（t₀.₉₇₅ = 12.7，區間極寬）；n < 3 一律在報告與 DecisionLog 提醒。
+  - **單條軌跡內的變異另列**：每條重複的區塊平均標準誤（`extended.block_average`，5 區塊，後半段），放在 `within_trajectory`，不與重複間不確定性相加或混用。
+  - **不一致標註**：各條數值的變異係數 > 0.25（經驗起始值，要依系統驗證）→ `divergent:<觀測量>`；二元結果不是全 0 或全 k → `inconsistent:<配體>:<結果>`。
+  - **失敗、未完成、被排除的重複留在輸出**（`replicas[]` 與 `excluded[]`，附原因）；每條數值都帶 `run_id`。
+  - **不接合重複**：事件長短與持續性只在單條內算（`extended.json` 的路徑逐條列出），這裡只彙總各條已算好的數。
+- **`Workflow.analyse`**：對 `run_ids` 的每一條分析（沿用既有 `analyse_run`、膜分析路徑與「已有 PASS 的 `analysis_manifest.json` 就沿用」的邏輯；沿用判斷集中在 `_reuse_analysis_manifest()` 一個函式，之後換成快取指紋只改這裡）。run.json 狀態不是 COMPLETE 的重複不分析、保留原因。單一重複分析失敗不擋其他重複（保留原因並寫 DecisionLog）；全部失敗才照舊丟出第一個錯誤。
+  - `summaries[key]` 向下相容：原有欄位是**第一條可分析的重複**（`representative_run_id`），另加 `replicas`（逐條 `run_id`、狀態、是否納入、原因、每條的 manifest 摘要）、`n_replicas_analysed`、`replica_set_file`（`<workflow>/analysis_replicas_<系統>.json`，`atomic_write_json`）、`replica_overlay`（疊圖 PNG）。
+  - 疊圖 `md20/report/replica_figs.py`：每條重複一條線（用 run id 命名）加跨重複平均 ± SD 灰帶，主鏈 RMSD 與各配體口袋 RMSD 各一格，規則照 `figures.md`（圖例在右側外、時間軸不遞增就不畫成時間）。只有一條時沒有色帶，標題寫明。
+  - `compare_runs`（apo 對複合物）的 RMSF 改用各系統**重複平均**；RMSD 曲線仍是一條代表重複，圖例寫明是哪一條。ΔRMSF 的重複間 CI 尚未做（見限制）。
+- **可比性（`_comparability`）**：讀**每一條**重複的 `run.json`。任何一條條件不同或不明 → 該比較「不可比」，並指出是系統之間還是同一系統的重複之間不同（`within_system`）；`conditions[key]` 是該系統的合併視圖（重複不同意的欄位變成「replicas differ: …」，不明就是 `null`），所以既有的成對可比性矩陣也會被擋。**只擋比較，各條自己的分析與彙總照常。** 每條的條件另存 `replica_conditions`。
+- **共同基底（`_common_basis`）**：每條可分析的重複各自成為一條軌跡，標籤 `系統/run_id`（只有一條的系統維持原標籤）；各自有地形與低谷佔比，**不頭尾接合**。`analysis_common.json` 的 `trajectory_labels` 對應回系統與 run id。
+- **報告（`md20/report/replica_section.py`，四語）**：MD 區加「獨立重複的彙總」：說明重複的定義與後代不算；每條重複的表（狀態、是否納入、RMSD 後半段平均與單條 SE、配體口袋 RMSD 與是否留在口袋、排除原因）；跨重複表（觀測量、n、平均 ± SD、t 區間、k／n、備註）；接觸占有率前 10 名；疊圖；n = 1 時寫「不可得」、不印 SD 與區間；不一致與排除會進該節的解讀。方法段與限制段的重複數改讀實際條數（`configured_or_actual`），不再把沒寫 `md.replicas` 讀成 1。
+- **限制（誠實）**：
+  - §2 表中尚未跨重複彙總：apo–複合物 ΔRMSF 的每殘基 CI、水合位點、DSSP、PCA 低谷佔比的 mean ± SD、DCCM、tICA／MSM 合併估計、膜面積與厚度。這些要等 `extended.json` 的對應欄位逐條讀入；目前只有第一條代表重複的版本。
+  - `engine/replicas.aggregate_replicas`（平衡階段的重複彙總）在 n = 1 時 SD 寫成 0.0，與本節「n = 1 不給不確定性」不一致，尚未改。
+  - 證據矩陣（`report/evidence.py`）仍讀 `md.get("replicas") or 1`，由另一個代理處理。
+  - 真實 mdtraj／OpenMM 路徑沒有在容器內跑，只用偽分析輸出測邏輯，真實路徑交給 CI。
+- 測試：`tests/test_replica_analysis.py`。
