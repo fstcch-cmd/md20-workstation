@@ -6,6 +6,14 @@
 ---
 
 ## 2026-11-07
+### D-112　28e87aa macOS openmm-stack `test_popc_bilayer_case_c`：D-104 斷言把「頭基原子」當成「脂質數」；中日文說明同樣易誤讀
+- 證據：run 42362077340 macOS job，`tests/test_membrane_integration.py:55` `assert 256 == 128`。同一測試前面的斷言都過：128 個 POPC（上下各 64）、總電荷 0、**water overlaps 閘門 PASS/AUTO_FIXED（D-102）**、即時 3D 階段 **bilayer → declashed（D-104）**。
+- 根因：`live3d.membrane_scene` 依設計（D-104：「脂質頭基（P、N、膽固醇 O3）全部畫」）把每個 POPC 的 P 與 N 都標為 `H`，128 個脂質 → 256 個頭基原子。程式行為正確；整合測試寫成 128。另外 GUI 說明的中文「脂質頭基（256 個）」、日文「頭部（256 個）」讀起來像 256 個脂質（英文、韓文本來就寫 head atoms）。
+- 決定：測試改為「P 原子 128 個（一個脂質一個磷）且 H 總數 = summary.n_lipid_heads = 256」；中日文說明改為「頭基原子（磷、氮等，N 個；每個脂質不只一個）」。繪圖邏輯不變。
+- 被否決：只畫 P（N 是膽鹼位置，學生看頭基朝向需要它；且膽固醇只有 O3）。
+- 測試：`tests/test_membrane_integration.py`（CI 真實 OpenMM）；`tests/test_live3d.py` 的中文說明斷言（含「脂質頭基」）仍成立。
+- 其餘兩項 macOS 失敗（`test_real_case_integration` padding 0.8）是 D-107 已修的項目，不重複。
+
 ### D-111　28e87aa 的 heavy (full_workflow) 紅燈：測試讀錯 manifest 位置（程式沒錯）
 - 證據：run 42362077340 job `heavy (workflow …full_workflow)` 在 `tests/test_workflow_integration.py:61` 失敗，`gb == []`；流程本身 COMPLETE（docking、apo/docked_BEN MD、PBC 檢查、D-98 原子電荷指紋斷言都過）。
 - 根因：`build/pipeline.build_case` 寫 `build_manifest.json` 時，組裝閘門放在 `assembly.gates.gates`（`BuildResult.to_dict()`），頂層沒有 `gates` 鍵；D-99 新增的斷言讀頂層，所以不論閘門有沒有跑都是空的。`tests/test_real_case_integration.py`、GUI（`gui/views.py`、`gui/tables.py`）都讀 `assembly.gates`，程式端一致。

@@ -52,7 +52,10 @@ def test_popc_bilayer_case_c(tmp_path):
     from md20.build.live3d import read_index, latest_scene
     assert [s["stage"] for s in read_index(tmp_path)["stages"]] == ["bilayer", "declashed"]
     sc, _ = latest_scene(tmp_path)
-    assert sum(a["k"] == "H" for a in sc["atoms"]) == 128 and not any(a["r"] == "HOH" for a in sc["atoms"])
+    # D-112: "H" = head ATOMS (P and N of every POPC → 2 per lipid), not lipids; one phosphate per lipid = 128
+    heads_drawn = [a for a in sc["atoms"] if a["k"] == "H"]
+    assert sum(a["n"] == "P" for a in heads_drawn) == 128 and len(heads_drawn) == sc["summary"]["n_lipid_heads"] == 256
+    assert not any(a["r"] == "HOH" for a in sc["atoms"])
     xyz, box = _run_membrane_npt(res)
     heads = xyz[mem["head_atom_indices"]][None]
     th = MA.thickness_pp(heads, box[None])

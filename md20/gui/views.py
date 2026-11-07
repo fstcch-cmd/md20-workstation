@@ -422,11 +422,11 @@ def _membrane_caption(scene: dict, lang: str) -> str:
     stage = pick(tuple(scene["stage_label"]), lang) if scene.get("stage_label") else scene.get("stage", "")
     nh, nt, ntot = s.get("n_lipid_heads", 0), s.get("n_tail_atoms_shown", 0), s.get("n_tail_atoms", 0)
     return stage + pick((
-        f"。橘色是脂質頭基（{nh} 個），灰色點是尾鏈原子（畫出 {nt}／{ntot} 個），水不畫，離子是小紫點。"
+        f"。橘色是脂質頭基原子（磷、氮等，{nh} 個；每個脂質不只一個），灰色點是尾鏈原子（畫出 {nt}／{ntot} 個），水不畫，離子是小紫點。"
         "建模時每完成一步會自動更新。拖曳旋轉、滾輪縮放。",
         f". Orange: lipid head atoms ({nh}). Grey dots: tail atoms ({nt} of {ntot} drawn). Water is not drawn and ions "
         "are small purple dots. The view updates after each build step. Drag to rotate and scroll to zoom.",
-        f"。橙は脂質の頭部（{nh} 個）、灰色の点は尾部の原子（{ntot} 個中 {nt} 個を表示）です。水は描かず、イオンは小さな紫の点です。"
+        f"。橙は脂質の頭部の原子（リン・窒素など {nh} 個。脂質 1 個に複数あります）、灰色の点は尾部の原子（{ntot} 個中 {nt} 個を表示）です。水は描かず、イオンは小さな紫の点です。"
         "建模の各段階が終わるたびに更新されます。ドラッグで回転、ホイールで拡大と縮小ができます。",
         f". 주황색은 지질 머리 원자({nh}개), 회색 점은 꼬리 원자({ntot}개 중 {nt}개 표시)입니다. 물은 그리지 않고 이온은 작은 보라색 점입니다. "
         "모델링 단계가 끝날 때마다 갱신됩니다. 드래그하면 회전하고 휠로 확대하거나 축소합니다."), lang)
