@@ -1,7 +1,7 @@
 """Extended trajectory analysis (D-58): everything the production trajectory supports beyond RMSD/RMSF/contacts.
 
 Two layers:
-  * pure numpy (tested everywhere): PCA, free-energy landscape, clustering from an RMSD matrix, cross-correlation,
+  * pure numpy (tested everywhere): PCA, free-energy landscape, (D-105, toolbox.py) tICA/MSM, H-bond network, hydration; clustering from an RMSD matrix, cross-correlation,
     hydrogen-bond and fingerprint aggregation, block averages;
   * `extended_metrics(traj, ligand_groups)` (mdtraj, run in the analysis step): extracts the per-frame data and
     calls the pure functions.  Every block is independent and wrapped, so one failure never loses the others.
@@ -262,13 +262,53 @@ def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *,
         return {"total_A2": s.round(1).tolist()}
     guard("sasa_protein", sasa_protein)
 
-    # ---- intramolecular protein hydrogen bonds (count per frame)
+    # ---- intramolecular protein hydrogen bonds (count per frame) and, D-105, the side-chain network
     def hb_protein():
         step = max(1, sub.n_frames // 100)                      # ≤ 100 frames: the whole protein is the slow part
         cplx = sub[::step].atom_slice(prot)
         per = md.wernet_nilsson(cplx)
-        return {"count": [int(len(x)) for x in per], "time_ns": t_ns[::step]}
+        ctop = cplx.topology
+        backbone = {"N", "O", "OXT", "H"}
+        pairs = []
+        for x in per:                                            # side chain involved: backbone helix/sheet bonds
+            fr = []                                              # would make every residue a "hub"
+            for d, h, a in x:
+                ad, aa = ctop.atom(int(d)), ctop.atom(int(a))
+                if ad.name in backbone and aa.name in backbone:
+                    continue
+                fr.append((f"{ad.residue.name}{ad.residue.resSeq}", f"{aa.residue.name}{aa.residue.resSeq}"))
+            pairs.append(fr)
+        from .toolbox import hbond_network
+        return {"count": [int(len(x)) for x in per], "time_ns": t_ns[::step], "network": hbond_network(pairs)}
     guard("hbonds_protein", hb_protein)
+
+    # ---- D-105: slow motions (tICA on Cα, all frames in time order) and a small Markov state model on them
+    def kinetics():
+        from .toolbox import tica, kmeans, msm
+        n = traj.n_frames
+        tt = np.asarray(traj.time, float) if traj.time is not None and len(traj.time) == n else np.arange(n, dtype=float)
+        dt_ns = float(np.median(np.diff(tt))) / 1000.0 if n > 1 else 0.0
+        if n < 100 or dt_ns <= 0:
+            return {"status": "insufficient", "reason": "frames", "n_frames": int(n)}
+        X = traj.xyz[:, ca, :].reshape(n, -1) * 10.0
+        lags = sorted({int(max(1, round(v / dt_ns))) for v in (0.05, 0.1, 0.2, 0.5, 1.0, 2.0)} & set(range(1, n // 10)))
+        if not lags:
+            return {"status": "insufficient", "reason": "frames", "n_frames": int(n)}
+        lag = lags[len(lags) // 2]
+        ti = tica(X, lag)
+        if ti.get("status") != "ok":
+            return ti
+        proj = np.asarray(ti["projection"])
+        ti["dt_ns"], ti["lag_ns"] = dt_ns, round(lag * dt_ns, 4)
+        ti["timescales_ns"] = [None if v is None else round(v * dt_ns, 4) for v in ti["timescales_frames"]]
+        ti["landscape"] = free_energy_landscape(proj[:, 0], proj[:, 1], temperature_k=temperature_k)
+        k = int(np.clip(n // 50, 5, 30))
+        lab, _ = kmeans(proj, k)
+        ti["msm"] = msm(lab, lags=lags, n_states=k, dt_ns=dt_ns)
+        step = max(1, n // 2000)                                 # keep the JSON small
+        ti["projection"] = proj[::step].round(3).tolist()
+        return ti
+    guard("tica", kinetics)
 
     out["ligands"] = {}
     polar = np.setdiff1d(top.select("protein and (element N or element O)"), lig_all)
@@ -354,6 +394,15 @@ def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *,
             buried = 1.0 - a / np.clip(free, 1e-6, None)
             return {"complex_A2": a.round(1).tolist(), "free_A2": free.round(1).tolist(), "buried_fraction": buried.round(4).tolist()}
         lguard("sasa", sasa_lig)
+
+        # D-105: where water stays around the ligand (needs waters in the trajectory; solute-only DCDs have none)
+        def hydration():
+            if not len(water_o):
+                return {"status": "no_water"}
+            from .toolbox import hydration_sites
+            com = sub.xyz[:, lh, :].mean(axis=(0, 1))
+            return hydration_sites([fr for fr in sub.xyz[:, water_o, :]], com, radius_nm=1.0)
+        lguard("hydration", hydration)
 
         out["ligands"][rn] = L
     return out

@@ -6,6 +6,20 @@
 ---
 
 ## 2026-11-07
+### D-105　軌跡分析工具箱（藍圖第 1 階段）：補 tICA、馬可夫狀態模型（附資格）、側鏈氫鍵網路、水合位點
+- 使用者 11/07 17:49 同意順序「建膜即時 3D → 分析工具箱」，目標週末完成。
+- **盤點更正**：藍圖（D-102 同 session 的 Claude Doc）把 PCA／分群／FEL／SASA／DSSP／氫鍵／DCCM 列為「—」，實際上 D-58 早已計算並進報告；藍圖低估了現況。真正缺的只有 tICA、MSM、氫鍵網路（圖結構）、水合位點。
+- **決定**：新模組 `md20/analysis/toolbox.py`（純 numpy），`extended_metrics` 接線，報告加兩張圖、兩張表。演算法與門檻見 `docs/specs/analysis_toolbox.md`。
+- **科學上的取捨（寧可擋也不要猜）**：
+  - MSM 對單一軌跡**永遠不報速率**；資格三級 insufficient／unresolved／exploratory，報告依資格寫結論。用對稱化計數（簡單、可解釋），註明不是可逆 MLE。
+  - tICA 先 PCA 降維再解廣義特徵值；幀數不足直接 `insufficient`，不硬算。
+  - 氫鍵網路排除純骨架氫鍵（否則螺旋 i→i+4 讓每個殘基都變「中心」），聚焦側鏈與鹽橋網路——這才是突變設計會用的資訊。
+  - 水合位點：只存溶質的長軌跡沒有水，報告明說「無法分析」，不以空表代替。
+- **被否決**：引入 deeptime／PyEMMA（Windows conda 套件與版本鎖定成本；教學版需要的是可讀的 100 行實作與明確的資格判定）；GIST（需 cpptraj，Windows 無）。
+- **證據**：`tests/test_toolbox.py` 7 項（含已知時間尺度還原、罕見事件拒絕）；`tests/test_extended_analysis.py` CI 真 mdtraj；報告範本涵蓋全部圖種（`test_report_template`）；`test_figure_text` 四語＋規範登記。容器 760 passed。
+- **未決**：Chapman–Kolmogorov／PCCA+ 巨狀態；GaMD 重加權接 FEL（藍圖第 2 階段）。中期藍圖 Claude Doc 的現況表需更正（待使用者決定是否由我改）。
+- 檔案：`md20/analysis/toolbox.py`（新）、`md20/analysis/extended.py`、`md20/report/{figures,figure_text,workflow_report}.py`、`docs/specs/{analysis_toolbox,report_language}.md`、測試。
+
 ### D-104　建膜即時 3D：建模每一步寫一個小場景，GUI 的 3D 分頁自己跟著更新
 - 使用者需求（11/07）：「建膜過程要有即時 3D 顯示」（之前只有建模完成後的起始結構與正式軌跡）。
 - **決定**：

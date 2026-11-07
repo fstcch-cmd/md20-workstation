@@ -48,13 +48,30 @@ def make_wf(tmp_path, lang="en"):
     xyz = rng.normal(0, 0.3, (te.size, 30, 3)); xyz[te.size // 2:, :, 0] += 1.5
     pc = pca(xyz); pr = np.asarray(pc["projection"]); pc["landscape"] = free_energy_landscape(pr[:, 0], pr[:, 1])
     D = np.abs(np.subtract.outer(np.arange(te.size), np.arange(te.size))) * 0.05
+    # D-105 toolbox (synthetic, shapes as written by analysis.extended through analysis.toolbox)
+    from md20.analysis.toolbox import tica, kmeans, msm, hbond_network, hydration_sites
+    sw = np.zeros(2000, int)
+    for i in range(1, 2000):
+        sw[i] = 1 - sw[i - 1] if rng.random() < 0.01 else sw[i - 1]
+    Xk = np.c_[sw + 0.1 * rng.normal(size=2000), 3 * rng.normal(size=(2000, 4))]
+    tk = tica(Xk, 5)
+    tk["dt_ns"], tk["lag_ns"] = 0.005, 0.025
+    tk["timescales_ns"] = [None if v is None else round(v * 0.005, 4) for v in tk["timescales_frames"]]
+    prk = np.asarray(tk["projection"])
+    tk["landscape"] = free_energy_landscape(prk[:, 0], prk[:, 1])
+    tk["msm"] = msm(kmeans(prk, 8)[0], lags=[1, 2, 5, 10, 20], n_states=8, dt_ns=0.005)
+    tk["projection"] = prk[::10].round(3).tolist()
+    net = hbond_network([[("ASP102", "HIS57"), ("HIS57", "SER195"), ("ARG117", "GLU80")] for _ in range(20)])
+    wat = [np.r_[rng.uniform(-1.2, 1.2, (rng.poisson(33.4 * 13.8), 3)), [[0.4, 0, 0]] + rng.normal(0, 0.03, (1, 3))] for _ in range(60)]
+    hyd = hydration_sites(wat, [0, 0, 0], min_ratio=3.0)
     for key in ("apo", "docked_BEN"):
         e = {"time_ns": te.tolist(), "errors": {},
              "dssp": {"fraction": {"H": (0.35 + 0 * te).tolist(), "E": (0.2 + 0 * te).tolist(), "C": (0.45 + 0 * te).tolist()}},
              "pca": pc, "clusters": cluster_from_rmsd(D, 2.0), "dccm": {"matrix": cross_correlation(xyz).round(3).tolist(),
                                                                          "residues": [f"R{i}" for i in range(30)]},
              "sasa_protein": {"total_A2": (11000 + rng.normal(0, 50, te.size)).tolist()},
-             "hbonds_protein": {"count": (180 + rng.normal(0, 3, te.size)).tolist(), "time_ns": te.tolist()}, "ligands": {}}
+             "hbonds_protein": {"count": (180 + rng.normal(0, 3, te.size)).tolist(), "time_ns": te.tolist(), "network": net},
+             "tica": tk, "ligands": {}}
         if key != "apo":
             e["ligands"]["L01"] = {"errors": {}, "hbonds": {"count": (2 + (rng.random(te.size) > 0.5)).tolist(),
                                                            "occupancy": [["ASP189:OD1 ← L01:N1", 0.83], ["SER190:OG → L01:N2", 0.41]]},
@@ -62,7 +79,8 @@ def make_wf(tmp_path, lang="en"):
                                                    "matrix": [[3] * te.size, [2, 0] * (te.size // 2) + [2] * (te.size % 2), [1] * te.size],
                                                    "occupancy": {"ionic": {"ASP189": 0.95}, "polar": {"SER190": 0.5}, "hydrophobic": {"TRP215": 0.9}}},
                                    "water_bridges": {"count": (rng.random(te.size) * 2).round().tolist(), "residues": [["GLY219", 0.4]]},
-                                   "sasa": {"buried_fraction": (0.82 + rng.normal(0, 0.02, te.size)).tolist()}}
+                                   "sasa": {"buried_fraction": (0.82 + rng.normal(0, 0.02, te.size)).tolist()},
+                                   "hydration": hyd}
         atomic_write_json(e, wf.dir / f"x_{key}.json")
     bdir = wf.dir / "binding_BEN"; bdir.mkdir()
     pos = np.linspace(0.4, 1.9, 300)

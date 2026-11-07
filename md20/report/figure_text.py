@@ -2448,3 +2448,85 @@ def classify_cg_membrane(name: str, summ: dict) -> list[dict]:
                      f"{name}：結合の秩序パラメータ P2 の平均は {m:.2f}（{'> 0.6、ゲル相寄り' if m > 0.6 else '< 0.1、無秩序すぎる'}）です。温度と組成を確認してください。",
                      f"{name}: 결합 질서 매개변수 P2 평균은 {m:.2f}({'> 0.6, 겔상 쪽' if m > 0.6 else '< 0.1, 지나치게 무질서함'})입니다. 온도와 조성을 확인하십시오."))
     return out
+
+
+# D-105 analysis toolbox: tICA landscape, Markov state model timescales (md20/analysis/toolbox.py)
+FIG.update({
+    "tica_landscape": {
+        "title": ("慢運動的自由能地形（tICA）", "Free-energy landscape of the slow motions (tICA)",
+                  "遅い運動の自由エネルギー地形（tICA）", "느린 운동의 자유 에너지 지형(tICA)"),
+        "caption": ("Cα 座標先做主成分分析，再找出隨時間變化最慢的兩個組合（時間延遲獨立成分）畫成地形。顏色越深自由能越低。",
+                    "Cα coordinates are reduced by PCA, then the two combinations that change most slowly in time "
+                    "(time-lagged independent components) are drawn as a landscape. Darker is lower free energy.",
+                    "Cα 座標を主成分分析で縮約し、時間的に最もゆっくり変わる2つの組み合わせ（時間遅れ独立成分）で地形を描いています。色が濃いほど自由エネルギーが低くなります。",
+                    "Cα 좌표를 주성분 분석으로 줄인 뒤, 시간에 따라 가장 느리게 변하는 두 조합(시간 지연 독립 성분)으로 지형을 그렸습니다. 색이 진할수록 자유 에너지가 낮습니다."),
+        "read": ("PCA 找的是變動最大的方向，tICA 找的是變得最慢的方向，兩者不一定相同。分開的低谷代表彼此轉換很慢的構形狀態。低谷之間只轉換過一兩次時，相對深度不可信。",
+                 "PCA finds the directions that vary most; tICA finds those that change most slowly, which need not be the "
+                 "same. Separate basins are states that interconvert slowly. If the run crossed between them only once or "
+                 "twice, their relative depth is not reliable.",
+                 "PCA は変動の大きい方向、tICA は変化の遅い方向を見つけます。両者は同じとは限りません。離れた谷は互いの転移が遅い構造状態です。"
+                 "谷の間の転移が1、2回しかない場合、谷の相対的な深さは信頼できません。",
+                 "PCA는 변동이 큰 방향을, tICA는 가장 느리게 변하는 방향을 찾으며 둘이 같다는 보장은 없습니다. 떨어진 골은 서로 느리게 바뀌는 구조 상태입니다. "
+                 "골 사이 전이가 한두 번뿐이면 골의 상대 깊이는 믿을 수 없습니다."),
+    },
+    "msm_its": {
+        "title": ("馬可夫狀態模型的隱含時間尺度", "Implied timescales of the Markov state model",
+                  "マルコフ状態モデルの陰的時間スケール", "마르코프 상태 모델의 암시적 시간 척도"),
+        "caption": ("tICA 空間分成數十個微狀態，在不同延遲時間估計轉移矩陣，畫出最慢的幾個過程的時間尺度。灰色區域短於延遲時間，無法解析；虛線是模擬長度的三分之一。",
+                    "tICA space is split into tens of microstates, the transition matrix is estimated at several lag times and "
+                    "the timescales of the slowest processes are drawn. The grey area is shorter than the lag and cannot be "
+                    "resolved. The dashed line is one third of the run.",
+                    "tICA 空間を数十個のミクロ状態に分け、いくつかの遅れ時間で遷移行列を推定し、最も遅い過程の時間スケールを描いています。灰色の領域は遅れ時間より短く、解像できません。破線はシミュレーション長の3分の1です。",
+                    "tICA 공간을 수십 개 미시 상태로 나누고 여러 지연 시간에서 전이 행렬을 추정해 가장 느린 과정들의 시간 척도를 그렸습니다. 회색 영역은 지연 시간보다 짧아 분해할 수 없습니다. 점선은 시뮬레이션 길이의 3분의 1입니다."),
+        "read": ("曲線隨延遲時間變平，代表模型在那個延遲下近似馬可夫。時間尺度接近或超過虛線，代表那個過程在這次模擬裡只發生過很少次，數值只能當教學示範，不能當速率。單一一條軌跡的 MSM 不能用來報告動力學結論。",
+                 "A curve that levels off as the lag grows means the model is close to Markovian at that lag. A timescale "
+                 "near or above the dashed line means the process happened only a few times in this run, so the value is "
+                 "a teaching illustration, not a rate. An MSM from a single trajectory cannot support kinetic conclusions.",
+                 "遅れ時間を大きくして曲線が平らになれば、その遅れ時間でモデルはほぼマルコフ的です。時間スケールが破線に近いか超える場合、その過程はこの計算で数回しか起きておらず、値は教育用の例であって速度ではありません。"
+                 "1本のトラジェクトリから作った MSM で速度論の結論は出せません。",
+                 "지연 시간이 길어질수록 곡선이 평평해지면 그 지연 시간에서 모델이 마르코프에 가깝다는 뜻입니다. 시간 척도가 점선 근처이거나 넘으면 그 과정은 이번 계산에서 몇 번밖에 일어나지 않았으므로 값은 교육용 예시이고 속도가 아닙니다. "
+                 "궤적 하나로 만든 MSM으로는 동역학 결론을 낼 수 없습니다."),
+    },
+})
+
+
+def classify_tica(name: str, ti: dict) -> list[dict]:
+    basins = (ti.get("landscape") or {}).get("basins") or []
+    ts = [v for v in (ti.get("timescales_ns") or []) if v is not None]
+    lag = ti.get("lag_ns")
+    slow = f"{ts[0]:.2g}" if ts else "—"
+    lead = (f"{name}：延遲 {lag} ns，最慢的運動模式時間尺度約 {slow} ns",
+            f"{name}: lag {lag} ns, slowest mode about {slow} ns",
+            f"{name}：遅れ時間 {lag} ns、最も遅い運動モードの時間スケールは約 {slow} ns",
+            f"{name}: 지연 {lag} ns, 가장 느린 운동 모드의 시간 척도 약 {slow} ns")
+    if len(basins) <= 1:
+        return [S("good", lead[0] + "。慢運動地形只有一個主要低谷。", lead[1] + ". The slow-motion landscape has one main basin.",
+                  lead[2] + "。遅い運動の地形には主な谷が1つだけです。", lead[3] + ". 느린 운동 지형에 주요 골이 하나뿐입니다.")]
+    return [S("note", lead[0] + f"。有 {len(basins)} 個低谷，蛋白在慢速轉換的構形之間移動。",
+              lead[1] + f". There are {len(basins)} basins: the protein moves between slowly interconverting states.",
+              lead[2] + f"。谷が {len(basins)} 個あり、タンパク質はゆっくり転移する状態の間を動いています。",
+              lead[3] + f". 골이 {len(basins)}개로, 단백질이 느리게 바뀌는 상태들 사이를 움직입니다.")]
+
+
+def classify_msm(name: str, m: dict) -> list[dict]:
+    el = m.get("eligibility")
+    T = m.get("trajectory_ns")
+    if el == "insufficient":
+        return [S("caution", f"{name}：轉換次數或連通性不足（{m.get('reason')}），不建立馬可夫模型的結論，圖只示範方法。",
+                  f"{name}: too few transitions or poor connectivity ({m.get('reason')}). No conclusion is drawn from the "
+                  "Markov model; the figure only shows the method.",
+                  f"{name}：遷移の回数か連結性が足りません（{m.get('reason')}）。マルコフモデルから結論は出さず、図は方法の例示です。",
+                  f"{name}: 전이 횟수나 연결성이 부족합니다({m.get('reason')}). 마르코프 모델로 결론을 내지 않으며 그림은 방법 예시입니다.")]
+    if el == "unresolved":
+        return [S("caution", f"{name}：最慢過程長於模擬（{T} ns）的三分之一，這次只看過幾次，時間尺度不可當速率。",
+                  f"{name}: the slowest process is longer than a third of the run ({T} ns). It was seen only a few times, "
+                  "so its timescale is not a rate.",
+                  f"{name}：最も遅い過程がシミュレーション（{T} ns）の3分の1より長く、数回しか観測されていません。時間スケールを速度として扱えません。",
+                  f"{name}: 가장 느린 과정이 시뮬레이션({T} ns)의 3분의 1보다 길어 몇 번밖에 관찰되지 않았습니다. 시간 척도를 속도로 볼 수 없습니다.")]
+    flat = m.get("its_flat")
+    return [S("note" if flat else "caution",
+              f"{name}：時間尺度" + ("隨延遲時間變平" if flat else "隨延遲時間仍在變") + "；單一軌跡，只能當探索性的結果。",
+              f"{name}: the timescales " + ("level off with lag" if flat else "still change with lag") +
+              ". One trajectory, so this is exploratory only.",
+              f"{name}：時間スケールは遅れ時間に対して" + ("平らになっています" if flat else "まだ変化しています") + "。1本のトラジェクトリなので探索的な結果です。",
+              f"{name}: 시간 척도가 지연 시간에 따라 " + ("평평해집니다" if flat else "아직 변합니다") + ". 궤적 하나이므로 탐색적 결과입니다.")]

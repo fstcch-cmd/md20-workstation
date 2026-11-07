@@ -306,7 +306,7 @@ def dssp_area(t, frac: dict, path: Path) -> str | None:
     return _save(fig, path)
 
 
-def landscape(land: dict, explained, path: Path) -> str | None:
+def landscape(land: dict, explained, path: Path, *, axes: tuple[str, str] = ("PC1", "PC2")) -> str | None:
     if not land or not land.get("G"):
         return None
     plt = _plt()
@@ -317,9 +317,13 @@ def landscape(land: dict, explained, path: Path) -> str | None:
     fig.colorbar(im, ax=ax, label="ΔG (kJ mol$^{-1}$)")
     for b in land.get("basins") or []:
         ax.plot(b[0], b[1], "w+", ms=8)
-    ex = list(explained or [0, 0]) + [0, 0]
-    ax.set_xlabel(f"PC1 ({ex[0]:.0%})")
-    ax.set_ylabel(f"PC2 ({ex[1]:.0%})")
+    if explained:                     # PCA: share of the variance; tICA (D-105): no variance share to show
+        ex = list(explained) + [0, 0]
+        ax.set_xlabel(f"{axes[0]} ({ex[0]:.0%})")
+        ax.set_ylabel(f"{axes[1]} ({ex[1]:.0%})")
+    else:
+        ax.set_xlabel(axes[0])
+        ax.set_ylabel(axes[1])
     return _save(fig, path)
 
 
@@ -868,4 +872,28 @@ def cg_membrane_plot(summ: dict, path: Path, *, tol_apl: float = 0.06, tol_dpp: 
         a2.set_xlabel("Bond order P2")
     fig.suptitle("COARSE-GRAINED (Martini 3), bead level, not atomistic", fontsize=9, color="#b8433f", x=0.02, ha="left")
     fig.tight_layout()
+    return _save(fig, path)
+
+
+def implied_timescales(m: dict, path: Path) -> str | None:
+    """D-105: implied timescales versus lag time.  Grey area: timescales shorter than the lag cannot be resolved;
+    dashed line: one third of the run (slower processes were seen too few times)."""
+    its = m.get("its_ns") or []
+    lags = m.get("lags_ns") or []
+    if len(lags) < 2:
+        return None
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(5.2, 3.4))
+    n_proc = max(len(x) for x in its)
+    for j in range(n_proc):
+        y = [x[j] if j < len(x) and x[j] is not None else np.nan for x in its]
+        ax.plot(lags, y, "o-", color=PALETTE[j % len(PALETTE)], label=f"process {j + 1}", ms=4)
+    lo = min(lags)
+    ax.fill_between(lags, [lo * 0.5] * len(lags), lags, color="#BBBBBB", alpha=0.5, lw=0)
+    if m.get("trajectory_ns"):
+        ax.axhline(m["trajectory_ns"] / 3, color="#555555", ls="--", lw=1)
+    ax.set_yscale("log")
+    ax.set_xlabel("Lag time (ns)")
+    ax.set_ylabel("Implied timescale (ns)")
+    ax.legend(frameon=False, fontsize=8, loc="center left", bbox_to_anchor=(1.0, 0.5))
     return _save(fig, path)

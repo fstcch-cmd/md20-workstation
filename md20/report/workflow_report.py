@@ -941,6 +941,7 @@ def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None, na
         if cl and cl.get("populations"):
             out += doc.figure_block(FG.clusters_plot(cl, ext[k].get("time_ns") or [], doc.figdir / f"md_clusters_{k}.png"),
                                     "clusters", FT.classify_clusters(k, cl), k)
+    out += _toolbox_section(doc, ext, order)                 # D-105: tICA, Markov model, H-bond network
     # ---- ligand binding in dynamics
     lig_keys = [(k, rn) for k in order for rn in (metrics[k].get("ligands") or {})]
     if not lig_keys:
@@ -986,6 +987,7 @@ def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None, na
             hb[lab(k, rn)] = (ext[k].get("time_ns") or [], L["hbonds"]["count"])
     if hb:
         out += doc.figure_block(FG.timeseries(hb, "Ligand–protein hydrogen bonds", doc.figdir / "md_hbond_count.png"), "hbond_count", FT.classify_hbond_count(hb))
+    out += _hydration_tables(doc, ext, lig_keys, lab)          # D-105
     for k, rn in lig_keys:
         L = ((ext.get(k) or {}).get("ligands") or {}).get(rn) or {}
         if L.get("hbonds"):
@@ -1608,3 +1610,68 @@ def _viewer_section(wf, lang: str = "zh") -> str:
     return ("<h2>" + pick(("3D 檢視（離線可用。拖曳可旋轉，軌跡可以播放）", "3D view (works offline. Drag to rotate and play the trajectory)",
                            "3D 表示（オフラインで使えます。ドラッグで回転、軌跡は再生できます）", "3D 보기 (오프라인 사용 가능. 드래그하면 회전하고 궤적을 재생할 수 있습니다)"), lang)
             + "</h2>" + "".join(parts))
+
+
+def _toolbox_section(doc, ext: dict, order: list) -> str:
+    """D-105: slow motions (tICA), Markov-model timescales with their eligibility, side-chain H-bond network."""
+    out = ""
+    for k in order:
+        ti = (ext.get(k) or {}).get("tica") or {}
+        if ti.get("status") == "ok" and (ti.get("landscape") or {}).get("G"):
+            out += doc.figure_block(FG.landscape(ti["landscape"], None, doc.figdir / f"md_tica_{k}.png", axes=("tIC1", "tIC2")), "tica_landscape",
+                                    FT.classify_tica(k, ti), k)
+            m = ti.get("msm") or {}
+            if len(m.get("lags_ns") or []) >= 2:
+                out += doc.figure_block(FG.implied_timescales(m, doc.figdir / f"md_its_{k}.png"), "msm_its", FT.classify_msm(k, m), k)
+    for k in order:
+        net = ((ext.get(k) or {}).get("hbonds_protein") or {}).get("network") or {}
+        if net.get("status") == "ok" and net.get("edges"):
+            rows = [[_esc(a), _esc(b), f"{o:.0%}"] for a, b, o in net["edges"][:15]]
+            out += doc.table([doc.t(("殘基", "Residue", "残基", "잔기")), doc.t(("殘基", "Residue", "残基", "잔기")),
+                              doc.t(("出現比例", "Occupancy", "出現率", "출현 비율"))], rows,
+                             (f"{k}：持續的側鏈氫鍵（≥ {net['min_occupancy']:.0%} 的幀）",
+                              f"{k}: persistent side-chain hydrogen bonds (≥ {net['min_occupancy']:.0%} of frames)",
+                              f"{k}：持続する側鎖の水素結合（フレームの {net['min_occupancy']:.0%} 以上）",
+                              f"{k}: 지속되는 곁사슬 수소 결합(프레임의 {net['min_occupancy']:.0%} 이상)"), num_cols={2})
+            hubs = "、".join(f"{r}（{n}）" for r, n in net.get("hubs", [])[:5])
+            hubs_en = ", ".join(f"{r} ({n})" for r, n in net.get("hubs", [])[:5])
+            comp = max((len(c) for c in net.get("components") or []), default=0)
+            out += _findings_html([FT.S("note",
+                                        f"{k}：連結最多的殘基是 {hubs}；最大的氫鍵網路有 {comp} 個殘基。網路中心的殘基若突變，最可能改變局部結構。",
+                                        f"{k}: the most connected residues are {hubs_en}; the largest network holds {comp} residues. "
+                                        "Mutating a hub residue is the most likely to change the local structure.",
+                                        f"{k}：つながりが最も多い残基は {hubs} です。最大のネットワークは {comp} 残基です。中心の残基を変異させると局所構造が最も変わりやすくなります。",
+                                        f"{k}: 연결이 가장 많은 잔기는 {hubs_en}입니다. 가장 큰 네트워크는 잔기 {comp}개입니다. 중심 잔기를 돌연변이시키면 국소 구조가 가장 바뀌기 쉽습니다.")],
+                                  doc.lang)
+    return out
+
+
+def _hydration_tables(doc, ext: dict, lig_keys: list, lab) -> str:
+    """D-105: water sites around each ligand (density relative to bulk water and how often a water sits there)."""
+    out = ""
+    for k, rn in lig_keys:
+        h = (((ext.get(k) or {}).get("ligands") or {}).get(rn) or {}).get("hydration") or {}
+        if h.get("status") == "no_water":
+            out += _findings_html([FT.S("note", f"{lab(k, rn)}：軌跡只存溶質，沒有水，無法分析水合位點。",
+                                        f"{lab(k, rn)}: the trajectory keeps only the solute, so hydration sites cannot be analysed.",
+                                        f"{lab(k, rn)}：トラジェクトリには溶質しかなく、水和サイトは解析できません。",
+                                        f"{lab(k, rn)}: 궤적에 용질만 있어 수화 위치를 분석할 수 없습니다.")], doc.lang)
+            continue
+        if h.get("status") != "ok" or not h.get("sites"):
+            continue
+        rows = [[str(i + 1), f"{x['density_ratio']:.1f}", f"{x['occupancy']:.0%}", f"{10 * x['distance_to_center_nm']:.1f}"]
+                for i, x in enumerate(h["sites"])]
+        out += doc.table([doc.t(("位點", "Site", "サイト", "위치")), doc.t(("密度／體相水", "Density / bulk", "密度／バルク", "밀도/벌크")),
+                          doc.t(("有水的時間", "Time occupied", "水がいる時間", "물이 있는 시간")),
+                          doc.t(("離配體中心 (Å)", "From ligand centre (Å)", "リガンド中心から (Å)", "리간드 중심에서 (Å)"))], rows,
+                         (f"{lab(k, rn)}：配體周圍 1 nm 內的水合位點", f"{lab(k, rn)}: hydration sites within 1 nm of the ligand",
+                          f"{lab(k, rn)}：リガンドから 1 nm 以内の水和サイト", f"{lab(k, rn)}: 리간드 1 nm 이내의 수화 위치"), num_cols={1, 2, 3})
+        stay = [x for x in h["sites"] if x["occupancy"] >= 0.8]
+        out += _findings_html([FT.S("note",
+                                    f"{lab(k, rn)}：{len(stay)} 個位點八成以上時間有水。這些水可能在配體與蛋白之間搭橋；設計衍生物時，取代它們或保留它們會改變結合。",
+                                    f"{lab(k, rn)}: {len(stay)} sites hold a water more than 80% of the time. Such waters may bridge "
+                                    "ligand and protein; replacing or keeping them in a derivative changes the binding.",
+                                    f"{lab(k, rn)}：{len(stay)} か所で 8 割以上の時間に水がいます。これらはリガンドとタンパク質を橋渡ししている可能性があり、誘導体で置き換えるか残すかで結合が変わります。",
+                                    f"{lab(k, rn)}: {len(stay)}곳에 80% 이상의 시간 동안 물이 있습니다. 이런 물은 리간드와 단백질을 잇는 다리일 수 있어 유도체에서 치환하거나 남기면 결합이 달라집니다.")],
+                              doc.lang)
+    return out

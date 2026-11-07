@@ -22,6 +22,7 @@
 | [hts_screen.md](hts_screen.md) | 高通量前期篩選：Excel/CSV 化合物庫 → 自動下載 3D → 批次快速對接 → 排名圖 → 勾選進入正式對接/MD | 已驗證（`test_screen_integration` 三 OS，1634916 起含 Windows） |
 | [ci_validation.md](ci_validation.md) | CI 架構、重測、論文對接重現、hsieh2024 不可重現分析、這幾輪抓到的 bug | 進行中 |
 | [binding_funnel_restraints.md](binding_funnel_restraints.md) | 結合自由能的漏斗約束與標準態校正：沿拉離軸投影 CV、圓錐＋圓柱側向約束、解析 K_b；筆電 3PTB 證據（一維距離 PMF 高估 3 倍以上） | **設計中**（a3 不含；請審查 §5） |
+| [analysis_toolbox.md](analysis_toolbox.md) | 軌跡分析工具箱：tICA、MSM（附資格）、側鏈氫鍵網路、水合位點（D-105） | 已實作・待 CI |
 | [gui_stability.md](gui_stability.md) | GUI 穩定性：計算獨立子程序、狀態與進度從檔案讀回、GUI 重開接回（D-103） | 已實作・待 CI |
 | [gui_v2.md](gui_v2.md) | GUI v2：四種模式、教學頁、依個案建議參數、雙語、進 MD 前確認 | 已實作・隨 v0.1.0a3 發行（CI 渲染；互動部分筆電確認） |
 | [multi_ligand.md](multi_ligand.md) | 多配體同時對接進 MD：穿環／重疊／漂浮檢查、剛體微調、軟核鬆弛、協同自由能熱力學循環 | 已驗證（CI openmm-stack；D-60、D-61、D-64） |
