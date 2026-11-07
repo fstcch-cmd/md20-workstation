@@ -444,8 +444,11 @@ def _binding_panel(wf: Workflow, project: str, name: str):
             out = []
             for c in ACT.binding_candidates(wf):
                 dg = "—"
-                if c["dG_kj"] is not None:
+                if c["dG_kj"] is not None and c.get("dG_eligible"):
                     dg = f"{c['dG_kj']:.1f}" + (f" ± {c['dG_err']:.1f}" if c["dG_err"] is not None else "")
+                elif c["dG_kj"] is not None:          # D-134: a number that failed (or lacks) the sampling assessment is not a ΔG°
+                    dg = _("不作為 ΔG°（取樣評估未通過或缺漏）", "not a ΔG° (sampling assessment failed or missing)",
+                           "ΔG° として扱わない（取得評価が不合格または欠落）", "ΔG°로 쓰지 않음(샘플링 평가 미통과 또는 누락)")
                 elif c["status"] == "PASS" and c["dG_withheld"]:
                     dg = _("不輸出（見報告）", "not reported (see report)", "出力しない（レポート参照）", "출력 안 함(보고서 참조)")
                 out.append({"target": c["target"], "ligand": c["ligand"],

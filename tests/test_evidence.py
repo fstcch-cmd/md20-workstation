@@ -25,11 +25,13 @@ def test_rows_cover_plan_run_and_gaps(tmp_path):
     by = {(r["item"], r["subject"]): r for r in rows}
     assert by[("docking", "PGA")]["status"] == "missing" and by[("docking", "BEN")]["status"] == "supported"
     assert by[("md", "docked_PGA")]["status"] == "missing"
+    assert by[("md", "apo")]["status"] == "ran"            # D-134: COMPLETE is execution, not a scientific claim
     assert by[("replicas", "apo")]["status"] == "supported" and by[("replicas", "docked_BEN")]["reasons"] == ["fewer_replicas"]
     assert by[("analysis", "docked_BEN")]["reasons"] == ["restrained"]
     assert by[("kinetics", "apo")]["reasons"] == ["msm_unresolved"]
     assert by[("compare", "")]["status"] == "limited"
     assert by[("binding", "BEN")]["status"] == "limited" and by[("binding", "BEN")]["detail"] == "classroom"
+    assert by[("binding", "BEN")]["reasons"] == ["assess_legacy", "dg_withheld"]          # no stored assessment: reanalysis needed
     sm = summary(rows)
     assert sm["missing"] == 2 and sm["supported"] >= 3
 

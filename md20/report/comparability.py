@@ -20,6 +20,7 @@ Pure Python.  `results` is the workflow's binding results (state steps.binding.r
 from __future__ import annotations
 
 from ..sampling.multi import context_basis, cond_view, exclusion_of
+from ..sampling.assessment import claim_eligible
 
 SCHEMA = "md20.comparability/1"
 GRADES = ("ddg", "order", "descriptive", "none")
@@ -203,7 +204,7 @@ def _cell(ka: str, kb: str, results: dict, md_conditions) -> dict:
             grade = "ddg" if basis["use_dG"] else "order"
             if grade == "order":
                 lacking = [k for k in (ka, kb) if not (results[k].get("dG_standard_kj_mol") is not None and
-                                                       (results[k].get("assessment") or {}).get("eligibility", {}).get("dG_standard"))]
+                                                       claim_eligible(results[k], "dG_standard"))]
                 limits.append({"code": "no_dG", "keys": lacking,
                                "withheld": {k: results[k].get("dG_withheld") for k in lacking if results[k].get("dG_withheld")}})
         else:

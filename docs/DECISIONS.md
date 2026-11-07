@@ -114,6 +114,28 @@
   - `man["resolution"]`、`man["streamed_persistence_error"]`、`extended.json` 的 `resolution／sampling／*.sensitivity／fingerprint.status` 可供報告顯示；`status in ("limited","unverified")` 時報告不得把持續性寫成滯留時間或 k_off。
   - `_common_basis`：`systems[key] = {..., "sampling": lab.get("sampling")}`。
 - 相關檔案：`md20/analysis/{fingerprint,persistence,extended,stream,traj,common_basis}.py`、`tests/test_analysis_{resolution,fingerprint,run_wiring}.py`、`docs/specs/analysis_cache.md`（新）、`docs/specs/{README,master_iteration_2026-11-07,long_timescale}.md`。
+### D-134　R2 統一科學評估：證據矩陣、圖說、摘要、比較、GUI 讀同一份版本化評估；MD「已執行」不等於「有證據」
+- **決定**：
+  - 新增 `sampling/assessment.claim_status(result, claim)`（schema `md20.assessment.claim/1`）：每個結合結果、每個說法（`diagnostic_curve` → `path_specific` → `dG_standard` → `affinity_ranking`）一份紀錄，含 `thresholds_version`、`execution_status`、`assessment`（pass／fail／unknown）、`eligible`、`evidence_ids`／診斷值與門檻、`failed`／`unknown`、`conflicts`、`reasons`、`overrides`。`resolve_assessment` 決定來源：儲存的 > 舊資料重算（只顯示診斷，資格壓成不成立）> 全 unknown。
+  - 證據矩陣（`report/evidence.py`）每列加 `execution_status`、`assessment`、`claim`、`claim_eligibility`、`requested_claim`／`requested_eligible`，保留舊鍵 `status`。結合列只有 `dG_standard` 成立才 `supported`；只有路徑特定 PMF → `limited`＋「只有沿這條拉離路徑的 PMF（描述性），不是標準 ΔG°」；舊資料 → `limited`＋「評估缺漏或舊版，需重新分析」。
+  - MD 列改為 `status = "ran"`（已執行）＋原因 `execution_only`；`COMPLETE` 是執行狀態，不是科學說法。`summary()` 多一個 `ran` 計數。
+  - 計畫重複數改用 `engine.replica_plan.configured_replicas(cfg)[0]`（預設 3），移除 `md.get("replicas") or 1`。
+  - 其他消費者全部改走同一份紀錄：`interpret.binding`（ΔG° 的「good」句只在成立時出現；有數字但不成立 → caution）、`figure_text.classify_assessment`（重算的舊資料不再說「合格」）、報告結合表（ΔG° 欄與各次 ΔG° 欄只在成立時顯示數字）、`sampling/multi.py` 的比較與協同循環、`report/comparability.py`、GUI 候選表（`dG_eligible`）。
+  - 人工 override 只用 `override_record()` 記成決策並出現在 `overrides`，**不改** `eligible` 與 `assessment`；fail 不會變 pass。
+  - 新原因代碼（`execution_only`、`assess_legacy`、`assess_failed`、`assess_unknown`、`path_specific_only`、`no_curve`）與說法表 `C` 皆四語（zh-TW／en／ja／ko）。
+- **理由**：執行成功不是科學通過。原本證據矩陣與比較用兩套標準，同一結果可同時被標「有證據」與「未納入比較」；有 ΔG° 數字就被顯示成 ΔG° 也會讓取樣失敗的結果被讀成親和力。規格 `docs/specs/assessment.md`。
+- **被否決**：
+  - 把舊資料從 manifest 重算後視為合格：run 當時沒有人合格化過，且比較（只讀儲存評估）與圖說會再度分歧；改為「顯示診斷、資格不成立、待重新分析」。
+  - MD 列維持 `supported`、另加欄位註明：徽章仍會被讀成科學結論；改用獨立狀態 `ran`。
+  - 放寬門檻或讓 override 把 fail 轉 pass：違反「缺證據＝unknown、不放寬門檻」，且 override 是人的決定、不是證據。
+  - 把對接、軌跡分析列也改成 `ran`：本批範圍只限 MD 與結合（R2 點名的缺陷）；其他列沒有科學門檻評估可讀，先不動。
+- **證據**：`tests/test_evidence_assessment.py`（執行＋ΔG°＋overlap 圖不連通＋solver 成功 → 證據矩陣／圖說／摘要／比較／GUI 全部不成立；舊資料 → `limited`、unknown；重算的舊資料資格不成立；override 只記錄；MD 為 `ran`；預設計畫 3 條；四語齊全；矩陣、比較、claim 在多種結果上一致）。更動的既有測試：`test_comparability_matrix`（夾具原本同時有 ΔG° 數值與 `dG_withheld`，自相矛盾，改為只有數值）。
+- **未驗證**：真實引擎路徑與 GUI 在 NiceGUI 上的渲染（CI）。
+- **未決**：
+  - 舊資料要變成「成立」目前只能重新分析；是否加「重新評估並寫回」的一鍵動作（需決定寫回的評估是否標示來源）。
+  - 評估的 `thresholds_version` 比目前舊時只標示、不自動重評。
+  - 對接、軌跡分析列的 `supported` 仍由各自旗標決定。
+- **相關檔案**：`md20/sampling/assessment.py`、`md20/report/evidence.py`、`md20/report/interpret.py`、`md20/report/figure_text.py`、`md20/report/workflow_report.py`（只動結合表、`_assessment_for`／`_claim_of`、證據矩陣渲染）、`md20/report/comparability.py`、`md20/sampling/multi.py`、`md20/gui/actions.py`、`md20/gui/app.py`、`docs/specs/assessment.md`、`docs/specs/README.md`、`tests/test_evidence_assessment.py`、`tests/test_comparability_matrix.py`。
 
 ### D-131　重複計畫與開始前告知：預設 3 條、時間倍數與 ETA、一鍵改條數、舊專案補跑（D-129 §3–§5）
 - 範圍：只做「需要幾條、花多少時間、使用者怎麼選」。分析與報告的跨重複彙總（`workflow.analyse`、`md20/analysis/`、`md20/report/`）是另一個代理同時做的，這裡沒動。不新增 phase／step。

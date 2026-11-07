@@ -252,3 +252,115 @@ def eligibility_of(result: dict) -> dict:
     if not a:
         return legacy_assessment(result or {})["eligibility"] | {"legacy": True}
     return a.get("eligibility") or {}
+
+
+# ---------------------------------------------------------------------------------------------------- claims (D-134, R2)
+# One versioned record per (result, claim) that EVERY consumer reads — evidence matrix, captions, executive summary,
+# comparison, GUI.  Execution status (the calculation ran) is carried but never decides a claim; the claim is decided by
+# the stored assessment (diagnostics → eligibility) and nothing else.  A human override is recorded, never applied.
+CLAIM_SCHEMA = "md20.assessment.claim/1"
+CLAIM_ELIGIBILITY_KEY = {"diagnostic_curve": "delta_pmf_curve", "path_specific": "delta_pmf_path_specific",
+                         "dG_standard": "dG_standard", "affinity_ranking": "affinity_ranking"}
+CLAIM_ORDER = ("affinity_ranking", "dG_standard", "path_specific", "diagnostic_curve")     # strongest first
+BLOCKING = REQUIRED_PATH + ("mbar_overlap",)           # mbar_overlap blocks only when a stored matrix is disconnected
+
+
+def resolve_assessment(result: dict | None, pmf: dict | None = None) -> tuple[dict, str]:
+    """(assessment, source) for one binding result.
+    source = "stored" (written by the run, D-96 on) | "reassessed" (recomputed from the stored PMF fields of a legacy
+    result: the diagnostics are shown, but a result the run itself never qualified stays NOT eligible until it is
+    reanalysed) | "legacy" (nothing stored: everything unknown)."""
+    a = (result or {}).get("assessment")
+    if a:
+        return a, "stored"
+    if pmf:
+        r = result or {}
+        a = assess_pmf(pmf, dG_withheld=r.get("dG_withheld"), has_dG=r.get("dG_standard_kj_mol") is not None)
+        a["reassessed_from_manifest"] = True
+        a["legacy"] = True
+        a["eligibility_if_stored"] = a["eligibility"]
+        a["eligibility"] = {**a["eligibility"], "delta_pmf_path_specific": False, "dG_standard": False,
+                            "affinity_ranking": False, "legacy": True}
+        a["reasons"] = ["no stored assessment (result written before D-96): awaiting reanalysis"] + list(a.get("reasons") or [])
+        return a, "reassessed"
+    return legacy_assessment(result or {}), "legacy"
+
+
+def override_record(claim: str, by: str, why: str, at: str | None = None) -> dict:
+    """A human decision about one claim.  It is evidence of who decided what and why; it never changes the diagnostics."""
+    return {"claim": claim, "by": by, "why": why, "at": at, "effect": "recorded decision only"}
+
+
+def claim_status(result: dict | None, claim: str = "dG_standard", *, pmf: dict | None = None,
+                 overrides: list[dict] | None = None) -> dict:
+    """Versioned verdict of ONE claim for ONE binding result.
+
+    claim: diagnostic_curve | path_specific | dG_standard | affinity_ranking.
+    assessment: "pass" (the diagnostics that claim needs pass) | "fail" (at least one failed) | "unknown" (legacy / not
+    recorded / not executed).  eligible: the claim may be stated.  Missing evidence is unknown, never pass; a failed
+    diagnostic is never rescued by a finished run, a numerical ΔG°, a solver-success flag or an override."""
+    if claim not in CLAIM_ELIGIBILITY_KEY:
+        raise ValueError(f"unknown claim {claim!r}")
+    r = result or {}
+    a, source = resolve_assessment(r, pmf)
+    by = {d["id"]: d for d in a.get("diagnostics") or []}
+    executed = r.get("status") == "PASS"
+    needs_diag = claim != "diagnostic_curve"
+    ids = list(BLOCKING) if needs_diag else []
+    failed = [i for i in ids if (by.get(i) or {}).get("status") == FAIL]
+    unknown = [i for i in REQUIRED_PATH if needs_diag and (by.get(i) or {}).get("status", UNKNOWN) == UNKNOWN]
+    el = a.get("eligibility") or {}
+    withheld = r.get("dG_withheld") or None
+    ok = bool(el.get(CLAIM_ELIGIBILITY_KEY[claim])) and executed
+    if claim in ("dG_standard", "affinity_ranking"):
+        ok = ok and r.get("dG_standard_kj_mol") is not None and not withheld       # a stored flag cannot outvote the value
+    if not executed:
+        state = UNKNOWN
+    elif failed:
+        state = FAIL
+    elif needs_diag and (source != "stored" or unknown):
+        state = UNKNOWN
+    elif not needs_diag:
+        state = PASS if el.get("delta_pmf_curve") else UNKNOWN
+    else:
+        state = PASS
+    reasons = []
+    if not executed:
+        reasons.append("not_run")
+    else:
+        if source != "stored":
+            reasons.append("assess_legacy")
+        if failed:
+            reasons.append("assess_failed")
+        elif unknown and source == "stored":
+            reasons.append("assess_unknown")
+        if claim in ("dG_standard", "affinity_ranking") and not ok and state == PASS:
+            reasons.append("dg_withheld")
+        if claim == "diagnostic_curve" and not ok:
+            reasons.append("no_curve")
+    ovs = [{**o, "effect": "recorded decision only"} for o in (overrides or r.get("overrides") or [])
+           if isinstance(o, dict) and o.get("claim") in (None, claim)]
+    return {
+        "schema": CLAIM_SCHEMA, "claim": claim, "thresholds_version": a.get("thresholds_version"),
+        "current_thresholds_version": THRESHOLDS_VERSION,
+        "execution_status": r.get("status") or "missing", "executed": executed,
+        "assessment_source": source, "assessment": state, "eligible": bool(ok),
+        "evidence_ids": ids, "failed": failed, "unknown": unknown,
+        "diagnostics": [{k: by[i].get(k) for k in ("id", "status", "value", "threshold", "threshold_source")}
+                        for i in ids if i in by],
+        "conflicts": list(a.get("conflicts") or []), "reasons": reasons, "withheld": withheld,
+        "overrides": ovs,
+        "override_effect": "an override is a recorded decision; it does not change a failed or unknown diagnostic",
+    }
+
+
+def claim_eligible(result: dict | None, claim: str) -> bool:
+    return bool(claim_status(result, claim)["eligible"])
+
+
+def strongest_claim(result: dict | None, *, pmf: dict | None = None) -> str | None:
+    """The strongest claim this result supports (None = not even executed)."""
+    for c in CLAIM_ORDER:
+        if claim_status(result, c, pmf=pmf)["eligible"]:
+            return c
+    return None

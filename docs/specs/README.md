@@ -29,6 +29,7 @@
 | [multi_ligand.md](multi_ligand.md) | 多配體同時對接進 MD：穿環／重疊／漂浮檢查、剛體微調、軟核鬆弛、協同自由能熱力學循環 | 已驗證（CI openmm-stack；D-60、D-61、D-64） |
 | [analysis_cache.md](analysis_cache.md) | 分析解析度（來源／有效節奏、stride、串流事件、子樣本與敏感度）與分析快取指紋（輸入／版本／門檻、重用決定、原子重算與舊結果保存）（D-135，R3＋R4） | 已實作・純 Python 驗證（真實 mdtraj 路徑待 CI） |
 | [master_iteration_2026-11-07.md](master_iteration_2026-11-07.md) | 整合規格複核：A1–A12 逐項判定、F01–F19 盤點、P0 兩批增量（評估／比較資格、replica 語意、結構限制、決策分流程、互作化學、動態接觸、配體狀態、互作持續性）、驗收對照與後續計畫 | 已實作・純 Python 驗證（D-95/96/97；真實引擎路徑待 CI） |
+| [assessment.md](assessment.md) | 統一科學評估（D-134、R2）：執行狀態／診斷／說法資格／比較資格分開；`claim_status` 版本化紀錄；證據矩陣、圖說、摘要、比較、GUI 讀同一份；舊資料待重新分析；override 只記錄 | 已實作・純 Python 驗證（真實引擎路徑待 CI） |
 | [report_language.md](report_language.md) | 報告用語規範與圖表 F1–F42：每種圖的怎麼讀、門檻與中英文句型 | 已實作（`figure_text.py`，測試檢查一致） |
 | [membrane.md](membrane.md) | 膜系統：膜蛋白、膜表面接觸、純膜；定向、建膜、膜專用流程、分析 | **部分實作，未在真實引擎驗證**（D-80） |
 | [structure_prediction.md](structure_prediction.md) | 輸入序列一鍵摺疊（OmegaFold、ESMFold、Boltz-2、ColabFold、上傳）與 pLDDT 閘門 | **設計中**（D-80） |

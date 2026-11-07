@@ -50,7 +50,7 @@ def test_all_qualified_gives_ddg_and_agrees_with_compare_binding():
 
 
 def test_only_path_specific_with_same_conditions_gives_order_and_says_why_not_ddg():
-    res = {"A": _r(30, None, "A"), "B": _r(20, -15, "B", dG_withheld="classroom")}
+    res = {"A": _r(30, None, "A"), "B": _r(20, -15, "B")}
     res["A"]["dG_withheld"] = "no plateau"
     m = comparability_matrix(res)
     assert _grade(m, "A", "B") == "order"

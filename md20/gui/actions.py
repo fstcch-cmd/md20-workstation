@@ -16,6 +16,7 @@ import re
 
 from ..build.receptor import receptor_choice_action, CHAIN_BREAK_GATES
 from ..util import atomic_write_json, load_json
+from ..sampling.assessment import claim_eligible
 
 # workflow step keys in execution order; a decision at step X invalidates X and everything after it
 STEP_ORDER = ["structure_gate", "receptor_docking", "screen_library", "screen_docking", "screen_selection", "docking_preflight",
@@ -371,7 +372,9 @@ def binding_candidates(wf) -> list[dict]:
                         "status": r.get("status") or ("PLANNED" if planned else "NOT_STARTED"),
                         "runs": int(r.get("replicas") or 0), "dG_kj": r.get("dG_standard_kj_mol"),
                         "dG_err": r.get("dG_err_kj_mol"), "dG_withheld": r.get("dG_withheld"),
-                        "delta_pmf": r.get("delta_pmf_kj_mol"), "finished_at": r.get("finished_at")})
+                        "delta_pmf": r.get("delta_pmf_kj_mol"), "finished_at": r.get("finished_at"),
+                        # D-134: the GUI shows a ΔG° number as ΔG° only when the one claim record qualifies it
+                        "dG_eligible": claim_eligible(r, "dG_standard")})
     return out
 
 

@@ -327,7 +327,21 @@ def binding(results: dict) -> list[dict]:
                      f"{name}: depth of the free-energy profile ΔPMF = {d:.1f}{pm} kJ mol⁻¹ ({kcal:.1f} kcal mol⁻¹).",
                      f"{name}：自由エネルギープロファイルの井戸の深さ ΔPMF = {d:.1f}{pm} kJ mol⁻¹（{kcal:.1f} kcal mol⁻¹）。",
                      f"{name}: 자유 에너지 프로파일의 우물 깊이 ΔPMF = {d:.1f}{pm} kJ mol⁻¹({kcal:.1f} kcal mol⁻¹)."))
-        if r.get("dG_standard_kj_mol") is not None:
+        from ..sampling.assessment import claim_status
+        cs = claim_status(r, "dG_standard")        # D-134 (R2): the number alone never makes a "good" ΔG° finding
+        if r.get("dG_standard_kj_mol") is not None and not cs["eligible"]:
+            g = r["dG_standard_kj_mol"]
+            out.append(F("caution",
+                         f"{name}：算出 ΔG° = {g:.1f} kJ mol⁻¹，但取樣評估未通過、缺漏或為舊版資料，這個數值不當作標準結合自由能，"
+                         "只留作診斷值，不比較、不排名。",
+                         f"{name}: a ΔG° of {g:.1f} kJ mol⁻¹ was computed, but the sampling assessment failed, is missing or is "
+                         "from an older version, so the number is not treated as a standard binding free energy; it is kept as "
+                         "a diagnostic value and is not compared or ranked.",
+                         f"{name}：ΔG° = {g:.1f} kJ mol⁻¹ が計算されましたが、取得評価が不合格・欠落、または旧版のデータのため、"
+                         "標準結合自由エネルギーとしては扱わず、診断値としてだけ残し、比較も順位づけもしません。",
+                         f"{name}: ΔG° = {g:.1f} kJ mol⁻¹가 계산되었지만 샘플링 평가가 미통과·누락이거나 구버전 데이터이므로 "
+                         "표준 결합 자유 에너지로 쓰지 않고 진단 값으로만 남기며 비교하거나 순위를 매기지 않습니다."))
+        elif r.get("dG_standard_kj_mol") is not None:
             g = r["dG_standard_kj_mol"]
             out.append(F("good",
                          f"{name}：標準結合自由能 ΔG° = {g:.1f} kJ mol⁻¹（{g / 4.184:.1f} kcal mol⁻¹），已含體積修正。",
