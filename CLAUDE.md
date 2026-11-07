@@ -52,3 +52,7 @@ GUI 閘門一鍵決定(`md20/gui/actions.py`)、3D 互作/vdW 表面、金屬擬
 - **私鑰永遠不進任何 repo**（擁有者離線保管，與 `md20/util/owner_pub.pem` 成對）；驗證不得有任何環境變數／設定／參數後門。
 - 設計：`docs/specs/licensing.md`（D-125）、D-124 LICENSE、設計文件 https://claude.ai/artifact/222jyPJRrE1Pzspv7shAS6 。
 - 使用者規則：開發順序自己決定；**push 要批次**（一輪 CI 跑完再推）；可用 Sonnet 子代理平行開發（HANDOFF §0）。
+
+## Skills 與工具（使用者 2026-11-07 指定：適合時自動使用）
+- **frontend-design**（Anthropic 官方 skill）：任何 GUI（`md20/gui/`）、報告 HTML 版面、學生說明頁的設計或改版，先載入再動手。
+- **Playwright**：驗證 GUI 行為。CI 已有 `tools/gui_preview.py`（Playwright 截圖）；本機若有 Playwright MCP（使用者以 `npx @playwright/mcp@0.0.84 --isolated` 固定版本、隔離模式加入），用它實際操作畫面確認。升級版本前先檢查 `microsoft/playwright-mcp` 的發行內容。
