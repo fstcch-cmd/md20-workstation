@@ -85,6 +85,9 @@ def test_peptide_above_popc_case_b(tmp_path):
     # D-102: solvation must not leave overlapping waters (root cause of the intermittent NaN); the build gate fired
     wg = [g for g in (man.get("gates") or {}).get("gates", []) if g["name"] == "water overlaps"]
     assert wg and wg[0]["status"] in ("PASS", "AUTO_FIXED"), wg
+    # D-115: ions were checked too (the water an ion inherited from an overlapping pair is removed, the ion kept)
+    ev = wg[0]["evidence"]
+    assert ev["n_ions"] > 0 and "removed_on_ions" in ev and ev["ion_water_min_nm"], ev
     # D-104: the placed peptide with the target phosphate planes comes first, before the slow bilayer step
     from md20.build.live3d import read_index
     import json as _json

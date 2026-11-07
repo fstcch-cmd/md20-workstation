@@ -117,6 +117,16 @@ def structure_stats(top, xyz, box) -> dict:
             k = f"{ow[i][1]}-{hw[j][1]}"
             by[k] = by.get(k, 0) + 1
         out["water_OH_inter_lt_0.14_by_chain"] = by
+        # D-115: ion–water O distances (an ion that replaced one water of an overlapping pair sits on the other)
+        ions = [(a.index, a.element.symbol) for a in top.atoms() if a.element is not None and len(list(a.residue.atoms())) == 1
+                and a.element.symbol in ("Na", "Cl", "K", "Mg", "Ca", "Zn", "Li", "Br", "F", "I", "Rb", "Cs")]
+        ion_min = {}
+        for i, el in ions:
+            dd, _ = tO.query(np.mod(xyz[i], box))
+            ion_min[el] = round(min(ion_min.get(el, 9.9), float(dd)), 4)
+        out["ion_water_O_min"] = ion_min
+        from md20.build.assemble import ION_O_MIN_NM
+        out["ions_on_water"] = sum(1 for i, el in ions if tO.query(np.mod(xyz[i], box))[0] < ION_O_MIN_NM.get(el, 0))
     except Exception as exc:  # noqa: BLE001
         out["water_stats_error"] = f"{type(exc).__name__}: {exc}"
     return out
@@ -217,6 +227,9 @@ def main(argv=None) -> int:
             rec["box_nm"] = man.get("membrane", {}).get("box_nm")
             bv = pdb.topology.getPeriodicBoxVectors().value_in_unit(unit.nanometer)
             rec["structure"] = structure_stats(pdb.topology, xyz, np.array([bv[0][0], bv[1][1], bv[2][2]]))
+            # D-115: what the build-stage declash saw BEFORE removing (water–water and ion–water), from the gate
+            wg = [g for g in (man.get("gates") or {}).get("gates", []) if g.get("name") == "water overlaps"]
+            rec["structure"]["declash_gate"] = ({"status": wg[0]["status"], **(wg[0].get("evidence") or {})} if wg else None)
             print(f"build{k} STRUCT " + json.dumps(rec["structure"], ensure_ascii=False), flush=True)
             rec["runs"] = []
             for s in seeds:

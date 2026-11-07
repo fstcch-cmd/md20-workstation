@@ -152,6 +152,10 @@ addMembrane 路徑用膜片自己的磷平面（`patch_geometry`），格點路�
 - 自由能：沿膜法線的 PMF（沿用傘狀採樣，CV 為配體質心到膜中心的 z 距離，加側向圓柱約束；與 `binding_funnel_restraints.md` 共用）尚未做。
 - 四種語言的指標名稱：`METRIC_LABELS`；閘門標題與說明在 `md20/gui/gate_text.py`。報告與圖表還沒有接上。
 
+## 6a2. 建模後去碰撞（D-102、D-115）
+- 建 System 前：水對水（O–O < 0.21、跨分子 O–H < 0.14 nm）刪較大索引的水；**離子對水**（`ION_O_MIN_NM`，約第一殼峰值 80%；陰離子另查 H）刪水、留離子；兩個離子 < 0.22 nm → NEEDS_HUMAN。同一個閘門「water overlaps」。
+- D-102 原本認為水重疊是 NaN 根因；診斷資料顯示每個建構都有水重疊、只有離子貼水的建構會爆（D-115，待下一輪診斷直接證實）。
+
 ## 6b. 建膜即時 3D（D-104）
 狀態：**[已實作・待 CI]**。
 - 建模寫 `<build>/live3d/NN_<stage>.json`＋`index.json`：`solute`（定向／放置後，附兩個磷原子目標平面）、`bilayer`（加膜後）、`declashed`（去水碰撞後）。workflow 在建每個 case 前寫 `<wf>/live3d_current.json`。

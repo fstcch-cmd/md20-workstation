@@ -925,13 +925,13 @@ PREFIX.append(("指定 anchor 殘基", ("Choose anchor residues to change the pu
 GATES.update({
     "water overlaps": (
         ("重疊的水", "Overlapping waters", "重なった水", "겹친 물"),
-        ("OpenMM 溶劑化偶爾會把兩個水放得幾乎重疊，最小化壓不開，MD 一開始就出現 NaN。建模時會刪掉其中一個多餘的水；"
-         "刪水修不好的重疊（水和溶質嵌在一起）會停下來請你檢查建模。",
+        ("OpenMM 溶劑化偶爾會把兩個水放得幾乎重疊，最小化壓不開，MD 一開始就出現 NaN。離子是拿水換的，換到重疊的水時離子會貼著另一個水，同樣會爆。建模時會刪掉多餘的水（離子保留）；"
+         "刪水修不好的重疊（水和溶質嵌在一起、兩個離子重疊）會停下來請你檢查建模。",
          "OpenMM solvation occasionally places two waters almost on top of each other. Minimisation cannot separate "
-         "them and the MD gives NaN in its first steps. The build removes the extra water. An overlap that removing "
-         "waters cannot fix (a water inside the solute) stops the build so you can check the model.",
+         "them and the MD gives NaN in its first steps. Ions are added by replacing waters, so an ion can inherit such an overlap and sit on a water. The build removes the extra water (ions are kept). An overlap that removing "
+         "waters cannot fix (a water inside the solute, two ions on top of each other) stops the build so you can check the model.",
          "OpenMM の溶媒和では、まれに 2 つの水がほぼ重なって置かれます。最小化では離れず、MD の最初で NaN になります。"
-         "建模時に余分な水を 1 つ削除します。水を消しても直らない重なり（水が溶質にめり込んでいる）は止めて、モデルの確認を求めます。",
+         "イオンは水と置き換えて加えるため、重なった水と置き換わるとイオンが別の水に接して同じく壊れます。建模時に余分な水を削除します（イオンは残します）。水を消しても直らない重なり（水が溶質にめり込んでいる、イオン同士が重なっている）は止めて、モデルの確認を求めます。",
          "OpenMM 용매화는 가끔 물 두 개를 거의 겹치게 놓습니다. 최소화로는 떼어 낼 수 없고 MD 시작 직후 NaN이 납니다. "
-         "모델링 단계에서 남는 물 하나를 지웁니다. 물을 지워도 풀리지 않는 겹침(물이 용질 안에 박힘)은 멈추고 모델 확인을 요청합니다.")),
+         "이온은 물을 바꿔 넣는 방식이라 겹친 물과 바뀌면 이온이 다른 물에 붙어 같은 문제가 생깁니다. 모델링 단계에서 남는 물을 지웁니다(이온은 남김). 물을 지워도 풀리지 않는 겹침(물이 용질 안에 박힘, 이온끼리 겹침)은 멈추고 모델 확인을 요청합니다.")),
 })
