@@ -1,5 +1,7 @@
 [繁中](MAC.md) · [English](MAC.en.md) · [日本語](MAC.ja.md) · [한국어](MAC.ko.md)
 
+Licence: real calculations need a licence file; see [UNLOCK.en.md](UNLOCK.en.md) to get and import it.
+
 # MD20 student guide: macOS
 
 You need macOS 12 or later (Apple Silicon M1–M4 or Intel), at least 8 GB of free disk space and an internet connection. Macs have no CUDA, so MD20 computes on OpenCL or the CPU. That is slower than an NVIDIA laptop. **Use the classroom tier for class cases.**

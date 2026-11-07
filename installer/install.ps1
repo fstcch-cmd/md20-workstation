@@ -150,6 +150,16 @@ if ((Test-Path $Desktop) -and -not $env:MD20_NO_DESKTOP) {
     "@echo off",
     "call `"$Gui`"")
 }
+# D-125: the student's unlock tool (import the licence file).  The owner tools in installer\owner are not linked anywhere.
+$UnlockSrc = Join-Path $Here "MD20-Unlock.cmd"
+if (Test-Path $UnlockSrc) {
+  Copy-Item -Force $UnlockSrc (Join-Path $Root "MD20-Unlock.cmd")
+  if ((Test-Path $Desktop) -and -not $env:MD20_NO_DESKTOP) {
+    Set-Content -Encoding Default -Path (Join-Path $Desktop "MD20-Unlock.cmd") -Value @(
+      "@echo off",
+      "call `"$Root\MD20-Unlock.cmd`" %*")
+  }
+}
 Write-Host "[4/4] Doctor ..."
 & $Mamba run -p $Prefix md20 doctor
 if ($WithFold) {
@@ -161,3 +171,4 @@ Write-Host ""
 Write-Host "完成。"
 Write-Host "  圖形介面：雙擊桌面的 MD20-GUI.cmd（或 $Gui）"
 Write-Host "  命令列：  $Cmd doctor | demo | pipeline ... （可把 $Root 加進 PATH）"
+Write-Host "  授權：    真正的計算需要 HCC Lab 簽發的授權檔。把授權檔拖到桌面的 MD20-Unlock.cmd 上，或雙擊它。 / Real calculations need a licence file from HCC Lab: drag it onto MD20-Unlock.cmd on the desktop, or double-click that file."

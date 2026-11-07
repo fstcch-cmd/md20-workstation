@@ -1,5 +1,7 @@
 [繁中](WINDOWS.md) · [English](WINDOWS.en.md) · [日本語](WINDOWS.ja.md) · [한국어](WINDOWS.ko.md)
 
+ライセンス：実際の計算にはライセンスファイルが必要です。入手と取り込みは [UNLOCK.ja.md](UNLOCK.ja.md) を見てください。
+
 # MD20 学生向け操作ガイド：Windows
 
 Windows 10 または 11、8 GB 以上の空きディスク容量、インターネット接続が必要です。NVIDIA のグラフィックカードがあれば、自動的に GPU（CUDA）で計算します。NVIDIA のカードがなくても OpenCL または CPU で動きますが、遅くなります。

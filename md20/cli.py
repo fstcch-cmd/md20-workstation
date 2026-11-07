@@ -9,6 +9,8 @@
   md20 fold SEQUENCE [--receptor-seq S] [--engine E] [--out DIR]   predicted structure (D-80)
   md20 setup-fold [--engine omegafold|boltz|esmfold] [--yes] [--warmup]  install a folding tool (plan first)
   md20 setup-cg [--yes]                         install martinize2, insane, martini_openmm (plan first)
+  md20 license status|machine|install FILE      signed licence (D-125); real calculations need one
+  md20 license issue|issue-batch --key PRIVATE.pem ...   owner only: sign licence files
 """
 from __future__ import annotations
 
@@ -29,6 +31,15 @@ def _guard():
 
 def _p(msg: str) -> None:
     print(msg, flush=True)
+
+
+EXIT_LICENSE = 13
+
+
+def _need_license(what: str) -> None:
+    """D-125: real calculations need a signed licence.  Raises LicenseRequired; main() prints it in four languages."""
+    from .util.license import require
+    require(what)
 
 
 def cmd_doctor(a):
@@ -58,6 +69,7 @@ def _open_project(a):
 
 
 def cmd_build(a):
+    _need_license("build")
     from .build.pipeline import build_case
     proj = _open_project(a)
     case = proj.new_case(a.case)
@@ -79,6 +91,8 @@ def _make_backend_factory(case, protocol, fake: bool):
 
 
 def cmd_run(a):
+    if not a.fake:                      # --fake is the synthetic backend of `demo`: no chemistry, no licence needed
+        _need_license("run")
     from .engine import make_protocol, run_protocol, NeedsHuman
     proj = _open_project(a)
     case = proj.case(a.case)
@@ -123,6 +137,8 @@ def cmd_report(a):
 
 
 def cmd_queue(a):
+    if a.action == "run" and not a.fake:
+        _need_license("queue")
     from .engine import JobQueue, PausePolicy
     from .env.hardware import _power_state
     proj = _open_project(a)
@@ -152,6 +168,7 @@ def cmd_pipeline(a):
     if a.action == "example":
         print(json.dumps(example_config(screen=getattr(a, "screen", False)), ensure_ascii=False, indent=2))
         return 0
+    _need_license("pipeline")           # before anything is read or created
     if not a.config:
         _p("pipeline run 需要設定檔：md20 pipeline example > my.json；md20 pipeline run my.json")
         return 2
@@ -218,6 +235,7 @@ def cmd_resume(a):
     if a.list or not todo:
         _p("沒有需要續跑的工作流程。" if not todo else f"{len(todo)} 個可續跑（去掉 --list 開始）。")
         return 0
+    _need_license("resume")
     platform = choose_platform()
     _p(f"平台：{platform.name}；續跑 {len(todo)} 個工作流程")
     rc = 0
@@ -327,6 +345,7 @@ def cmd_setup_vina(a):
 
 def cmd_fold(a):
     """D-80: sequence → predicted structure (md20/build/fold.py)."""
+    _need_license("fold")
     from .build import fold as F
     seqs = list(a.receptor_seq or []) + [a.sequence]
     out = Path(a.out) if a.out else Path.cwd() / f"fold_{a.sequence[:12]}"
@@ -472,6 +491,52 @@ def cmd_stamp(a):
     return 0
 
 
+def _print_license_error(exc) -> None:
+    print("\n\n".join(exc.texts), file=sys.stderr, flush=True)
+
+
+def cmd_license(a):
+    """D-125: status / machine / install for students; issue / issue-batch for the owner (private key is only read)."""
+    from .util import license as L
+    act = a.lic_cmd
+    try:
+        if act == "machine":
+            _p(L.machine_code())
+            return 0
+        if act == "status":
+            st = L.status()
+            _p(st.message_all(with_howto=True))
+            if st.state != L.NONE:
+                _p(f"\nid: {st.license_id or '-'}\nlicensee: {st.licensee or '-'}\nscope: {st.scope or '-'}\n"
+                   f"expires: {st.expires or '-'}\nmachines: {', '.join(st.machines) or 'all'}\nfile: {st.path or '-'}")
+            if st.ok:
+                _p(f"machine code: {st.machine_code}")
+            return 0 if st.ok else 1
+        if act == "install":
+            st = L.install(a.file.strip().strip('"'))
+            _p(L.installed_message(st))
+            return 0
+        if act == "issue":
+            path, payload = L.issue(a.key, a.name, out=a.out, days=a.days, expires=a.expires, machines=a.machine or (),
+                                    scope=a.scope, note=a.note or "")
+            _p(f"licence file: {path}\nid: {payload['id']}\nlicensee: {payload['licensee']}\nexpires: {payload['expires'] or 'none'}\n"
+               f"machines: {', '.join(payload['machines']) or 'any'}\nscope: {payload['scope']}")
+            return 0
+        if act == "issue-batch":
+            done = L.issue_batch(a.key, a.csv, a.out, scope=a.scope, note=a.note or "")
+            for d in done:
+                _p(f"{d['name']}\t{d['expires'] or 'none'}\t{d['id']}\t{d['file']}")
+            _p(f"{len(done)} licence file(s) written to {a.out} (index: issued.csv)")
+            return 0 if done else 1
+    except L.LicenseError as exc:
+        _print_license_error(exc)
+        return 1
+    except OSError as exc:
+        print(f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        return 1
+    return 2
+
+
 def cmd_status(a):
     proj = _open_project(a)
     for c in proj.cases():
@@ -586,12 +651,32 @@ def main(argv=None) -> int:
     rp = sub.add_parser("report"); rp.add_argument("--project", required=True); rp.add_argument("--case", required=True)
     rp.add_argument("--run"); rp.add_argument("--bundle", action="store_true"); rp.set_defaults(fn=cmd_report)
     m = sub.add_parser("demo"); m.add_argument("--dir"); m.set_defaults(fn=cmd_demo)
+    lc = sub.add_parser("license", help="MD20 授權（D-125）：status、machine、install；擁有者用 issue、issue-batch")
+    ls = lc.add_subparsers(dest="lic_cmd", required=True)
+    ls.add_parser("status", help="show the licence state in four languages"); ls.add_parser("machine", help="print the machine code")
+    li = ls.add_parser("install", help="import a .md20license file (copied only when it is valid for this computer)")
+    li.add_argument("file")
+    for nm, hp in (("issue", "owner: sign one licence file"), ("issue-batch", "owner: sign many from a CSV (name, days or date, machine code)")):
+        sp = ls.add_parser(nm, help=hp)
+        sp.add_argument("--key", required=True, help="owner private key PEM (read only, never copied)")
+        sp.add_argument("--scope", choices=["use", "all"], default="use"); sp.add_argument("--note")
+        if nm == "issue":
+            sp.add_argument("--name", required=True); sp.add_argument("--days", type=int); sp.add_argument("--expires", help="YYYY-MM-DD, last valid day")
+            sp.add_argument("--machine", action="append", help="machine code (repeatable); omit for any computer"); sp.add_argument("--out")
+        else:
+            sp.add_argument("--csv", required=True); sp.add_argument("--out", required=True, help="output folder")
+    lc.set_defaults(fn=cmd_license)
     a = ap.parse_args(argv)
-    if a.dir is None and a.cmd != "demo":                # D-88: same projects folder as the GUI chose last time
+    if a.dir is None and a.cmd not in ("demo", "license"):                # D-88: same projects folder as the GUI chose last time
         from .gui.folders import saved_projects_dir
         a.dir = str(saved_projects_dir())
     os.environ["MD20_RESOURCE_MODE"] = a.mode          # D-68: Vina and other helpers follow the chosen mode
-    return int(a.fn(a) or 0)
+    from .util.license import LicenseRequired
+    try:
+        return int(a.fn(a) or 0)
+    except LicenseRequired as exc:
+        print(exc.status.message_all(with_howto=True), file=sys.stderr, flush=True)
+        return EXIT_LICENSE
 
 
 if __name__ == "__main__":

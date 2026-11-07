@@ -1,5 +1,7 @@
 [繁中](WINDOWS.md) · [English](WINDOWS.en.md) · [日本語](WINDOWS.ja.md) · [한국어](WINDOWS.ko.md)
 
+Licence: real calculations need a licence file; see [UNLOCK.en.md](UNLOCK.en.md) to get and import it.
+
 # MD20 student guide: Windows
 
 You need Windows 10 or 11, at least 8 GB of free disk space and an internet connection. If the computer has an NVIDIA graphics card, MD20 uses the GPU (CUDA) automatically. Without one it still runs on OpenCL or the CPU, only more slowly.

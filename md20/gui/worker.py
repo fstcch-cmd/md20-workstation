@@ -134,6 +134,7 @@ def run_worker(project_dir, name: str, *, run_fn=None) -> dict:
     the real driver in tests."""
     from ..project import Project
     from ..workflow import Workflow, WorkflowBlocked
+    from ..util.license import LicenseRequired
     project_dir = Path(project_dir)
     root = project_dir.parent
     wf = Workflow.open(Project(project_dir), name)
@@ -170,6 +171,8 @@ def run_worker(project_dir, name: str, *, run_fn=None) -> dict:
         info["message"] = DONE_MSG if out["status"] == "COMPLETE" else PAUSED_MSG
     except WorkflowBlocked as exc:
         info["status"], info["message"] = "NEEDS_HUMAN", str(exc)
+    except LicenseRequired as exc:        # D-125: say so in four languages, not as a traceback
+        info["status"], info["message"] = "ERROR", list(exc.texts())
     except BaseException as exc:  # noqa: BLE001  (KeyboardInterrupt too: the GUI must see that the run ended)
         info["status"], info["message"] = "ERROR", f"{type(exc).__name__}: {exc}\n{traceback.format_exc()[-2000:]}"
     finally:
@@ -188,6 +191,8 @@ def _real_run(wf, root: Path, sink) -> dict:
     if fake:
         from .logic import _fake_run
         return _fake_run(wf, float(fake), sink)
+    from ..util.license import require
+    require("gui-worker")                 # D-125: the stand-in above does no chemistry; everything below does
     from ..engine import PausePolicy
     from ..engine.factory import make_backend_factory
     from ..env import choose_platform
