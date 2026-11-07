@@ -5,6 +5,22 @@
 
 ## 0. 新 session 第一步
 
+> **2026-11-07 第三個 session（session_016gcJzAV8UjRW4ixPZLxddG）交接。**
+>
+> **本 session 做了（全部已 push main，HEAD 見 git log；容器測試通過，真實引擎路徑交 CI）：**
+> - **D-99／D-100 水盒**：要拉離 SMD 的案例在建模時就依 SMD 規則算水盒大小（修好 GRP 教學案例「水盒太小做不了 SMD」）；通則化——任何含配體案例都事先檢查（`md.box_for_smd`：auto 便宜先加大／貴則 MD 前提醒、always、never）。**更正 padding 意義**：OpenMM 的 padding 是「溶質到自己影像的距離」只加一次，不是「到盒邊」；依使用者決定 **padding 預設全部 2.0 nm**。
+> - **D-101 傘狀採樣**：第一批 window 改用 SMD 力曲線規劃（陡處加密加硬）；每個 window 後即時偵測斷點並在進度列／GUI 提示原因（被斜坡推走／能障雙峰／間距／k 上限）；覆蓋圖每個 window 後都輸出（紅斷點、橘警示），報告指名這張圖、空白時說明「SMD 拉離中」。
+> - **D-102 膜 NaN 根因修復**：診斷確認是**建構缺陷、平台無關**（Linux 也會 NaN）——OpenMM 溶劑化放出重疊水（O–O 0.178 nm）最小化壓不下、MD 前幾步 NaN。加入缺少的「去水碰撞」步驟（建 System 前，閘門 water overlaps）。
+> - **中期開發藍圖**（對標市面軟體）：Claude Doc https://claude.ai/artifact/X7GWyffsMwTL2r9fr3SX6B （四階段：分析工具箱→增強取樣→定量自由能→進階；見 DECISIONS）。
+>
+> **待使用者／下一個 session：**
+> 1. **a19 發行**：`e0a0f77`（D-95–D-98）CI 全綠，發行說明 `docs/releases/v0.1.0a19.md` 已寫好。推 tag 是公開動作、**本 session 權限被擋，需使用者執行**：`git tag -a v0.1.0a19 e0a0f77 -m "MD20 v0.1.0a19" && git push origin v0.1.0a19`（或 Actions → Release Windows 填 tag）。**注意 a19 只含 D-95–D-98；D-99～D-102 是之後的版本（a20），不要混入 a19。**
+> 2. **確認 CI**：HEAD（`f61f305`）會觸發新 CI，確認 D-99/100/101/102 的真實引擎路徑（heavy workflow、openmm-stack 三 OS、膜測試 water overlaps 閘門與 NaN 歸零）全綠。膜診斷工作流程 run 42355183065 的 Windows build 與交叉實驗結果也可一併看（佐證 D-102）。
+> 3. **新功能需求（使用者 11/07，見 DECISIONS「新功能需求」）**：(a) **GUI 穩定性**——UI 容易斷線，需增強（WebSocket 重連、計算不阻塞 UI、斷線後從檔案回復狀態）；(b) **建膜即時 3D 顯示**。
+> 4. 中期藍圖審閱後決定先開發哪一階段。
+> 5. repo 11/07 已改回公開（開發期間）；若要關回私人，記得 release 需登入下載、CI 計費。
+> 6. 本 session 用 send_later 排了幾個檢查 check-in（膜診斷、CI）；D-102 已解決膜問題，若它們在新 session 觸發，讀本交接即可，不需重做。
+
 > **2026-11-07 第三個 session（session_016gcJzAV8UjRW4ixPZLxddG）接手。** 查到：**a18 從未發行**（GitHub 最新 release 是 a17）；repo 11/07 改為私人（CI 計費、release 需登入）。下一版用 a19。進度見 `docs/WORKBOARD.md`。
 >
 > **2026-11-07 第二次交接（session_016gcJzASwmZ7ZUPX5BewTyo）。** 已 push 到 main，HEAD **`ba4d7da`**，決策到 **D-97**，**未發行**。本 session 做了整合規格（`MD20_Claude_Code_Master_Iteration_Prompt_EN.md`）的 P0 兩批：

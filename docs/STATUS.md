@@ -3,6 +3,14 @@
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
+## 本 session（2026-11-07，session_016gcJzAV8UjRW4ixPZLxddG）新增，已 push、未發行（屬 a20，不入 a19）
+- **D-99/D-100**：SMD 水盒事先依規則決定＋通則檢查；**padding 意義更正、預設全部 2.0 nm**。
+- **D-101**：傘狀採樣 SMD 力曲線預先規劃＋即時斷點提示＋覆蓋圖一定存在。
+- **D-102**：膜 NaN 根因＝OpenMM 放出重疊水（建構缺陷、平台無關）；加「去水碰撞」閘門修復。
+- 中期開發藍圖 Claude Doc（對標市面軟體）：artifact/X7GWyffsMwTL2r9fr3SX6B。
+- **誠實狀態**：以上容器測試通過（純 Python／FakeBackend）；真實 OpenMM 路徑（heavy workflow、openmm-stack、膜測試）**交 HEAD `f61f305` 的 CI 確認**，本 session 結束時尚未全部跑完。
+- **新需求（待開發）**：GUI 穩定性（UI 易斷線）、建膜即時 3D 顯示。
+
 ## 待發行：v0.1.0a19——**`e0a0f77` CI 全綠**（openmm-stack 三 OS 777–778 passed、skip 均為預期；heavy 三個、installer 兩個、pure-python 六個、paper-docking 綠）。推 tag 屬公開發行，需使用者執行。膜表面測試曾在 `5a3fa37` Windows 偶發 NaN 一次（`e0a0f77` 三 OS 通過），根因診斷進行中（DECISIONS 11/07）。
 
 ## 進行中（2026-11-07，session_016gcJzAV8UjRW4ixPZLxddG）：D-98 配體原子電荷＋A7 拒絕代碼＋DevCheck P0
