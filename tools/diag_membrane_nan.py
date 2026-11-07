@@ -15,6 +15,13 @@ Every build also records what each chain is (residues, z range) and the closest 
 Usage:  python tools/diag_membrane_nan.py OUT_DIR [--builds 3] [--seeds 1,2,3] [--steps 200] [--from-builds DIR]
 Set OPENMM_CPU_THREADS=1 in the environment for a single-threaded (deterministic summation) pass.
 Writes OUT_DIR/diag.json and prints one line per run plus a summary.  Not a test; changes nothing in md20.
+
+Exit code: ALWAYS 0 by design (diagnostic collection must not be lost to a red job, and a green job from this script
+proves nothing scientific).  Whether the artifact is complete is decided by the separate tools/validate_membrane_diag.py
+(D-136), which reads the "protocol" block and the "finished" marker this script writes (output fields only; the
+simulation itself is unchanged).  Seeds: run["seed"] seeds BOTH the velocity generation and the Langevin integrator;
+the build uses the membrane plan's own seed (recorded as build["construction_seed"], never varied here); the
+barostat RNG seed is not set by this script or by md20 (OpenMM default).
 """
 from __future__ import annotations
 
@@ -204,10 +211,27 @@ def main(argv=None) -> int:
     import types
     sources = sorted(Path(a.from_builds).glob("build*")) if a.from_builds else [None] * a.builds
     report["from_builds"] = a.from_builds
+    # D-136: what was requested, so tools/validate_membrane_diag.py can tell a complete artifact from a partial one.
+    # Output fields only; nothing below changes how a build or a run is performed.
+    try:
+        _construction_seed = MB.DEFAULTS.get("seed") if not a.from_builds else None
+    except Exception:  # noqa: BLE001
+        _construction_seed = None
+    report["protocol"] = {
+        "schema": "md20.membrane_diag/2", "builds_requested": len(sources), "velocity_seeds": seeds, "steps": a.steps,
+        "chunk_steps": 10, "min_iter_short": 500, "min_iter_long": a.long_min, "runs_per_build": len(seeds) + 1,
+        "from_builds": a.from_builds, "construction_seed": _construction_seed, "construction_seed_varied": False,
+        "seed_roles": {"run.seed": "velocity generation and Langevin integrator seed",
+                       "construction_seed": "membrane plan seed (lipid layout, solute orientation); the same for every build here",
+                       "not_controlled": ["MonteCarloMembraneBarostat RNG seed (not set by md20; OpenMM default)",
+                                          "CPU force-summation order unless OPENMM_CPU_THREADS=1"]},
+    }
+    report["finished"] = False
     for k, src in enumerate(sources):
         bdir = src if src is not None else out / f"build{k}"
         t0 = time.time()
-        rec: dict = {"build": k, "source": str(src) if src else "built here"}
+        rec: dict = {"build": k, "source": str(src) if src else "built here",
+                     "construction_seed": report["protocol"]["construction_seed"]}
         try:
             if src is None:
                 res = MB.build_membrane_system(bdir, {"type": "surface", "lipids": "mammalian", "surface_distance_nm": 1.0},
@@ -246,6 +270,8 @@ def main(argv=None) -> int:
             print(f"build{k}: ERROR {exc}", flush=True)
         report["builds"].append(rec)
         (out / "diag.json").write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding="utf-8")
+    report["finished"] = True          # D-136: written only when every requested build was attempted
+    (out / "diag.json").write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding="utf-8")
     runs = [r for b in report["builds"] for r in b.get("runs", [])]
     nan = [r for r in runs if r["nan_at_step"]]
     shas = sorted({b.get("xyz_sha") for b in report["builds"] if b.get("xyz_sha")})

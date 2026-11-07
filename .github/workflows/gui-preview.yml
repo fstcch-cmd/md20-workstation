@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   screenshots:
+    name: "screenshots (GUI render + click self-test; a GUI check, not scientific validation)"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

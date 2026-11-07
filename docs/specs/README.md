@@ -61,3 +61,4 @@
 | [replicas.md](replicas.md) | 獨立重複：每個分析是否需要重複、條數取最大值（3）、報告如何呈現跨重複不確定性、開始時告知使用者（D-129）；重複計畫與告知（D-131） | 規格；§3–§5 已實作，待 CI；§7 每條重複分析與跨重複彙總（D-130 重做）已實作，待 CI |
 | [autonomy.md](autonomy.md) | 有界自主行動帳本（R8）：評估→提案→授權→執行→重新評估→停止／升級；預設只提建議；append-only 帳本、冪等鍵、預算與重試上限、禁止類別永不執行（D-137） | **已實作・純 Python（待 CI）**；未接進工作流程執行路徑，使用者尚未授權計算預算 |
 | [replicas.md](replicas.md) | 獨立重複：每個分析是否需要重複、條數取最大值（3）、報告如何呈現跨重複不確定性、開始時告知使用者（D-129）；重複計畫與告知（D-131） | 規格；§3–§5 已實作，待 CI |
+| [capabilities.md](capabilities.md) | 單一能力清單 `docs/capabilities.json`／`docs/CAPABILITIES.md`（五種彼此獨立的狀態、測試類型、CI job 分類、已發行安裝程式、版本對齊）與膜診斷驗收器 `tools/validate_membrane_diag.py`（D-136，R7＋R5 膜） | 已實作・純 Python 測試（CI 結果待下一輪） |

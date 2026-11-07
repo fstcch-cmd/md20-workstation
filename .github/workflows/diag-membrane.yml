@@ -1,5 +1,9 @@
-name: Diagnose membrane NaN (manual)
+name: Diagnose membrane NaN (manual, DIAGNOSTIC - not qualification)
 
+# DIAGNOSTIC, NOT QUALIFICATION (D-136): tools/diag_membrane_nan.py returns 0 on purpose, so a green diagnostic step
+# proves nothing scientific.  The separate "Validate diagnostic artifact" steps decide only whether the artifact is
+# COMPLETE (they fail on a missing/partial artifact or a build error); NaN counts are reported in the job summary, not
+# judged.  Nothing from this workflow may be cited as a qualified membrane capability (docs/specs/capabilities.md).
 # Manual only: reproduces and characterises the intermittent NaN in
 # tests/test_membrane_integration.py::test_peptide_above_popc_case_b (docs/DECISIONS.md, 11/07).
 # Round 2 (cross-OS): each OS builds and runs; then each OS re-runs the dynamics on the OTHER OS's builds, which
@@ -16,6 +20,7 @@ permissions:
 
 jobs:
   build:
+    name: "diagnostic build+run (${{ matrix.tag }}) - not qualification"
     strategy:
       fail-fast: false
       matrix:
@@ -39,18 +44,24 @@ jobs:
         shell: bash -el {0}
         timeout-minutes: 130
         run: '"$MAMBA_EXE" run -n md20 python tools/diag_membrane_nan.py diag_out --builds ${{ inputs.builds }} --seeds ${{ inputs.seeds }} --steps ${{ inputs.steps }}'
+      - name: Validate diagnostic artifact (blocks on incompleteness only; NaN counts are reported, not judged)
+        if: always()
+        shell: bash -el {0}
+        run: '"$MAMBA_EXE" run -n md20 python tools/validate_membrane_diag.py diag_out --expect-builds ${{ inputs.builds }} --expect-seeds ${{ inputs.seeds }} --expect-steps ${{ inputs.steps }} --json diag_out/validation.json --markdown "$GITHUB_STEP_SUMMARY"'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: "builds-${{ matrix.tag }}"
           path: |
             diag_out/diag.json
+            diag_out/validation.json
             diag_out/build*/system.xml
             diag_out/build*/topology.pdb
             diag_out/build*/build_manifest.json
           if-no-files-found: ignore
 
   cross:
+    name: "diagnostic cross-run (${{ matrix.tag }}) - not qualification"
     needs: build
     if: always()
     strategy:
@@ -78,3 +89,7 @@ jobs:
         shell: bash -el {0}
         timeout-minutes: 130
         run: '"$MAMBA_EXE" run -n md20 python tools/diag_membrane_nan.py cross_out --from-builds other --seeds ${{ inputs.seeds }} --steps ${{ inputs.steps }}'
+      - name: Validate diagnostic artifact (blocks on incompleteness only; NaN counts are reported, not judged)
+        if: always()
+        shell: bash -el {0}
+        run: '"$MAMBA_EXE" run -n md20 python tools/validate_membrane_diag.py cross_out --expect-builds ${{ inputs.builds }} --expect-seeds ${{ inputs.seeds }} --expect-steps ${{ inputs.steps }} --json cross_out/validation.json --markdown "$GITHUB_STEP_SUMMARY"'
