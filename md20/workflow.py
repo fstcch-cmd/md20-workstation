@@ -1275,7 +1275,8 @@ class Workflow:
             pad = TIER_PADDING_NM.get(tier, 0.8)
             if not getattr(self, "_pad_default_logged", False):
                 self.dec.record("build.box", "padding_nm", pad,
-                                f"未指定 padding：{tier} tier 預設 {pad} nm（蛋白到盒邊的最小距離；菱形十二面體盒）。"
+                                f"未指定 padding：{tier} tier 預設 {pad} nm（溶質到自己週期影像的最小距離——OpenMM 的 padding 只加一次，"
+                                f"盒寬 = 2×溶質半徑 + padding；菱形十二面體盒）。"
                                 "水佔原子數 80–90%，盒子只需容納蛋白加一層完整溶劑化殼層。")
                 self._pad_default_logged = True
         else:
@@ -1289,11 +1290,26 @@ class Workflow:
             if pad < need:
                 if not getattr(self, "_pad_logged", False):
                     self.dec.record("build.box", "padding_nm", need,
-                                    f"啟用結合自由能計算：拉離距離需要空間，padding 由 {pad} 自動提高到 {need} nm，"
-                                    f"避免配體被拉到週期影像附近。")
+                                    f"啟用結合自由能計算：padding 下限由 {pad} 提高到 {need} nm；"
+                                    f"實際大小在建模時依 SMD 規則算出（D-99，見 box size for SMD 閘門）。")
                     self._pad_logged = True
                 pad = need
         return pad
+
+    def _smd_box(self, ligands: list[str] | None, *, screen: bool = False) -> dict | None:
+        """D-99: cases that will be pulled are sized by the SMD box rule at build time (build.assemble.smd_padding)."""
+        b = self.cfg.get("binding") or {}
+        if screen or not b.get("enabled") or not ligands:
+            return None
+        bc = b.get("config") or {}
+        from .sampling.binding import BindingConfig
+        d = BindingConfig()
+        pulled = [n for n in ligands if n in (b.get("ligands") or ligands)]
+        if not pulled:
+            return None
+        return {"pull_nm": float(bc.get("pull_distance_nm", bc.get("pull_distance", d.pull_distance_nm))),
+                "margin_nm": float(bc.get("box_margin_nm", d.box_margin_nm)),
+                "allowance_nm": float(bc.get("box_allowance_nm", 0.5)), "ligands": pulled}
 
     def _build_one(self, case, raw: Path, names: list[str], picks: dict, *, screen: bool = False) -> tuple[dict, dict]:
         """Build one case from chosen poses (`picks[name]` has sdf/smiles); returns (build summary, name → topology name)."""
@@ -1307,7 +1323,8 @@ class Workflow:
                 for n in names if lspec.get(n, {}).get("sequence")]
         s = build_case(case, receptor=raw, decisions=self.dec, ligand_references=[picks[n]["smiles"] for n in small],
                        ligand_poses=[picks[n]["sdf"] for n in small], ph=self.cfg.get("ph", 7.4),
-                       padding_nm=self._padding_nm(names, screen=screen), keep_hetero=set(self.cfg.get("keep_hetero", [])),
+                       padding_nm=self._padding_nm(names, screen=screen), smd_box=self._smd_box(names, screen=screen),
+                       keep_hetero=set(self.cfg.get("keep_hetero", [])),
                        extra_ligand_resnames=drop, peptides=peps or None, ligand_names=small,
                        exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])),
                        metal_policy=self.cfg.get("metal_policy") or None,

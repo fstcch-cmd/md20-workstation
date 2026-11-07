@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
+import math
 import numpy as np
 
 MIN_PADDING_NM = 0.6      # below this the protein sees its own image inside the 1.0 nm cutoff — never allowed
@@ -185,6 +186,9 @@ def add_flat_bottom_restraints(system, topology, positions, lig_atom_ranges, *, 
     return out
 
 
+# D-99: room for the ligand COM to move / a peptide to extend between the build and the SMD start (equilibration + MD)
+SMD_BOX_ALLOWANCE_NM = 0.5
+
 # Monovalent ions OpenMM's Modeller.addSolvent can place; amber14/tip3p.xml carries Joung–Cheatham parameters for
 # all of them.  Divalent salts (MgCl2, CaCl2) need a different placement and are not supported yet (gate).
 POSITIVE_IONS = {"Na+": "NA", "K+": "K", "Li+": "LI", "Rb+": "RB", "Cs+": "CS"}
@@ -210,6 +214,88 @@ def resolve_ions(ions: dict | None, ionic_strength_molar: float = 0.15) -> tuple
     return spec, None
 
 
+def smd_padding_plan(xyz: np.ndarray, masses: np.ndarray, ca: np.ndarray, ligands: dict, padding_nm: float, *,
+                     pull_nm: float, margin_nm: float, allowance_nm: float, shape: str) -> dict:
+    """Pure core of `smd_padding` (D-99).  `ligands` = {name: heavy-atom indices}.  Returns a plan:
+    {"status": PASS|AUTO_FIXED|NEEDS_HUMAN, "padding_nm", "worst", "per", "evidence"}."""
+    from ..sampling.binding import pocket_anchor, smd_half_box_need, solute_radius_nm, padding_for_half_box
+    per, unplanned = {}, []
+    for name, lig in ligands.items():
+        lig = np.asarray(lig, dtype=int)
+        anc, used = pocket_anchor(xyz, ca, lig) if len(lig) else (np.array([], dtype=int), 0.0)
+        if not len(anc):
+            unplanned.append(name)
+            continue
+        need = smd_half_box_need(xyz, None, anc, lig, masses, pull_nm=pull_nm, margin_nm=margin_nm)
+        per[name] = {**{k: round(v, 3) for k, v in need.items()}, "anchor_cutoff_nm": round(used, 2), "n_anchor": int(len(anc))}
+    ev = {"ligands": per, "unplanned_ligands": unplanned, "allowance_nm": allowance_nm, "padding_requested_nm": padding_nm,
+          "box_shape": shape}
+    if not per:
+        return {"status": NEEDS_HUMAN, "padding_nm": padding_nm, "worst": None, "per": per, "evidence": ev}
+    worst = max(per, key=lambda k: per[k]["need_half_box_nm"])
+    half_needed = per[worst]["need_half_box_nm"] + allowance_nm
+    R = solute_radius_nm(xyz)
+    p_req = math.ceil(padding_for_half_box(R, half_needed) / 0.05 - 1e-9) * 0.05
+    vf = {"dodecahedron": 0.7071, "octahedron": 0.7698, "cube": 1.0}[shape]
+    w = lambda p: max(2 * R + p, 2 * p)                                   # noqa: E731
+    ev.update({"solute_radius_nm": round(R, 3), "half_box_needed_nm": round(half_needed, 3),
+               "padding_required_nm": round(p_req, 2), "half_box_at_requested_nm": round(w(padding_nm) / 2, 3)})
+    if p_req <= padding_nm + 1e-9:
+        return {"status": PASS, "padding_nm": padding_nm, "worst": worst, "per": per, "evidence": ev}
+    v0, v1 = vf * w(padding_nm) ** 3, vf * w(p_req) ** 3
+    ev.update({"volume_nm3_before": round(v0, 1), "volume_nm3_after": round(v1, 1), "approx_water_added": int((v1 - v0) * 33.4)})
+    return {"status": AUTO_FIXED, "padding_nm": float(round(p_req, 2)), "worst": worst, "per": per, "evidence": ev}
+
+
+def smd_padding(modeller, lig_atom_ranges, padding_nm: float, smd_box: dict, shape: str, report, decisions=None) -> float:
+    """D-99: the padding a pulled case needs, from the SAME rule the SMD step checks (sampling.binding: pocket-Cα anchor,
+    d0 + pull + ligand radius + margin ≤ half box) and OpenMM's real box formula (width = 2R + padding), plus an
+    allowance for the ligand moving / a peptide extending during MD.  Returns the padding to use (never smaller)."""
+    from openmm import unit
+    xyz = np.asarray(modeller.positions.value_in_unit(unit.nanometer), float)
+    atoms = list(modeller.topology.atoms())
+    masses = np.array([a.element.mass.value_in_unit(unit.dalton) if a.element is not None else 0.0 for a in atoms])
+    in_lig = {i for _, a, b in lig_atom_ranges for i in range(a, b)}
+    ca = np.array([a.index for a in atoms if a.name == "CA" and a.element is not None and a.element.symbol == "C"
+                   and a.index not in in_lig], dtype=int)
+    present = [n for n, _, _ in lig_atom_ranges]
+    # names in the config may differ from the topology names (renamed L01…): no match → size for every ligand
+    wanted = (set(smd_box.get("ligands") or []) & set(present)) or set(present)
+    ligs = {n: [i for i in range(a, b) if atoms[i].element is not None and atoms[i].element.symbol != "H"]
+            for n, a, b in lig_atom_ranges if n in wanted}
+    pull, margin = float(smd_box.get("pull_nm", 1.5)), float(smd_box.get("margin_nm", 1.0))
+    allow = float(smd_box.get("allowance_nm", SMD_BOX_ALLOWANCE_NM))
+    plan = smd_padding_plan(xyz, masses, ca, ligs, padding_nm, pull_nm=pull, margin_nm=margin, allowance_nm=allow, shape=shape)
+    report.add(smd_box_gate(plan, pull_nm=pull, margin_nm=margin))
+    if decisions and plan["status"] == AUTO_FIXED:
+        decisions.record("build.box", "padding for SMD", plan["padding_nm"],
+                         f"這個案例之後要做 SMD／傘狀採樣：依 SMD 步驟同一條規則（d0 + 拉離 + 配體半徑 + 安全距離 ≤ 盒子半長）"
+                         f"加上 {allow} nm 的 MD 漂移餘裕，以 OpenMM 實際的盒子公式（盒寬 = 2×溶質半徑 + padding）算出 padding "
+                         f"{plan['padding_nm']:.2f} nm（原 {padding_nm}）。先前固定的「拉離距離 + 0.5」沒有算配體半徑、d0 和安全距離，"
+                         f"胜肽（半徑大）會建出 SMD 不能用的盒子。")
+    return plan["padding_nm"]
+
+
+def smd_box_gate(plan: dict, *, pull_nm: float, margin_nm: float) -> Gate:
+    ev, worst = plan["evidence"], plan["worst"]
+    if plan["status"] == NEEDS_HUMAN:
+        return Gate("box size for SMD", NEEDS_HUMAN,
+                    f"要拉離的配體 {', '.join(ev['unplanned_ligands']) or '—'} 附近找不到口袋 Cα（1.6 nm 內），無法依 SMD 規則決定水盒大小。",
+                    options=["binding.config.anchor_residues 指定 anchor", f"md.padding_nm 自行指定（目前 {ev['padding_requested_nm']}）"],
+                    evidence=ev)
+    w = plan["per"][worst]
+    if plan["status"] == PASS:
+        return Gate("box size for SMD", PASS,
+                    f"padding {ev['padding_requested_nm']} nm 已足夠拉離 {worst}（盒子半長 {ev['half_box_at_requested_nm']:.2f} ≥ 需要的 "
+                    f"{ev['half_box_needed_nm']:.2f} nm，含 MD 漂移餘裕 {ev['allowance_nm']} nm）。", evidence=ev)
+    return Gate("box size for SMD", AUTO_FIXED,
+                f"要拉離 {worst}：d0 {w['d0_nm']:.2f} + 拉離 {pull_nm} + 配體半徑 {w['ligand_radius_nm']:.2f} + 安全距離 {margin_nm} "
+                f"+ MD 漂移餘裕 {ev['allowance_nm']} = 盒子半長需 {ev['half_box_needed_nm']:.2f} nm；溶質半徑 {ev['solute_radius_nm']:.2f} nm，"
+                f"padding 由 {ev['padding_requested_nm']} 提高到 {plan['padding_nm']:.2f} nm（盒子約 {ev['volume_nm3_before']:.0f} → "
+                f"{ev['volume_nm3_after']:.0f} nm³，水約多 {ev['approx_water_added']:,} 個，MD 計算量約 ×{ev['volume_nm3_after'] / ev['volume_nm3_before']:.1f}）。",
+                evidence=ev, diff=[f"padding_nm: {ev['padding_requested_nm']} → {plan['padding_nm']:.2f}"])
+
+
 def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_dir: Path | str, *,
                     padding_nm: float = 1.0, ionic_strength_molar: float = 0.15, box_shape: str = "dodecahedron",
                     water_model: str = "tip3p", decisions: DecisionLog | None = None,
@@ -217,8 +303,10 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                     flat_bottom: bool | None = None, metal_policy: dict | None = None, ph: float = 7.4,
                     metal_params: dict | None = None, solvent: str = "explicit", ions: dict | None = None,
                     ligand_metal: str | None = None, accept_geometry: bool = False,
-                    membrane: dict | None = None) -> BuildResult:
-    """`membrane` = md.membrane (docs/specs/membrane.md): the bilayer replaces the water box; receptor_pdb may be None
+                    membrane: dict | None = None, smd_box: dict | None = None) -> BuildResult:
+    """`smd_box` (D-99) = {"pull_nm", "margin_nm", "allowance_nm", "ligands": [names] | None}: the case will be pulled
+    (SMD/umbrella), so the water box is sized with the SMD box rule before solvation instead of a fixed padding.
+    `membrane` = md.membrane (docs/specs/membrane.md): the bilayer replaces the water box; receptor_pdb may be None
     for a solute-only surface system (case B) or a pure bilayer (case C, no ligands either)."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -333,8 +421,10 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                              "不適合金屬位點、水橋接的結合、SMD/傘狀採樣（溶劑化能障會失真）。")
     else:
         # solvate — the box is where the compute goes (80–90 % of the atoms are water), so: smallest shape that keeps
-        # the protein ≥ 2×padding from its own image in every orientation (rhombic dodecahedron: 71 % of the cube's
+        # the protein ≥ padding from its own image in every orientation (rhombic dodecahedron: 71 % of the cube's
         # volume for the same image distance), and padding no larger than the solvation shell needs.
+        # D-99 correction: OpenMM adds padding ONCE (width = 2R + padding), so padding is the solute-to-own-image
+        # distance, not the solute-to-edge distance (earlier comments said "2×padding" / "to the box edge").
         if padding_nm < MIN_PADDING_NM:
             report.add(Gate("padding", NEEDS_HUMAN,
                             f"padding {padding_nm} nm 小於 {MIN_PADDING_NM} nm：蛋白會與自己的週期影像在截斷半徑（1.0 nm）內互相作用，"
@@ -366,6 +456,8 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                 atomic_write_json({**res.to_dict(), "membrane": membrane_info}, out_dir / "build_manifest.json")
                 return res
         shape = {"cube": "cube", "dodecahedron": "dodecahedron", "octahedron": "octahedron"}[box_shape]
+        if smd_box and mplan is None and lig_atom_ranges:
+            padding_nm = smd_padding(modeller, lig_atom_ranges, padding_nm, smd_box, shape, report, decisions)
         if mplan is None:
             modeller.addSolvent(ff, model=water_model, padding=padding_nm * unit.nanometer, boxShape=shape,
                                 positiveIon=ion_spec["positive"], negativeIon=ion_spec["negative"],
@@ -384,7 +476,7 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                              + f"；{ion_spec['positive']}{ion_spec['negative']} 鹽濃度 {ion_spec['concentration_molar']} M"
                              + ("，並以同種離子中和溶質淨電荷" if ion_spec["neutralize"] else "，不中和淨電荷（PME 會加均勻背景電荷）")
                              + "（離子數見 build_manifest 的 n_ions；鹽只佔原子數 < 1%，算力在水）。"
-                             "padding 是蛋白到盒邊的最小距離：0.8 nm 已含完整溶劑化殼層，再小會碰到自己的週期影像。")
+                             "padding 是溶質到自己週期影像的最小距離（OpenMM：盒寬 = 2×溶質半徑 + padding，只加一次；D-99 更正）。")
     counts = {}
     n_water = 0
     for res_ in modeller.topology.residues():

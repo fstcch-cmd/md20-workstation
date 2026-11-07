@@ -17,7 +17,7 @@
 | [gate_actions.md](gate_actions.md) | 三態閘門、GUI 一鍵決定、選項→設定修補、失效重跑 | 已驗證（GUI 伺服器測試）|
 | [viewer_interactions.md](viewer_interactions.md) | 離線 3D viewer、幾何互作標示、vdW 表面 | 已實作・純 Python 驗證（Chromium 繪圖測試在 CI 恆跳過，未驗證） |
 | [drivers.md](drivers.md) | 顯示卡驅動偵測→判定→一鍵下載官方驅動（不自動安裝）；`-Cuda` 不動驅動的替代路 | 已實作・筆電 `drivers plan` 實測正常，下載未在真機用過 |
-| [solvent_box.md](solvent_box.md) | 水盒：菱形十二面體、tier padding（0.8／1.0）、下限閘門、離子強度可調——算力不浪費在水與鹽 | 已驗證（全流程 CI＋筆電） |
+| [solvent_box.md](solvent_box.md) | 水盒：菱形十二面體、tier padding（0.8／1.0）、下限閘門、離子強度可調；**D-99 更正 padding 意義（只加一次＝溶質到影像距離）與 SMD 案例的盒子大小** | 已驗證（全流程 CI＋筆電）；D-99 待 CI |
 | [pbc_centering.md](pbc_centering.md) | 週期邊界歸零：蛋白鏈＋bonded 金屬為錨、配體／胜肽折回、歸零 DCD 輸出、視覺性解離閘門 | 已驗證（全流程 CI＋筆電） |
 | [hts_screen.md](hts_screen.md) | 高通量前期篩選：Excel/CSV 化合物庫 → 自動下載 3D → 批次快速對接 → 排名圖 → 勾選進入正式對接/MD | 已驗證（`test_screen_integration` 三 OS，1634916 起含 Windows） |
 | [ci_validation.md](ci_validation.md) | CI 架構、重測、論文對接重現、hsieh2024 不可重現分析、這幾輪抓到的 bug | 進行中 |

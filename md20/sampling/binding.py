@@ -76,6 +76,49 @@ def cv_distance(xyz: np.ndarray, box: np.ndarray, anchor: np.ndarray, ligand: np
 
 
 # --------------------------------------------------------------------------- system setup
+_SOLVENT_RESNAMES = {"HOH", "WAT", "TIP3", "SOL", "NA", "CL", "K", "Na+", "Cl-", "K+", "MG", "CA2", "LI", "RB", "CS", "BR", "F", "I"}
+
+
+def pocket_anchor(xyz: np.ndarray, ca: np.ndarray, lig: np.ndarray, *, cutoff_nm: float = 0.8,
+                  max_cutoff_nm: float = 1.6, min_atoms: int = 4) -> tuple[np.ndarray, float]:
+    """Pocket anchor rule (pure): the Cα within `cutoff` of any ligand heavy atom, widening by 0.2 nm until ≥ 4.
+    Used by select_groups (SMD) and by the build's box sizing (D-99), so both see the same anchor."""
+    cutoff, sel = cutoff_nm, np.array([], dtype=int)
+    while len(sel) < min_atoms and cutoff <= max_cutoff_nm and len(ca):
+        d = np.min(np.linalg.norm(xyz[ca][:, None, :] - xyz[lig][None, :, :], axis=2), axis=1)
+        sel = ca[d <= cutoff]
+        cutoff += 0.2
+    return sel, cutoff - 0.2
+
+
+def smd_half_box_need(xyz: np.ndarray, box: np.ndarray | None, anchor: np.ndarray, ligand: np.ndarray,
+                      masses: np.ndarray, *, pull_nm: float, margin_nm: float) -> dict:
+    """The SMD box rule (pure, D-99): bound distance d0 + pull + ligand radius + margin must fit in half the box.
+    `box` None = not yet solvated (no minimum image)."""
+    dv = group_com(xyz, ligand, masses) - group_com(xyz, anchor, masses)
+    d0 = float(np.linalg.norm(min_image(dv, box) if box is not None else dv))
+    lx = xyz[ligand]
+    r = float(np.max(np.linalg.norm(lx - lx.mean(0), axis=1))) if len(ligand) > 1 else 0.0
+    return {"d0_nm": d0, "pull_nm": float(pull_nm), "ligand_radius_nm": r, "margin_nm": float(margin_nm),
+            "need_half_box_nm": d0 + float(pull_nm) + r + float(margin_nm)}
+
+
+def solute_radius_nm(xyz: np.ndarray) -> float:
+    """OpenMM Modeller.addSolvent's solute radius: farthest atom from the centre of the bounding box."""
+    c = 0.5 * (xyz.min(0) + xyz.max(0))
+    return float(np.max(np.linalg.norm(xyz - c, axis=1))) if len(xyz) else 0.0
+
+
+def padding_for_half_box(radius_nm: float, half_box_nm: float) -> float:
+    """Smallest OpenMM padding giving at least `half_box_nm`.  OpenMM (modeller.py, addSolvent with padding):
+    width = max(2R + padding, 2·padding) and every box vector of cube / dodecahedron / octahedron has length = width,
+    so half the shortest vector = max(R + p/2, p).  NB: padding is the solute-to-own-image distance, added once."""
+    p = 2.0 * (half_box_nm - radius_nm)
+    if p <= 2.0 * radius_nm:
+        return max(p, 0.0)
+    return half_box_nm
+
+
 def select_groups(topology, positions_nm: np.ndarray, *, ligand_resname: str | None = None,
                   ligand_indices: list[int] | None = None, anchor_indices: list[int] | None = None,
                   pocket_cutoff_nm: float = 0.8, exclude_indices=None) -> tuple[np.ndarray, np.ndarray, dict]:
@@ -93,14 +136,9 @@ def select_groups(topology, positions_nm: np.ndarray, *, ligand_resname: str | N
         ca = np.array([a.index for a in atoms if a.name == "CA" and a.residue.name not in {ligand_resname, "CA"}
                        and a.residue.index not in lig_res and a.residue.index not in excl_res
                        and a.element is not None and a.element.symbol == "C"], dtype=int)
-        cutoff = pocket_cutoff_nm
-        sel = np.array([], dtype=int)
-        while len(sel) < 4 and cutoff <= 1.6 and len(ca):
-            d = np.min(np.linalg.norm(positions_nm[ca][:, None, :] - positions_nm[lig][None, :, :], axis=2), axis=1)
-            sel = ca[d <= cutoff]
-            cutoff += 0.2
+        sel, used = pocket_anchor(positions_nm, ca, lig, cutoff_nm=pocket_cutoff_nm)
         anchor_indices = sel.tolist()
-        note = f"口袋 anchor：配體 {cutoff - 0.2:.1f} nm 內的 {len(sel)} 個 Cα"
+        note = f"口袋 anchor：配體 {used:.1f} nm 內的 {len(sel)} 個 Cα"
     anc = np.array(anchor_indices, dtype=int)
     if not len(anc):
         raise ValueError("找不到 anchor 原子")
@@ -500,16 +538,21 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         ctx.setParameter("msw_fb_scale", 0.0)   # multi-ligand flat-bottom restraints are off for free-energy work
     xyz, box = _state_xyz_box(ctx)
     d0 = cv_distance(xyz, box, anchor, ligand, masses)
+    bc = smd_half_box_need(xyz, box, anchor, ligand, masses, pull_nm=cfg.pull_distance_nm, margin_nm=cfg.box_margin_nm)
+    lig_radius, need = bc["ligand_radius_nm"], bc["need_half_box_nm"]
     lig_xyz = xyz[ligand]
-    lig_radius = float(np.max(np.linalg.norm(lig_xyz - lig_xyz.mean(0), axis=1))) if len(ligand) > 1 else 0.0
     half_box = 0.5 * float(min(np.linalg.norm(box, axis=1)))
-    need = d0 + cfg.pull_distance_nm + lig_radius + cfg.box_margin_nm
-    manifest["box_check"] = {"d0_nm": d0, "pull_nm": cfg.pull_distance_nm, "ligand_radius_nm": lig_radius,
-                             "margin_nm": cfg.box_margin_nm, "need_half_box_nm": need, "half_box_nm": half_box}
+    manifest["box_check"] = {**bc, "half_box_nm": half_box}
     if need > half_box:
+        # D-99: say exactly which padding would have been enough for THIS structure (same rule as the build's sizing)
+        solute = np.array([a.index for a in top.atoms() if a.residue.name not in _SOLVENT_RESNAMES], dtype=int)
+        r_sol = solute_radius_nm(_unwrap_near(xyz[solute], xyz[anchor].mean(0), box)) if len(solute) else 0.0
+        p_need = padding_for_half_box(r_sol, need)
+        manifest["box_check"].update({"solute_radius_nm": r_sol, "padding_needed_nm": round(p_need + 0.05, 2)})
         msg = (f"水盒太小：拉離終點 {d0 + cfg.pull_distance_nm:.2f} nm + 配體半徑 {lig_radius:.2f} + 安全距離 "
                f"{cfg.box_margin_nm:.1f} = {need:.2f} nm，超過盒子半長 {half_box:.2f} nm；配體會接近週期影像，PMF 不可信。"
-               f"請以較大 padding 重建（啟用結合計算時工作流程會自動提高），或縮短 pull_distance。")
+               f"這個結構至少要 padding {p_need + 0.05:.2f} nm（OpenMM 的 padding 是溶質到自身影像的距離，只加一次）。"
+               f"選項：md.padding_nm: {p_need + 0.05:.2f} 後重建／縮短 binding.config.pull_distance_nm。")
         manifest.update({"status": "NEEDS_HUMAN", "reason": msg})
         atomic_write_json(json.loads(json.dumps(manifest, default=_np_default)), out / "binding_manifest.json")
         if decisions:

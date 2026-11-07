@@ -21,7 +21,7 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
                ligand_names: list[str] | None = None, peptide_policy: dict | None = None,
                exclude_chains: set[str] | None = None, metal_policy: dict | None = None, ligand_metal: str | None = None, accept_geometry: bool = False,
                metal_params: dict | None = None, solvent: str = "explicit", box_shape: str = "dodecahedron",
-               membrane: dict | None = None, decisions=None) -> dict:
+               membrane: dict | None = None, smd_box: dict | None = None, decisions=None) -> dict:
     """Build a case.
 
     `cocrystal_resnames[i]` (optional) names the HETATM residue whose coordinates are the pose for ligand i.
@@ -119,7 +119,7 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
             _update_case(case, summary)
             return summary
         ligs.append(prec)
-    res = assemble_system(rman["receptor_pdb"], ligs, bdir, padding_nm=padding_nm, box_shape=box_shape,
+    res = assemble_system(rman["receptor_pdb"], ligs, bdir, padding_nm=padding_nm, box_shape=box_shape, smd_box=smd_box,
                           ionic_strength_molar=ionic_strength_molar, ions=ions, decisions=decisions, metal_policy=metal_policy, ph=ph,
                           metal_params=metal_params, solvent=solvent, ligand_metal=ligand_metal,
                           accept_geometry=accept_geometry, membrane=membrane)

@@ -6,6 +6,24 @@
 ---
 
 ## 2026-11-07
+### D-99　要拉離的案例在建模時就依 SMD 規則決定水盒大小；更正「padding」的意義（OpenMM 只加一次）
+- 起因：使用者 11/07 16:23「之前 GRP 的教學專案失敗，原因是水盒太小，無法做 SMD」（教學二 hsieh2025：Keap1 BTB 4CXT＋GGGGGKP）。
+- 根因（兩處規則不一致）：
+  1. SMD 步驟（`sampling/binding.run_binding`）要求 d0 ＋ 拉離距離 ＋ 配體半徑 ＋ 安全距離（1.0 nm）≤ 盒子半長，anchor＝配體 0.8 nm 內的口袋 Cα。
+  2. 建模時（`workflow._padding_nm`，WP3）只把 padding 提高到「拉離距離 ＋ 0.5」（夾在 1.5–2.5），**沒有算配體半徑、d0、安全距離，也沒有算蛋白大小**。
+  3. 而且 **OpenMM 的 padding 只加一次**：`modeller.addSolvent(padding=p)` 的盒寬 = max(2R ＋ p, 2p)，R＝溶質外接框中心到最遠原子（openmm 8.6.1 `wrappers/python/openmm/app/modeller.py` 第 502–514 行；cube／dodecahedron／octahedron 每個盒向量長度都等於盒寬）。所以盒子半長 = R ＋ p/2，**padding 是溶質到自己週期影像的距離**，不是到盒邊；程式註解與 `docs/specs/solvent_box.md` 寫的「蛋白到盒邊」「≥ 2×padding」「蛋白到影像 ≥ 1.6 nm」都是錯的。
+  4. 胜肽配體伸展後半徑約 1 nm、盲搜盒常停在表面 → 依原規則 GRP 這類案例的盒子必然不夠，SMD 一定擋下。合成幾何測試重現：R 2.47 nm、padding 2.0 → 半長 3.47，需要 4.57 nm。
+- 決定：
+  - `sampling/binding.py` 抽出純函式 `pocket_anchor`（原 select_groups 的 anchor 規則）、`smd_half_box_need`（原 run_binding 的盒子規則）、`solute_radius_nm`（OpenMM 的 R）、`padding_for_half_box`（OpenMM 盒寬公式的反函數）；run_binding 與建模共用，**兩邊永遠是同一條規則**。
+  - `build/assemble.smd_padding`：要拉離的案例（`binding.enabled`、有配體、非篩選短 MD）在加水之前，以實際的蛋白＋配體座標算出所需 padding，再加 **MD 漂移餘裕 0.5 nm**（配體 COM 在平衡與 MD 中移動、胜肽伸展；可用 `binding.config.box_allowance_nm` 改）；需要更大時 padding 提高並給 AUTO_FIXED 閘門「box size for SMD」（diff：padding 前後；說明含盒子體積前後、約多幾個水、MD 計算量倍數），夠用時 PASS；找不到口袋 Cα 時 NEEDS_HUMAN（不猜）。`_padding_nm` 的舊規則保留為下限。
+  - SMD 時若仍太小（MD 漂移超過餘裕），NEEDS_HUMAN 訊息改成給**這個結構實際需要的 padding 數值**（`md.padding_nm: X`），不再只說「以較大 padding 重建」。
+  - 更正程式註解與決策日誌文字中 padding 的意義；`docs/specs/solvent_box.md` 加更正（保留原文）。
+- 成本（照實說）：GRP 類幾何 padding 2.0 → 4.2 nm，盒子約 237 → 541 nm³（×2.3），MD 與 SMD 的算力同比例增加；小分子埋在口袋（3PTB 類）多半 PASS、不變。
+- 被否決：把固定規則改成更大的常數（仍與 SMD 規則脫鉤，小分子會白白多算）；SMD 前自動以更大盒子重新溶劑化（等於新增步驟，且平衡過的結構要重新平衡）；縮短胜肽的拉離距離（改科學模型，未獲授權）；放寬 SMD 的安全距離（同上）。
+- **另一個需要使用者決定的問題（未改）**：既然 padding 是溶質到影像的距離，classroom／teaching 預設 0.8 nm 代表蛋白與自己的影像只隔 0.8 nm，**小於非鍵截斷 1.0 nm**——蛋白會直接與自己的影像有實空間作用。research 1.0 nm 剛好等於截斷。常見做法（GROMACS `-d 1.0` ＝到盒邊 1.0 ＝影像 2.0 nm）約等於 OpenMM padding 2.0。提高預設會讓所有案例的水變多（算力約 ×1.5–2）；屬科學設定與成本取捨，等使用者決定。`MIN_PADDING_NM` 的說明文字目前也以「< 0.8 才會碰到影像」為前提，一併待決。
+- 測試：`tests/test_smd_box_sizing.py`（12 項：OpenMM 盒寬公式的最小且足夠 padding、padding 只加一次、GRP 類幾何舊規則失敗而新規則通過、埋藏小分子維持原 padding、無 anchor 擋下、anchor 規則與原 select_groups 相同、只有要拉離的案例才套用）；`test_workflow_integration.py::test_full_workflow_3ptb` 加斷言（真實 OpenMM 建模出現「box size for SMD」閘門且 PASS／AUTO_FIXED、SMD 沒有遇到水盒太小）。容器 710 passed、49 skipped。
+- 未決：GRP 教學二的真實重跑（需使用者在筆電執行；盒子變大，時間會變長）；漂移餘裕 0.5 nm 是否足夠，待真實案例的 SMD 起點紀錄驗證。
+
 ### 觀察（未改程式）：`5a3fa37` openmm-stack Windows 的 `test_peptide_above_popc_case_b` NaN
 - 事實：Windows CPU 平台，膜系統（POPC＋胜肽，`Modeller.addMembrane`）最小化 10 kJ/mol 後直接 200 步 NPT（2 fs、MonteCarloMembraneBarostat）→ `Particle coordinate is NaN`。同一測試在 `d879f2b` Windows 通過（201 秒）；`5a3fa37` 的 Linux、macOS 也通過。OpenMM 8.6.1、numpy 2.4.6、openff-toolkit 0.18.0 兩次相同；`d879f2b..HEAD` 沒有改到膜、引擎或環境檔（只有 D-95 的安裝釘選，版本本來就相同）。
 - 判斷：偶發（多執行緒 CPU 加總順序、或膜組裝的隨機性），第一次出現。另外兩項 openmm-stack 失敗（三 OS 共有）是 `test_validation_papers`，已在 `460d9d1` 修正。

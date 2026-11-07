@@ -56,11 +56,17 @@ def test_full_workflow_3ptb(pdb_3ptb, tmp_path):
                 assert "fingerprint" not in (L.get("errors") or {}), L.get("errors")
                 assert fp["ligand_charge"] == "atom-level formal charges", (name, fp.get("ligand_charge"))
     bm_ben = load_json(Path(wf.project.case(st["md_runs"]["runs"]["docked_BEN"]["case_id"]).build_dir) / "build_manifest.json", {})
+    # D-99: the pulled case was sized by the SMD rule at build time (real OpenMM modeller), and SMD did not hit the box check
+    gb = [g for g in (bm_ben.get("gates") or {}).get("gates", []) if g["name"] == "box size for SMD"]
+    assert gb and gb[0]["status"] in ("PASS", "AUTO_FIXED"), gb
+    ev = gb[0]["evidence"]
+    assert ev["solute_radius_nm"] > 1.0 and ev["half_box_needed_nm"] > 0
     for lig in (bm_ben.get("assembly") or {}).get("ligands") or []:
         q, s = lig.get("atom_formal_charges") or [], lig.get("atom_charge_signs") or []
         assert len(q) == len(s) == len(lig["atom_indices"]) and lig.get("atom_charge_method"), lig.get("name")
         assert sum(1 for x in s if x) >= sum(1 for x in q if x), (q, s, lig.get("atom_charge_method"))
     b = out["binding"]["BEN"]
+    assert "水盒太小" not in str(b), b
     assert b["status"] == "PASS" and b["delta_pmf_kj_mol"] is not None
     html = Path(out["report"]).read_text(encoding="utf-8")
     assert "分子對接" in html and "ΔPMF" in html and "apo" in html
