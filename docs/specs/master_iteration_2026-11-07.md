@@ -27,7 +27,7 @@
 | A9 | `workflow.py:1660` `md_runs[i % len(md_runs)]`；`multi.py:295` 文字固定寫「MD 起點都不同」 | SMD replica 數 > MD replica 數時循環重用同一個 MD 終點，但文字仍宣稱獨立起點；research tier 的「≥ 3 replica」也用 SMD 數 | **確認缺陷** | 三個 SMD 種子被當三個獨立平衡起點 | **已修**：每個 replica 記錄 `md_run_id`、seed、起點檔；彙總分開「共用起點的隨機拉離次數」與「獨立 MD 起點數」；文字依實際情況；tier 規則改看獨立起點數 |
 | A10 | `report/workflow_report.py:1385–1389`（`key[:10]`）、`:1389–1390`（decisions 只用 stage 前綴過濾）；`util/decisions.py`（無 workflow 欄位） | 同一專案多個流程的決策混在一起；重點摘要截前 10 條 | **確認缺陷** | 出處污染；後來的嚴重 PMF 問題可能被截掉 | **已修**：DecisionLog 寫入帶 `workflow`；報告只取本流程，舊紀錄（無歸屬）另列「歸屬不明」而不猜；摘要去重後 caution 全部保留，其他依序補到 10 條 |
 | A11 | `analysis/extended.py` PCA/cluster；`figure_text.py:1049` `classify_pca`、`:1073` `classify_clusters`、`:1095` `classify_dccm` | 各系統各自做 PCA；短軌跡投影密度叫自由能地形 | **方法限制** | 跨系統不可比；密度≠熱力學 FEL | **未修**（下一輪 F12）：需要共同基底與代表結構連結 |
-| A12 | `analysis/extended.py:27` `frame_indices`（MAX_FRAMES 250） | 昂貴分析共用抽幀；目前**沒有**任何事件持續時間估計使用它 | **方法限制**（擴充風險，不是現有錯誤） | 若新持續性分析沿用抽幀會漏掉短暫中斷 | **已處理於新分析**：F09 持續性用自己的節奏契約（讀儲存幀、不吃顯示抽幀、replica 不串接、稀疏資料給限制）；既有抽幀預設**不改**（沒有回歸測試前不動） |
+| A12 | `analysis/extended.py:27` `frame_indices`（MAX_FRAMES 250） | 昂貴分析共用抽幀；目前**沒有**任何事件持續時間估計使用它 | **方法限制**（擴充風險，不是現有錯誤） | 若新持續性分析沿用抽幀會漏掉短暫中斷 | **已處理於新分析**：F09 持續性用自己的節奏契約（讀儲存幀、不吃顯示抽幀、replica 不串接、稀疏資料給限制）；既有抽幀預設**不改**（沒有回歸測試前不動）。**D-135 更正**：抽幀的比例、方案與敏感度現在寫進輸出（`sampling`、`pca.sensitivity`），記憶體保護 stride 也不再默默傳進持續性（見 `analysis_cache.md`） |
 
 ## 2. F01–F19 盤點（§6）
 
@@ -110,6 +110,7 @@ A5/A6/F07/F08/F09/A4/A12 已實作（純 Python，容器可測；真實 mdtraj �
 - 節奏契約：儲存間隔 > 允許中斷→`limited`（短暫中斷無法分辨，事件長度是上限）；可辨識的最大延遲＝觀察窗；事件數 < 5 或觀察窗不足 → 不擬合壽命（`lifetime: unavailable`）。
 - 不同 run 絕不串接；chunk 邊界不切斷事件。
 - 明文：接觸持續性不是配體滯留時間、不是 koff。
+- **D-135 更新（R3）**：事件偵測改為 `EventAccumulator`（可分 chunk 餵、跨 chunk 帶著開著的事件）；輸出加 `status`（computed／limited／unverified）與 `resolution`（來源／有效節奏、stride、觀察長度）；stride > 1 時 `analyse_run` 改用串流在全部儲存幀上重算持續性。細節見 `analysis_cache.md` §1。
 
 ## 4. 驗收對照（§11）
 本輪新增測試對應：Test 1、2、3（assessment）；4 的高 RMSD 但接觸保留、anchor 改變不影響狀態判定（ligand_state 只用接觸與口袋，不用絕對距離）；5、6（interactions）；7（replica）；9 的四語一致（圖說讀同一個 Assessment）；10（決策紀錄分流程）；14 的解析度不算修正；19 的缺水資料→unavailable；25、36（persistence）。

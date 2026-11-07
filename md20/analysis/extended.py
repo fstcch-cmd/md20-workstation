@@ -12,7 +12,11 @@ from __future__ import annotations
 
 import numpy as np
 
+EXTENDED_SCHEMA = "md20.extended/3"      # D-135: bump when extended.json gains/changes fields (invalidates cached analyses)
 MAX_FRAMES = 250            # frames used for the expensive parts (SASA, clustering, water bridges)
+SENSITIVITY_TOLERANCES = {"pc1_abs_cos_min": 0.9, "explained_abs_diff_max": 0.10, "largest_cluster_abs_diff_max": 0.15,
+                          "basis": "declared reporting thresholds (empirical); not a convergence criterion"}
+ALL_FRAMES_PCA_MAX_ELEMENTS = 20_000_000   # frames × 3·N_Cα above which the all-frame PCA comparison is skipped as costly
 HB_DIST_NM = 0.35           # donor–acceptor heavy-atom distance for a hydrogen bond
 HYDROPHOBIC_NM = 0.40
 IONIC_NM = 0.40
@@ -24,7 +28,9 @@ NEG_ATOMS = {("ASP", "OD1"), ("ASP", "OD2"), ("GLU", "OE1"), ("GLU", "OE2")}
 
 
 # =========================================================================================== pure numpy
-def frame_indices(n: int, max_frames: int = MAX_FRAMES) -> np.ndarray:
+def frame_indices(n: int, max_frames: int | None = None) -> np.ndarray:
+    """Uniform subsample of `n` frames (display / expensive-estimator input; never an event-detection input)."""
+    max_frames = MAX_FRAMES if max_frames is None else max_frames
     return np.unique(np.linspace(0, n - 1, min(n, max_frames)).astype(int)) if n else np.array([], int)
 
 
@@ -41,6 +47,87 @@ def pca(xyz: np.ndarray, n_components: int = 3) -> dict:
     proj = U[:, :k] * S[:k]
     return {"projection": proj.tolist(), "explained": frac[:k].round(4).tolist(),
             "cumulative": float(frac[:k].sum())}
+
+
+def _pca_axes(X: np.ndarray, k: int):
+    X = np.asarray(X, float).reshape(len(X), -1)
+    X = X - X.mean(0)
+    _, S, Vt = np.linalg.svd(X, full_matrices=False)
+    var = S ** 2 / max(1, len(X) - 1)
+    frac = var / var.sum() if var.sum() > 0 else var
+    k = min(k, len(S))
+    return frac[:k], Vt[:k]
+
+
+def _subspace_overlap(Va: np.ndarray, Vb: np.ndarray) -> float:
+    k = min(len(Va), len(Vb))
+    return float(np.linalg.norm(Va[:k] @ Vb[:k].T) ** 2 / k) if k else 0.0
+
+
+def pca_sensitivity(xyz_sel: np.ndarray, xyz_all: np.ndarray | None = None, *, n_components: int = 3,
+                    max_all_elements: int = ALL_FRAMES_PCA_MAX_ELEMENTS) -> dict:
+    """R3 (D-135): how much do the PCA axes depend on WHICH frames were subsampled?  Reported, not promised.
+
+      interleaved_halves  PCA on the even and on the odd frames of the subsample: explained variance of each, |cos| of
+                          the two PC1s, mean squared overlap of the leading subspaces (1 = identical subspace)
+      all_frames          the subsample's PCA vs PCA of every analysed frame, when that is cheap enough
+    `consistent` compares against SENSITIVITY_TOLERANCES (declared reporting thresholds, not a convergence test)."""
+    tol = SENSITIVITY_TOLERANCES
+    X = np.asarray(xyz_sel, float).reshape(len(xyz_sel), -1)
+    out: dict = {"tolerances": tol, "n_frames_subsample": int(len(X)),
+                 "note": "sensitivity of the PCA axes to the choice of frames; it does not show that the landscape has "
+                         "converged, and a larger frame cap would not guarantee convergence"}
+    if len(X) < 8:
+        out["interleaved_halves"] = {"status": "insufficient", "reason": f"{len(X)} frames in the subsample"}
+        out["consistent"] = None
+        return out
+    fa, Va = _pca_axes(X[0::2], n_components)
+    fb, Vb = _pca_axes(X[1::2], n_components)
+    f0, V0 = _pca_axes(X, n_components)
+    k = min(len(fa), len(fb))
+    out["interleaved_halves"] = {
+        "status": "ok", "explained_even": fa[:k].round(4).tolist(), "explained_odd": fb[:k].round(4).tolist(),
+        "pc1_abs_cos": round(float(abs(Va[0] @ Vb[0])), 4), "subspace_overlap": round(_subspace_overlap(Va, Vb), 4),
+        "max_explained_abs_diff": round(float(np.abs(fa[:k] - fb[:k]).max()), 4)}
+    ok = [out["interleaved_halves"]["pc1_abs_cos"] >= tol["pc1_abs_cos_min"],
+          out["interleaved_halves"]["max_explained_abs_diff"] <= tol["explained_abs_diff_max"]]
+    if xyz_all is None:
+        out["all_frames"] = {"status": "skipped", "reason": "not provided"}
+    else:
+        Xa = np.asarray(xyz_all)
+        if Xa.size > max_all_elements:
+            out["all_frames"] = {"status": "skipped", "reason": f"{Xa.shape[0]} frames × {Xa.reshape(len(Xa), -1).shape[1]} "
+                                                                 f"coordinates exceeds {max_all_elements:,} elements"}
+        else:
+            fz, Vz = _pca_axes(Xa, n_components)
+            kk = min(len(fz), len(f0))
+            out["all_frames"] = {"status": "ok", "n_frames": int(len(Xa)), "explained_all": fz[:kk].round(4).tolist(),
+                                 "explained_subsample": f0[:kk].round(4).tolist(),
+                                 "pc1_abs_cos": round(float(abs(V0[0] @ Vz[0])), 4),
+                                 "subspace_overlap": round(_subspace_overlap(V0, Vz), 4),
+                                 "max_explained_abs_diff": round(float(np.abs(f0[:kk] - fz[:kk]).max()), 4)}
+            ok += [out["all_frames"]["pc1_abs_cos"] >= tol["pc1_abs_cos_min"],
+                   out["all_frames"]["max_explained_abs_diff"] <= tol["explained_abs_diff_max"]]
+    out["consistent"] = bool(all(ok))
+    return out
+
+
+def cluster_sensitivity(D: np.ndarray, cutoff_A: float = 2.0) -> dict:
+    """R3 (D-135): the same clustering on the interleaved halves of the subsample (even / odd frames) — number of
+    clusters and the largest cluster's population.  Reported, not a convergence claim."""
+    D = np.asarray(D, float)
+    tol = SENSITIVITY_TOLERANCES
+    if len(D) < 8:
+        return {"status": "insufficient", "tolerances": tol, "reason": f"{len(D)} frames in the subsample"}
+    res = {}
+    for name, ix in (("all_subsample", np.arange(len(D))), ("even", np.arange(0, len(D), 2)), ("odd", np.arange(1, len(D), 2))):
+        c = cluster_from_rmsd(D[np.ix_(ix, ix)], cutoff_A=cutoff_A)
+        res[name] = {"n_frames": int(len(ix)), "n_clusters": c["n_clusters"], "largest_population": max(c["populations"])}
+    diff = abs(res["even"]["largest_population"] - res["odd"]["largest_population"])
+    return {"status": "ok", "tolerances": tol, **res, "largest_population_abs_diff": round(float(diff), 4),
+            "consistent": bool(diff <= tol["largest_cluster_abs_diff_max"]),
+            "note": "sensitivity to which frames were subsampled; the cluster count is a property of the cutoff and the "
+                    "subsample, not a converged conformational census"}
 
 
 def _smooth2d(H: np.ndarray, sigma: float = 1.0) -> np.ndarray:
@@ -185,39 +272,64 @@ def _res_label(top, i: int) -> str:
     return f"{r.name}{r.resSeq}"
 
 
-def _persistence(fp: dict, *, max_gap_ps: float = 0.0, min_occupancy: float = 0.1, top: int = 12) -> dict:
-    """F09 (D-97): residue-level persistence of each interaction label on the stored frames of this one run."""
-    from .persistence import events, survival
+def _persistence(fp: dict, *, max_gap_ps: float = 0.0, min_occupancy: float = 0.1, top: int = 12,
+                 resolution: dict | None = None) -> dict:
+    """F09 (D-97, D-135): residue-level persistence of each interaction label on the frames given to the fingerprint
+    (`resolution` states whether these are all stored frames or a stride-decimated subset; stride > 1 ⇒ "limited")."""
+    from .persistence import EventAccumulator, select_interactions, persistence_report
     t = fp.get("time_ps")
     if not t or len(t) != fp.get("n_frames"):
         return {"status": "unavailable", "reason": "stored frame times are not recorded"}
-    out = {"status": "computed", "definition": "continuous" if max_gap_ps <= 0 else "intermittent", "max_gap_ps": max_gap_ps,
-           "items": []}
-    for lab, occ in (fp.get("occupancy") or {}).items():
-        for r, v in sorted(occ.items(), key=lambda kv: -kv[1])[:top]:
-            if v < min_occupancy:
-                continue
-            on = (np.asarray(fp["bitmask"][fp["residues"].index(r)]) & fp["bits"][lab]) > 0
-            ev = events(on, t, run_id="this_run", max_gap_ps=max_gap_ps)
-            sv = survival([ev])
-            out["items"].append({"residue": r, "label": lab, "occupancy_time_weighted": ev["occupancy_time_weighted"],
-                                 "n_events": len(ev["events"]), "events": ev["events"], "limitations": ev["limitations"],
-                                 "lifetime_ps": sv["lifetime_ps"], "lifetime_reason": sv.get("lifetime_reason"),
-                                 "n_left_censored_excluded": sv["n_left_censored_excluded"]})
-    return out
+    selected = select_interactions(fp.get("occupancy") or {}, min_occupancy=min_occupancy, top=top)
+    acc = EventAccumulator(run_id="this_run", max_gap_ps=max_gap_ps)
+    on = {}
+    for r, lab in selected:
+        on[(r, lab)] = (np.asarray(fp["bitmask"][fp["residues"].index(r)]) & fp["bits"][lab]) > 0
+    acc.update(on, t)
+    return persistence_report(acc, selected, resolution=resolution,
+                              source="frames given to the fingerprint (see resolution)")
+
+
+def _sampling_record(n_analysed: int, sel: np.ndarray, resolution: dict) -> dict:
+    """R3 (D-135): which blocks use a uniform subsample, how many frames of how many, and which use every analysed frame."""
+    eff = resolution.get("effective_interval_ps")
+    gap = None if (eff is None or len(sel) < 2 or n_analysed < 2) else round(eff * (n_analysed - 1) / (len(sel) - 1), 4)
+    return {"scheme": "uniform subsample: np.linspace(0, N-1, n).astype(int), unique indices (deterministic, not random)",
+            "role": "estimator input for PCA/free-energy map, clustering, cross-correlation, SASA, secondary structure, "
+                    "ligand hydrogen bonds, water bridges and hydration; display for the matrices drawn from them",
+            "max_frames": MAX_FRAMES, "n_frames_analysed": int(n_analysed), "n_used": int(len(sel)),
+            "fraction_used": round(float(len(sel)) / n_analysed, 4) if n_analysed else None,
+            "mean_interval_between_used_frames_ps": gap,
+            "subsampled_blocks": ["dssp", "pca", "clusters", "dccm", "sasa_protein", "hbonds_protein (further ≤ 100 frames)",
+                                  "ligands.*.hbonds", "ligands.*.water_bridges", "ligands.*.sasa", "ligands.*.hydration"],
+            "all_analysed_frames_blocks": ["ligands.*.fingerprint (contacts and persistence events)", "tica / msm"],
+            "note": "N counts the frames handed to extended_metrics; if effective_stride > 1 these are already every k-th "
+                    "stored frame (see resolution). A larger cap is not promised to converge any of the blocks."}
 
 
 def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *, temperature_k: float = 300.0,
-                     ligand_charges: dict[str, dict[int, int]] | None = None) -> dict:
-    """All extended analyses for one (centred, superposed) production trajectory.  JSON-able."""
+                     ligand_charges: dict[str, dict[int, int]] | None = None, resolution: dict | None = None) -> dict:
+    """All extended analyses for one (centred, superposed) production trajectory.  JSON-able.
+
+    `resolution` (D-135) = {"effective_stride": k, "source_frame_interval_ps": …, "n_frames_source": …} as known by the
+    caller that loaded `traj`; absent ⇒ the stride is "unverified" (full resolution is not claimed)."""
     import mdtraj as md
+    from .persistence import resolution_record
     top = traj.topology
-    out: dict = {"errors": {}}
+    ctx = resolution or {}
+    res_rec = resolution_record(traj.time if traj.time is not None and len(traj.time) else None,
+                                source_frame_interval_ps=ctx.get("source_frame_interval_ps"),
+                                effective_stride=ctx.get("effective_stride"), n_frames_source=ctx.get("n_frames_source"),
+                                origin="frames of the analysed trajectory (after any memory stride)")
+    if res_rec["n_frames_used"] == 0:
+        res_rec["n_frames_used"] = int(traj.n_frames)
+    out: dict = {"schema": EXTENDED_SCHEMA, "errors": {}, "resolution": res_rec}
     lig_all = np.array(sorted({i for v in (ligand_groups or {}).values() for i in v}), dtype=int)
     prot = np.setdiff1d(top.select("protein"), lig_all)
     ca = np.setdiff1d(top.select("protein and name CA"), lig_all)
     sel = frame_indices(traj.n_frames)
     sub = traj[sel]
+    out["sampling"] = _sampling_record(int(traj.n_frames), sel, res_rec)
     t_ns = (sub.time / 1000.0).tolist() if sub.time is not None and len(sub.time) else list(range(len(sel)))
     out["time_ns"] = t_ns
 
@@ -243,6 +355,9 @@ def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *,
         if p:
             pr = np.asarray(p["projection"])
             p["landscape"] = free_energy_landscape(pr[:, 0], pr[:, 1], temperature_k=temperature_k)
+            p["sampling"] = {"n_used": int(len(sel)), "n_frames_analysed": int(traj.n_frames), "scheme": "uniform subsample"}
+            allx = traj.xyz[:, ca, :] * 10.0 if len(ca) * 3 * traj.n_frames <= ALL_FRAMES_PCA_MAX_ELEMENTS else None
+            p["sensitivity"] = pca_sensitivity(sub.xyz[:, ca, :] * 10.0, allx)
         return p
     guard("pca", pca_block)
 
@@ -251,7 +366,10 @@ def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *,
         idx = np.concatenate([ca, lig_all]).astype(int)
         D = np.array([md.rmsd(sub, sub, i, atom_indices=idx) for i in range(sub.n_frames)]) * 10.0
         D = (D + D.T) / 2
-        return cluster_from_rmsd(D, cutoff_A=2.0)
+        c = cluster_from_rmsd(D, cutoff_A=2.0)
+        c["sampling"] = {"n_used": int(len(sel)), "n_frames_analysed": int(traj.n_frames), "scheme": "uniform subsample"}
+        c["sensitivity"] = cluster_sensitivity(D, 2.0)
+        return c
     guard("clusters", clusters)
 
     # ---- dynamic cross-correlation (Cα)
@@ -310,6 +428,7 @@ def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *,
             return ti
         proj = np.asarray(ti["projection"])
         ti["dt_ns"], ti["lag_ns"] = dt_ns, round(lag * dt_ns, 4)
+        ti["resolution"] = res_rec                               # D-135: dt is the EFFECTIVE interval of the analysed frames
         ti["timescales_ns"] = [None if v is None else round(v * dt_ns, 4) for v in ti["timescales_frames"]]
         ti["landscape"] = free_energy_landscape(proj[:, 0], proj[:, 1], temperature_k=temperature_k)
         k = int(np.clip(n // 50, 5, 30))
@@ -367,7 +486,14 @@ def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *,
             fp["display_labels"] = IX.display_labels(fp["residues"])
             fp["matrix"] = IX.legacy_matrix(fp)
             fp["initial_vs_new"] = IX.initial_vs_new(fp)
-            fp["persistence"] = _persistence(fp)
+            fp["resolution"] = res_rec
+            rs = res_rec["resolution"]
+            fp["status"] = {"full": "computed"}.get(rs["status"], rs["status"])
+            if rs["status"] != "full":
+                fp["reason"] = ("; ".join(rs["reasons"]) + ("; occupancy fractions are sampled estimates, event durations "
+                                                            "and interruptions are not resolved below the effective interval"
+                                                            if rs["status"] == "limited" else ""))
+            fp["persistence"] = _persistence(fp, resolution=res_rec)
             return fp
         lguard("fingerprint", fingerprint)
 
