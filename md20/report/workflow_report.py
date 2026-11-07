@@ -437,7 +437,56 @@ def _evidence_html(doc: Doc, wf) -> str:
                              tx(("計畫", "Planned", "計画", "계획"), L), tx(("完成", "Done", "完了", "완료"), L),
                              tx(("證據", "Evidence", "裏付け", "근거"), L), tx(("限制或缺口", "Limitation or gap", "制限・欠落", "제한 또는 공백"), L)],
                             body, ("研究設計與證據覆蓋（計畫、實際執行、能支持什麼）", "Study design and evidence coverage (planned, run, what it supports)",
-                                   "研究デザインと裏付けの範囲（計画・実行・何を支えるか）", "연구 설계와 근거 범위(계획, 실행, 무엇을 뒷받침하는가)"))
+                                   "研究デザインと裏付けの範囲（計画・実行・何を支えるか）", "연구 설계와 근거 범위(계획, 실행, 무엇을 뒷받침하는가)")) \
+        + _comparability_html(doc, wf)
+
+
+def _comparability_html(doc: Doc, wf) -> str:
+    """D-120 (F05): candidate x candidate matrix, next to the evidence coverage.  Grades come from the same functions
+    compare_binding uses (report/comparability.py); one candidate → says there is nothing to compare."""
+    from . import comparability as CP
+    st = (wf.state() or {}).get("steps", {})
+    results = {k: v for k, v in ((st.get("binding") or {}).get("results") or {}).items() if isinstance(v, dict)}
+    if not results:
+        return ""
+    L = doc.lang
+    title = doc.t(("候選之間的可比性", "Comparability between candidates", "候補どうしの比較可能性", "후보 사이의 비교 가능성"))
+    if len(results) < 2:
+        return (f"<h3>{_esc(title)}</h3><p class=muted>"
+                + _esc(doc.t(("只有一個候選，沒有比較。", "There is only one candidate, so there is nothing to compare.",
+                              "候補が 1 つだけなので、比較はありません。", "후보가 하나뿐이라 비교가 없습니다."))) + "</p>")
+    conds = ((st.get("analysis") or {}).get("comparison") or {}).get("comparability") or {}
+    mdc = CP.md_conditions_map(results, (st.get("md_cases") or {}).get("cases") or {}, conds.get("conditions"))
+    m = CP.comparability_matrix(results, md_conditions=mdc)
+    keys = m["candidates"]
+    cls = {"ddg": "{}", "order": "{}", "descriptive": "<span class=muted>{}</span>", "none": "<b class=warn>{}</b>"}
+    rows = []
+    for a in keys:
+        row = [f"<b>{_esc(a)}</b>"]
+        for b in keys:
+            g = m["cells"][a][b]["grade"]
+            row.append("—" if g == "self" else cls[g].format(_esc(doc.t(CP.GRADE_LABEL[g]))))
+        rows.append(row)
+    out = f"<h3>{_esc(title)}</h3>"
+    out += doc.table([""] + keys, rows,
+                     ("候選 × 候選：每一對可以比到什麼程度", "Candidate by candidate: how far each pair can be compared",
+                      "候補 × 候補：各組をどこまで比較できるか", "후보 × 후보: 각 쌍을 어디까지 비교할 수 있는가"))
+    out += "<ul class=muted>" + "".join(f"<li><b>{_esc(doc.t(CP.GRADE_LABEL[g]))}</b>{colon(L)}{_esc(doc.t(CP.GRADE_MEANS[g]))}</li>"
+                                        for g in CP.GRADES) + "</ul>"
+    detail = []
+    for i, a in enumerate(keys):
+        for b in keys[i + 1:]:
+            c = m["cells"][a][b]
+            items = [(x, "warn") for x in c["reasons"]] + [(x, "muted") for x in c["limits"] + c["notes"]]
+            if not items:
+                continue
+            ul = "<ul>" + "".join(f"<li class={k}>{_esc(CP.reason_text(x, L))}</li>" for x, k in items) + "</ul>"
+            detail.append([_esc(f"{a} × {b}"), _esc(doc.t(CP.GRADE_LABEL[c["grade"]])), ul])
+    if detail:
+        out += doc.table([doc.t(("組合", "Pair", "組み合わせ", "조합")), doc.t(("等級", "Level", "レベル", "등급")),
+                          doc.t(("原因、限制與提醒", "Reasons, limits and reminders", "理由・制限・注意", "이유, 제한, 주의"))], detail,
+                         ("每一對的原因", "Reasons for each pair", "各組の理由", "각 쌍의 이유"))
+    return out
 
 
 def _structure(doc: Doc, wf) -> str:
