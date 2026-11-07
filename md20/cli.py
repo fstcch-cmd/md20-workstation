@@ -9,7 +9,7 @@
   md20 fold SEQUENCE [--receptor-seq S] [--engine E] [--out DIR]   predicted structure (D-80)
   md20 setup-fold [--engine omegafold|boltz|esmfold] [--yes] [--warmup]  install a folding tool (plan first)
   md20 setup-cg [--yes]                         install martinize2, insane, martini_openmm (plan first)
-  md20 license status|machine|install FILE      signed licence (D-125); real calculations need one
+  md20 license status|machine|install FILE|update-revocations FILE   signed licence (D-125, D-128); real calculations need one
 """
 from __future__ import annotations
 
@@ -177,6 +177,9 @@ def cmd_pipeline(a):
     from .env import choose_platform
     from .env.hardware import _power_state
     cfg = json.loads(Path(a.config).read_text(encoding="utf-8"))
+    from .workflow import required_features
+    from .util.license import require_features
+    require_features("pipeline", required_features(cfg))        # D-128: before the project is created
     root = Path(a.dir) / safe_name(a.project)
     proj = Project(root) if (root / "project.json").is_file() else Project.create(a.dir, a.project)
     wf_cfg_path = root / "workflows" / safe_name(cfg.get("name", "workflow")) / "config.json"
@@ -235,9 +238,24 @@ def cmd_resume(a):
         _p("沒有需要續跑的工作流程。" if not todo else f"{len(todo)} 個可續跑（去掉 --list 開始）。")
         return 0
     _need_license("resume")
+    rc = 0
+    from .workflow import required_features
+    from .util.license import FeatureNotLicensed, require_features
+    runnable = []
+    for r in todo:                              # D-128: a workflow that needs a feature the licence lacks is skipped, the others carry on
+        try:
+            cfg0 = json.loads((Path(r["workflow_dir"]) / "config.json").read_text(encoding="utf-8"))
+            require_features("resume", required_features(cfg0))
+            runnable.append(r)
+        except FeatureNotLicensed as exc:
+            _p(f"[{r['name']}]")
+            print("\n\n".join(exc.texts()), file=sys.stderr, flush=True)
+            rc = EXIT_LICENSE
+    todo = runnable
+    if not todo:
+        return rc
     platform = choose_platform()
     _p(f"平台：{platform.name}；續跑 {len(todo)} 個工作流程")
-    rc = 0
     for r in todo:
         proj = Project(r["project_dir"])
         cfg = json.loads((Path(r["workflow_dir"]) / "config.json").read_text(encoding="utf-8"))
@@ -479,7 +497,9 @@ def cmd_stamp(a):
     for f in a.files:
         found = st.find_markers(f)
         _p(f"{f}\n  可見戳記：{'有' if found['visible'] else '無'}\n  隱藏標記：{', '.join(found['hidden']) or '無'}\n"
-           f"  加密來源紀錄：{'有' if found['blob'] else '無'}")
+           f"  加密來源紀錄：{'有' if found['blob'] else '無'}\n"
+           f"  授權編號：{found.get('license_id') or '無'}"
+           + ("\n  評估版標記：有（" + " / ".join(st.EVAL_NOTICE) + "）" if found.get("evaluation") else ""))
         if a.action == "decrypt" and found["blob"]:
             if not a.key:
                 _p("  （需要 --key 私鑰才能解開）"); continue
@@ -508,9 +528,19 @@ def cmd_license(a):
             if st.state != L.NONE:
                 _p(f"\nid: {st.license_id or '-'}\nlicensee: {st.licensee or '-'}\nscope: {st.scope or '-'}\n"
                    f"expires: {st.expires or '-'}\nmachines: {', '.join(st.machines) or 'all'}\nfile: {st.path or '-'}")
+                if st.schema == L.SCHEMA_V2:
+                    _p(f"tier: {st.tier or '-'}\nfeatures: {'all' if st.features is None else ', '.join(st.features) or 'none'}\n"
+                       f"org: {st.org or '-'}\nseats: {st.seats if st.seats is not None else '-'}\n"
+                       f"max version: {st.max_version or '-'}")
             if st.ok:
                 _p(f"machine code: {st.machine_code}")
+            rev = L.revocations()
+            _p(f"revocation list: {rev.issued_at + ' (' + str(len(rev.ids)) + ' ids)' if rev else 'none'}")
             return 0 if st.ok else 1
+        if act == "update-revocations":
+            r = L.update_revocations(a.file.strip().strip('"'))
+            _p(L.revocations_message(r))
+            return 0
         if act == "install":
             st = L.install(a.file.strip().strip('"'))
             _p(L.installed_message(st))
@@ -638,11 +668,13 @@ def main(argv=None) -> int:
     rp = sub.add_parser("report"); rp.add_argument("--project", required=True); rp.add_argument("--case", required=True)
     rp.add_argument("--run"); rp.add_argument("--bundle", action="store_true"); rp.set_defaults(fn=cmd_report)
     m = sub.add_parser("demo"); m.add_argument("--dir"); m.set_defaults(fn=cmd_demo)
-    lc = sub.add_parser("license", help="MD20 授權（D-125）：status、machine、install")
+    lc = sub.add_parser("license", help="MD20 授權（D-125）：status、machine、install、update-revocations")
     ls = lc.add_subparsers(dest="lic_cmd", required=True)
     ls.add_parser("status", help="show the licence state in four languages"); ls.add_parser("machine", help="print the machine code")
     li = ls.add_parser("install", help="import a .md20license file (copied only when it is valid for this computer)")
     li.add_argument("file")
+    ur = ls.add_parser("update-revocations", help="import a signed revocation list (revoked.json); only a newer valid list is accepted")
+    ur.add_argument("file")
     lc.set_defaults(fn=cmd_license)
     a = ap.parse_args(argv)
     if a.dir is None and a.cmd not in ("demo", "license"):                # D-88: same projects folder as the GUI chose last time
@@ -652,8 +684,8 @@ def main(argv=None) -> int:
     from .util.license import LicenseRequired
     try:
         return int(a.fn(a) or 0)
-    except LicenseRequired as exc:
-        print(exc.status.message_all(with_howto=True), file=sys.stderr, flush=True)
+    except LicenseRequired as exc:             # also FeatureNotLicensed (D-128): "your licence does not include X"
+        print("\n\n".join(exc.texts()), file=sys.stderr, flush=True)
         return EXIT_LICENSE
 
 

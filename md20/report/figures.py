@@ -26,7 +26,10 @@ def _save(fig, path: Path) -> str:
     from ..analysis.plots import legend_outside
     legend_outside(fig)                      # D-89: legends to the right of the plots, never over the data
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path)
+    from ..util.stamp import figure_metadata, watermark_figure
+    watermark_figure(fig)                    # D-128: evaluation-tier licence only
+    fmt = Path(path).suffix.lower().lstrip(".")
+    fig.savefig(path, metadata=figure_metadata(fmt) or None)         # licence id and provenance in the file metadata
     import matplotlib.pyplot as plt
     plt.close(fig)
     return str(path)

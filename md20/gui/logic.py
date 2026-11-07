@@ -255,8 +255,11 @@ class Runner:
     def start_process(self, wf: Workflow) -> Job | ProcessJob:
         key = f"{wf.project.dir}::{wf.name}"
         if not os.environ.get("MD20_GUI_FAKE_RUN"):      # the stand-in does no chemistry (D-74); a real run needs a licence
-            from ..util.license import require
-            require("gui")                               # D-125: raises LicenseRequired before any process is started
+            from ..util.license import require_features
+            from ..workflow import required_features
+            # D-125: raises LicenseRequired before any process is started; D-128: FeatureNotLicensed when the licence lacks
+            # a feature this workflow needs (binding, membrane, hts, cg)
+            require_features("gui", required_features(getattr(wf, "cfg", None) or {}))
         busy = self.running(wf.project.dir.parent)
         if busy is not None:                   # D-67: one calculation at a time, also across GUI restarts
             return busy
