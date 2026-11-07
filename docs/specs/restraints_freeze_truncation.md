@@ -1,6 +1,6 @@
 # 約束策略、凍結、口袋截斷模型與資源估算
 
-狀態：**§3.1 分組約束＋分階段釋放已實作（D-23，2026-11-01）；§3.1 智慧建議已實作・純 Python（D-118，2026-11-07，待 CI）；§3.2–3.4 仍為 [設計中]**。使用者需求（2026-11-01）：約束要隨 minimization → NVT → NPT → production 分階段下降；提供凍結
+狀態：**§3.1 分組約束＋分階段釋放已實作（D-23，2026-11-01）；§3.1 智慧建議已實作・純 Python（D-118，2026-11-07，待 CI），輸入接線與採用紀錄已補（D-123）；§3.2–3.4 仍為 [設計中]**。使用者需求（2026-11-01）：約束要隨 minimization → NVT → NPT → production 分階段下降；提供凍結
 （整條主鏈、指定殘基）；約束與凍結都要能智慧化建議，讓使用者直觀地降低運算資源；也允許整顆蛋白自由模擬。
 已加入的引擎掛鉤（D-23 起由 `make_protocol(restraints=…)` 使用）：`StageSpec.restraint_groups`（每組 [起, 迄] 倍率）、`StageSpec.freeze`，
 `chunks._apply_schedule` 會逐批設定 `msw_rs_<group>`；兩個新欄位在預設值時不進入 protocol 雜湊（進行中的 run 可續跑）。
@@ -54,6 +54,10 @@ OpenMM 以質量 0 凍結：積分器不移動它，但所有力（含凍結原�
     條件為解析度 > 2.5 Å、預測模型、低信心區（pLDDT < 70 的殘基 ≥ 10%）、補建或封端的斷鏈、對接姿勢有碰撞、胜肽配體、金屬鍵結模型（另含既有的多配體同時對接）。
     hold_backbone 只作選項（MD 目標、production < 1 ns、非預測模型）；「截斷模型」尚未實作，故沒有對應提示。不建議為省時間而凍結。
     約束只有三組，低信心區無法個別約束，只能整體放慢（理由裡直說）。
+  - **輸入接線與採用紀錄（D-123）**：補建殘基數讀 `build_manifest.json["receptor"]["missing_residues_added"]`（`receptor_manifest.json` 同鍵；封端斷鏈讀 `capped_breaks`，使 `has_gaps` 為真）；
+    碰撞數讀 pose_selection 的 `docking_rejections`（聯合 pose 且有 `ligand_clash` 規則才計）。讀不到保持未知並列在 `not_considered`，不當 0。
+    多個 case 取最大值。`md.restraints` 被設定且等於此刻建議的策略時，`Workflow._restraint_strategy()` 以 `decision_entry()` 寫 DecisionLog
+    （`kind = human`，evidence 加 `inputs`）；未設定、設成別的值或 hold_backbone 不寫。單一配體 pose 沒有碰撞資料，`n_pose_clashes` 一律未知；受體–配體碰撞數目前沒有任何來源。
 
 ### 3.2 凍結選項（`md.freeze`）
 - `none`（預設）、`backbone`（蛋白主鏈重原子）、`residues: "A:10-50, A:200"`、`beyond: R`（離任何配體重原子 > R Å 的整個殘基）。

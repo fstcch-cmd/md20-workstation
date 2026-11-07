@@ -243,3 +243,158 @@ def test_features_from_config_reads_header_values():
                                receptor_text="ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 40.00           C\n"
                                              "ATOM      2  CA  ALA A   2       3.800   0.000   0.000  1.00 90.00           C\n")
     assert m.structure_source == "model" and m.plddt_low_fraction == 0.5 and m.resolution_a is None
+
+
+# ------------------------------------------------------------------------ D-123: inputs from build and docking records
+from md20.engine.restraint_advice import (capped_breaks_from_manifest, features_from_records, pose_clashes_from_selection,
+                                           rebuilt_residues_from_manifest)
+
+REBUILT = {"(0, 45)": ["GLY", "SER"], "(0, 80)": ["ALA", "ALA", "THR"]}
+
+
+def _bm(**rec):
+    """A build_manifest.json as build_case writes it: the receptor manifest sits under "receptor"."""
+    return {"status": "PASS", "receptor": {"status": "PASS", **rec}, "ligands": []}
+
+
+def _sel(**per_lig):
+    return {"mode": "simultaneous", "ligands": per_lig}
+
+
+def _joint(entry="E", rejections=(), lig_names=("A", "B")):
+    return {n: {"rank": 1, "entry": entry, "docking_rejections": list(rejections)} for n in lig_names}
+
+
+def test_rebuilt_residues_read_from_the_manifest_keys():
+    assert rebuilt_residues_from_manifest(_bm(missing_residues_added=REBUILT)) == 5
+    assert rebuilt_residues_from_manifest({"missing_residues_added": REBUILT}) == 5      # a receptor manifest itself
+    assert rebuilt_residues_from_manifest(_bm(missing_residues_added={})) == 0           # the manifest says: none rebuilt
+    # not readable -> unknown, never 0
+    assert rebuilt_residues_from_manifest(_bm()) is None                                 # receptor blocked before the repair
+    assert rebuilt_residues_from_manifest(_bm(missing_residues_added=["GLY"])) is None
+    assert rebuilt_residues_from_manifest(_bm(missing_residues_added={"(0, 1)": "GLY"})) is None
+    assert rebuilt_residues_from_manifest({}) is None and rebuilt_residues_from_manifest(None) is None
+    assert rebuilt_residues_from_manifest({"receptor": "x"}) is None
+
+
+def test_capped_breaks_read_from_the_manifest():
+    assert capped_breaks_from_manifest(_bm(capped_breaks=[{"chain": "A", "before": 10, "after": 14, "new_chain": "B"}])) == 1
+    assert capped_breaks_from_manifest(_bm(capped_breaks=[])) == 0
+    assert capped_breaks_from_manifest(_bm()) is None and capped_breaks_from_manifest(None) is None
+
+
+def test_pose_clashes_from_the_selection():
+    clash = [{"code": "geometry_repairable", "rule": "ligand_clash", "params": {}, "text": "x"}]
+    other = [{"code": "model_limitation", "rule": "score_window", "params": {}, "text": "y"}]
+    assert pose_clashes_from_selection(_sel(**_joint(rejections=clash))) == 1
+    assert pose_clashes_from_selection(_sel(**_joint(rejections=other))) == 0
+    assert pose_clashes_from_selection(_sel(**_joint(rejections=[]))) == 0
+    two = {**_joint("E1", clash), **_joint("E2", [], ("C", "D"))}
+    assert pose_clashes_from_selection(_sel(**two)) == 1
+    # unknown: no selection, nothing joint (docking only measures ligand-ligand distance), or an older record
+    assert pose_clashes_from_selection(None) is None and pose_clashes_from_selection({}) is None
+    assert pose_clashes_from_selection(_sel(A={"rank": 1, "entry": "A", "docking_rejections": clash})) is None
+    assert pose_clashes_from_selection(_sel(A={"rank": 1, "entry": "E"}, B={"rank": 1, "entry": "E"})) is None
+    assert pose_clashes_from_selection(_sel(A={"rank": 1, "entry": "A", "source": "fold_complex"})) is None
+
+
+def test_features_from_records_takes_the_largest_count_and_keeps_unknown():
+    r = features_from_records(manifests=[_bm(missing_residues_added={"(0, 1)": ["GLY"]}), _bm(missing_residues_added=REBUILT), _bm()])
+    assert r["n_rebuilt_residues"] == 5 and r["n_capped_breaks"] is None and r["n_pose_clashes"] is None
+    assert r["sources"]["n_rebuilt_residues"] and r["sources"]["n_pose_clashes"] is None
+    none = features_from_records(manifests=[_bm(), {}], pose_selection=None)
+    assert none["n_rebuilt_residues"] is None and none["n_capped_breaks"] is None and none["n_pose_clashes"] is None
+    assert features_from_records()["n_rebuilt_residues"] is None
+
+
+def test_records_change_the_advice():
+    f = A.CaseFeatures(resolution_a=1.8)
+    plain = A.restraint_advice(f, "teaching")
+    assert plain["strategy"] == "standard" and "pose_clash" in {x["key"] for x in plain["not_considered"]}
+    g = A.features_with_records(f, manifests=[_bm(missing_residues_added=REBUILT)])
+    adv = A.restraint_advice(g, "teaching")
+    assert g.n_rebuilt_residues == 5 and adv["strategy"] == "gentle"
+    reason = next(x for x in adv["items"] if x["key"] == "gaps")
+    assert "5" in reason["text_all"]["zh"] and "5 residues" in reason["text_all"]["en"]
+    assert f.n_rebuilt_residues is None                                                   # the original is not touched
+    # read as 0: no reason, and the pose clash input (still unknown) stays listed
+    z = A.features_with_records(f, manifests=[_bm(missing_residues_added={})])
+    assert z.n_rebuilt_residues == 0 and A.restraint_advice(z, "teaching")["strategy"] == "standard"
+    # capped breaks mean a gap in the chain
+    c = A.features_with_records(f, manifests=[_bm(capped_breaks=[{"chain": "A"}])])
+    assert c.has_gaps and A.restraint_advice(c, "teaching")["strategy"] == "gentle"
+    # a clashing joint pose
+    clash = [{"code": "geometry_repairable", "rule": "ligand_clash"}]
+    p = A.features_with_records(A.CaseFeatures(n_ligands=2, docking_mode="simultaneous"), pose_selection=_sel(**_joint(rejections=clash)))
+    assert p.n_pose_clashes == 1
+    assert "pose_clash" in {x["key"] for x in A.restraint_advice(p, "teaching")["items"] if x["role"] == "reason"}
+    # nothing readable: features unchanged, not_considered still lists it
+    u = A.features_with_records(f, manifests=[_bm()], pose_selection=None)
+    assert u == f
+
+
+def test_adoption_entry_only_when_the_setting_equals_the_advice():
+    f = A.features_with_records(A.CaseFeatures(resolution_a=1.8), manifests=[_bm(missing_residues_added=REBUILT)])
+    e = A.adopted_restraint_entry(f, "teaching", {"restraints": "gentle"})
+    assert e["choice"] == "gentle" and e["kind"] == "human" and "溫和" in e["why"]
+    assert "gaps" in e["evidence"]["reasons"] and e["evidence"]["inputs"]["n_rebuilt_residues"] == 5
+    assert A.adopted_restraint_entry(f, "teaching", {}) is None                       # not set: not adopted
+    assert A.adopted_restraint_entry(f, "teaching", {"restraints": "standard"}) is None   # set to something else
+    assert A.adopted_restraint_entry(f, "teaching", {"restraints": "hold_backbone"}) is None
+    assert A.adopted_restraint_entry(A.CaseFeatures(resolution_a=1.8), "teaching", {"restraints": "gentle"}) is None
+
+
+def _workflow(tmp_path, restraints=None):
+    from md20.project.store import Project
+    from md20.workflow import Workflow, example_config
+    cfg = copy.deepcopy(example_config())
+    if restraints is not None:
+        cfg["md"]["restraints"] = restraints
+    return Workflow(Project.create(tmp_path, "p"), cfg)
+
+
+def _with_case(wf, manifest):
+    from md20.util import atomic_write_json
+    case = wf.project.new_case("c1")
+    atomic_write_json(manifest, case.build_dir / "build_manifest.json")
+    wf._mark("md_cases", cases={"docked_single": {"case_id": case.case_id, "status": "PASS"}})
+    return case
+
+
+def _rows(wf):
+    return [r for r in wf.dec.read() if r["stage"] == "md.restraints"]
+
+
+def test_workflow_writes_the_decision_when_the_advice_is_adopted(tmp_path):
+    wf = _workflow(tmp_path, "gentle")
+    _with_case(wf, _bm(missing_residues_added=REBUILT))
+    assert wf._restraint_strategy() == "gentle"
+    wf._restraint_strategy()                                                    # called once per case: no duplicate
+    rows = _rows(wf)
+    assert len(rows) == 1 and rows[0]["choice"] == "gentle" and rows[0]["kind"] == "human" and rows[0]["workflow"] == wf.name
+    assert "溫和" in rows[0]["why"] and "gaps" in rows[0]["evidence"]["reasons"]
+    assert rows[0]["evidence"]["inputs"]["n_rebuilt_residues"] == 5
+    # a new Workflow object on the same project and state (a re-run) does not repeat it either
+    from md20.workflow import Workflow
+    Workflow(wf.project, wf.cfg)._restraint_strategy()
+    assert len(_rows(wf)) == 1
+
+
+def test_workflow_writes_nothing_when_the_advice_is_not_adopted(tmp_path):
+    for i, setting in enumerate((None, "standard", "hold_backbone")):
+        wf = _workflow(tmp_path / str(i), setting)
+        _with_case(wf, _bm(missing_residues_added=REBUILT))                      # the advice here is gentle
+        assert wf._restraint_strategy() == (setting or "standard")
+        assert _rows(wf) == []
+    # no record of a rebuild: the advice is standard, so "gentle" is not the advice and is not logged as adopted
+    wf = _workflow(tmp_path / "x", "gentle")
+    _with_case(wf, _bm())
+    wf._restraint_strategy()
+    assert _rows(wf) == []
+
+
+def test_workflow_unreadable_records_stay_unknown(tmp_path):
+    wf = _workflow(tmp_path)
+    assert wf._restraint_features().n_rebuilt_residues is None and wf._restraint_features().n_pose_clashes is None
+    _with_case(wf, {"status": "NEEDS_HUMAN"})
+    assert wf._restraint_features().n_rebuilt_residues is None
