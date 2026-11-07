@@ -285,6 +285,7 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
                                 "poses": [x.to_dict() for x in infos], "pose_sdfs": {lig.name: sdfs},
                                 "recommended_rank": pick.rank if pick else None, "reason": recinfo.get("reason", ""),
                                 "recommendation_status": recinfo.get("status", "NEEDS_HUMAN"),
+                                "recommendation_code": recinfo.get("code"), "recommendation_rule": recinfo.get("rule"),
                                 "redock_rmsd": pick.rmsd_ref if pick else min((i.rmsd_ref for i in infos if i.rmsd_ref is not None), default=None)})
             if decisions:
                 decisions.record("docking.pose", lig.name, f"rank {pick.rank}" if pick else "none", recinfo.get("reason", ""),
@@ -330,7 +331,8 @@ def dock(receptor_pdb: Path | str, ligands: list[LigandInput], box: Box, out_dir
                             "protonation": {nm: protonation[nm] for nm in names},
                             "poses": [x.to_dict() for x in infos], "pose_sdfs": sdfs,
                             "recommended_rank": pick.rank if pick else None, "reason": recinfo.get("reason", ""),
-                            "recommendation_status": recinfo.get("status", "NEEDS_HUMAN")})
+                            "recommendation_status": recinfo.get("status", "NEEDS_HUMAN"),
+                            "recommendation_code": recinfo.get("code"), "recommendation_rule": recinfo.get("rule")})
         if decisions:
             decisions.record("docking.pose", "joint " + "+".join(names), f"rank {pick.rank}" if pick else "none",
                              recinfo.get("reason", ""), kind="auto" if pick else "human")

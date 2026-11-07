@@ -187,6 +187,10 @@ def _sdf(path, xyz):
     return str(path)
 
 
+def _clash(d):
+    return {"code": "geometry_repairable", "rule": "ligand_clash", "text": f"配體間 {d} Å < 3.3（碰撞）"}
+
+
 def test_all_joint_poses_clashing_takes_the_least_risk_pose(tmp_path):   # D-78
     import types
     import numpy as np
@@ -197,8 +201,10 @@ def test_all_joint_poses_clashing_takes_the_least_risk_pose(tmp_path):   # D-78
     rod = np.array([[0.2, 0, -0.77], [0.2, 0, 0.77], [0.2, 0, 2.2], [0.2, 0, 3.6], [0.2, 1.4, 3.6], [0.2, 1.4, 2.2]])
     sd = {"A": [_sdf(tmp_path / "a1.sdf", ring), _sdf(tmp_path / "a2.sdf", ring)],
           "B": [_sdf(tmp_path / "b1.sdf", rod), _sdf(tmp_path / "b2.sdf", ring + [0, 0, 1.9])]}
-    poses = [{"rank": 1, "score": -10.0, "clash": True, "min_ll_distance": 0.2, "rejected": ["配體間 0.2 Å < 3.3（碰撞）"]},
-             {"rank": 2, "score": -9.6, "clash": True, "min_ll_distance": 1.9, "rejected": ["配體間 1.9 Å < 3.3（碰撞）"]}]
+    poses = [{"rank": 1, "score": -10.0, "clash": True, "min_ll_distance": 0.2, "rejected": ["配體間 0.2 Å < 3.3（碰撞）"],
+              "rejection_codes": [_clash(0.2)]},
+             {"rank": 2, "score": -9.6, "clash": True, "min_ll_distance": 1.9, "rejected": ["配體間 1.9 Å < 3.3（碰撞）"],
+              "rejection_codes": [_clash(1.9)]}]
     e = {"name": "joint", "ligands": ["A", "B"], "smiles": {"A": "c1ccccc1", "B": "c1ccccc1"}, "poses": poses,
          "pose_sdfs": sd, "recommended_rank": None, "reason": "沒有任何 pose 通過保守條件，不自動選擇。"}
     sel = wf.choose_poses(types.SimpleNamespace(mode="simultaneous", entries=[e]))

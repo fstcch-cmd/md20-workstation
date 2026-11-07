@@ -131,8 +131,11 @@ def interaction_diagram(sdf_path, receptor_pdb, out_png: Path) -> tuple[str | No
                              "res": f"{l[17:20].strip()}{int(l[22:26])}", "name": l[12:16].strip(), "resname": l[17:20].strip()})
             except ValueError:
                 continue
-    # formal charges come from the molecule's chemistry (charged groups written in the SDF), not from partial charges
-    q = [m.GetAtomWithIdx(i).GetFormalCharge() for i in heavy]
+    # formal charges come from the molecule's chemistry (charged groups written in the SDF), not from partial charges;
+    # D-98: delocalised over resonance forms (carboxylate: both O), the same rule as the trajectory fingerprint
+    from ..build.ligand import charged_group_signs
+    signs, _ = charged_group_signs(m)
+    q = [signs[i] for i in heavy]
     cons = pose_contacts(xyz, elem, prot, lig_charges=q)
     mh = Chem.RemoveHs(m)
     AllChem.Compute2DCoords(mh)

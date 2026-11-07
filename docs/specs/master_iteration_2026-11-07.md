@@ -115,8 +115,8 @@ A5/A6/F07/F08/F09/A4/A12 已實作（純 Python，容器可測；真實 mdtraj �
 未涵蓋：8、11、12、13、15–18、20–24、26–35（見 §5）。
 
 ## 5. 未做與下一步（精確）
-1. **A7 reason code**：`docking/poses._rejections` 回傳 `(code, text)`；code 分 `geometry_repairable`／`model_limitation`／`hypothesis_change`；`_least_risk_joint_pose` 只接受全部 `geometry_repairable`；報告保留原始拒絕理由與修復後評估。測試：共同佔據拒絕不可被 fallback 清除。
-2. **配體原子形式電荷進 manifest**：`build/ligand.py` 在 `ref` 已映射到拓撲時寫 `charged_atoms: {topology_index: sign}`；需 RDKit，CI `openmm-stack` 驗證；之後鹽橋才會出現在配體上。
+1. **【已做，D-98】A7 reason code**：`docking/poses._rejections` 回傳 `(code, text)`；code 分 `geometry_repairable`／`model_limitation`／`hypothesis_change`；`_least_risk_joint_pose` 只接受全部 `geometry_repairable`；報告保留原始拒絕理由與修復後評估。測試：共同佔據拒絕不可被 fallback 清除。
+2. **【已做，D-98；實作與原文不同：SDF 順序的 `atom_formal_charges`／`atom_charge_signs`（共振聯集），在 workflow 以 `atom_indices` 對應，長度不符即未知】配體原子形式電荷進 manifest**：`build/ligand.py` 在 `ref` 已映射到拓撲時寫 `charged_atoms: {topology_index: sign}`；需 RDKit，CI `openmm-stack` 驗證；之後鹽橋才會出現在配體上。
 3. **報告整合**：把 `persistence` 事件表與 `ligand_state` 接進 `workflow_report._md` 的配體段（條碼＋持續性＋時間對應結構）；目前資料層已寫入 `extended.json`／`metrics.json`，圖未接。
 4. **F12/F10/F11**、**F01/F05 證據矩陣**、**P1A 自動行動迴圈**（偵測窗口 ESS 不足→延長 vs 重疊不足→補窗，已有 adaptive.py 可接）。
 5. **F19 MM/GBSA pilot（P2B）**：先決條件——①選定後端（OpenMM GBn2 單軌跡，因為 D-20 已有 GBn2 且不需轉檔，保留 OpenFF 參數）；②小型可獨立驗證的基準（需要 OpenMM，容器無法執行）；③使用者授權計算預算。本輪未開始，也未宣稱任何能量驗證。

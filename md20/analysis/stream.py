@@ -214,6 +214,19 @@ def remap_groups(groups: dict | None, subset: list[int] | None) -> dict | None:
     return {k: [pos[int(i)] for i in v if int(i) in pos] for k, v in groups.items()}
 
 
+def remap_charges(charges: dict | None, subset: list[int] | None) -> dict | None:
+    """D-98: {name: {full index: sign}} → indices in a solute-only trajectory.  A ligand that loses any charged atom
+    in the remap is dropped (charge unknown) rather than silently becoming less charged."""
+    if charges is None or subset is None:
+        return charges
+    pos = {int(a): i for i, a in enumerate(subset)}
+    out = {}
+    for k, m in charges.items():
+        if all(int(i) in pos for i in m):
+            out[k] = {pos[int(i)]: s for i, s in m.items()}
+    return out
+
+
 def remap_indices(idx: list[int] | None, subset: list[int] | None) -> list[int] | None:
     if idx is None or subset is None:
         return idx

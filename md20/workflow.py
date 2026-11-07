@@ -59,6 +59,24 @@ def manifest_ligands(bm: dict) -> list[dict]:
         return asm
     return bm.get("ligands") or []
 
+def manifest_ligand_charges(bm: dict) -> dict[str, dict[int, int]]:
+    """D-98: {ligand name: {topology atom index: +1/-1}} for small-molecule ligands whose build record carries
+    atom-level charge signs (``atom_charge_signs``, resonance-delocalised; else ``atom_formal_charges``; SDF order)
+    AND topology indices of the same length.
+
+    A ligand is LEFT OUT (→ its charge stays "unknown" in the interaction fingerprint, so no salt bridge is called)
+    when the charges were not recorded (manifests before D-98), the lengths disagree (order cannot be trusted), or it
+    is a peptide (atom-level charges are not recorded for peptides yet).  An included ligand with no charged atom
+    maps to {} — "known, neutral" — which is different from absent."""
+    out: dict[str, dict[int, int]] = {}
+    for l in manifest_ligands(bm):
+        q, idx = (l.get("atom_charge_signs") or l.get("atom_formal_charges")), l.get("atom_indices")
+        if l.get("kind", "small") == "peptide" or not q or not idx or len(q) != len(idx):
+            continue
+        out[l["name"]] = {int(i): (1 if int(c) > 0 else -1) for i, c in zip(idx, q) if int(c) != 0}
+    return out
+
+
 def fetch_pdb(pid: str, path: Path, *, timeout: float = 60.0) -> Path:
     """Download an RCSB entry to a temporary file, check it is really a PDB, then move it into place: a broken
     connection or an HTML error page must never be left behind as `<ID>.pdb` and reused on the next run."""
@@ -835,8 +853,9 @@ class Workflow:
                 # of stopping; only a failed redocking self-check or unreadable poses still stop here.
                 least = self._least_risk_joint_pose(e) if res.mode == "simultaneous" else None
                 if least is None:
+                    refusal = self._fallback_refusal(e) if res.mode == "simultaneous" else ""
                     self._block("pose_selection",
-                                f"{e['name']}：系統沒有推薦任何 pose（{e.get('reason') or '無合格候選'}）。"
+                                f"{e['name']}：系統沒有推薦任何 pose（{e.get('reason') or '無合格候選'}）。{refusal}"
                                 f"請在 pose_choices 指定名次，或檢查盒子/口袋設定後重跑對接。")
             rank = least[0] if least else int(user.get(e["name"], e["recommended_rank"]))
             if not 1 <= rank <= n:
@@ -890,7 +909,11 @@ class Workflow:
                 sel["ligands"][lig] = {"rank": rank, "sdf": e["pose_sdfs"][lig][rank - 1], "score": p["score"],
                                        "rmsd_ref": p.get("rmsd_ref"), "entry": e["name"],
                                        "smiles": e["smiles"][lig] if isinstance(e["smiles"], dict) else e["smiles"],
-                                       "md_screen": screen_info}
+                                       "md_screen": screen_info,
+                                       # D-98 (A7): the docking rejections of the used pose stay on record — a repair
+                                       # later in the build never erases why docking rejected it
+                                       "docking_rejections": list(p.get("rejection_codes") or []),
+                                       "fallback": bool(least)}
             self.dec.record("workflow.pose", e["name"], f"rank {rank}", why,
                             kind="human" if e["name"] in user else ("auto_fixed" if least else "auto"))
         self._complex_picks(sel)                           # D-80: peptides placed from a predicted complex
@@ -913,9 +936,14 @@ class Workflow:
         reason = e.get("reason") or ""
         if "edocking" in reason:
             return None
+        eligible, _ = self._fallback_eligibility(e)
+        if not eligible:
+            return None
         names = list(e.get("ligands") or [])
         poses, scores = {}, {}
         for p in e.get("poses") or []:
+            if p["rank"] not in eligible:
+                continue
             k = p["rank"] - 1
             try:
                 poses[p["rank"]] = [ML.mol_from_sdf(e["pose_sdfs"][nm][k], nm) for nm in names]
@@ -928,10 +956,12 @@ class Workflow:
         around = np.vstack([m.xyz for ms in poses.values() for m in ms])
         prot = ML.protein_near(rec, around) if rec and Path(rec).is_file() else None
         rows = ML.rank_for_md(poses, prot, scores)
-        objections = {p["rank"]: [x for x in (p.get("rejected") or []) if "碰撞" not in x] for p in e["poses"]}
+        codes = {p["rank"]: list(p.get("rejection_codes") or []) for p in e["poses"]}
         for r in rows:
-            r["docking_objections"] = objections.get(r["rank"], [])
-        rows.sort(key=lambda r: len(r["docking_objections"]))        # stable: geometry order kept within a group
+            # D-98 (A7): only geometry-repairable poses reach here, so no other docking objection remains; the original
+            # rejections are kept with the row (and with the selection) for the report
+            r["docking_objections"] = []
+            r["docking_rejections"] = codes.get(r["rank"], [])
         st = self.state()
         st["least_risk_poses"] = {**(st.get("least_risk_poses") or {}), e["name"]: rows}
         atomic_write_json(st, self.state_path)
@@ -941,12 +971,52 @@ class Workflow:
                2: "剛體微調解不開，要靠建模時的軟核鬆弛；若仍失敗會停下來請你決定排除哪個配體"}[b["tier"]]
         top = "；".join(f"第 {r['rank']} 名（{['可直接或微調', '會排除漂浮配體', '需軟核鬆弛'][r['tier']]}，"
                        f"剩餘問題 {r['problems']}，分數 {r['score']:.2f}）" for r in rows[:3])
-        why = (f"沒有聯合姿勢通過保守條件（{reason or '配體互相接觸'}）。不停在這裡，改依進入 MD 的風險排序所有姿勢，"
-               f"選第 {b['rank']} 名（{b['score']:.2f} kcal/mol）：{how}。排序依據依序為：對接層的其他疑點數、幾何能否解開、"
+        orig = "、".join(x["text"] for x in b["docking_rejections"]) or "—"
+        n_out = len(e.get("poses") or []) - len(eligible)
+        why = (f"沒有聯合姿勢通過保守條件（{reason or '配體互相接觸'}）。不停在這裡，改依進入 MD 的風險排序"
+               f"只有「可由建模修正的幾何問題」的姿勢（{len(eligible)} 個；另有 {n_out} 個因對接模型限制或共同佔據假設不成立而不列入，"
+               f"這些拒絕不會被修復抹掉），選第 {b['rank']} 名（{b['score']:.2f} kcal/mol）：{how}。"
+               f"這個姿勢在對接層被排除的原始理由（保留）：{orig}。排序依據依序為：幾何能否解開、"
                f"排除的配體數、微調後剩餘的重疊與穿環、需要微調的配體數、最短接觸距離、分數。前三名：{top}。"
                "進入 MD 前仍會做幾何檢查、剛體微調、必要時軟核鬆弛，最小化後再查穿環；報告會標註這是低風險選擇而不是推薦。"
                "若要用別的姿勢，在姿勢表點選即可。")
         return b["rank"], why, rows
+
+    @staticmethod
+    def _fallback_eligibility(e: dict) -> tuple[set, dict]:
+        """D-98 (A7): ranks a least-risk fallback may consider — every docking rejection of the pose is
+        `geometry_repairable`.  Returns (eligible ranks, {rank: why not}).  The whole entry is refused when the docking
+        model or the co-occupancy hypothesis failed at entry level (pocket too small, redocking).  A pose written before
+        D-98 has no rejection codes: it is NOT eligible (the text is not parsed to guess what it meant)."""
+        from .docking.poses import GEOMETRY_REPAIRABLE, CODE_TEXT
+        if e.get("recommendation_code") and e["recommendation_code"] != GEOMETRY_REPAIRABLE:
+            return set(), {"entry": f"{CODE_TEXT.get(e['recommendation_code'], e['recommendation_code'])}"
+                                    f"（{e.get('recommendation_rule') or '—'}）"}
+        ok, why_not = set(), {}
+        for p in e.get("poses") or []:
+            codes = p.get("rejection_codes")
+            if codes is None:
+                why_not[p["rank"]] = "舊的對接結果沒有拒絕代碼"
+            elif not codes:
+                why_not[p["rank"]] = "沒有被排除（不需要後備）"
+            elif all(c.get("code") == GEOMETRY_REPAIRABLE for c in codes):
+                ok.add(p["rank"])
+            else:
+                why_not[p["rank"]] = "、".join(f"{c.get('text')}〔{CODE_TEXT.get(c.get('code'), c.get('code'))}〕"
+                                              for c in codes if c.get("code") != GEOMETRY_REPAIRABLE)
+        return ok, why_not
+
+    def _fallback_refusal(self, e: dict) -> str:
+        """Why no least-risk fallback was taken (appended to the NEEDS_HUMAN message)."""
+        ok, why_not = self._fallback_eligibility(e)
+        if ok:
+            return ""
+        if "entry" in why_not:
+            return f"不採用低風險後備：{why_not['entry']}，這不是移動原子能修正的問題。"
+        if why_not and all(v == "舊的對接結果沒有拒絕代碼" for v in why_not.values()):
+            return "不採用低風險後備：這份對接結果是舊版寫的、沒有拒絕代碼，無法確認拒絕是否只是可修的幾何問題；重新對接即可。"
+        items = "；".join(f"第 {r} 名：{v}" for r, v in list(why_not.items())[:4])
+        return f"不採用低風險後備：沒有任何姿勢的拒絕理由全部屬於可由建模修正的幾何問題（{items}）。"
 
     def _docking_signature(self) -> str | None:
         from .util import sha256_file
@@ -1485,7 +1555,7 @@ class Workflow:
                 else:
                     groups = {l["name"]: l["heavy_atom_indices"] for l in manifest_ligands(bm) if l.get("heavy_atom_indices")}
                     man = analyse_run(run_dir, top, label=key, ligand_groups=groups or None, metal_indices=metal_indices_from_manifest(bm),
-                                      decisions=self.dec)
+                                      decisions=self.dec, ligand_charges=manifest_ligand_charges(bm))
                     if membrane:            # case A: membrane metrics and the equilibration acceptance next to the usual ones
                         from .analysis.membrane_run import analyse_membrane_run
                         try:

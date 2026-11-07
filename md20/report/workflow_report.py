@@ -547,6 +547,34 @@ def _docking_joint(doc: Doc, e: dict, box: dict, prot: list, rank_used: int, cha
     return out
 
 
+_REJ_CODE = {"geometry_repairable": ("可由建模修正的幾何問題", "geometry the build can repair", "モデル構築で修正できる幾何の問題", "모델 구축에서 고칠 수 있는 기하 문제"),
+             "model_limitation": ("對接模型的限制", "limit of the docking model", "ドッキングモデルの限界", "도킹 모델의 한계"),
+             "hypothesis_change": ("假設不成立", "the hypothesis does not hold", "仮定が成り立たない", "가정이 성립하지 않음")}
+
+
+def _used_pose_rejections(sel: dict, entry: str, L: str) -> str:
+    """D-98 (A7): a used pose that docking had rejected keeps its original reasons in the report, with their class,
+    whether it was taken by the least-risk fallback or chosen by a person; the build's repair is reported separately."""
+    seen, out = set(), ""
+    for v in (sel.get("ligands") or {}).values():
+        rej = v.get("docking_rejections") or []
+        if v.get("entry") != entry or not rej or v.get("rank") in seen:
+            continue
+        seen.add(v.get("rank"))
+        how = (tx(("低風險後備選用（不是推薦）", "Taken by the least-risk fallback (not a recommendation)",
+                   "低リスクの代替として選択（推奨ではない）", "저위험 대안으로 선택(추천 아님)"), L) if v.get("fallback") else
+               tx(("依使用者指定", "Chosen by the user", "ユーザーの指定", "사용자 지정"), L))
+        items = ("；" if L in ("zh", "ja") else "; ").join(
+            f"{r.get('text')}{paren(tx(_REJ_CODE.get(r.get('code'), (r.get('code'),) * 4), L), L)}" for r in rej)
+        head = tx(("選用的第 {r} 名姿勢在對接層被排除；原始理由（保留）", "The used pose (rank {r}) was rejected at docking; original reasons (kept)",
+                   "使用したポーズ（順位 {r}）はドッキングで除外されました。元の理由（保持）", "사용한 포즈(순위 {r})는 도킹에서 제외되었습니다. 원래 이유(유지)"), L)
+        tail = tx(("建模後的幾何修正與檢查見下方多配體幾何表", "The repair and re-check during the build are in the multi-ligand geometry table below",
+                   "モデル構築での修正と再検査は下の複数リガンド幾何表にあります", "모델 구축 중 수정과 재검사는 아래 다중 리간드 기하 표에 있습니다"), L)
+        out += (f"<p class=muted>⚠ {_esc(head.format(r=v.get('rank')))}{colon(L)}{_esc(items)}{stop(L)}"
+                f"{_esc(how)}{stop(L)}{_esc(tail)}{stop(L)}</p>")
+    return out
+
+
 def _geometry_table(doc: Doc, rec: dict) -> str:
     """D-60: what the multi-ligand geometry check found and did, per ligand."""
     L = doc.lang
@@ -667,6 +695,7 @@ def _docking(doc: Doc, wf, vals, f, goal) -> str:
         if e.get("reason"):
             out += (f"<p class=muted>{_esc(tx(('系統推薦的理由', 'Reason for the recommendation', '推奨の理由', '추천 이유'), L))}"
                     f"{colon(L)}{_esc(e['reason'])}</p>")
+        out += _used_pose_rejections(sel, e["name"], L)
     out += _geometry_table(doc, wf.state().get("multi_ligand") or {})
     nos = SR.selection_rows(wf, L)                     # D-82: placed from a predicted complex, no docking entry
     if nos:

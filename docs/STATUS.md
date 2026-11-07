@@ -3,7 +3,12 @@
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
-## 進行中（已 push、未發行）：整合規格 P0（D-95、D-96、D-97，2026-11-07）
+## 進行中（2026-11-07，session_016gcJzAV8UjRW4ixPZLxddG）：D-98 配體原子電荷＋A7 拒絕代碼＋DevCheck P0
+- **(A)** 容器 697 passed、49 skipped（新增 24 項）。
+- **(B)** 交 CI：RDKit 共振判定（`test_rdkit_acetate_and_neutral_molecule`）、3PTB 完整流程的新斷言（heavy workflow）；另可在筆電以 `MD20-DevCheck-P0.cmd` 於沙盒資料夾隔離驗證。
+- **(C)** 胜肽配體原子電荷仍未記錄；docking 拒絕文字只有中文。
+
+## 整合規格 P0（D-95、D-96、D-97，2026-11-07，已 push、未發行）
 已 push 到 main，HEAD **`ba4d7da`**。**未發行**（對外版本是 **a17**——a18 實際上從未發行，見 DECISIONS 11/07 紀錄）。這批是科學正確性修正，不是新 phase。
 - **(A) 真實跑過並通過**：容器內 `pytest -o addopts="" -q` → **673 passed、48 skipped**。新增純 Python 測試：assessment 9、interactions/persistence 14、extended 接線 2、報告持續性 1、provenance 4、structure/multi-binding 多項。
 - **(B) CI 驗證狀態（2026-11-07）**：

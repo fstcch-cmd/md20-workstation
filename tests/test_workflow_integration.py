@@ -13,6 +13,7 @@ pytest.importorskip("openmm"); pytest.importorskip("openff.toolkit"); pytest.imp
 
 from md20.project import Project
 from md20.workflow import Workflow, example_config
+from md20.util.jsonio import load_json
 from md20.engine.factory import make_backend_factory
 from md20.env import choose_platform
 
@@ -46,6 +47,19 @@ def test_full_workflow_3ptb(pdb_3ptb, tmp_path):
             # keyed by the assembled ligand residue name (L01…), not the input name (BEN) — CI f140a49, D-28
             checks = summ.get("pbc_checks") or {}
             assert checks and all(c["true_nm"] < 1.0 for c in checks.values()), checks
+            # D-98: atom-level ligand charges recorded at build reach the fingerprint (charge known, not "unknown");
+            # a charged ligand's sign lands on ≥ as many atoms as the raw formal charges (resonance: amidinium → both N)
+            assert summ.get("extended_file"), summ.get("extended_errors")
+            ext = load_json(summ["extended_file"], {})
+            for name, L in (ext.get("ligands") or {}).items():
+                fp = L.get("fingerprint") or {}
+                assert "fingerprint" not in (L.get("errors") or {}), L.get("errors")
+                assert fp["ligand_charge"] == "atom-level formal charges", (name, fp.get("ligand_charge"))
+    bm_ben = load_json(Path(wf.project.case(st["md_runs"]["runs"]["docked_BEN"]["case_id"]).build_dir) / "build_manifest.json", {})
+    for lig in (bm_ben.get("assembly") or {}).get("ligands") or []:
+        q, s = lig.get("atom_formal_charges") or [], lig.get("atom_charge_signs") or []
+        assert len(q) == len(s) == len(lig["atom_indices"]) and lig.get("atom_charge_method"), lig.get("name")
+        assert sum(1 for x in s if x) >= sum(1 for x in q if x), (q, s, lig.get("atom_charge_method"))
     b = out["binding"]["BEN"]
     assert b["status"] == "PASS" and b["delta_pmf_kj_mol"] is not None
     html = Path(out["report"]).read_text(encoding="utf-8")

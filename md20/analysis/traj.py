@@ -300,17 +300,20 @@ def plot_metrics(m: dict, out_dir: Path | str, *, label: str = "") -> dict:
 
 def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 1, label: str = "",
                 ligand_groups: dict[str, list[int]] | None = None, metal_indices: list[int] | None = None,
-                decisions=None) -> dict:
+                decisions=None, ligand_charges: dict[str, dict[int, int]] | None = None) -> dict:
+    """ligand_charges (D-98) = {ligand name: {full-system atom index: ±1}} from the build manifest; a ligand absent
+    from it has an unknown charge (no salt bridge is called for it)."""
     run_dir = Path(run_dir)
     # long runs (docs/specs/long_timescale.md): solute-only DCDs renumber atoms; a trajectory too large for memory
     # is read with a stride here and at full resolution by the streaming pass below
-    from .stream import production_info, production_topology, remap_groups, remap_indices, dcd_frame_count, \
-        choose_stride, stream_production_metrics
+    from .stream import production_info, production_topology, remap_groups, remap_indices, remap_charges, \
+        dcd_frame_count, choose_stride, stream_production_metrics
     full_groups, full_metals = ligand_groups, metal_indices
     pinfo = production_info(run_dir)
     if pinfo["dcd_atoms"] == "solute":
         _, subset = production_topology(run_dir, topology_pdb)
         ligand_groups, metal_indices = remap_groups(ligand_groups, subset), remap_indices(metal_indices, subset)
+        ligand_charges = remap_charges(ligand_charges, subset)
     auto_stride = 1
     if stride == 1 and pinfo["dcds"] and pinfo.get("dcd_atom_count"):
         n_fr = sum(dcd_frame_count(p, int(pinfo["dcd_atom_count"])) for p in pinfo["dcds"])
@@ -369,7 +372,7 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
         if groups is None:
             top = traj.topology
             groups = {rn: top.select(f"resname {rn} and not element H").tolist() for rn in _ligand_resnames(top)}
-        ext = extended_metrics(traj, groups)
+        ext = extended_metrics(traj, groups, ligand_charges=ligand_charges)
         atomic_write_json(ext, adir / "extended.json", backup=False)
         summary["extended_file"] = str(adir / "extended.json")
         summary["extended_errors"] = {**ext.get("errors", {}), **{f"{k}:{n}": e for k, l in (ext.get("ligands") or {}).items()

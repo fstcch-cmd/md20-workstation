@@ -9,7 +9,7 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
-| **接手 P0 收尾＋下一批：配體原子形式電荷寫入 build manifest（讓鹽橋能判配體）、A7 docking fallback reason code**；確認 ba4d7da CI；a19 發行待使用者（a18 從未發行） | 使用者／HANDOFF 11/07 | session_016gcJzAV8UjRW4ixPZLxddG | 2026-11-07 10:50 | 勿動 md20/build/ 的 manifest 配體段、md20/docking/ 的 fallback 路徑 |
+| **接手 P0 收尾＋下一批：配體原子形式電荷寫入 build manifest（讓鹽橋能判配體）、A7 docking fallback reason code**：D-98 程式完成（697 passed），待 CI 與筆電 DevCheck-P0；a19 發行待使用者（a18 從未發行） | 使用者／HANDOFF 11/07 | session_016gcJzAV8UjRW4ixPZLxddG | 2026-11-07 10:50 | 勿動 md20/build/ 的 manifest 配體段、md20/docking/ 的 fallback 路徑 |
 | **整合規格 P0（D-95 CI 相依、D-96 A1/A2/A3/A9/A10、D-97 A4/A5/A6/A12/F07/F09）**：完成，已 push（HEAD `ba4d7da`）；由 session_016gcJzAV8UjRW4ixPZLxddG 接手收尾。673 passed。下一批：A7、A8、A11、F10/F11/F12、P1A 自動行動、F19 pilot | 使用者（MD20_Claude_Code_Master_Iteration_Prompt_EN.md） | session_016gcJzASwmZ7ZUPX5BewTyo | 2026-11-07 09:40 | 見 docs/specs/master_iteration_2026-11-07.md；勿動 md20/sampling/assessment.py、md20/analysis/interactions.py、md20/analysis/persistence.py |
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |

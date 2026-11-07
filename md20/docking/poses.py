@@ -38,6 +38,8 @@ class PoseInfo:
     clash: bool = False
     contacts_per_ligand: list | None = None
     rejected: list = field(default_factory=list)
+    # D-98 (A7): one {"code", "rule", "text"} per entry of `rejected` (same order); code in REJECTION_CODES
+    rejection_codes: list = field(default_factory=list)
     recommended: bool = False
     reason: str = ""
     extra: dict = field(default_factory=dict)
@@ -107,23 +109,45 @@ def analyse_poses(pose_coords: list[np.ndarray], scores: list[float], *, recepto
 
 LL_MIN, LL_MAX = 3.3, 4.5
 
+# D-98 (A7): what a rejection means for a fallback.  Only GEOMETRY_REPAIRABLE problems are ones the build can repair AND
+# verify (rigid nudge, soft-core relaxation, post-minimisation piercing check — D-60/D-78).  The other two are not
+# repaired by moving atoms: a pose outside the score window or a failed redocking is a limit of the docking model; a
+# ligand on the surface, ligands that do not share the pocket, or a pocket too small for all of them mean the
+# co-occupancy / binding-site hypothesis itself does not hold for that pose.
+GEOMETRY_REPAIRABLE, MODEL_LIMITATION, HYPOTHESIS_CHANGE = "geometry_repairable", "model_limitation", "hypothesis_change"
+REJECTION_CODES = (GEOMETRY_REPAIRABLE, MODEL_LIMITATION, HYPOTHESIS_CHANGE)
+CODE_TEXT = {GEOMETRY_REPAIRABLE: "可由建模修正的幾何問題", MODEL_LIMITATION: "對接模型的限制",
+             HYPOTHESIS_CHANGE: "假設不成立（不是幾何可修的問題）"}
 
-def _rejections(i: PoseInfo, *, best: float, score_window: float, min_contacts: int, ll_min: float, ll_max: float) -> list[str]:
+
+def classify_rejections(i: PoseInfo, *, best: float, score_window: float, min_contacts: int, ll_min: float,
+                        ll_max: float) -> list[dict]:
+    """Structured rejections: [{"code", "rule", "text"}] (D-98, A7)."""
     r = []
     if i.score > best + score_window:
-        r.append(f"分數差 {i.score - best:.1f} > {score_window} kcal/mol")
+        r.append({"code": MODEL_LIMITATION, "rule": "score_window",
+                  "text": f"分數差 {i.score - best:.1f} > {score_window} kcal/mol"})
     if i.contacts_per_ligand is not None:
         shallow = [k for k, c in enumerate(i.contacts_per_ligand) if c < min_contacts]
         if shallow:
-            r.append("配體 " + ",".join(str(k + 1) for k in shallow) + f" 接觸 < {min_contacts}（一深一淺）")
+            r.append({"code": HYPOTHESIS_CHANGE, "rule": "shallow_ligand",
+                      "text": "配體 " + ",".join(str(k + 1) for k in shallow) + f" 接觸 < {min_contacts}（一深一淺）"})
     elif i.contacts < min_contacts:
-        r.append(f"接觸 {i.contacts} < {min_contacts}（可能在表面）")
+        r.append({"code": HYPOTHESIS_CHANGE, "rule": "surface_pose", "text": f"接觸 {i.contacts} < {min_contacts}（可能在表面）"})
     if i.min_ll_distance is not None:
         if i.min_ll_distance < ll_min:
-            r.append(f"配體間 {i.min_ll_distance:.1f} Å < {ll_min}（碰撞）")
+            r.append({"code": GEOMETRY_REPAIRABLE, "rule": "ligand_clash",
+                      "text": f"配體間 {i.min_ll_distance:.1f} Å < {ll_min}（碰撞）"})
         elif i.min_ll_distance > ll_max:
-            r.append(f"配體間 {i.min_ll_distance:.1f} Å > {ll_max}（未共同佔據口袋）")
+            r.append({"code": HYPOTHESIS_CHANGE, "rule": "not_co_occupying",
+                      "text": f"配體間 {i.min_ll_distance:.1f} Å > {ll_max}（未共同佔據口袋）"})
     return r
+
+
+def _rejections(i: PoseInfo, *, best: float, score_window: float, min_contacts: int, ll_min: float, ll_max: float) -> list[str]:
+    """Text only (kept for callers that read `rejected`); `classify_rejections` carries the codes."""
+    return [x["text"] for x in classify_rejections(i, best=best, score_window=score_window, min_contacts=min_contacts,
+                                                   ll_min=ll_min, ll_max=ll_max)]
 
 
 def recommend_pose(infos: list[PoseInfo], *, score_window: float = 1.0, min_contacts: int = 10, ll_min: float = LL_MIN,
@@ -135,14 +159,17 @@ def recommend_pose(infos: list[PoseInfo], *, score_window: float = 1.0, min_cont
     """
     best = min(i.score for i in infos)
     for i in infos:
-        i.rejected = _rejections(i, best=best, score_window=score_window, min_contacts=min_contacts, ll_min=ll_min, ll_max=ll_max)
+        i.rejection_codes = classify_rejections(i, best=best, score_window=score_window, min_contacts=min_contacts,
+                                                ll_min=ll_min, ll_max=ll_max)
+        i.rejected = [x["text"] for x in i.rejection_codes]
         i.clash = i.min_ll_distance is not None and i.min_ll_distance < ll_min
         i.recommended = False
     notes = []
     if pocket_volume_A3 is not None and ligand_volume_A3 is not None and pocket_volume_A3 < 1.2 * ligand_volume_A3:
         msg = (f"口袋可用體積約 {pocket_volume_A3:.0f} Å³，配體總體積約 {ligand_volume_A3:.0f} Å³：口袋可能只容得下一個配體"
                "（格點粗估）。建議改用 independent 對接或只保留一個配體。")
-        infos[0].extra["recommendation"] = {"status": "NEEDS_HUMAN", "reason": msg}
+        infos[0].extra["recommendation"] = {"status": "NEEDS_HUMAN", "reason": msg, "code": HYPOTHESIS_CHANGE,
+                                            "rule": "pocket_too_small"}
         return None
     if ligand_charges and len(ligand_charges) > 1:
         pos = [q for q in ligand_charges if q > 0]; neg = [q for q in ligand_charges if q < 0]
@@ -151,14 +178,16 @@ def recommend_pose(infos: list[PoseInfo], *, score_window: float = 1.0, min_cont
     cands = [i for i in infos if not i.rejected]
     if not cands:
         why = "；".join(f"rank {i.rank}：{'、'.join(i.rejected)}" for i in infos[:6])
-        infos[0].extra["recommendation"] = {"status": "NEEDS_HUMAN", "reason": "沒有任何 pose 通過保守條件，不自動選擇。" + why}
+        infos[0].extra["recommendation"] = {"status": "NEEDS_HUMAN", "reason": "沒有任何 pose 通過保守條件，不自動選擇。" + why,
+                                            "code": None, "rule": "no_candidate"}
         return None
     pick = sorted(cands, key=lambda i: (-i.cluster_size, i.score))[0]
     if pick.rmsd_ref is not None and pick.rmsd_ref > redock_max_rmsd:
         best_ref = min((i.rmsd_ref for i in infos if i.rmsd_ref is not None), default=None)
         infos[0].extra["recommendation"] = {"status": "NEEDS_HUMAN", "reason":
             f"Redocking 自檢未通過：推薦 pose 與晶體 pose 的 RMSD {pick.rmsd_ref:.2f} Å > {redock_max_rmsd} Å"
-            f"（所有 pose 中最小 {best_ref:.2f} Å）。對接設定（box、質子化、受體準備）不可信，請先修正，不往下選 pose。"}
+            f"（所有 pose 中最小 {best_ref:.2f} Å）。對接設定（box、質子化、受體準備）不可信，請先修正，不往下選 pose。",
+            "code": MODEL_LIMITATION, "rule": "redocking_failed"}
         return None
     pick.recommended = True
     parts = [f"第 {pick.rank} 名 pose（{pick.score:.2f} kcal/mol）"]

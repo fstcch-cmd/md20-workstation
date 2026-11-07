@@ -6,6 +6,22 @@
 ---
 
 ## 2026-11-07
+### D-98　配體原子電荷寫進 build manifest（鹽橋終於能判在配體上，羧酸根兩個 O 都算）、docking 拒絕理由加代碼（A7：低風險後備只接受可修的幾何問題）、DevCheck 可在沙盒資料夾只跑 P0 驗證
+- 依據：`docs/specs/master_iteration_2026-11-07.md` §5 第 1、2 項；使用者 11/07 10:51 對「下一批」無偏好，採用本 session 建議（配體電荷＋A7）；使用者要求「多在沙盒或此電腦隔離驗證」。
+- 決定與理由：
+  1. **配體原子電荷**：`LigandRecord` 新增 `atom_formal_charges`（最終 SDF 的每個原子，SDF 順序）、`atom_charge_signs`（帶電基團的正負號，依 RDKit `ResonanceMolSupplier` 的所有共振式取聯集，不開 charge separation）、`atom_charge_method`。SDF 順序＝OpenFF `from_rdkit` 後的拓撲順序＝組裝的 `atom_indices`，所以 `workflow.manifest_ligand_charges` 只在兩者長度相同時才對應成 `{拓撲索引: ±1}`；長度不符、舊 manifest、胜肽一律**不列入**＝電荷未知（不判鹽橋）。已列入但無帶電原子＝`{}`（已知中性），兩者不同。`analyse_run(ligand_charges=…)` → `extended_metrics`；只存溶質的 DCD 用 `remap_charges` 重新編號，任何帶電原子被移出子集合時整個配體改為未知（不讓羧酸根變成「半帶電」）。報告的 docking 2D 互作圖改用同一個共振規則，靜態圖與軌跡指紋一致。
+  2. **A7**：`docking/poses.classify_rejections` 每個拒絕給 `{code, rule, text}`；code：`geometry_repairable`（配體互碰，建模能以剛體微調／軟核鬆弛修正並在最小化後複查）、`model_limitation`（分數超出窗口、redocking 失敗）、`hypothesis_change`（表面姿勢、一深一淺、配體間太遠＝未共同佔據、口袋只容得下一個）。`PoseInfo.rejected`（文字）保留給既有呼叫者，`rejection_codes` 與它一一對應；entry 層另有 `recommendation_code/rule`。`_least_risk_joint_pose` 只考慮**所有**拒絕都是 `geometry_repairable` 的姿勢；entry 層是模型限制或假設不成立、或沒有任何姿勢合格時不走後備，NEEDS_HUMAN 訊息逐名次說明原因與分類。選用姿勢的原始拒絕理由寫進 `pose_selection.ligands[*].docking_rejections`（含 `fallback` 旗標，人工指定也保留），報告對接節顯示「原始理由（保留）」與分類。
+  3. **DevCheck**：`installer/MD20-DevCheck.cmd` 接受 `MD20_DEVCHECK_DIR`（紀錄與安裝都放這裡）與 `MD20_DEVCHECK=p0`（只跑 P0 測試＋3PTB 完整流程在本機 GPU）；新增 `MD20-DevCheck-P0.cmd` 啟動檔。沒有這兩個變數時行為不變。
+- 被否決：
+  - 規格 §5-2 原寫在 `build/ligand.py` 直接寫 `charged_atoms: {topology_index: sign}`——建配體時還不知道拓撲索引（組裝才決定），改為存 SDF 順序、在 workflow 用 `atom_indices` 對應，並以長度一致當成順序可信的條件。
+  - 只用原始形式電荷（RDKit 把羧酸根的 −1 放在其中一個 O；另一個 O 與 LYS 的鹽橋會漏判，測試 `test_partner_oxygen_of_carboxylate…` 證明）。
+  - 開 charge separation 列舉共振式（會把中性醯胺等拆成正負，憑空造出帶電原子）。
+  - 舊的對接結果（沒有代碼）從拒絕文字推回代碼（規格明文不從文字猜；改為不走後備並請重新對接）。
+  - 只把「共同佔據」拒絕排在後面而不排除（排序仍可能選到它，等於讓修復抹掉假設不成立的拒絕）。
+- 行為改變：D-78 的後備以前會選「碰撞＋分數超出窗口」或「碰撞＋未共同佔據」的姿勢（只是排在後面）；現在這些姿勢不列入，全部不合格時停下來。舊專案已完成的姿勢選擇不受影響（`_done` 快取）；新選擇若用舊對接結果會停下來請重新對接。
+- 測試：`tests/test_ligand_atom_charges.py`（17 項＋1 項 RDKit 交 CI）、`tests/test_docking_rejection_codes.py`（7 項，含規格指定的「共同佔據拒絕不可被後備清除」）、`test_workflow_gates.py` 的 D-78 測試改用新版對接輸出、`test_workflow_integration.py::test_full_workflow_3ptb` 加斷言（指紋的配體電荷為已知、`atom_charge_signs` 長度與拓撲一致且帶電原子數 ≥ 原始形式電荷——苯甲脒的脒基應落在兩個 N）。容器 697 passed、49 skipped。
+- 未決：RDKit 共振判定與真實 3PTB 路徑只能在 CI openmm-stack／heavy workflow 與筆電 DevCheck 驗證；胜肽配體的原子電荷尚未記錄（仍為未知）；docking 拒絕文字仍只有中文（報告英日韓版照原文顯示，與既有 `reason` 相同）。
+
 ### 11/07 紀錄（session_016gcJzAV8UjRW4ixPZLxddG）：a18 從未發行；repo 改為私人後的 CI 計費與下載影響
 - 查證（11/07 10:50）：`gh api repos/.../releases` 最新為 **v0.1.0a17**（2026-11-04 03:38 UTC），`releases/tags/v0.1.0a18` 回 404，tag 也只到 a17；`release-windows.yml` 最後一次執行是 run 41767824360（`8e2fc14`，D-92，產生 a17）。D-93（`d879f2b`）與 D-94（`5561dd7`）之後**沒有再跑發行流程**；`pyproject.toml` 已是 `0.1.0a18`，但沒有對應的 release。
 - 影響：學生現在能下載的是 a17；a17 的 `install.ps1` 同樣沒有 D-95 釘選，新安裝會在 `pip install openmmforcefields` 失敗。README 的 a18 連結與 `docs/students/*` 的 a18 檔名目前指向不存在的 release（發行下一版時一併更新，本次不改）。

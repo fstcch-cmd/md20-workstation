@@ -33,6 +33,13 @@ class LigandRecord:
     provider: str = ""              # "openff-sage" | "gaff2" | ""
     charge_method: str = ""
     charge_sum: float | None = None
+    # D-98: formal charge of every atom of the final SDF, in SDF atom order (= topology order after assembly);
+    # empty = not recorded (older manifests) → analysis treats the ligand charge as unknown, never guesses
+    atom_formal_charges: list = field(default_factory=list)
+    # D-98: sign of the charged GROUP each atom belongs to, delocalised over resonance forms (carboxylate: both O −1);
+    # used by the interaction fingerprint.  atom_charge_method says how it was obtained.
+    atom_charge_signs: list = field(default_factory=list)
+    atom_charge_method: str = ""
     smoke_test: dict = field(default_factory=dict)
     gates: dict = field(default_factory=dict)
     status: str = PASS
@@ -317,6 +324,54 @@ def vacuum_smoke_test(mol, generator, *, md_ps: float = 1.0, timestep_fs: float 
             "md_ps": md_ps, "note": "" if ok else ("能量非有限" if not finite else "鍵長偏離參考 >15%，參數可疑")}
 
 
+# --------------------------------------------------------------------------- charged groups (D-98)
+def resonance_charge_signs(n_atoms: int, formal: list[int], resonance_forms: list[list[int]]) -> tuple[list[int], str]:
+    """Per-atom sign of the charged group, from the formal charges of every resonance form (pure function).
+
+    An atom is −1/+1 when it carries that sign in at least one form; an atom that is positive in one form and
+    negative in another keeps its sign in the input structure (0 if it has none there) — never a guess between the
+    two.  Returns (signs, method)."""
+    signs = [0] * n_atoms
+    seen: list[set] = [set() for _ in range(n_atoms)]
+    for form in [formal] + list(resonance_forms):
+        if len(form) != n_atoms:
+            continue
+        for i, q in enumerate(form):
+            if q:
+                seen[i].add(1 if q > 0 else -1)
+    conflicts = 0
+    for i in range(n_atoms):
+        if len(seen[i]) == 1:
+            signs[i] = next(iter(seen[i]))
+        elif len(seen[i]) > 1:
+            conflicts += 1
+            signs[i] = (1 if formal[i] > 0 else -1) if formal[i] else 0
+    method = "formal charges over resonance forms (RDKit ResonanceMolSupplier, no charge separation)"
+    if conflicts:
+        method += f"; {conflicts} atom(s) with opposite signs across forms kept their input sign"
+    return signs, method
+
+
+def charged_group_signs(mol, max_forms: int = 64) -> tuple[list[int], str]:
+    """RDKit wrapper around `resonance_charge_signs`.  Without resonance enumeration (failure or too many forms) the
+    raw atom formal charges are used and the method says so — the fingerprint then may miss the partner O of a
+    carboxylate, which is stated rather than hidden."""
+    formal = [int(a.GetFormalCharge()) for a in mol.GetAtoms()]
+    if not any(formal):
+        return [0] * len(formal), "no formal charges on any atom (neutral at every atom)"
+    try:
+        from rdkit import Chem
+        sup = Chem.ResonanceMolSupplier(mol, 0, max_forms)       # flags 0: no charge separation, no unconstrained
+        forms = []
+        for k in range(min(len(sup), max_forms)):
+            m = sup[k]
+            if m is not None:
+                forms.append([int(a.GetFormalCharge()) for a in m.GetAtoms()])
+        return resonance_charge_signs(len(formal), formal, forms)
+    except Exception as exc:  # noqa: BLE001
+        return [(1 if q > 0 else -1) if q else 0 for q in formal], f"raw atom formal charges (resonance failed: {type(exc).__name__})"
+
+
 # --------------------------------------------------------------------------- driver
 def prepare_ligand(reference: str | Path, pose: Path | str | None, out_dir: Path | str, *, name: str = "L01",
                    expected_charge: int | None = None, decisions: DecisionLog | None = None,
@@ -359,6 +414,8 @@ def prepare_ligand(reference: str | Path, pose: Path | str | None, out_dir: Path
             AllChem.MMFFOptimizeMolecule(mol)
             report.add(Gate("3D", AUTO_FIXED, "參考分子無 3D 座標，以 ETKDG + MMFF 產生。"))
     rec.n_atoms = mol.GetNumAtoms()
+    rec.atom_formal_charges = [int(a.GetFormalCharge()) for a in mol.GetAtoms()]
+    rec.atom_charge_signs, rec.atom_charge_method = charged_group_signs(mol)
     mol.SetProp("_Name", name)
     from ..util.stamp import stamp_rdkit_mol
     stamp_rdkit_mol(mol)
