@@ -6,6 +6,19 @@
 ---
 
 ## 2026-11-07
+### 中期開發藍圖（對標市面分子模擬軟體）— Claude Doc
+- 使用者 11/07 16:38：通盤理解專案，比較市面分析與教學所用軟體有哪些 MD20 沒有、但有能力開發的功能，讓學生得到最全面的訓練，工作站盡量涵蓋市面功能。
+- 產出：Claude Doc「MD20 中期開發藍圖：對標市面分子模擬軟體」https://claude.ai/artifact/X7GWyffsMwTL2r9fr3SX6B （供使用者審閱與持續修改；非程式變更，不進 CI）。
+- 對標：Schrödinger（Maestro/Desmond/FEP+）、GROMACS+PLUMED、AMBER、CHARMM-GUI、OpenFE/openmmtools、MDAnalysis/PyEMMA。
+- 四階段優先序（藍圖圖）：
+  1. **近期・分析工具箱（容器可測、純 Python、教學價值最高）**：PCA/tICA、分群、二維自由能面（FEL）、SASA、DSSP 二級結構、氫鍵網路、DCCM、口袋/藥性（fpocket/P2Rank）、水合位點。
+  2. **中期・增強取樣（OpenMM 原生）**：GaMD、well-tempered metadynamics、自由能面重加權。
+  3. **研究・定量自由能（工作站，需授權計算預算）**：REST2/Hamiltonian REMD、RBFE（OpenFE/perses）、ABFE、恆定 pH MD。
+  4. **進階・選配（工作站）**：QM/MM（xtb/Psi4）、ML 勢能（ANI/MACE）、瀏覽器內互動 3D（Mol*/NGL）、極化力場。
+- 閘門：容器 CI 綠＋筆電驗證 → 筆電實跑＋收斂驗證 → 授權計算預算＋基準驗證（FreeSolv/PDBbind）。
+- 不做/暫緩：雲端 NIM/生成化學/AI 連接器（文件 04 已移出）、聚合物/全細胞、自寫 WebGL 引擎、極化力場（優先度低）、加權集合/字串法/milestoning。
+- 待使用者：審閱藍圖後決定先開發哪一階段的哪些項目（實作時仍照 repo 慣例：不新增 phase 只強化、三態閘門、決策與規格進 repo、改動要有測試、真實路徑交 CI）。
+
 ### D-101　傘狀採樣：用 SMD 力曲線預先規劃 window（預防）、斷點即時提示並說明原因、覆蓋圖一定存在、k 上限時以 μ(c) 反解
 - 使用者 11/07 16:38：「智慧補窗遇到連續不足時，你常說看直方圖，但直方圖也沒有任何東西；應該即時顯示，讓使用者早一點處理。需要完整思考。」
 - 查到的事實：
