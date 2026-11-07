@@ -4,7 +4,21 @@
 > **重點:所有成果都在這個 repo + GitHub Actions 上,不在任何對話容器裡。** 新 session 只要 clone 本 repo 即可完整接手;正在跑的「虛擬機」就是 GitHub Actions CI,與 session 無關,不會因為舊對話結束而消失。
 
 ## 0. 新 session 第一步
-> **2026-11-02 之後：先讀 `docs/archive/HANDOFF_2026-11-02.md`**（交接當時的現況與開場指令）；**2026-11-03 起 v0.1.0a3 已發行**，之後的現況以 `docs/STATUS.md` 開頭的「目前版本」、`docs/WORKBOARD.md` 與 `docs/DECISIONS.md`（最新在最上面，目前到 D-72）為準。本檔其餘章節仍是一般說明。
+
+> **2026-11-07 交接（session_016gcJz9hwPAMieHsNEctkzL 關閉前）。** 目前版本 **v0.1.0a18**，決策到 **D-94**。本週（11/04–11/07）這個 session 做的，全部已 push 到 `main`（HEAD `5561dd7`）：
+> - **D-91** zip 內直接執行安裝程式→提示先解壓縮（a16）。
+> - **D-92** 多配體拉離路徑被擋→自動改道＋可按的「略過這個配體」（a17）。
+> - **D-93** 路徑判定修正（貼著的鄰居不再算擋路，修好筆電 hsieh2024 URI 改道失敗）、「只做 MD」真的清掉 `binding.added`、閘門加「只算單獨結合（`binding.alone`）」與「指定 anchor 殘基（`binding.anchor_residues`）」、`reconnect_timeout` 180 秒（a18）。
+> - **D-94** GUI「3D 檢視」分頁空白：NiceGUI 3 的 `ui.html` 會以 DOMPurify 清掉 iframe，改用 `ui.element("iframe")`；gui-preview e2e 加 3D 分頁檢查。報告內嵌的 3D 一直正常。
+>
+> **接手第一件事：確認 `5561dd7` 重跑後的 CI。** 第一輪（run 42322469948）大量紅燈是 infra flake（PyPI 連不到裝不了 `openmmforcefields`→`md20` 沒裝成；一台 runner 磁碟只剩 15.7 GB），**不是** D-94 的問題，gui-preview 綠。已於 11/07 09:34 重跑失敗 job。查法：`gh api "repos/fstcch-cmd/md20-workstation/actions/runs?head_sha=5561dd7..." --jq ...`（見 §0 下方指令）。
+>
+> **待筆電確認（使用者下次開機可驗）：** ① hsieh2024_rela_1vkx 裝 a18 後，URI 這個被擋的目標按「開始或繼續」是否直接算（D-93 原方向已淨空），或四個選項是否都能按；② SMD／PMF 實際跑出來的數值；③ 3D 分頁在筆電 NiceGUI 上是否真的畫出來（容器內 Chromium 已驗 e2e）；④ 「連線丟失」是否因 reconnect_timeout 消失。
+>
+> **使用者的開發主線（11/07 提到、但當下擱置）：** 一份「MD20_Claude_Code_Master_Iteration_Prompt_EN.md」整合規格（涵蓋 A1–A12 問題複核、F01–F19 功能盤點、互作完整偵測、時間取樣完整性、provenance、claim eligibility、opt-in MM/GBSA pilot、6.4/6.5/10/11 節）。**使用者 11/07 說「GPT 這件事情先不用」，所以先不要主動去找那份檔案或照它動工**；等使用者正式提供檔案再接。Project 文件 04 的里程碑 M5 已列 MM/GBSA，可先讀。
+>
+> ---
+> **2026-11-02 之後：先讀 `docs/archive/HANDOFF_2026-11-02.md`**（交接當時的現況與開場指令）；之後的現況以 `docs/STATUS.md` 開頭的「目前版本」、`docs/WORKBOARD.md` 與 `docs/DECISIONS.md`（最新在最上面，目前到 D-94）為準。本檔其餘章節仍是一般說明。
 
 1. 把 repo 加進 session 並 clone:`fstcch-cmd/md20-workstation`(需要 push 權限)。
 2. 讀這幾份:`docs/STATUS.md`(誠實三級現況)、本檔、`MD20_optimization_brief` 的規則(見 §4)、`docs/WORKFLOW.md`、`docs/TEACHING.md`。

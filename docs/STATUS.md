@@ -1,4 +1,4 @@
-# MD20 單機教學版 — 狀態報告（最後更新 2026-11-03；本檔自 2026-11-01 起累積）
+# MD20 單機教學版 — 狀態報告（最後更新 2026-11-07；本檔自 2026-11-01 起累積）
 
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
@@ -7,6 +7,7 @@
 - 拉離路徑判定修正（貼著的鄰居不再算擋路）、「只做 MD」真的停下結合自由能、閘門加「只算單獨結合」與「指定 anchor 殘基」（D-93）。**測試過**：純 Python（5 項新測試）；以筆電 hsieh2024 的 topology.pdb 重算路徑：原方向淨空。**沒測過**：筆電上 URI 的實際 SMD／PMF；「連線丟失」是否消失（reconnect_timeout 180 秒）。
 - GUI「3D 檢視」分頁空白的修正（D-94，NiceGUI 3 清掉 iframe）。**測試過**：CI gui-preview e2e 點分頁並確認 iframe 內畫出 canvas（以該次 CI 為準）。報告內的 3D 一直正常（筆電報告實測）。
 - CI：46fdbdb 與 d879f2b 各有 1 項 CPU 整合測試隨機失敗（Windows 膜胜肽 NaN；macOS 長時間溫度看門狗），各自在另一輪通過，見 DECISIONS 11/07 CI 紀錄。
+- **D-94 的 commit `5561dd7` 第一輪 CI（run 42322469948）大量紅燈，但不是程式問題**：openmm-stack 三 OS／heavy／installer／paper-docking 全卡在安裝步驟 `pip install openmmforcefields`（CI 當下連不到 PyPI：「Could not find a version … from versions: none」），`md20` 沒裝成，之後 import 全部 `ModuleNotFoundError`；pure-python ubuntu 另因 runner 硬碟只剩 15.7 GB 卡在長時間模擬的磁碟檢查。**真正測到 D-94 的 gui-preview 工作是綠的。** 2026-11-07 09:34 已重跑失敗 job（rerun-failed-jobs），下一個 session 要確認重跑結果；若仍紅，先看是不是同一個 PyPI／磁碟 infra flake 再判斷。
 
 ## v0.1.0a17（2026-11-04 發行，已被 a18 取代）
 - 多配體拉離路徑被擋住時自動改道（D-92）。**測試過**：純 Python 幾何測試。**沒測過**：筆電 hsieh2024 URI 改道後的實際 SMD。
