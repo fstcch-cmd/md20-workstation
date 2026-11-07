@@ -6,6 +6,19 @@
 ---
 
 ## 2026-11-07
+### D-119　補窗提案與既有中心碰撞（REVIEW #18 的 bug 部分）：D-101 沒修好；改為最小間距規則，近重複提案放棄並記理由
+- 問題（REVIEW #18）：提案落在既有 window 中心時只把中心挪 2 pm（最多 10 次）就當作「新增」；該 window 與原本的取樣分佈完全相同，下一輪同一個端點提案又出現，直到 rounds 用完。
+- **現況確認（結論：D-101 後仍存在）**：D-101 改的是「直方圖已連續就停止插入」「k 上限需在斷點內試過」，沒碰到碰撞處理（`plan_refinement` 尾段的 key 位移迴圈）。重現（`tests/test_adaptive_windows.py::test_endpoint_proposal_on_an_existing_centre…`，合成剖面：下端被 5000 kJ/mol/nm² 的牆擋住，0.30 nm 的 window 實際落在約 0.436 nm，CV 範圍端點 0.30 nm 永遠取樣不到）：未修改的 `plan_refinement` 6 輪後端點附近有 **0.300、0.302、0.304、0.306、0.308、0.310 … 共 7 個** 實質相同的 window，每輪各加一個。
+- 決定（`md20/sampling/adaptive.py`，只改碰撞處理）：
+  - 最小間距：提案中心與任何既有／本輪已取的中心距離 < `max(2 pm, 0.1 × min(σ提案, σ既有))`，且提案的 k 不比該 window 明顯更硬（< 1.5×）→ **放棄**。端點提案（補 CV 範圍端點）用 0.3σ（與「redundant」門檻同值：端點旁多一個 window 沒有新增覆蓋）。
+  - 每個放棄的提案寫進 `RefinePlan.skipped`（center、k、近鄰中心與 k、最小間距、中文理由）並同文進 `plan.notes`（補窗紀錄 `refine_log.json` 的 notes 會帶到），不靜默丟棄。放棄不佔每輪／總預算。
+  - 明顯更硬（k ≥ 1.5×）的提案不算重複——斷點邏輯刻意在 window 滑走處把 k 提高，那是不同的分佈；維持原本的「key 被占用時挪到空著的 key」（至多 10 次，仍失敗則放棄並記理由）。
+  - 「連續輪次不得重複提出同一位置」由同一規則保證：前一輪放下去的 window 已在 `samples`，同 k 的同一位置下一輪必被擋。無新增 window 時 `plan.insert` 為空，既有的 binding 迴圈（`not rp.insert and not rp.extend`）即停，不再空轉到 rounds 用完；端點未被取樣時 `continuous` 仍為 False（誠實：該端沒覆蓋到）。
+- 為什麼是 0.1σ 而不是 0.3σ（取捨）：先試 0.3σ，既有測試 `test_sharp_wall…`、`test_unsamplable_spike…` 失敗——斷點填補在 k_max 下會放相距約 0.26σ 的 window（5.8 mm），靠增加該段樣本量讓合併直方圖過 10% 門檻。這是現行協定的行為，改它屬協定變更，不在本條授權內；0.1σ 只擋「明確重複」（含 2 pm 逐輪爬行），既有 31 項補窗測試不變。
+- 被否決：碰撞時往外挪一個最小間距重放（挪過去的 window 仍滑到同一處，只是換個 key 的假新增）；端點碰撞時自動把 k 提高（會增加 window 數，屬協定變更）；改 `binding.py`（本條範圍只在規劃器）。
+- 證據：`tests/test_adaptive_windows.py` 新增 3 項（端點碰撞：新舊程式對照——舊程式 7 個、新程式 1 個且 `skipped` 有理由；三種剖面逐輪檢查插入的中心不違反最小間距、同一輪內彼此 ≥ 2 pm、跨輪不重複同一個 (center, k)；`to_dict` 帶 `skipped`）。原有補窗測試（`test_adaptive_windows` 14 項、`test_smd_informed_windows`、`test_umbrella_manual`）全過。
+- **未決（協定變更，需使用者授權，本條未動）**：REVIEW #18 的門檻部分——`min_effective_samples=100`（binding 以 `min(100, 0.25 × 每 window 樣本數)` 傳入）會讓多數 window 在 `extend` 與否的邊緣，refinement 幾乎必跑滿 6 輪，**成本約 ×5–6**；目標重疊 0.2、k 規則、rounds 上限同屬此類。成本觀察：本條修正只去掉「假新增」的 window，不減少 extend 的輪數；是否降低 `min_effective_samples` 或改 n_eff 判準需要實測成本與 PMF 誤差的取捨。另：0.1σ–0.3σ 之間的近重複（斷點填補時提高樣本密度）目前仍允許，是否收緊待審查。
+
 ### D-115　膜 NaN 的剩餘原因：離子落在重疊的水上（D-102 只查水對水）；去碰撞改為也查離子對水
 - 觸發：28e87aa 的 openmm-stack ubuntu `test_peptide_above_popc_case_b` 在 D-102 去水碰撞之後仍 `Particle coordinate is NaN`（Windows、macOS 同一 run 通過）。
 - 重讀 D-102 的診斷資料（run 42355183065 四個 job 的 log；artifact 下載被代理擋住）：

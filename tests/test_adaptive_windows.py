@@ -205,3 +205,80 @@ def test_coverage_view_marks_breaks():
     assert not v["continuous"] and v["breaks"]
     assert len(v["edges"]) == len(v["pooled"]) + 1 and len(v["windows"]) == len(samples)
     assert all(len(w["counts"]) == len(v["pooled"]) for w in v["windows"])
+
+
+# ---- D-119 (REVIEW #18): endpoint / hole proposals that collide with an existing centre -------------------------------
+# A walled-in lower end: a window centred at 0.30 nm is pushed to ≈0.436 nm by the 5000 kJ/mol/nm² wall, so the CV-range
+# end 0.30 nm is never sampled whatever centre/k (≤ k_max) we try.  The old code kept "adding" 0.302, 0.304, … each round.
+def _walled(r):
+    return np.where(r < 0.45, 5000.0 * (r - 0.45) ** 2, np.where(r < 0.75, 200.0 * (r - 0.45), 60.0))
+
+
+def _walled_samples(extra=()):
+    k0 = 1000.0
+    cs = [0.30, 0.45, 0.6, 0.75, 0.9] + list(extra)
+    return {c: sample(c, k0, seed=i, prof=_walled) for i, c in enumerate(cs)}, {c: k0 for c in cs}
+
+
+def _run_walled(rounds=6):
+    samples, ks = _walled_samples()
+    log = []
+    for rnd in range(rounds):
+        plan = plan_refinement(samples, ks, temperature_k=T, target_overlap=0.2, min_effective_samples=1,
+                               cv_range=(0.30, 0.9))
+        log.append(plan)
+        for j, ins in enumerate(plan.insert):
+            c, k = float(ins["center"]), float(ins["k"])
+            samples[c], ks[c] = sample(c, k, seed=500 * (rnd + 1) + j, prof=_walled), k
+    return samples, ks, log
+
+
+def _min_sep_ok(samples, ks, plan):
+    """No inserted window is within 0.1σ (floor 2 pm) of another centre unless it is materially stiffer."""
+    for ins in plan.insert:
+        for c in samples:
+            sep = max(2e-3, 0.1 * min(math.sqrt(KT / ins["k"]), math.sqrt(KT / ks[c])))
+            assert abs(c - ins["center"]) >= sep or ins["k"] >= 1.5 * ks[c], (ins, c)
+
+
+def test_endpoint_proposal_on_an_existing_centre_is_dropped_with_a_reason_not_nudged_each_round():
+    samples, ks, log = _run_walled()
+    centres = sorted(samples)
+    # no run of near-identical centres at the unreachable end (old: 0.30, 0.302, 0.304, 0.306 …)
+    near_end = [c for c in centres if c < 0.36]
+    assert len(near_end) == 1, near_end
+    first = log[0]
+    assert not any(i["center"] < 0.36 for i in first.insert)
+    skipped = [s for p in log for s in p.skipped if s["center"] < 0.36]
+    assert skipped and all(s["reason"] and "放棄" in s["reason"] for s in skipped)
+    assert any("最小間距" in n for n in log[0].notes)                       # the reason is in the round's notes too
+    # an unreachable end is not 'continuous', and refinement stops early instead of burning all rounds
+    assert not log[0].continuous
+    assert log[-1].insert == [] and len(samples) <= 5 + 12
+
+
+def test_same_round_inserts_respect_the_minimum_spacing_and_do_not_repeat_across_rounds():
+    for prof_name in ("sharp", "desolv", "smooth"):
+        prof = PROFILES[prof_name]
+        samples = {float(c): sample(c, 1000.0, seed=i, prof=prof) for i, c in enumerate(COARSE)}
+        ks = {float(c): 1000.0 for c in COARSE}
+        seen_pairs = set()
+        for rnd in range(8):
+            plan = plan_refinement(samples, ks, temperature_k=T, target_overlap=0.2, min_effective_samples=50,
+                                   cv_range=(0.45, 1.6))
+            _min_sep_ok(samples, ks, plan)
+            ins = sorted(i["center"] for i in plan.insert)
+            assert all(b - a >= 2e-3 for a, b in zip(ins, ins[1:])), ins          # also among themselves
+            if plan.done or not plan.insert:
+                break
+            for j, i in enumerate(plan.insert):
+                c, k = float(i["center"]), float(i["k"])
+                assert (c, k) not in seen_pairs                                    # never the same (centre, k) twice
+                seen_pairs.add((c, k))
+                samples[c], ks[c] = sample(c, k, seed=1000 * (rnd + 1) + j, prof=prof), k
+
+
+def test_plan_to_dict_carries_skipped_reasons():
+    _, _, log = _run_walled(rounds=1)
+    d = log[0].to_dict()
+    assert d["skipped"] and all(s["reason"] for s in d["skipped"])
