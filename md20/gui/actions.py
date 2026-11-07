@@ -22,7 +22,7 @@ STEP_ORDER = ["structure_gate", "receptor_docking", "screen_library", "screen_do
               "fold", "docking", "pose_selection", "md_confirm", "md_cases", "md_runs", "analysis", "binding", "report"]
 STRUCTURE_OVERRIDE = {"resolution": "resolution", "R-free": "r_free", "ligand occupancy": "ligand_occupancy",
                       "pocket occupancy": "pocket"}
-_METAL_OPT = re.compile(r"metal_policy:\s*\{\s*([A-Za-z0-9:]+)\s*:\s*(bonded|keep_nonbonded|remove)\s*\}")
+_METAL_OPT = re.compile(r"metal_policy:\s*\{\s*([A-Za-z0-9:]+)\s*:\s*(bonded_open|bonded|keep_nonbonded|remove)\s*\}")
 _LOCATIONS = {"intracellular": "intracellular", "extracellular-membrane": "extracellular-membrane", "secreted": "secreted"}
 
 

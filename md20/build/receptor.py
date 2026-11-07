@@ -236,6 +236,38 @@ def receptor_choice_action(gate_name: str, choice: str) -> str | None:
     return None
 
 
+METAL_SITE_WATERS = "metal_site_waters.pdb"
+METAL_WATER_CUTOFF_A = 2.6          # = metal.CUTOFF_A["O"]: a water O this close to a metal is a coordination partner
+
+
+def metal_site_water_lines(text: str, kept_resnames: set[str]) -> list[str]:
+    """D-133 (pure): HETATM lines of water oxygens within METAL_WATER_CUTOFF_A of a kept metal (first model, first
+    altloc).  Only metals the bonded model supports (metal.BONDED_METALS) are considered."""
+    from .metal import BONDED_METALS
+    metals, waters = [], []
+    for line in text.splitlines():
+        rec = line[:6].strip()
+        if rec == "ENDMDL":
+            break
+        if rec != "HETATM" or len(line) < 54 or line[16] not in (" ", "A"):
+            continue
+        resname = line[17:20].strip()
+        try:
+            xyz = (float(line[30:38]), float(line[38:46]), float(line[46:54]))
+        except ValueError:
+            continue
+        el = (line[76:78].strip() if len(line) >= 78 else "") or line[12:16].strip()[:1]
+        if resname in WATER and el.upper().startswith("O"):
+            waters.append((line, xyz))
+        elif resname in BONDED_METALS and resname in kept_resnames:
+            metals.append(xyz)
+    out = []
+    for line, w in waters:
+        if any(sum((a - b) ** 2 for a, b in zip(w, m)) ** 0.5 <= METAL_WATER_CUTOFF_A for m in metals):
+            out.append(line[:16] + " " + line[17:])          # altloc cleared
+    return out
+
+
 def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4, keep_hetero: set[str] | None = None,
                      decisions: DecisionLog | None = None, max_auto_gap: int = 6, keep_pocket_waters: bool = False,
                      human_choices: dict | None = None, ligand_resnames: set[str] | None = None,
@@ -319,6 +351,20 @@ def prepare_receptor(source: Path | str, out_dir: Path | str, *, ph: float = 7.4
                 break
     filtered.write_text("\n".join(kept_lines) + "\nEND\n", encoding="utf-8")
     manifest["dropped_hetero"] = dropped
+    # D-133: crystal waters that coordinate a kept metal are written to a sidecar (never into the receptor used for
+    # docking); the build adds them back only for a `bonded` metal site, as the site's missing coordination partner
+    site_waters = metal_site_water_lines(text or source.read_text(encoding="utf-8", errors="ignore"), keep_set)
+    sidecar = out_dir / METAL_SITE_WATERS
+    if site_waters:
+        sidecar.write_text("\n".join(site_waters) + "\nEND\n", encoding="ascii", errors="replace")
+        manifest["metal_site_waters"] = {"file": str(sidecar), "n": len(site_waters)}
+        if decisions:
+            decisions.record("build.receptor", "metal site waters", len(site_waters),
+                             f"晶體中有 {len(site_waters)} 個水分子直接配位在保留的金屬上（O 距金屬 ≤ {METAL_WATER_CUTOFF_A} Å）。"
+                             "它們不放進受體（對接時配體可佔該位置），另存一份；只有金屬設為 bonded 時，建模才把它加回當配位。",
+                             kind="auto")
+    elif sidecar.exists():
+        sidecar.unlink()                      # stale sidecar from an earlier preparation of a different structure
     fixer = PDBFixer(filename=str(filtered))
     fixer.findMissingResidues()
     # drop terminal "missing residues" (PDBFixer would build floppy tails); keep internal gaps ≤ max_auto_gap

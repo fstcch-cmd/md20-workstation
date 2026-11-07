@@ -923,6 +923,18 @@ PREFIX.append(("指定 anchor 殘基", ("Choose anchor residues to change the pu
 
 # D-102 water de-clash before System creation (md20/build/assemble.py remove_overlapping_waters)
 GATES.update({
+    "metal site water vs ligand": (
+        ("金屬配位水與配體重疊", "Metal-site water overlaps the ligand", "金属配位水とリガンドの重なり", "금속 배위 물과 리간드 겹침"),
+        ("鍵結金屬模型會保留晶體中直接配位在金屬上的水，讓配位數和晶體一致。對接的配體正好落在這個水的位置，"
+         "代表配體可能取代了它（例如直接配位金屬）。兩者都留會碰撞，自動刪水是猜測，所以停下來請你決定。",
+         "The bonded metal model keeps the crystal water that coordinates the metal, so the site has the same number of "
+         "partners as in the crystal. The docked ligand sits where that water is, so the ligand probably replaces it "
+         "(for example by binding the metal directly). Keeping both would be a clash and deleting the water "
+         "automatically would be a guess, so the build stops for your decision.",
+         "結合金属モデルは、結晶で金属に直接配位している水を残し、配位数を結晶と同じにします。ドッキングしたリガンドがちょうどその水の位置にあり、"
+         "リガンドが水を置き換えている可能性があります（金属に直接配位するなど）。両方残すと衝突し、自動で水を消すのは推測になるため、判断を求めて止めます。",
+         "결합 금속 모델은 결정에서 금속에 직접 배위한 물을 남겨 배위수를 결정과 같게 합니다. 도킹한 리간드가 바로 그 물 자리에 있어 "
+         "리간드가 물을 대신했을 가능성이 있습니다(예: 금속에 직접 배위). 둘 다 두면 충돌하고 물을 자동으로 지우는 것은 추측이라, 결정을 요청하며 멈춥니다.")),
     "water overlaps": (
         ("重疊的水", "Overlapping waters", "重なった水", "겹친 물"),
         ("OpenMM 溶劑化偶爾會把兩個水放得幾乎重疊，最小化壓不開，MD 一開始就出現 NaN。離子是拿水換的，換到重疊的水時離子會貼著另一個水，同樣會爆。建模時會刪掉多餘的水（離子保留）；"

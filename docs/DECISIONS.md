@@ -6,6 +6,25 @@
 ---
 
 ## 2026-11-07
+### D-133　鋅鍵結模型：保留晶體配位水作為第四個鍵結配位（R5；使用者已授權改鋅模型）
+- 背景：heavy-metal `test_bonded_zinc_ca2`（3KS3，CA II）紅，HIS119:ND1–Zn 平均 0.236 nm、r0 0.202。使用者授權依證據修改鋅鍵結模型，但不准放寬 0.03 nm 門檻。
+- **重現與證據**（CI job 128427389578，`58d81bc`，D-34 埋的診斷）：GLU106:OE1 距 Zn **1.74 Å**、OE2 2.0 Å、CD 2.48 Å，20 幀全部如此；三個 Zn–N 全部拉長（2.30／2.25／2.36 Å）。
+  是第二殼層的 Glu106 羧基塌陷到 Zn 的開放第四位點，把整個位點拉走。容器沒有 OpenMM，無法本地重跑；數值來自 CI。
+- **程式缺陷 vs 模型不足**：查核原子對應、His 質子化（HID/HID/HIE）、1-2／1-3 排除、1-4 縮放、M–D–X 角與參數來源，皆無錯誤（既有單元測試＋本條新測試）。
+  原因是**模型不足**：受體準備把配位在 Zn 上的晶體水移除了，CA II 的鋅本來是 His₃＋H₂O/OH⁻ 四配位；12-6 點電荷模型下 Zn²⁺ 與羧基 O⁻ 之間的排斥不夠，會塌陷到 1.7 Å。這證實 D-34 的假說 H1。
+- **決定**：
+  - `prepare_receptor`：配位在保留金屬上的晶體水（O ≤ 2.6 Å，第一個 model、第一個 altloc）另存 `metal_site_waters.pdb`，**不放進受體**（對接時配體仍可佔那個位置）。
+  - `assemble_system` → `apply_metal_policy(site_waters=…)`：只對 policy **剛好是 `bonded`**、且沒有 `metal_params` 的位點把水加回（O＋Modeller 加氫，TIP3P）。`plan_site` 把它當第四個鍵結配位：晶體距離、同一個 K_BOND；D–M–D 角包含這個水（四配位共 6 個）；
+    Zn–H(水) 為 1-3 排除；**不加 M–O–H 角**（剛性水可以轉動）。蛋白配位原子 < 3 的閘門只算蛋白，水不能讓不完整的位點過關。
+  - 新 policy `bonded_open`＝D-133 之前的模型（不加回水、位點開放），GUI 一鍵、結構閘門、advisor、pipeline 的 keep_hetero 都認得。
+  - 配體重原子距位點水 O < 2.2 Å → NEEDS_HUMAN「metal site water vs ligand」（在幾何修正之前檢查，以免配體被推開）：選項 `bonded_open`、改選 pose、`keep_nonbonded`。四語標題與說明在 `gui/gate_text.py`。
+  - `test_metal_integration.py`：期望改為 4 個鍵（含 1 個水）、4 個 1-2 排除；**0.03 nm 與 0.08 nm 門檻不動**；新增 Glu/Asp 羧基 O 不得在 Zn 2.6 Å 內的回歸斷言（原本 1.74 Å 的案例）。擬合參數測試不變（不加水，仍 3 個鍵）。
+- **理由**：證據顯示推力來自開放位點；調大 Zn–N k（H2）只能縮小偏移、擋不住羧基佔位；改 LJ（H3）是另一個模型變更，證據沒指向它。把水留在對接受體裡則會擋住會取代鋅水的配體（例如磺胺類），所以用側檔、只在 MD 建模時加回。
+- **被否決**：放寬門檻或丟掉前段幀（違反使用者指示）；在開放位點加虛擬排斥牆（非物理、不可解釋）；把水留在 `receptor_clean.pdb`（影響對接）；自動判斷 H₂O 或 OH⁻（X 光看不到氫，不猜）。
+- **證據／測試**：`tests/test_metal_site_water.py`（7 項：鍵結第四配位、`bonded_open`、蛋白配位數閘門、擬合參數不加水、水無 M–O–H 角但 1-3 排除、配體佔位閘門、側檔只選保留金屬上的水並忽略第二 altloc）；`tests/test_metal.py`、`test_metal_params.py`、`test_gate_text.py` 照過。**真實驗證待 heavy-metal CI**（容器無 OpenMM）。
+- **未決**：(1) 鋅水以中性 TIP3P 表示；CA II 鋅水 pKa ≈ 7，OH⁻ 模型（淨電荷 +1）未提供，報告標註——要不要做 OH⁻ 選項是科學模型決定，需使用者。(2) QM 小模型輸入仍只含蛋白配位殘基（不含水）。(3) 若 heavy-metal 仍紅，下一步看 Zn LJ（H3），不放寬門檻。
+- **相關檔案**：`md20/build/receptor.py`（`metal_site_water_lines`、側檔）、`md20/build/metal.py`（`BONDED_POLICIES`、`site_waters_to_add`、`read_site_waters`、`site_water_ligand_gate`、`plan_site`、`bonded_metal_terms`、`apply_metal_policy`）、`md20/build/assemble.py`、`md20/build/pipeline.py`、`md20/advisor.py`、`md20/gui/actions.py`、`md20/gui/gate_text.py`、`tests/test_metal_site_water.py`、`tests/test_metal_integration.py`、`docs/specs/metal_sites.md` §1、§4d。
+
 ### D-131　重複計畫與開始前告知：預設 3 條、時間倍數與 ETA、一鍵改條數、舊專案補跑（D-129 §3–§5）
 - 範圍：只做「需要幾條、花多少時間、使用者怎麼選」。分析與報告的跨重複彙總（`workflow.analyse`、`md20/analysis/`、`md20/report/`）是另一個代理同時做的，這裡沒動。不新增 phase／step。
 - **決定**：

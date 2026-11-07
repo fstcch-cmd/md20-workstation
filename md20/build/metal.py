@@ -27,6 +27,7 @@ import numpy as np
 
 from .gates import Gate, PASS, AUTO_FIXED, NEEDS_HUMAN
 
+BONDED_POLICIES = ("bonded", "bonded_open")      # D-133: bonded keeps crystal coordinating waters; bonded_open does not
 BONDED_METALS = {"ZN", "FE", "FE2", "CU", "CU1", "MN", "CO", "NI", "MG", "CA", "CD"}
 # donor atoms (resname, atom) and the cutoff (Å) at which they count as coordinating
 DONORS = {("HIS", "NE2"): "N", ("HIS", "ND1"): "N", ("CYS", "SG"): "S", ("ASP", "OD1"): "O", ("ASP", "OD2"): "O",
@@ -69,7 +70,8 @@ def find_sites(atoms: list[dict], *, metals: set[str] | None = None) -> list[dic
             el = (a.get("element") or a["name"][:1]).upper()[:1]
             if a["resname"].upper() in WATER:
                 if el == "O" and d[j] <= CUTOFF_A["O"]:
-                    waters.append({"resname": a["resname"], "chain": a["chain"], "resseq": a["resseq"], "distance_A": round(float(d[j]), 2)})
+                    waters.append({"index": a["index"], "name": a["name"], "resname": a["resname"], "chain": a["chain"],
+                                   "resseq": a["resseq"], "element": "O", "distance_A": round(float(d[j]), 2)})
                 continue
             if el not in CUTOFF_A or d[j] > CUTOFF_A[el]:
                 continue
@@ -113,8 +115,8 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
                    why=f"{key} 以非鍵結離子保留，並加 {K_KEEP:.0f} kJ/mol/nm² 位置限制（production 也不解除），避免離子離開位點；"
                        "配位幾何不保證，報告標註。")
         return out
-    if policy != "bonded":
-        out.update(status=NEEDS_HUMAN, why=f"{key}：未知的 metal_policy「{policy}」（可用 bonded / keep_nonbonded / remove）。")
+    if policy not in BONDED_POLICIES:
+        out.update(status=NEEDS_HUMAN, why=f"{key}：未知的 metal_policy「{policy}」（可用 bonded / bonded_open / keep_nonbonded / remove）。")
         return out
     donors = site["donors"]
     problems = []
@@ -141,15 +143,22 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
             variants[rid] = "HID" if d["name"] == "NE2" else "HIE"
     bonds = [{"metal": site["metal_index"], "donor": d["index"], "r0_nm": round(d["distance_A"] / 10.0, 4), "k": K_BOND,
               "label": f"{d['resname']}{d['resseq']}:{d['name']}"} for d in donors]
+    # D-133: under `bonded` a crystal water on the site (added back by apply_metal_policy) is bonded too, so the site
+    # keeps its coordination number; `bonded_open` leaves the position open (the pre-D-133 model)
+    site_w = [w for w in site.get("waters") or [] if w.get("index") is not None] \
+        if policy == "bonded" and not params else []        # fitted params cover only the donors they were fitted on
+    bonds += [{"metal": site["metal_index"], "donor": w["index"], "r0_nm": round(w["distance_A"] / 10.0, 4), "k": K_BOND,
+               "label": f"{w['resname']}{w['resseq']}:{w['name']}", "water": True} for w in site_w]
+    cage = list(donors) + list(site_w)
     angles = []
     if xyz_of:
         mx = site["metal_xyz"]
-        for i in range(len(donors)):
-            for j in range(i + 1, len(donors)):
-                a, b = donors[i], donors[j]
+        for i in range(len(cage)):
+            for j in range(i + 1, len(cage)):
+                a, b = cage[i], cage[j]
                 angles.append({"a": a["index"], "metal": site["metal_index"], "b": b["index"],
                                "theta0_deg": round(_angle(xyz_of[a["index"]], mx, xyz_of[b["index"]]), 2), "k": K_ANGLE})
-    geom = {4: "四配位", 5: "五配位", 6: "六配位"}.get(len(donors), f"{len(donors)} 配位")
+    geom = {3: "三配位", 4: "四配位", 5: "五配位", 6: "六配位"}.get(len(cage), f"{len(cage)} 配位")
     caveats = ["鍵結模型為晶體幾何的諧和鍵與角（非擬合的 MCPB.py/ZAFF 參數）；電荷沿用力場。金屬被當成與配位原子共價相連："
                "1-2、1-3 非鍵結作用排除、1-4 依 Amber 縮放（靜電 ÷1.2、LJ ÷2），並加金屬–配位原子–鄰原子角項固定環的朝向。"]
     fitted = ""
@@ -173,8 +182,13 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
         fitted = "（擬合參數：" + fp["why"] + "）"
     elif params and not xyz_of:
         out["source"] = "pending"            # resolved on the final pass
-    if site["waters"]:
-        caveats.append(f"晶體中有 {len(site['waters'])} 個配位水；受體準備已移除水分子，該配位位置開放（可能由溶劑水或配體佔據）。")
+    if site_w:
+        caveats.append(f"晶體中的 {len(site_w)} 個配位水保留並以鍵結項連到金屬（中性 TIP3P 水，不是氫氧根；"
+                       "鋅水的質子化狀態依 pKa 可能不同，報告標註）。這是為了讓配位數與晶體一致，避免開放位點被附近帶負電基團佔據（D-133）。")
+    elif policy == "bonded_open":
+        caveats.append("bonded_open：配位水不加回，該配位位置開放；附近帶負電的基團可能塌陷到金屬上（D-133 診斷），只在配體要佔該位置時使用。")
+    elif len(donors) < 4:
+        caveats.append(f"只有 {len(donors)} 個配位原子且晶體沒有記錄配位水：開放位點可能被溶劑水、配體或附近帶負電基團佔據。")
     out.update(status=AUTO_FIXED, action="bonded", bonds=bonds, angles=angles, variants=variants, caveats=caveats,
                why=f"{key} 依使用者設定建立鍵結模型：{geom}（" + "、".join(b["label"] + f" {b['r0_nm'] * 10:.2f} Å" for b in bonds)
                    + "）" + (f"；配位殘基質子化改為 " + "、".join(f"{k}→{v}" for k, v in variants.items()) if variants else "")
@@ -249,6 +263,32 @@ def add_ligand_metal_restraints(system, contacts: list[dict], *, periodic: bool 
     return out
 
 
+def site_water_ligand_gate(plans: list[dict], positions_nm, ligand_indices: list[int], min_nm: float = 0.22) -> Gate | None:
+    """D-133: a bonded site water (crystal) that a docked ligand overlaps → NEEDS_HUMAN.  The ligand probably
+    displaces that water (e.g. a zinc-binding group); keeping both would be a clash, dropping the water silently
+    would be a guess."""
+    if not ligand_indices:
+        return None
+    pos = np.asarray(positions_nm, float)
+    lig = pos[np.asarray(ligand_indices, int)]
+    hits = []
+    for p in plans:
+        for b in p.get("bonds") or []:
+            if b.get("water"):
+                d = float(np.min(np.linalg.norm(lig - pos[b["donor"]], axis=1)))
+                if d < min_nm:
+                    hits.append((p["key"], b["label"], d))
+    if not hits:
+        return None
+    what = "、".join(f"{k} {lab}（配體原子距 {d * 10:.1f} Å）" for k, lab, d in hits)
+    return Gate("metal site water vs ligand", NEEDS_HUMAN,
+                f"對接配體與金屬位點保留的晶體配位水重疊：{what}。配體可能取代了這個水（例如直接配位金屬），"
+                "兩者都保留會碰撞，自動刪水則是猜測。",
+                options=["metal_policy: {" + hits[0][0] + ": bonded_open}（不加回配位水；配體若直接配位金屬仍需另外參數化）",
+                         "改選其他 pose（pose 表）", "metal_policy: {" + hits[0][0] + ": keep_nonbonded}"],
+                evidence={"hits": [{"site": k, "water": lab, "min_distance_nm": round(d, 3)} for k, lab, d in hits]})
+
+
 def site_gates(plans: list[dict]) -> list[Gate]:
     return [Gate(f"metal {p['key']}", p["status"], p["why"], options=p.get("options") or [],
                  evidence={"action": p["action"], "n_bonds": len(p["bonds"]), "variants": p["variants"],
@@ -286,8 +326,43 @@ def _atoms_of(topology, positions_nm) -> list[dict]:
     return out
 
 
+def site_waters_to_add(sites: list[dict], plans: list[dict], waters: list[dict], metal_params: dict | None = None,
+                       cutoff_A: float | None = None) -> list[dict]:
+    """D-133 (pure): which sidecar crystal waters (metal_site_waters.pdb records {resname, resseq, xyz (Å)}) go back
+    into the model — only for a site whose policy is exactly `bonded` with no fitted parameters, and only waters
+    within the O cutoff of that metal.  Each water is returned once with the metal key it serves."""
+    cut = CUTOFF_A["O"] if cutoff_A is None else cutoff_A
+    out, used = [], set()
+    for s, p in zip(sites, plans):
+        if p.get("policy") != "bonded" or p.get("action") != "bonded" or policy_for(s["key"], metal_params):
+            continue
+        for k, w in enumerate(waters):
+            if k in used:
+                continue
+            if float(np.linalg.norm(np.asarray(w["xyz"], float) - np.asarray(s["metal_xyz"], float))) <= cut:
+                used.add(k)
+                out.append({**w, "metal_key": s["key"], "chain": s.get("chain") or (s["key"].split(":")[1][:1] if ":" in s["key"] else "A")})
+    return out
+
+
+def read_site_waters(path) -> list[dict]:
+    """Records of metal_site_waters.pdb (receptor.prepare_receptor, D-133): O atoms only."""
+    out = []
+    from pathlib import Path as _P
+    if not path or not _P(path).is_file():
+        return out
+    for line in _P(path).read_text(encoding="ascii", errors="replace").splitlines():
+        if line.startswith("HETATM") and len(line) >= 54:
+            try:
+                out.append({"resname": line[17:20].strip() or "HOH", "resseq": line[22:26].strip(),
+                            "xyz": (float(line[30:38]), float(line[38:46]), float(line[46:54]))})
+            except ValueError:
+                continue
+    return out
+
+
 def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float = 7.4,
-                       metal_params: dict | None = None, qm_dir=None) -> list[dict]:
+                       metal_params: dict | None = None, qm_dir=None, site_waters=None) -> list[dict]:
     """Edit the receptor Modeller in place (remove metals / reprotonate coordinating residues) and return the
     final per-site plans with indices valid for the edited topology (ligands/solvent are appended later,
     so receptor indices stay valid in the assembled system)."""
@@ -310,9 +385,24 @@ def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float =
     rm = {sites[i]["metal_index"] for i, p in enumerate(plans) if p["action"] == "remove"}
     if rm:
         modeller.delete([a for a in modeller.topology.atoms() if a.index in rm])
+    # 1b) D-133: crystal waters coordinating a `bonded` site go back in (O only; hydrogens added in step 2)
+    added_w = []
+    if site_waters:
+        atoms, sites = snapshot()
+        plans = [plan_site(s, policy_for(s["key"], policy)) for s in sites]
+        added_w = site_waters_to_add(sites, plans, read_site_waters(site_waters) if not isinstance(site_waters, list)
+                                     else site_waters, metal_params)
+        if added_w:
+            from openmm import app, Vec3
+            wt = app.Topology()
+            for w in added_w:
+                ch = wt.addChain(w["chain"])
+                r = wt.addResidue("HOH", ch, id=str(w["resseq"]))
+                wt.addAtom("O", app.element.oxygen, r)
+            modeller.add(wt, [Vec3(*[c / 10.0 for c in w["xyz"]]) for w in added_w] * unit.nanometer)
     # 2) reprotonation of coordinating residues (delete their H, re-add with explicit variants everywhere)
     want = {k: v for p in plans if p["action"] == "bonded" for k, v in p["variants"].items()}
-    if want:
+    if want or added_w:
         res_of = {f"{r.chain.id}:{r.id}": r for r in modeller.topology.residues()}
         modeller.delete([a for k in want if k in res_of for a in res_of[k].atoms()
                          if a.element is not None and a.element.symbol == "H"])
@@ -384,11 +474,14 @@ def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], position
                 for x2 in nbr.get(d2, ()):
                     if x2 != m and x2 not in donors and x2 != d and x2 not in nbr.get(d, ()):
                         pairs14.add((min(d, x2), max(d, x2)))
+        waters = {b["donor"] for b in p["bonds"] if b.get("water")}
         for d in donors:
             for x in nbr.get(d, ()):
                 if x == m or x in donors:
                     continue
                 excl13.add((m, x))
+                if d in waters:          # D-133: a coordinated water may rotate (rigid TIP3P); no M–O–H angle term
+                    continue
                 u, v = pos[m] - pos[d], pos[x] - pos[d]
                 th = float(np.arccos(np.clip(np.dot(u, v) / np.linalg.norm(u) / np.linalg.norm(v), -1.0, 1.0)))
                 angles.append((m, d, x, th))

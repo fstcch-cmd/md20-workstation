@@ -23,9 +23,11 @@ def test_bonded_zinc_ca2(pdb_ca2, tmp_path):
     zn = [p for p in plans if p["key"].startswith("ZN")]
     assert len(zn) == 1 and zn[0]["action"] == "bonded", plans
     p = zn[0]
-    assert len(p["bonds"]) == 3, p["bonds"]                                    # His94, His96, His119
+    # D-133: His94, His96, His119 + the crystal zinc water (kept for a bonded site; tetrahedral as in 3KS3)
+    assert len(p["bonds"]) == 4, p["bonds"]
+    assert sum(1 for b in p["bonds"] if b.get("water")) == 1, p["bonds"]
     assert set(p["variants"].values()) <= {"HID", "HIE"} and len(p["variants"]) == 3
-    assert res.restraints["metals"]["exclusions"] == 3
+    assert res.restraints["metals"]["exclusions"] == 4
     assert res.restraints["metals"]["exclusions_13"] >= 6 and res.restraints["metals"]["angles_mdx"] >= 6   # CE1/CD2 per His
     qm = p["qm_input"]                                                       # QM small-model input for the upgrade path
     assert qm["status"] == "PASS" and qm["charge"] == 2 and qm["multiplicity"] == 1 and len(qm["residues"]) == 3
@@ -36,7 +38,7 @@ def test_bonded_zinc_ca2(pdb_ca2, tmp_path):
     # topology: the tautomer matches the coordinating nitrogen (no H on the N bound to Zn)
     pdb = app.PDBFile(res.topology_pdb)
     atoms = list(pdb.topology.atoms())
-    for b in p["bonds"]:
+    for b in [b for b in p["bonds"] if not b.get("water")]:
         donor = atoms[b["donor"]]
         hname = "HE2" if donor.name == "NE2" else "HD1"
         assert hname not in {a.name for a in donor.residue.atoms()}, (donor.residue, donor.name)
@@ -73,6 +75,8 @@ def test_bonded_zinc_ca2(pdb_ca2, tmp_path):
     diag = {"bonds_mean_A": {k: round(float(np.mean(v)) * 10, 3) for k, v in traces.items()},
             "r0_A": {b["label"]: round(b["r0_nm"] * 10, 3) for b in p["bonds"]},
             "nonbonded_within_3A": {k: [len(v), round(float(np.mean(v)) * 10, 2)] for k, v in sorted(crowd.items())}}
+    # D-133 regression: before the site water was kept, GLU106 OE1 sat 1.74 Å from Zn in every frame (CI 128427389578)
+    assert not any(k.startswith("GLU") and (":OE" in k or ":OD" in k) and v[1] < 2.6 for k, v in diag["nonbonded_within_3A"].items()), diag
     for b in p["bonds"]:
         tr = np.array(traces[b["label"]])
         assert abs(tr.mean() - b["r0_nm"]) < 0.03, (b["label"], tr.mean(), tr.std(), b["r0_nm"], diag)

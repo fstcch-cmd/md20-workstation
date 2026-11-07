@@ -223,7 +223,7 @@ def features_from_config(cfg: dict, *, receptor_text: str | None = None, doctor:
                      docking_mode=(cfg.get("docking") or {}).get("mode", "independent"),
                      metals=sorted(keep & METALS), binding=bool((cfg.get("binding") or {}).get("enabled")))
     pol = cfg.get("metal_policy") or {}
-    f.bonded_metals = sorted(k for k, v in pol.items() if str(v).lower() == "bonded") if isinstance(pol, dict) else []
+    f.bonded_metals = sorted(k for k, v in pol.items() if str(v).lower() in ("bonded", "bonded_open")) if isinstance(pol, dict) else []
     b = cfg.get("box") or {}
     f.has_ligand = bool(ligs)
     f.membrane = bool((cfg.get("md") or {}).get("membrane"))

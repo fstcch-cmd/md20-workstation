@@ -621,8 +621,12 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
         modeller = app.Modeller(app.Topology(), unit.Quantity([], unit.nanometer))
     ff = app.ForceField(*forcefield_files)
     from .metal import apply_metal_policy, add_metal_forces, site_gates
+    from .receptor import METAL_SITE_WATERS
+    site_waters = Path(receptor_pdb).parent / METAL_SITE_WATERS if receptor_pdb is not None else None
     metal_plans = apply_metal_policy(modeller, ff, metal_policy, ph=ph, metal_params=metal_params,
-                                     qm_dir=out_dir / "metal_qm") if receptor_pdb is not None else []
+                                     qm_dir=out_dir / "metal_qm",
+                                     site_waters=site_waters if site_waters and site_waters.is_file() else None) \
+        if receptor_pdb is not None else []
     for g in site_gates(metal_plans):
         report.add(g)
         if decisions and g.status != PASS:
@@ -663,7 +667,18 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
         else:
             ff.registerTemplateGenerator(ladder["generator"].generator)
             generators.append(ladder["provider"])
-    if len(lig_atom_ranges) >= 1:
+    if lig_atom_ranges and any(b.get("water") for p in metal_plans for b in p.get("bonds") or []):
+        # D-133: checked before the geometry backstop, which would otherwise nudge the ligand off the site water
+        from .metal import site_water_ligand_gate
+        _all = list(modeller.topology.atoms())
+        g = site_water_ligand_gate(metal_plans, np.asarray(modeller.positions.value_in_unit(unit.nanometer)),
+                                   [i for _, a, b in lig_atom_ranges for i in range(a, b)
+                                    if _all[i].element is not None and _all[i].element.symbol != "H"])
+        if g is not None:
+            report.add(g)
+            if decisions:
+                decisions.record("build.metal", g.name, g.status, g.explanation, kind="human")
+    if len(lig_atom_ranges) >= 1 and report.ok:
         _geometry_backstop(modeller, lig_atom_ranges, n_protein, report, decisions, accept_geometry, ff=ff)
     if lig_atom_ranges:
         # REVIEW #15: metal sites were planned on the receptor alone; check the assembled complex for a docked

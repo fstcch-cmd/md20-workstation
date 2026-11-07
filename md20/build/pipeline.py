@@ -38,7 +38,7 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
         # a metal with a keep/bonded policy must survive receptor clean-up; "remove" is applied at assembly
         from .receptor import COFACTOR_KEEP_DEFAULT
         keep_hetero = set(keep_hetero) if keep_hetero else set(COFACTOR_KEEP_DEFAULT)
-        keep_hetero |= {k.split(":")[0].upper() for k, v in metal_policy.items() if v in ("bonded", "keep_nonbonded")}
+        keep_hetero |= {k.split(":")[0].upper() for k, v in metal_policy.items() if v in ("bonded", "bonded_open", "keep_nonbonded")}
     rman = prepare_receptor(rec_in["path"], bdir / "receptor", ph=ph, decisions=decisions, keep_hetero=keep_hetero,
                             human_choices=(human_choices or {}).get("receptor"),
                             ligand_resnames=set(cocrystal) | set(x for x in (extra_ligand_resnames or ()) if x),
