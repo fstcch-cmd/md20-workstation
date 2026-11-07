@@ -10,7 +10,6 @@
   md20 setup-fold [--engine omegafold|boltz|esmfold] [--yes] [--warmup]  install a folding tool (plan first)
   md20 setup-cg [--yes]                         install martinize2, insane, martini_openmm (plan first)
   md20 license status|machine|install FILE      signed licence (D-125); real calculations need one
-  md20 license issue|issue-batch --key PRIVATE.pem ...   owner only: sign licence files
 """
 from __future__ import annotations
 
@@ -474,9 +473,9 @@ def cmd_setup_cg(a):
 def cmd_stamp(a):
     from .util import stamp as st
     if a.action == "keygen":
-        priv, pub = st.keygen(a.out)
-        _p(f"私鑰（請離線保存，切勿上傳）：{priv}\n公鑰（放進 md20/util/owner_pub.pem）：{pub}")
-        return 0
+        _p("金鑰產生已移到 HCC Lab 的私人工具（簽發端 repo），這個程式不再產生金鑰。\n"
+           "Key generation has moved to HCC Lab's private signing tool; this program no longer creates keys.")
+        return 1
     for f in a.files:
         found = st.find_markers(f)
         _p(f"{f}\n  可見戳記：{'有' if found['visible'] else '無'}\n  隱藏標記：{', '.join(found['hidden']) or '無'}\n"
@@ -496,7 +495,7 @@ def _print_license_error(exc) -> None:
 
 
 def cmd_license(a):
-    """D-125: status / machine / install for students; issue / issue-batch for the owner (private key is only read)."""
+    """D-125: status / machine / install.  Issuing licences is not part of this program (D-127)."""
     from .util import license as L
     act = a.lic_cmd
     try:
@@ -516,18 +515,6 @@ def cmd_license(a):
             st = L.install(a.file.strip().strip('"'))
             _p(L.installed_message(st))
             return 0
-        if act == "issue":
-            path, payload = L.issue(a.key, a.name, out=a.out, days=a.days, expires=a.expires, machines=a.machine or (),
-                                    scope=a.scope, note=a.note or "")
-            _p(f"licence file: {path}\nid: {payload['id']}\nlicensee: {payload['licensee']}\nexpires: {payload['expires'] or 'none'}\n"
-               f"machines: {', '.join(payload['machines']) or 'any'}\nscope: {payload['scope']}")
-            return 0
-        if act == "issue-batch":
-            done = L.issue_batch(a.key, a.csv, a.out, scope=a.scope, note=a.note or "")
-            for d in done:
-                _p(f"{d['name']}\t{d['expires'] or 'none'}\t{d['id']}\t{d['file']}")
-            _p(f"{len(done)} licence file(s) written to {a.out} (index: issued.csv)")
-            return 0 if done else 1
     except L.LicenseError as exc:
         _print_license_error(exc)
         return 1
@@ -651,20 +638,11 @@ def main(argv=None) -> int:
     rp = sub.add_parser("report"); rp.add_argument("--project", required=True); rp.add_argument("--case", required=True)
     rp.add_argument("--run"); rp.add_argument("--bundle", action="store_true"); rp.set_defaults(fn=cmd_report)
     m = sub.add_parser("demo"); m.add_argument("--dir"); m.set_defaults(fn=cmd_demo)
-    lc = sub.add_parser("license", help="MD20 授權（D-125）：status、machine、install；擁有者用 issue、issue-batch")
+    lc = sub.add_parser("license", help="MD20 授權（D-125）：status、machine、install")
     ls = lc.add_subparsers(dest="lic_cmd", required=True)
     ls.add_parser("status", help="show the licence state in four languages"); ls.add_parser("machine", help="print the machine code")
     li = ls.add_parser("install", help="import a .md20license file (copied only when it is valid for this computer)")
     li.add_argument("file")
-    for nm, hp in (("issue", "owner: sign one licence file"), ("issue-batch", "owner: sign many from a CSV (name, days or date, machine code)")):
-        sp = ls.add_parser(nm, help=hp)
-        sp.add_argument("--key", required=True, help="owner private key PEM (read only, never copied)")
-        sp.add_argument("--scope", choices=["use", "all"], default="use"); sp.add_argument("--note")
-        if nm == "issue":
-            sp.add_argument("--name", required=True); sp.add_argument("--days", type=int); sp.add_argument("--expires", help="YYYY-MM-DD, last valid day")
-            sp.add_argument("--machine", action="append", help="machine code (repeatable); omit for any computer"); sp.add_argument("--out")
-        else:
-            sp.add_argument("--csv", required=True); sp.add_argument("--out", required=True, help="output folder")
     lc.set_defaults(fn=cmd_license)
     a = ap.parse_args(argv)
     if a.dir is None and a.cmd not in ("demo", "license"):                # D-88: same projects folder as the GUI chose last time

@@ -1,0 +1,64 @@
+{
+  "format": "md20-license-vector/1",
+  "warning": "TEST KEY ONLY. This public key must never be added to md20 TRUSTED_KEYS or public_keys/.",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAwvihl5/4BVIfylbActhq\nocU4nI4fTHjK08eJ0zgFZDw/0GdWyrN+LscGlhTP5NDEhcQB4GRSsjXbrKBEnqCQ\nNqgPxdy4YGbKyPaFVwcfdq+3aiM3F5+3/O95+DVCHPVdOYb/WIHvhc+syO3Y/cWv\n5TyQ4nRRuFz/yfTX5vjUENMjiD4HVvdBqxmGImSIwd9JrFGL5YcNcMtw22gcUsLh\n3KaGrbf6XTrriTwDLBiEUrION07/T3cLLYhAr5P/0f9jOrsr8NChhEtbE6hRnv12\nw5RyxWA4oMI/yHxynM3SfPxJJ/kUZGO1fXrjO3POn+/2GSDxYrEvw7eBoTXjUENh\n48LcnuSkW18LeptQb3C05T+rVMhe73U3GLS+tYOo5iq6iN5Dpcy46IMGjY/fC+eU\nxCyHmiKVkEjruOi2puIaq4djaeESgepS+tTdVMdQi1Vh5r+b5J6+oEC0v4ruwjlN\n33oY6Eb5KJUFw2zQ435QhAtkmmCX6nVRH/jHWKBZ9is9AgMBAAE=\n-----END PUBLIC KEY-----\n",
+  "vectors": [
+    {
+      "name": "basic-any-computer",
+      "payload": {
+        "schema": "md20-license/1",
+        "id": "0123456789abcdef",
+        "licensee": "Test Student",
+        "issued_at": "2026-11-07T12:00:00Z",
+        "expires": "2099-12-31",
+        "machines": [],
+        "scope": "use",
+        "note": "test vector 1",
+        "issuer": "HCC Lab, NKUST"
+      },
+      "message_utf8": "md20-license-v1\n{\"expires\":\"2099-12-31\",\"id\":\"0123456789abcdef\",\"issued_at\":\"2026-11-07T12:00:00Z\",\"issuer\":\"HCC Lab, NKUST\",\"licensee\":\"Test Student\",\"machines\":[],\"note\":\"test vector 1\",\"schema\":\"md20-license/1\",\"scope\":\"use\"}",
+      "message_sha256": "7e520c7cbdbddb65ac675b9aeddf276da9ea95460eac4ed415833156665ee7af",
+      "sig": "Pf5tYwwsvP0E7MjiQOl5CHSPTIYxf4F0pUYYqrAzHyQLT0Ca6s3taOILnP8ITqN4Bngr2haYa8YbGFoV7iJXz1YoOFHgZ7NI6e1zqe1IbZY+O0sa8osx9Nh7cUrHs+i4798LbyIG7tYzSJc71FCiXNVFB2CfNHuwJCk/gXuDtRU5WcqXAuA/5V1tWXNHQaq939l48981Ol7PHI0PrH5FJSrSdcIcbFRqxT0wdONlkOn8FFdeolcfT2ppEBXyPdDmT6gUaghImcU0OO562Fr2leU0uYZQn4McXz1kqiJNOx8CnAwUt2lzldRtOP9opfPykLEV4AaWw+50ncS24Ii7dRUf8PD/CL9BrfzeZTQuW0yyjzbo+0tkSFEkeKDpYDvO7oe+TL6Ys7j3MAwoUqizbbRuVHNyPB3GxAj7SNzU2o2zydh7B3971eE/Z2fAL7aIlnk7H57bZsSrGL98Gpj5goeQXrVFE69H5izqgniFWOxj3Img2nLGbmQqnCEnLZhN",
+      "expect_signature": "valid"
+    },
+    {
+      "name": "unicode-bound-no-expiry",
+      "payload": {
+        "schema": "md20-license/1",
+        "id": "fedcba9876543210",
+        "licensee": "王小明 \"Ming\" <測試>",
+        "issued_at": "2026-11-07T12:00:01Z",
+        "expires": null,
+        "machines": [
+          "1111-2222-3333-4444",
+          "AAAA-BBBB-CCCC-DDDD"
+        ],
+        "scope": "use",
+        "note": "備註: 中文、引號 \" 與反斜線 \\ / 斜線",
+        "issuer": "HCC Lab, NKUST"
+      },
+      "message_utf8": "md20-license-v1\n{\"expires\":null,\"id\":\"fedcba9876543210\",\"issued_at\":\"2026-11-07T12:00:01Z\",\"issuer\":\"HCC Lab, NKUST\",\"licensee\":\"王小明 \\\"Ming\\\" <測試>\",\"machines\":[\"1111-2222-3333-4444\",\"AAAA-BBBB-CCCC-DDDD\"],\"note\":\"備註: 中文、引號 \\\" 與反斜線 \\\\ / 斜線\",\"schema\":\"md20-license/1\",\"scope\":\"use\"}",
+      "message_sha256": "9886bdf64b9d1447872319b667c9ab04d4b8e21c9a7db999bcdd33b925a488f1",
+      "sig": "AKRcsT+XEMK2e5OZb9qtii/jm/kNFcQRfgh6R/AOE/ZX518vPYGF616UJFe8oxi76nb5S3C8pI1z9l7M6Y38rvX566ZOSTIfYweJMQr2lO4vRhGJpqig3B6hQfS0LM+EdozUn5+Qsd739+mxrHwkeWov27nUWBACL2lZNCYQgPhH+dZ0xveIzVzcZtjSRUSo1QKOXIEXvVmM91j2zs3FHitmC2GQeRexDJxDmzPgnf5/1cCPMjPVq3Ky9mnOY+ew9hNtbBLAB3MHt016bPgjG8QZTGR7AfGHAvocwdyhrN29rSjVTNDK4Z0lpPB0/2YEDc7celbOm6AiwE3ePOFPavlEgwP0NmjF4l9/DScyq+yRdCBgBkjT8Iwk61+BS/rRSEXaHcagDwYCFQ+UiSE9iFTgUj20A9qagd8P8Z1FS71IPggbH4f1XvH9VfuqIItW9kTxeGSZ48GsgJ1C8bIQ2taLUytt+9Jt3/De9og8FhgdwvB353MWjH3hdXnEKJ8U",
+      "expect_signature": "valid"
+    },
+    {
+      "name": "scope-all",
+      "payload": {
+        "schema": "md20-license/1",
+        "id": "00ff00ff00ff00ff",
+        "licensee": "Everyone",
+        "issued_at": "2026-11-07T12:00:02Z",
+        "expires": "2099-12-31",
+        "machines": [],
+        "scope": "all",
+        "note": "",
+        "issuer": "HCC Lab, NKUST"
+      },
+      "message_utf8": "md20-license-v1\n{\"expires\":\"2099-12-31\",\"id\":\"00ff00ff00ff00ff\",\"issued_at\":\"2026-11-07T12:00:02Z\",\"issuer\":\"HCC Lab, NKUST\",\"licensee\":\"Everyone\",\"machines\":[],\"note\":\"\",\"schema\":\"md20-license/1\",\"scope\":\"all\"}",
+      "message_sha256": "155defcb8c09934987068286e0de287073a25fdd459e5d7afdd2219e9c159d30",
+      "sig": "mmKGoUPDiti63wPKRhRyjkTQNPzhoWzVcJkf5AWQVd4XQLsezKrCbZrV8AiMxZqLeDeq7KU7qPCN/38Sld4lr2uXYQxlYvLpzMprEHR3Bkh1yxntcD4pqurVTrsPIf1sPklpch5Xy6J5dWmRMGQ443MpLAjgD5WfNh9fXB6l0pp+Pe2oybIPnNKiEOdGWpb1pclCklY2Ytuz+2fXNJgBRSIYB4kKuYe9QacI6oGCT83eR58eA+EJxAo7Z5pJRfeF3WPnXaUa392skGylrRBdaMfepKwbw6f7O5yMY+uycvwaBQ9PuuzQWUf0IMHHZHR6ZpgjfddAVKNR/1EjlADG+C3N27bMH/93NQWjo+OKRMwmWtYPdTLF54d7QiwInjNCiz1n9ACB0+1+etnOwvneh2uwZGsF0gcfOUeVpiuhvv43b1abdae9TaXicoXl9Z9iH23UmnxmGfEz9NVMcEV9ZcWKhQV/qQtXMmXnXZUnqEcGvnwbID7k15x7FDpDQPlo",
+      "expect_signature": "valid"
+    }
+  ]
+}

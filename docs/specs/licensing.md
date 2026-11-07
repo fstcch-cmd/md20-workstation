@@ -1,13 +1,16 @@
-# Spec: 簽章授權（第 2 層，D-125）
+# Spec: 簽章授權（第 2 層，D-125；分工 D-127）
 
 對象：要審查授權設計的人。條文層（第 1 層）是 `LICENSE`（D-124）；本檔是程式層。
+
+**分工（D-127）**：本 repo（md20）只**驗證**授權；產生金鑰、簽發、授權紀錄都在 HCC Lab 的私人簽發端 repo，學生拿到的套件不含簽發程式碼。
+兩邊靠本檔的格式（§2）與測試向量 `tests/data/license_vector_v1.json` 對齊。
 
 ## 1. 要解決的問題
 repo 必須公開（CI 費用），但擁有者（HCC Lab, NKUST）不允許別人任意使用。需要一個**擁有者可以逐人發放、逐人收回（到期）**的機制，
 不需要伺服器，學生離線也能用，並且讓每份輸出都能追溯到哪一份授權。
 
 ## 2. 原理
-- 擁有者持有 RSA 私鑰（離線保管，不在 repo）。套件內 `md20/util/owner_pub.pem` 是對應公鑰。
+- 擁有者持有 RSA 私鑰（離線保管，不在任何公開 repo）。套件內 `md20/util/owner_pub.pem` 是對應公鑰。
 - 授權檔 `*.md20license`＝JSON `{"payload", "sig"}`。簽章是對 `b"md20-license-v1\n"` ＋ canonical JSON(payload) 的 RSA-PSS（SHA-256、MGF1-SHA256、最大 salt）。
 - 程式只信任 `license.TRUSTED_KEYS` 裡的公鑰（預設一把；換鑰時可兩把並存）。
 
@@ -48,13 +51,24 @@ CLI 沒有授權時以結束碼 13 離開，stderr 印四語說明、機器碼�
 測試與 CI 的行程內測試由 `tests/conftest.py` 的 autouse fixture 用 monkeypatch 改 `TRUSTED_KEYS`、`license_dir`，並安裝以測試金鑰簽的授權。
 真實擁有者私鑰不在 repo，測試金鑰只存在於記憶體與暫存目錄。
 
-## 6. 擁有者操作
+## 6. 簽發端（不在本 repo）
+簽發（金鑰產生、單人與整班簽發、替本機簽並安裝、授權紀錄）由 HCC Lab 的私人簽發端 repo 負責；md20 不含這些程式碼，`md20 license` 只有：
 ```
-md20 license issue --key md20_owner_private.pem --name "王小明" --days 365 --machine 3F9A-07C2-B15D-6E48 --out wang.md20license
-md20 license issue-batch --key md20_owner_private.pem --csv 名單.csv --out 授權資料夾
+md20 license status           # 四語狀態
+md20 license machine          # 印出本機機器碼
+md20 license install FILE     # 驗證通過才複製進 app data
 ```
-CSV 欄位：姓名、天數或 `YYYY-MM-DD`、機器碼（可空）；UTF-8。`--scope all` 簽全開授權（不能同時綁機器）。
-Windows：`installer\owner\MD20-Issue-License.cmd`（單人或批次）與 `MD20-Unlock-This-PC.cmd`（替本機簽並安裝）。
+`md20 stamp keygen` 只印出「金鑰產生已移到 HCC Lab 的私人工具」（結束碼 1）。`stamp decrypt` 仍在（需要擁有者私鑰，屬讀取）。
+CSV 名單、`--scope all`、機器碼綁定等簽發選項的定義見簽發端 repo；本檔 §2 的 payload 是兩邊共同遵守的契約。
+
+### 格式測試向量
+`tests/data/license_vector_v1.json` 是簽發端 `test_vectors/v1.json` 的逐位元組副本：一把**測試**公鑰與三組固定 payload 的簽章（私鑰在產生向量後已丟棄）。
+`tests/test_license_vector.py` 驗證：驗證器接受每組向量、任何欄位或簽章被改就拒絕、向量金鑰沒被信任時一律拒絕、向量檔不含私鑰且不同於套件內 `owner_pub.pem`。
+這把測試公鑰只在測試中用 monkeypatch 放進 `TRUSTED_KEYS`，**絕不加入**真正的清單。格式變更必須兩個 repo 同時改（規格、向量、測試）。
+
+### 測試如何取得授權
+測試要有授權可驗證，所以 `tests/_license_testkit.py` 放一個最小的測試用簽章 helper（用 `tests/conftest.py` 產生的拋棄式金鑰）。
+測試程式不隨套件發行（`pyproject.toml` 只打包 `md20*`），所以這不是簽發端；`tests/test_license.py` 檢查 `md20.util.license` 沒有任何簽章／讀私鑰的公開函式。
 
 ## 7. 誠實限制
 - 原始碼公開：能改程式的人可以移除檢查。這一層是門檻與證據，不是防拷。規避即違反 D-124 條款。
