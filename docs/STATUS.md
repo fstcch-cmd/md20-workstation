@@ -3,6 +3,13 @@
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
+## 本 session（2026-11-07 晚，session_016gcJz8q8wadWxHb24EMCKt；主 session 指派 Sonnet 子代理開發、審查後整合）：D-111～D-123（屬 a20）
+- **ac5fba5 CI 結果（真實引擎）**：(A) D-102 膜情境 B 在 Windows／macOS／Ubuntu 都通過（Windows 先前 12/36 NaN）；D-104 建膜即時 3D 階段 bilayer→declashed；D-105 工具箱與 D-106 共同基底真實 mdtraj 測試通過；D-107 讓 pure-python 六個與 heavy-metal 轉綠；paper-docking、installer 兩個綠。紅燈全是測試或無氫拓撲問題，已修：D-111（heavy 斷言位置）、D-112（頭基原子 256≠128）、D-121（無氫拓撲的蛋白氫鍵）。
+- **(C) 膜 NaN 尚未完全解決**：28e87aa 的 Ubuntu 情境 B 在 D-102 之後仍 NaN；重讀診斷資料，水重疊每個建構都有、不是區分因子；判斷為「離子落在重疊的水上」並修（D-115，D-102 加更正）。**這是與資料一致的判斷，尚待膜診斷直接證實。**
+- **(B) 新功能，容器測試通過、真實路徑交 CI**：D-113 PMF 評估納入 MBAR overlap matrix；D-114 Vina 單一釘選版 v1.2.7＋sha256（同班不再混版本）；D-116 SMD 路徑接觸釋放（F13）；D-117 micromamba 釘選 2.10.0-0＋sha256；D-118／D-123 約束策略智慧建議（只建議）＋從建模與對接紀錄接入特徵、採用時記錄；D-119 補窗近重複提案放棄並記理由（REVIEW #18 bug 部分）；D-120 跨候選可比性矩陣（F05）；D-122 自動行動成本與效益報告（F17）。
+- D-103 決定維持「關 GUI 不中斷計算」（開發者決定，使用者可推翻）。容器 923 passed、49 skipped。
+- (C) 待授權：REVIEW #18 門檻（min_effective_samples=100 讓補窗成本約 ×5–6）、A8、P1A、藍圖第 2–4 階段、F19；conda 環境鎖版未做。
+
 ## 本 session（2026-11-07，session_016gcJz7pQmKkZzkUxg6SqVs）：D-103 GUI 穩定性（屬 a20）
 - **D-106 系統比較**：條件可比性檢查（未知即不可比）、所有系統放在同一組主成分軸、低谷代表幀、前後半一致性、殘基對應的 ΔRMSF。(A) 容器 766 passed；(B) 真實流程交 CI heavy workflow。
 - **D-105 分析工具箱**：tICA、MSM（附資格，單一軌跡不報速率）、側鏈氫鍵網路、水合位點，進報告。(A) 容器 760 passed；(B) mdtraj 接線交 CI。
