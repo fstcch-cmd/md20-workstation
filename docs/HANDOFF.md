@@ -25,7 +25,7 @@
 > - **D-110**：docking 拒絕理由四語化（理由帶 params，報告依語言渲染）。
 >
 > **待使用者（接手可問或先做好等審）：**
-> 1. **a19 發行**：`e0a0f77`（D-95~D-98）CI 全綠、`docs/releases/v0.1.0a19.md` 已寫好。推 tag 是公開動作、**本 session 權限被擋，需使用者執行**：`git tag -a v0.1.0a19 e0a0f77 -m "MD20 v0.1.0a19" && git push origin v0.1.0a19`。a19 只含 D-95~D-98；D-99~D-110 屬 a20。
+> 1. **發行（非必須，使用者決定時機）**：對外仍是 a17。發行唯一修的是新安裝的 openmmforcefields 釘選。a19（`e0a0f77`，只含 D-95~D-98）CI 全綠、發行說明已寫好；但 D-99~D-110 也都在 main 了，所以**更乾淨的做法是等 `ac5fba5` CI 全綠後直接發 a20（涵蓋全部），跳過 a19**。推 tag 是公開動作、本 session 權限被擋、需使用者執行；a19 用 `git tag -a v0.1.0a19 e0a0f77 … && git push origin v0.1.0a19`，a20 等 CI 綠後用 HEAD。**不要催使用者發行。**
 > 2. **需授權才能做（屬協定變更或需計算預算，別自行動工）**：A8 漏斗約束 ΔG°／PMF 參考態、P1A 自動補窗迴圈（`adaptive.py` 可接）；藍圖第 2–4 階段——GaMD／well-tempered metadynamics、REST2/H-REMD、RBFE/ABFE（OpenFE）、恆定 pH、QM/MM、ML 勢能。F19 MM/GBSA pilot 也需計算預算授權。
 > 3. **F11 口袋體積／水合事件**：需 fpocket／P2Rank（Windows 可行性待查）。
 > 4. **使用者的既有需求**：D-72 筆電實測、hsieh2024 URI 的實際 SMD/PMF 數值、D-103 關掉 GUI 主控台後計算是否存活（CI 測不到，需筆電）。
