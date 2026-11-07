@@ -834,6 +834,7 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
     if metrics:
         disp = {key: {v: u for u, v in (c.get("ligand_map") or {}).items()} for key, c in cases.items()}
         out += _md_figures(doc, sums, metrics, ext, disp)
+        out += _common_html(doc, comp)                      # D-106: systems on one basis, only when comparable
     else:                                              # older runs without metrics.json: the analysis images as drawn
         for key, s_ in sums.items():
             figs = s_.get("figures") or {}
@@ -1674,4 +1675,36 @@ def _hydration_tables(doc, ext: dict, lig_keys: list, lab) -> str:
                                     f"{lab(k, rn)}：{len(stay)} か所で 8 割以上の時間に水がいます。これらはリガンドとタンパク質を橋渡ししている可能性があり、誘導体で置き換えるか残すかで結合が変わります。",
                                     f"{lab(k, rn)}: {len(stay)}곳에 80% 이상의 시간 동안 물이 있습니다. 이런 물은 리간드와 단백질을 잇는 다리일 수 있어 유도체에서 치환하거나 남기면 결합이 달라집니다.")],
                               doc.lang)
+    return out
+
+
+def _common_html(doc, comp: dict) -> str:
+    """D-106 (A11/F12/F10): comparability of the systems, their landscapes on one PCA basis and the representative
+    frames of each basin."""
+    out = ""
+    cmp_ok = comp.get("comparability") or {}
+    cb = load_json(comp.get("common_basis_file"), {}) if comp.get("common_basis_file") else {}
+    if not cmp_ok and not cb:
+        return ""
+    out += _sub(doc, "系統之間的比較", "Comparison between systems", "系どうしの比較", "계 사이 비교")
+    if cmp_ok and not cmp_ok.get("comparable"):
+        diff = "、".join(d["field"] for d in cmp_ok.get("differences") or []) or "—"
+        unk = "、".join(cmp_ok.get("unknown") or []) or "—"
+        out += _findings_html([FT.S("caution",
+                                    f"條件不同：{diff}；無法確認：{unk}。apo 與複合物的 RMSF 差異不計算，地形只並列。差異可能來自設定，不一定來自配體。",
+                                    f"Conditions differ: {diff}; not confirmed: {unk}. The apo–complex RMSF difference is not computed and the "
+                                    "maps are only shown side by side. A difference may come from the settings rather than the ligand.",
+                                    f"条件の違い：{diff}。確認できない項目：{unk}。apo と複合体の RMSF の差は計算せず、地形は並べるだけです。差は設定から来ている可能性があります。",
+                                    f"다른 조건: {diff}. 확인할 수 없는 항목: {unk}. apo와 복합체의 RMSF 차이는 계산하지 않고 지형은 나란히만 보입니다. 차이가 설정에서 왔을 수 있습니다.")],
+                              doc.lang)
+    if cb.get("status") == "ok":
+        out += doc.figure_block(FG.common_landscape(cb, doc.figdir / "md_common_landscape.png"), "common_landscape", FT.classify_common(cb))
+        rows = [[_esc(r["system"]), str(r["basin"]), str(r["frame"]), "—" if r.get("time_ns") is None else f"{r['time_ns']:.2f}",
+                 "—" if r.get("population") is None else f"{r['population']:.0%}"] for r in cb.get("representatives") or []]
+        if rows:
+            out += doc.table([doc.t(("系統", "System", "系", "계")), doc.t(("低谷", "Basin", "谷", "골")),
+                              doc.t(("代表幀（分析抽樣後）", "Representative frame (analysis sample)", "代表フレーム（解析用サンプル）", "대표 프레임(분석 표본)")),
+                              doc.t(("時間 (ns)", "Time (ns)", "時間 (ns)", "시간 (ns)")), doc.t(("比例", "Share", "割合", "비율"))], rows,
+                             ("每個低谷的代表結構（離低谷最低點最近的實際幀）", "Representative structure of each basin (the actual frame closest to the basin minimum)",
+                              "各谷の代表構造（谷の最低点に最も近い実際のフレーム）", "골마다 대표 구조(골 최저점에 가장 가까운 실제 프레임)"), num_cols={1, 2, 3, 4})
     return out

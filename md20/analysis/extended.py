@@ -52,7 +52,8 @@ def _smooth2d(H: np.ndarray, sigma: float = 1.0) -> np.ndarray:
     return np.apply_along_axis(lambda v: np.convolve(v, k, mode="valid"), 1, a)
 
 
-def free_energy_landscape(p1, p2, *, temperature_k: float = 300.0, bins: int | None = None, min_population: float = 0.05) -> dict:
+def free_energy_landscape(p1, p2, *, temperature_k: float = 300.0, bins: int | None = None, min_population: float = 0.05,
+                          edges: tuple | None = None) -> dict:
     """−kT ln P(PC1, PC2) in kJ/mol from a lightly smoothed histogram, minimum set to 0; empty bins are NaN.
     Basins are connected regions below 1 kT that hold at least `min_population` of the frames (sampling noise in a
     sparse histogram is not counted as a state).  Bins scale with the number of frames (√n / 1.5, 10 to 30)."""
@@ -60,8 +61,12 @@ def free_energy_landscape(p1, p2, *, temperature_k: float = 300.0, bins: int | N
     n = len(p1)
     if n < 10:
         return {}
-    bins = bins or int(np.clip(np.sqrt(n) / 1.5, 10, 30))
-    H, xe, ye = np.histogram2d(p1, p2, bins=bins)
+    if edges is not None:                       # D-106: several systems on the same bins (common basis)
+        H, xe, ye = np.histogram2d(p1, p2, bins=[np.asarray(edges[0]), np.asarray(edges[1])])
+        bins = len(xe) - 1
+    else:
+        bins = bins or int(np.clip(np.sqrt(n) / 1.5, 10, 30))
+        H, xe, ye = np.histogram2d(p1, p2, bins=bins)
     Hs = _smooth2d(H, 1.0)
     P = Hs / Hs.sum()
     kT = 0.0083145 * temperature_k

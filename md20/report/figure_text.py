@@ -2530,3 +2530,50 @@ def classify_msm(name: str, m: dict) -> list[dict]:
               ". One trajectory, so this is exploratory only.",
               f"{name}：時間スケールは遅れ時間に対して" + ("平らになっています" if flat else "まだ変化しています") + "。1本のトラジェクトリなので探索的な結果です。",
               f"{name}: 시간 척도가 지연 시간에 따라 " + ("평평해집니다" if flat else "아직 변합니다") + ". 궤적 하나이므로 탐색적 결과입니다.")]
+
+
+# D-106 (A11/F12): systems on one PCA basis
+FIG.update({
+    "common_landscape": {
+        "title": ("各系統放在同一組主成分軸上的構形地形", "Conformational landscapes of all systems on one set of principal components",
+                  "全系を同じ主成分軸に置いた構造地形", "모든 계를 같은 주성분 축에 놓은 구조 지형"),
+        "caption": ("所有系統共有的 Cα 合併做一次主成分分析，每個系統用同一組格子畫地形，數字是低谷編號。",
+                    "One principal component analysis of the Cα atoms all systems share; each system is drawn on the same "
+                    "grid. Numbers label the basins.",
+                    "全系に共通する Cα をまとめて一度だけ主成分分析し、各系を同じ格子で描いています。数字は谷の番号です。",
+                    "모든 계에 공통인 Cα를 합쳐 주성분 분석을 한 번 하고, 계마다 같은 격자로 그렸습니다. 숫자는 골 번호입니다."),
+        "read": ("各系統分開做 PCA 時軸不同，圖不能互相比較；這張圖的軸相同，可以直接看配體是否讓蛋白停在某一個區域。前後兩半的低谷比例差太多時，這只是取樣到的分布，不是收斂的自由能地形。每個低谷附一個實際的代表幀，可以打開來看結構。",
+                 "Separate PCAs have different axes and cannot be compared; here the axes are shared, so you can see whether "
+                 "the ligand keeps the protein in one region. If the basin shares differ a lot between the first and second "
+                 "half of a run, the map is the sampled distribution, not a converged free-energy landscape. Each basin "
+                 "comes with an actual representative frame you can open.",
+                 "別々の PCA では軸が違い、比べられません。この図は軸が共通なので、リガンドがタンパク質をある領域にとどめるかを直接見られます。"
+                 "前半と後半で谷の割合が大きく違えば、これはサンプリングした分布であって収束した自由エネルギー地形ではありません。各谷には開いて確認できる実際の代表フレームがあります。",
+                 "따로 한 PCA는 축이 달라 비교할 수 없습니다. 이 그림은 축이 같아 리간드가 단백질을 한 영역에 머물게 하는지 바로 볼 수 있습니다. "
+                 "앞뒤 절반의 골 비율이 크게 다르면 이것은 샘플링된 분포이고 수렴한 자유 에너지 지형이 아닙니다. 골마다 열어 볼 수 있는 실제 대표 프레임이 있습니다."),
+    },
+})
+
+
+def classify_common(cb: dict) -> list[dict]:
+    out = []
+    if not cb.get("comparable"):
+        out.append(S("caution", "系統之間的模擬條件不同或無法確認，地形只並列呈現，不比較。",
+                     "The simulation conditions differ between systems or could not be confirmed, so the maps are shown side by side "
+                     "without comparison.",
+                     "系の間でシミュレーション条件が違うか確認できないため、地形は並べるだけで比較しません。",
+                     "계 사이의 시뮬레이션 조건이 다르거나 확인할 수 없어 지형을 나란히 보여 줄 뿐 비교하지 않습니다."))
+    for n in cb.get("systems") or []:
+        ps = cb["per_system"][n]
+        nb = len(ps["landscape"].get("basins") or [])
+        hs = ps.get("half_split") or {}
+        if hs.get("status") == "ok" and not hs.get("consistent"):
+            out.append(S("caution", f"{n}：{nb} 個低谷，但前後兩半的比例最多差 {hs['max_change']:.0%}，這是取樣到的分布，不是收斂的地形。",
+                         f"{n}: {nb} basins, but their shares differ by up to {hs['max_change']:.0%} between the two halves. "
+                         "This is the sampled distribution, not a converged landscape.",
+                         f"{n}：谷は {nb} 個ですが、前半と後半で割合が最大 {hs['max_change']:.0%} 違います。サンプリングした分布であり、収束した地形ではありません。",
+                         f"{n}: 골이 {nb}개지만 앞뒤 절반의 비율이 최대 {hs['max_change']:.0%} 다릅니다. 샘플링된 분포이고 수렴한 지형이 아닙니다."))
+        else:
+            out.append(S("note", f"{n}：{nb} 個低谷，前後兩半一致。", f"{n}: {nb} basins, consistent between the two halves.",
+                         f"{n}：谷は {nb} 個で、前半と後半は一致しています。", f"{n}: 골 {nb}개, 앞뒤 절반이 일치합니다."))
+    return out

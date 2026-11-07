@@ -100,7 +100,19 @@ def make_wf(tmp_path, lang="en"):
                            "ligands": {"L01": {"stays_bound": True, "rmsd_last20_A": 1.3, "top_contacts": [["ASP189", 0.92], ["SER190", 0.71]]}}}}
     wf._mark("md_cases", cases={"apo": {"case_id": "c0", "mode": "apo", "ligands": []},
                                 "docked_BEN": {"case_id": "c1", "mode": "docked_single", "ligands": ["BEN"]}})
-    wf._mark("analysis", summaries=sums, comparison={"most_rigidified_on_binding": [{"residue": "SER195", "delta_rmsf_A": -0.42}]})
+    # D-106: common basis across systems (synthetic)
+    from md20.analysis.common_basis import common_basis
+    def _sysd(states):
+        base = np.c_[np.arange(30) * 3.8, np.zeros(30), np.zeros(30)]
+        mode = np.zeros((30, 3)); mode[15:, 1] = 2.0
+        return {"labels": [f"A:{i}" for i in range(30)], "time_ns": list(np.arange(200) * 0.05),
+                "xyz": np.array([base + states[f % len(states)] * mode + rng.normal(0, 0.15, base.shape) for f in range(200)])}
+    cb = common_basis({"apo": _sysd([0, 1]), "docked_BEN": _sysd([0])})
+    cb["comparable"] = True
+    atomic_write_json(cb, wf.dir / "analysis_common.json")
+    wf._mark("analysis", summaries=sums, comparison={"most_rigidified_on_binding": [{"residue": "SER195", "delta_rmsf_A": -0.42}],
+                                                     "comparability": {"comparable": True, "differences": [], "unknown": []},
+                                                     "common_basis_file": str(wf.dir / "analysis_common.json")})
     wf._mark("binding", results={"BEN": {"delta_pmf_kj_mol": 24.3, "delta_pmf_err_kj_mol": 1.8, "dG_standard_kj_mol": None,
                                          "dG_withheld": "classroom", "half_split": {"diff_kj_mol": 1.1}, "caveats": ["profile only"],
                                          "r_min_nm": 0.42, "max_force": 650.0, "work": 80.2,

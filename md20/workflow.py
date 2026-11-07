@@ -1608,9 +1608,60 @@ class Workflow:
                 atomic_write_json(st, self.state_path)
             out[key] = man
             metrics[key] = load_json(man["metrics_file"], {})
-        comp = compare_runs(metrics, self.dir / "figures") if len(metrics) > 1 and not self.membrane_only_type() else {}
+        cmp_ok = None
+        if len(metrics) > 1 and not self.membrane_only_type():
+            cmp_ok = self._comparability(runs)
+        comp = compare_runs(metrics, self.dir / "figures", cmp_ok) if len(metrics) > 1 and not self.membrane_only_type() else {}
+        if cmp_ok is not None:
+            comp["comparability"] = cmp_ok
+            cb = self._common_basis(runs, cmp_ok)
+            if cb:
+                comp["common_basis_file"] = cb
         self._mark("analysis", summaries=out, comparison=comp)
         return {"summaries": out, "comparison": comp}
+
+    def _comparability(self, runs: dict) -> dict:
+        """D-106 (F10): may these runs be compared at all?  Conditions from run.json and the build manifests."""
+        from .analysis.common_basis import conditions, comparability
+        conds = {}
+        for key, r in runs.items():
+            case = self.project.case(r["case_id"])
+            conds[key] = conditions(load_json(case.dir / "runs" / r["run_ids"][0] / "run.json", {}),
+                                    load_json(case.build_dir / "build_manifest.json", {}))
+        res = comparability(conds)
+        res["conditions"] = conds
+        if not res["comparable"]:
+            what = "、".join(d["field"] for d in res["differences"]) or "—"
+            unk = "、".join(res["unknown"]) or "—"
+            self.dec.record("analysis.compare", "comparability", {"differences": what, "unknown": unk},
+                            f"系統之間條件不同（{what}）或無法確認（{unk}）：apo 與複合物的 RMSF 差異、共同基底地形只列出、不做比較結論。"
+                            "條件不同時，差異可能來自設定而不是配體。", kind="auto")
+        return res
+
+    def _common_basis(self, runs: dict, cmp_ok: dict) -> str | None:
+        """D-106 (A11/F12): one PCA basis for all systems (common Cα), landscapes on the same bins, representative
+        frames, half-split check.  Written to <workflow>/analysis_common.json."""
+        import numpy as np
+        from .analysis.common_basis import common_basis
+        systems = {}
+        order = sorted(runs, key=lambda k: (not k.lower().startswith("apo"), k))
+        for key in order:
+            r = runs[key]
+            adir = self.project.case(r["case_id"]).dir / "runs" / r["run_ids"][0] / "analysis"
+            lab = load_json(adir / "ca_labels.json", {})
+            if not lab.get("labels") or not (adir / "ca_xyz.npy").is_file():
+                continue
+            systems[key] = {"labels": lab["labels"], "time_ns": lab.get("time_ns"), "xyz": np.load(adir / "ca_xyz.npy")}
+        if len(systems) < 2:
+            return None
+        try:
+            res = common_basis(systems)
+        except Exception as exc:  # noqa: BLE001 — optional comparison
+            res = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+        res["comparable"] = bool(cmp_ok.get("comparable"))
+        path = self.dir / "analysis_common.json"
+        atomic_write_json(res, path, backup=False)
+        return str(path)
 
     # WP3: what a tier is allowed to claim.  Sampling below the tier minimum still runs, but ΔG° is not reported.
     TIER_BINDING = {"classroom": {"dG": False},

@@ -2,6 +2,7 @@
 
 Heavy: runs only when MD20_HEAVY=1 (CI ubuntu job) and the full chemistry stack is installed.
 """
+import json
 import os
 from pathlib import Path
 
@@ -39,6 +40,13 @@ def test_full_workflow_3ptb(pdb_3ptb, tmp_path):
     assert st["pose_selection"]["selection"]["ligands"]["BEN"]["rank"] >= 1
     assert set(st["md_runs"]["runs"]) == {"apo", "docked_BEN"}
     assert st["analysis"]["comparison"]["figures"]["compare"]
+    # D-106: apo and complex were run the same way → comparable; one PCA basis for both (real mdtraj path)
+    cmp_ok = st["analysis"]["comparison"]["comparability"]
+    assert cmp_ok["comparable"], cmp_ok
+    cb = json.loads(Path(st["analysis"]["comparison"]["common_basis_file"]).read_text(encoding="utf-8"))
+    assert cb["status"] in ("ok", "insufficient"), cb
+    if cb["status"] == "ok":
+        assert set(cb["systems"]) == {"apo", "docked_BEN"} and cb["n_common_ca"] > 200
     # PBC re-centering: every analysed run ships a centred DCD and the apparent-vs-true dissociation check
     for key, summ in st["analysis"]["summaries"].items():
         cen = summ.get("centered") or {}

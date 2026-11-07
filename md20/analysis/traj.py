@@ -298,6 +298,46 @@ def plot_metrics(m: dict, out_dir: Path | str, *, label: str = "") -> dict:
     return figs
 
 
+_VARIANT = {"HID": "HIS", "HIE": "HIS", "HIP": "HIS", "HSD": "HIS", "HSE": "HIS", "HSP": "HIS", "CYX": "CYS", "CYM": "CYS",
+            "ASH": "ASP", "GLH": "GLU", "LYN": "LYS"}
+
+
+def residue_keys(names: list[str]) -> list[str]:
+    """"HIE57" → "HIS57" (protonation variants folded); repeats (several chains) get "#2", "#3"."""
+    out, seen = [], {}
+    for n in names:
+        k = _VARIANT.get(n[:3], n[:3]) + n[3:]
+        seen[k] = seen.get(k, 0) + 1
+        out.append(k if seen[k] == 1 else f"{k}#{seen[k]}")
+    return out
+
+
+def ca_labels(top, atom_indices) -> list[str]:
+    """chain:residue-number per Cα.  The residue *name* is left out on purpose: HID/HIE/HIP or CYX can differ between
+    the apo and the complex build of the same protein (D-106)."""
+    out = []
+    for i in atom_indices:
+        r = top.atom(int(i)).residue
+        ch = getattr(r.chain, "chain_id", None) or str(r.chain.index)
+        out.append(f"{ch}:{r.resSeq}")
+    return out
+
+
+def save_ca_coordinates(traj, adir: Path, ligand_groups=None, max_frames: int = 250) -> None:
+    """analysis/ca_xyz.npy (frames ≤ max_frames, Å, already centred and superposed) + ca_labels.json."""
+    try:
+        lig = {int(i) for v in (ligand_groups or {}).values() for i in v}
+        ca = [int(i) for i in traj.topology.select("protein and name CA") if int(i) not in lig]
+        if not ca:
+            return
+        sel = np.unique(np.linspace(0, traj.n_frames - 1, min(max_frames, traj.n_frames)).round().astype(int))
+        np.save(Path(adir) / "ca_xyz.npy", (traj.xyz[sel][:, ca, :] * 10.0).astype(np.float32))
+        t = (np.asarray(traj.time)[sel] / 1000.0).round(4).tolist() if traj.time is not None and len(traj.time) == traj.n_frames else sel.tolist()
+        atomic_write_json({"labels": ca_labels(traj.topology, ca), "time_ns": t}, Path(adir) / "ca_labels.json", backup=False)
+    except Exception:  # noqa: BLE001 — the comparison is optional; the per-system analysis stands
+        pass
+
+
 def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 1, label: str = "",
                 ligand_groups: dict[str, list[int]] | None = None, metal_indices: list[int] | None = None,
                 decisions=None, ligand_charges: dict[str, dict[int, int]] | None = None) -> dict:
@@ -329,6 +369,7 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
     m = compute_metrics(traj, ligand_groups)
     adir = run_dir / "analysis"
     adir.mkdir(parents=True, exist_ok=True)
+    save_ca_coordinates(traj, adir, ligand_groups)     # D-106: for the common basis across systems
     try:
         cen = export_centered(run_dir, topology_pdb, metal_indices=metal_indices, ligand_groups=ligand_groups, stride=stride)
     except Exception as exc:  # noqa: BLE001 — the centred export is a convenience; metrics above are already imaged
@@ -384,7 +425,7 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
     return summary
 
 
-def compare_runs(metrics: dict[str, dict], out_dir: Path | str) -> dict:
+def compare_runs(metrics: dict[str, dict], out_dir: Path | str, comparability: dict | None = None) -> dict:
     """Overlay e.g. {"apo": m_apo, "holo L01": m_holo}: backbone RMSD and Cα RMSF (same protein ⇒ same residue axis)."""
     plt = _mpl()
     out_dir = Path(out_dir)
@@ -402,14 +443,17 @@ def compare_runs(metrics: dict[str, dict], out_dir: Path | str) -> dict:
     axes[0].legend(frameon=False, fontsize=8)
     fig.tight_layout()
     figs["compare"] = _save(fig, out_dir / "compare_apo_holo")
-    # residues whose flexibility changes most on binding (first pair apo vs first holo)
+    # residues whose flexibility changes most on binding (first pair apo vs first holo).  D-106 (F10): residues
+    # matched by name+number (protonation variants folded), never by position; refused when the runs differ
     labs = list(metrics)
     delta = None
     if len(labs) >= 2 and "rmsf_ca_A" in metrics[labs[0]] and "rmsf_ca_A" in metrics[labs[1]]:
-        a, b = np.asarray(metrics[labs[0]]["rmsf_ca_A"]), np.asarray(metrics[labs[1]]["rmsf_ca_A"])
-        n = min(len(a), len(b))
-        d = b[:n] - a[:n]
-        idx = np.argsort(d)[:10]
-        names = metrics[labs[1]].get("rmsf_residues", [str(i) for i in range(n)])
-        delta = [{"residue": names[i], "delta_rmsf_A": round(float(d[i]), 3)} for i in idx]
-    return {"figures": figs, "most_rigidified_on_binding": delta}
+        from .common_basis import delta_rmsf
+        a, b = metrics[labs[0]], metrics[labs[1]]
+        r = delta_rmsf((residue_keys(a.get("rmsf_residues") or []), a["rmsf_ca_A"]),
+                       (residue_keys(b.get("rmsf_residues") or []), b["rmsf_ca_A"]), comparability)
+        delta = r.get("most_rigidified") if r.get("status") == "ok" else None
+        figs_note = r
+    else:
+        figs_note = None
+    return {"figures": figs, "most_rigidified_on_binding": delta, "delta_rmsf": figs_note}

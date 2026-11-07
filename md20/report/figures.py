@@ -897,3 +897,31 @@ def implied_timescales(m: dict, path: Path) -> str | None:
     ax.set_ylabel("Implied timescale (ns)")
     ax.legend(frameon=False, fontsize=8, loc="center left", bbox_to_anchor=(1.0, 0.5))
     return _save(fig, path)
+
+
+def common_landscape(cb: dict, path: Path) -> str | None:
+    """D-106: every system's landscape on one PCA basis and the same bins, side by side; basins marked."""
+    names = cb.get("systems") or []
+    if len(names) < 2:
+        return None
+    plt = _plt()
+    k = len(names)
+    fig, axes = plt.subplots(1, k, figsize=(3.0 * k + 0.6, 3.0), sharex=True, sharey=True, squeeze=False)
+    xe, ye = np.asarray(cb["xedges"]), np.asarray(cb["yedges"])
+    vmax = max((np.nanmax(np.array([[np.nan if v is None else v for v in r] for r in cb["per_system"][n]["landscape"]["G"]], float))
+                for n in names if cb["per_system"][n]["landscape"].get("G")), default=1.0)
+    im = None
+    for ax, n in zip(axes[0], names):
+        land = cb["per_system"][n]["landscape"]
+        if land.get("G"):
+            G = np.array([[np.nan if v is None else v for v in r] for r in land["G"]], float)
+            im = ax.pcolormesh(xe, ye, G.T, cmap="viridis", shading="auto", vmin=0, vmax=vmax)
+        for i, b in enumerate(land.get("basins") or []):
+            ax.plot(b[0], b[1], "w+", ms=8)
+            ax.annotate(str(i + 1), (b[0], b[1]), color="white", fontsize=8, xytext=(3, 3), textcoords="offset points")
+        ax.set_title(n, fontsize=9, loc="left")
+        ax.set_xlabel(f"PC1 ({cb['explained'][0]:.0%})")
+    axes[0][0].set_ylabel(f"PC2 ({cb['explained'][1]:.0%})")
+    if im is not None:
+        fig.colorbar(im, ax=axes[0].tolist(), label="ΔG (kJ mol$^{-1}$)")
+    return _save(fig, path)
