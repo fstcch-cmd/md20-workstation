@@ -7,7 +7,7 @@ import numpy as np
 from md20.analysis import interactions as IX
 from md20.analysis.extended import _persistence
 from md20.report.workflow_report import build_workflow_report
-from tests.test_report_v2 import make_wf
+from test_report_v2 import make_wf           # repo-root conftest puts tests/ on sys.path (same as test_report_subsystems)
 
 
 def _fp():

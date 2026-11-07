@@ -28,7 +28,8 @@
   - 用 RMSD 單一門檻定 `stays_bound`／「已平衡」（A4）。
 - 測試：`tests/test_interactions.py`（14 項：電荷判定、並存標籤、跨鏈、晚形成接觸、PBC、chunk 一致、缺水；KM、設限、稀疏、不串接、壽命可辨識性）、`tests/test_extended_fingerprint_wiring.py`（2 項，以 stand-in topology 驗證 extended_metrics 接線而不需 mdtraj）、`tests/test_interactions_report.py`（1 項，報告端用真實模組輸出）、`test_extended_analysis.py` pose_contacts 斷言改為 A5 新行為、`test_report_v2.py` 配體狀態斷言更新。全套：673 passed、48 skipped。
 - 未決／交 CI：真實 mdtraj 下 `compute_metrics`／`extended_metrics` 的新路徑只有 CI openmm-stack heavy workflow 能驗；mdtraj 的 chain_id 取得（`chain.chain_id` 或索引）在真實拓撲上要確認。配體原子形式電荷寫入 build manifest（讓鹽橋能出現在配體上）仍待實作（需 RDKit）。
-- 相容性：舊的 `extended.json`（單類別 matrix）報告仍可畫（`legacy_matrix` 與舊圖說保留並標「舊紀錄」）。本 commit 未 push。
+- 相容性：舊的 `extended.json`（單類別 matrix）報告仍可畫（`legacy_matrix` 與舊圖說保留並標「舊紀錄」）。
+- **更正（11/07，push 後 CI）**：`tests/test_interactions_report.py` 原寫 `from tests.test_report_v2 import make_wf`，CI 沒把 repo root 當 package（repo 沒有 `tests/__init__.py`，靠 root conftest 把 `tests/` 放進 sys.path），collection 失敗 `ModuleNotFoundError: No module named 'tests'`，連帶讓六個 pure-python job 全紅。改為 `from test_report_v2 import make_wf`（與 `test_report_subsystems.py` 同慣例）。本地從 repo root 跑湊巧可行，所以沒先抓到；之後跑 `pytest tests/<file>.py` 單檔可重現。run `42330274488`（2979908）因此先紅。
 
 ### D-96　整合規格 P0 第一批：執行狀態／科學評估／比較資格分開（A1、A2）、replica 起點語意（A9）、結構限制不算修正（A3）、決策紀錄依流程分開與摘要不截斷（A10）
 - 依據：使用者 11/07 09:39 提供的 `MD20_Claude_Code_Master_Iteration_Prompt_EN.md`（取代先前片段）。逐項複核表與 F01–F19 盤點在 `docs/specs/master_iteration_2026-11-07.md` §1–§2（每項附 `5561dd7` 的檔案與行號）。
