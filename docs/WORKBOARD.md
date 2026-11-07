@@ -9,7 +9,7 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
-| **Evidence-Driven Repair 規格 R1–R8（主線）＋鋅鍵結（R5，已授權改參數）＋授權第3層 D-128＋重複分析 D-130/D-131（重做）**：規格全文 `docs/specs/evidence_driven_repair_prompt.md`；本地核對見 HANDOFF §0 | 使用者 11/07 23:01 | 待下個 session | 2026-11-07 23:07 | main 650bc65 已 push；R2/R4/R7 本地未修 |
+| **Evidence-Driven Repair R1–R8 第一輪**：完成 D-130（重做）、D-133～D-138，已合併 main（見 HANDOFF §0 第七個 session）；待 CI 驗證真實路徑；剩餘：D-130 未彙總觀測量、D-137 接 binding hook、舊結果重新評估回寫 | 使用者 11/07 23:01 | session_016gcJz6aoRW5kLP9Jzbi7kj | 2026-11-07 23:25 | 授權第 3 層 D-128 已於第六個 session 完成 |
 | **授權與數位簽章（第 2–4 層）**：D-124 LICENSE 已完成；D-125 簽章授權開發中（分支 agent/license-gate，未推）；簽發端移到私人 repo `md-digital-signature`；第 3、4 層待做 | 使用者 11/07 21:50–22:11 | session_016gcJz8q8wadWxHb24EMCKt | 2026-11-07 21:55 | 私鑰永不進 repo；第 4 層需使用者建 Secret |
 | **第五個 session（主 session＋Sonnet 子代理）：D-111～D-123 已整合並一次 push**（使用者：push 不要太頻繁，批次推送）；ac5fba5 CI 已跑完，紅燈全在已修範圍。28e87aa 已證實：膜 case B Windows／macOS PASSED（D-102），case C water overlaps 閘門＋bilayer→declashed（D-104）。下一項：micromamba／conda 鎖版（supply_chain §2） | 使用者 11/07（開發順序由開發者決定） | session_016gcJz8q8wadWxHb24EMCKt | 2026-11-07 19:06 | 勿動 md20/sampling/assessment.py 的 mbar_overlap、md20/docking/vina_cli.py |
 | **GUI 穩定性（D-103）：計算改獨立子程序、狀態與進度從檔案讀回、GUI 重開接回；補 D-102 漏掉的 water overlaps 四語說明**；D-103～D-110 全部已推（a20）：GUI 穩定性、建膜即時 3D、分析工具箱、系統比較、證據矩陣、CI 修紅、runner 移除、拒絕理由四語。**驗證點 ac5fba5**（勿再 push，讓 openmm-stack 三 OS／heavy 跑完）。待授權：P1A 自動補窗、A8 漏斗約束（屬協定變更）、藍圖第 2–4 階段（需工作站＋計算預算）。待筆電：D-72、URI 數值、D-103 關主控台存活 | 使用者 11/07 | session_016gcJz7pQmKkZzkUxg6SqVs | 2026-11-07 17:35 | 勿動 md20/gui/worker.py、md20/gui/logic.py 的 Runner/ProcessJob |

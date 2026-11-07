@@ -5,6 +5,24 @@
 
 ## 0. 新 session 第一步
 
+> **2026-11-07 第七個 session（session_016gcJz6aoRW5kLP9Jzbi7kj，Opus 5.5 主 session＋5 個 Sonnet 子代理）交接。**
+>
+> **做了（全部在 main，已審查合併；push 狀態見最後一個 commit 訊息與 `git status`）：** 規格 `docs/specs/evidence_driven_repair_prompt.md` R1–R8 第一輪。
+> - **R1 D-130（重做）**：`Workflow.analyse` 分析每一條重複；`md20/analysis/replica_set.py` 彙總 mean／SD／t 區間／k/n、n=1 標「單一軌跡無法估計重複間不確定性」、失敗重複保留原因、拉離不算重複；比較與共同基底用全部重複；報告 `report/replica_section.py`＋疊圖。
+> - **R2 D-134**：`assessment.claim_status` 一份版本化 claim 評估；證據矩陣 MD 列改「ran」、結合只有 ΔG° 合格才 supported；圖說、比較、GUI 同源；重複數讀 `configured_replicas`。
+> - **R3／R4 D-135**：解析度紀錄（來源／有效節奏、limited）、抽幀時持續性在全部儲存幀上串流計算；`analysis/fingerprint.py` 指紋＋原子替換，主 session 已接到 `Workflow._reuse_analysis_manifest`（舊版 manifest 一律重算分析、不重跑 MD）。
+> - **R5 D-133 鋅**：診斷＝開放第四位點被 GLU106 羧基佔據（CI job 128427389578），保留晶體配位水作第四鍵結配位（側檔 `metal_site_waters.pdb`，不進對接受體）、新 policy `bonded_open`、配體佔水位 NEEDS_HUMAN；門檻不動。**膜**：D-136 `tools/validate_membrane_diag.py` 驗收器接進 diag workflow。
+> - **R6 D-138**：PMF／ΔG° 現況核對（`docs/specs/claims_audit.md`）；因果／機制句改為有界觀察（四語）。
+> - **R7 D-136**：`docs/capabilities.json`＋`docs/CAPABILITIES.md`（`--check` 進 CI）；`md20/__init__.py` 版本、學生文件 a19→a17 據實。
+> - **R8 D-137**：`md20/autonomy/` 行動帳本與控制器，**預設只提建議**，未接入執行路徑。
+>
+> **下一個 session 第一件事：** 單次查 CI（指令見使用者提示）。重點：heavy-metal（D-133 是否轉綠：4 個鍵、Glu 羧基不在 2.6 Å 內、平均偏差 < 0.03 nm）；openmm-stack 三 OS 的真實 mdtraj 分析（多重複、串流持續性、指紋）；pure-python 的 `capability_manifest --check`。紅了在同一 commit 修並附 DECISIONS。
+>
+> **仍待做（開發者自排）：** D-130 未彙總的觀測量（ΔRMSF 殘基 CI、水合、DSSP、PCA 盆地、DCCM、tICA/MSM、膜指標、平衡圖逐條列）；binding 把 `recorder=` 接到 `plan_refinement`（D-137 hook）；舊版結果「重新評估並回寫」動作（D-134 未決）；膜-only 分析寫指紋；capabilities 在 CI 結果出來後更新狀態。
+> **需使用者決定：** 鋅水用 OH⁻ 模型與否（D-133 未決）；ΔG° 的 affinity_ranking 是否必須有漏斗／方向校正（A8，D-138）；自主執行的計算預算與政策（D-137）；D-135／D-130 的經驗門檻（敏感度容差、CV 0.25）審閱。
+>
+> ---
+>
 > **2026-11-07 第六個 session（session_016gcJz8q8wadWxHb24EMCKt，Opus 5.5→4.8）交接。使用者即將關閉 session。**
 >
 > **所有已審查成果已 push：md20 main `650bc65`（origin 同步）、私人 repo `md-digital-signature` `3a68598`。** 觸發的 CI run 42384880862。

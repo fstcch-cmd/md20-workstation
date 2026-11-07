@@ -1,6 +1,11 @@
 # MD20 單機教學版 — 狀態報告
 
-## 當前事實（2026-11-07 第六個 session 收尾，main 650bc65）
+## 當前事實（2026-11-07 第七個 session，session_016gcJz6aoRW5kLP9Jzbi7kj）
+- **對外發行最新仍為 a17**；main 為開發中 a20。單一能力現況看 `docs/CAPABILITIES.md`（D-136，`tools/capability_manifest.py --check` 在 CI 驗證），本檔保留為歷史。
+- 本 session 做了「Evidence-Driven Repair」R1–R8 第一輪（D-130 重做、D-133～D-138）。**(A)** 容器 1259 passed、50 skipped。**(B)** 真實路徑全部交 CI（尚無結果）：鋅新模型（heavy-metal）、每條重複的真實 mdtraj 分析、串流持續性、指紋重用。**(C)** 見下方各條未決與 HANDOFF §0。
+- 鋅：heavy-metal 紅的原因已確認是**模型不足**（拿掉鋅配位水後，Glu106 羧基塌陷到 1.74 Å），不是 Zn–N 參數；D-133 保留晶體配位水作第四個鍵結配位，門檻 0.03 nm 未放寬，**待 CI 證實**。
+
+## 前一個 session 的事實（2026-11-07 第六個 session 收尾，main 650bc65）
 - **對外發行最新為 a17**（a18、a19 從未發行；main 為開發中 a20，見 D-132）。先前「待發行 a19」的段落保留為歷史。
 - **現況請看 `docs/CAPABILITIES.md`**（D-136：每個功能的實作／合成測試／真實引擎／benchmark／已發行安裝程式五種狀態，機器可讀版 `docs/capabilities.json`）；本檔以下是累積歷史。
 - 授權：第 1 層 LICENSE（D-124）、第 2 層簽章驗證（D-125）、簽發端在私人 repo（D-127）已 push。第 3 層（D-128）設計完成、實作待重做。

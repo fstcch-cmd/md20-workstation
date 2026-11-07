@@ -609,15 +609,19 @@
    "feature": "鋅的晶體幾何鍵結模型（含金屬中心與經金屬的 1-3/1-4 修正）",
    "implementation": [
     "md20/build/metal.py::bonded_metal_terms",
-    "md20/build/metal.py::add_metal_forces"
+    "md20/build/metal.py::add_metal_forces",
+    "md20/build/metal.py::site_waters_to_add",
+    "md20/build/metal.py::site_water_ligand_gate",
+    "md20/build/receptor.py::metal_site_water_lines"
    ],
    "supported_system_types": [
     "CA II（3KS3）型 Zn–His3 位點（唯一真實測試過的案例）"
    ],
    "restrictions": [
-    "目前在 heavy-metal CI 失敗：HIS119:ND1–Zn 平均 2.324 Å 對 r0 2.02 Å，偏差 0.0304 nm 超過 0.03 nm 門檻（580cbff）；另行修復中，不得放寬門檻或換判定",
+    "580cbff／58d81bc 在 heavy-metal CI 失敗（58d81bc：HIS119:ND1 2.36 Å 對 r0 2.02 Å；GLU106 OE1 塌陷到 Zn 1.74 Å）。D-133 改為保留晶體配位水作第四個鍵結配位（模型變更，使用者授權），門檻未放寬；新模型尚無 CI 結果",
     "電荷沿用力場；未擬合的諧和鍵/角",
-    "不得因此重新分類為基礎設施問題：這是科學／模型失敗"
+    "不得因此重新分類為基礎設施問題：這是科學／模型失敗",
+    "鋅水以中性 TIP3P 表示，未提供 OH⁻ 模型；配體佔據配位水位置時 NEEDS_HUMAN"
    ],
    "tests": [
     {
@@ -629,6 +633,11 @@
      "file": "tests/test_metal_integration.py",
      "type": "real_engine",
      "ci_job": "ci.yml:heavy[metal]"
+    },
+    {
+     "file": "tests/test_metal_site_water.py",
+     "type": "unit",
+     "ci_job": "ci.yml:pure-python"
     }
    ],
    "states": {
@@ -641,7 +650,7 @@
     "status": "fail",
     "commit": "580cbff",
     "evidence_url": "https://github.com/fstcch-cmd/md20-workstation/actions/runs/42374500293",
-    "basis": "heavy[metal] 在 580cbff 失敗（test_bonded_zinc_ca2）",
+    "basis": "heavy[metal] 在 580cbff 與 58d81bc 失敗（test_bonded_zinc_ca2）；D-133 修正後待 CI",
     "changed_since_evidence": []
    },
    "benchmark_scope": "none",
@@ -1003,13 +1012,15 @@
    "implementation": [
     "md20/engine/replicas.py::run_replicas",
     "md20/engine/replica_plan.py::plan_replicas",
-    "md20/workflow.py::Workflow.analyse"
+    "md20/workflow.py::Workflow.analyse",
+    "md20/analysis/replica_set.py::aggregate_replica_set",
+    "md20/report/replica_section.py"
    ],
    "supported_system_types": [
     "任何 MD 工作流程（SMD／傘狀採樣不隨重複數變）"
    ],
    "restrictions": [
-    "分析與報告的跨重複彙總尚未完成（D-130 待做）：Workflow.analyse 目前只讀第一條（run_ids[0]）；只有結合自由能跨重複彙總（D-96）",
+    "D-130：Workflow.analyse 分析每一條重複並彙總（mean／SD／t 區間、k/n；n=1 不給重複間不確定性）；ΔRMSF 殘基 CI、水合、DSSP、PCA 盆地比例、DCCM、tICA/MSM、膜指標仍只用代表重複；真實 mdtraj 路徑待 CI",
     "重複計畫與預設 3 條（D-131）合入 main 後尚未有 CI 結果",
     "每條從同一個建好的系統開始、各自 seed（2026+1000×條序）；不是從同一平衡結構分出"
    ],
@@ -1022,6 +1033,11 @@
     {
      "file": "tests/test_replica_plan.py",
      "type": "unit",
+     "ci_job": "ci.yml:pure-python"
+    },
+    {
+     "file": "tests/test_replica_analysis.py",
+     "type": "synthetic",
      "ci_job": "ci.yml:pure-python"
     }
    ],
@@ -1239,14 +1255,16 @@
    "feature": "PMF 結構化評估（執行狀態／科學評估／比較資格三分、overlap graph 連通）",
    "implementation": [
     "md20/sampling/assessment.py::assess_pmf",
-    "md20/sampling/assessment.py::eligibility_of"
+    "md20/sampling/assessment.py::eligibility_of",
+    "md20/sampling/assessment.py::claim_status"
    ],
    "supported_system_types": [
     "任何有傘狀採樣窗口的 PMF 結果"
    ],
    "restrictions": [
     "門檻為保守啟發式，未對外部資料校準",
-    "沒有專屬真實引擎測試：run_binding 寫入評估的路徑只在全流程間接走過，但測試沒有斷言它"
+    "沒有專屬真實引擎測試：run_binding 寫入評估的路徑只在全流程間接走過，但測試沒有斷言它",
+    "D-134：證據矩陣、圖說、比較、GUI 讀同一份 claim 評估；舊版結果需重新分析才可能 supported"
    ],
    "tests": [
     {
@@ -1256,6 +1274,11 @@
     },
     {
      "file": "tests/test_pmf_diagnostics.py",
+     "type": "unit",
+     "ci_job": "ci.yml:pure-python"
+    },
+    {
+     "file": "tests/test_evidence_assessment.py",
      "type": "unit",
      "ci_job": "ci.yml:pure-python"
     }
@@ -1283,7 +1306,9 @@
    "implementation": [
     "md20/analysis/interactions.py::fingerprint",
     "md20/analysis/persistence.py::persistence_for_runs",
-    "md20/analysis/extended.py"
+    "md20/analysis/extended.py",
+    "md20/analysis/persistence.py::EventAccumulator",
+    "md20/analysis/stream.py::stream_production_persistence"
    ],
    "supported_system_types": [
     "蛋白–小分子／胜肽軌跡（有氫與無氫拓撲）"
@@ -1291,7 +1316,8 @@
    "restrictions": [
     "配體電荷未知時鹽橋標『帶電接近，配體電荷未知』，不當作中性",
     "水橋在無水軌跡時標不可用",
-    "單一軌跡的持續性估計不含不確定性"
+    "單一軌跡的持續性估計不含不確定性",
+    "D-135：抽幀時持續性改在全部儲存幀上串流計算；串流失敗則標 limited；真實 mdtraj 串流待 CI"
    ],
    "tests": [
     {
@@ -1313,6 +1339,11 @@
      "file": "tests/test_extended_analysis.py",
      "type": "real_engine",
      "ci_job": "ci.yml:openmm-stack"
+    },
+    {
+     "file": "tests/test_analysis_resolution.py",
+     "type": "unit",
+     "ci_job": "ci.yml:pure-python"
     }
    ],
    "states": {
@@ -1782,6 +1813,88 @@
    "benchmark_scope": "none",
    "released_installer": "v0.1.0a17 (older code)",
    "released_installer_note": "a17 含較舊版本：9/9 個實作檔存在於 a17，7 個與 main 相同；main 的差異未發行"
+  },
+  {
+   "id": "analysis_cache",
+   "feature": "分析快取指紋與原子替換（R4，D-135）",
+   "implementation": [
+    "md20/analysis/fingerprint.py::analysis_fingerprint",
+    "md20/analysis/fingerprint.py::reuse_decision",
+    "md20/workflow.py::Workflow._reuse_analysis_manifest"
+   ],
+   "supported_system_types": [
+    "一般軌跡分析（膜-only 分析仍用舊的 PASS 規則）"
+   ],
+   "restrictions": [
+    "analyse_run 每次重算整個 run 的分析；recompute_parts 只供參考",
+    "DCD 以頭尾雜湊辨識，中段改動且大小不變偵測不到"
+   ],
+   "tests": [
+    {
+     "file": "tests/test_analysis_fingerprint.py",
+     "type": "unit",
+     "ci_job": "ci.yml:pure-python"
+    },
+    {
+     "file": "tests/test_analysis_run_wiring.py",
+     "type": "synthetic",
+     "ci_job": "ci.yml:pure-python"
+    }
+   ],
+   "states": {
+    "implemented": "yes",
+    "synthetic_tested": "yes",
+    "real_engine_tested": "no",
+    "scientifically_benchmarked": "none"
+   },
+   "last_known_result": {
+    "status": "unverified",
+    "commit": "-",
+    "evidence_url": "",
+    "basis": "只有容器純 Python 測試；尚無 CI 結果",
+    "changed_since_evidence": []
+   },
+   "benchmark_scope": "none",
+   "released_installer": "unreleased (main only)",
+   "released_installer_note": "D-13x，2026-11-07 新增"
+  },
+  {
+   "id": "autonomy_ledger",
+   "feature": "有界自主行動帳本（R8，D-137）",
+   "implementation": [
+    "md20/autonomy/controller.py",
+    "md20/autonomy/ledger.py"
+   ],
+   "supported_system_types": [
+    "補窗、延長、加重複、重新分析的提案"
+   ],
+   "restrictions": [
+    "預設只提建議：沒有使用者核准的計算預算與政策檔就不執行任何動作",
+    "尚未接入 binding／GUI 執行路徑"
+   ],
+   "tests": [
+    {
+     "file": "tests/test_autonomy.py",
+     "type": "unit",
+     "ci_job": "ci.yml:pure-python"
+    }
+   ],
+   "states": {
+    "implemented": "yes",
+    "synthetic_tested": "yes",
+    "real_engine_tested": "no",
+    "scientifically_benchmarked": "none"
+   },
+   "last_known_result": {
+    "status": "unverified",
+    "commit": "-",
+    "evidence_url": "",
+    "basis": "只有容器純 Python 測試；尚無 CI 結果",
+    "changed_since_evidence": []
+   },
+   "benchmark_scope": "none",
+   "released_installer": "unreleased (main only)",
+   "released_installer_note": "D-13x，2026-11-07 新增"
   }
  ]
 }

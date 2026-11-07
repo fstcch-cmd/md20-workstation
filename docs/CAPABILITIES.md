@@ -84,6 +84,8 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 | [授權第 2–3 層：簽章授權驗證、機器碼、等級／功能／席次、撤銷清單、評估版浮水印、輸出授權編號（D-125、D-127、D-128）](#licence_l2_l3_verification) | yes | yes | no | none | unreleased (main only) | stale |
 | [授權第 4 層：發行版 Cython＋AES-256-GCM（D-125 設計）](#licence_l4_distribution_protection) | no | no | no | none | unreleased (main only) | unverified |
 | [安裝程式（Windows install.ps1、macOS install.sh、環境檔、啟動檔、doctor）](#installer) | yes | yes | partial | none | v0.1.0a17 (older code) | stale |
+| [分析快取指紋與原子替換（R4，D-135）](#analysis_cache) | yes | yes | no | none | unreleased (main only) | unverified |
+| [有界自主行動帳本（R8，D-137）](#autonomy_ledger) | yes | yes | no | none | unreleased (main only) | unverified |
 
 <a id="docking_vina"></a>
 ## 分子對接（AutoDock Vina：independent／simultaneous、盒子、redocking、拒絕代碼）
@@ -281,14 +283,15 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 
 `metal_bonded_zinc`
 
-**實作**：`md20/build/metal.py::bonded_metal_terms`、`md20/build/metal.py::add_metal_forces`
+**實作**：`md20/build/metal.py::bonded_metal_terms`、`md20/build/metal.py::add_metal_forces`、`md20/build/metal.py::site_waters_to_add`、`md20/build/metal.py::site_water_ligand_gate`、`md20/build/receptor.py::metal_site_water_lines`
 
 **支援的系統類型**：CA II（3KS3）型 Zn–His3 位點（唯一真實測試過的案例）
 
 **限制**：
-- 目前在 heavy-metal CI 失敗：HIS119:ND1–Zn 平均 2.324 Å 對 r0 2.02 Å，偏差 0.0304 nm 超過 0.03 nm 門檻（580cbff）；另行修復中，不得放寬門檻或換判定
+- 580cbff／58d81bc 在 heavy-metal CI 失敗（58d81bc：HIS119:ND1 2.36 Å 對 r0 2.02 Å；GLU106 OE1 塌陷到 Zn 1.74 Å）。D-133 改為保留晶體配位水作第四個鍵結配位（模型變更，使用者授權），門檻未放寬；新模型尚無 CI 結果
 - 電荷沿用力場；未擬合的諧和鍵/角
 - 不得因此重新分類為基礎設施問題：這是科學／模型失敗
+- 鋅水以中性 TIP3P 表示，未提供 OH⁻ 模型；配體佔據配位水位置時 NEEDS_HUMAN
 
 **測試**：
 
@@ -296,10 +299,11 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 |---|---|---|
 | `tests/test_metal.py` | unit | `ci.yml:pure-python` |
 | `tests/test_metal_integration.py` | real_engine | `ci.yml:heavy[metal]` |
+| `tests/test_metal_site_water.py` | unit | `ci.yml:pure-python` |
 
 **狀態**：implemented=`yes`｜synthetic_tested=`yes`｜real_engine_tested=`failing`｜scientifically_benchmarked=`none`｜released_installer=`v0.1.0a17`
 
-**最後已知結果**：`fail`，commit `580cbff`，證據 https://github.com/fstcch-cmd/md20-workstation/actions/runs/42374500293。依據：heavy[metal] 在 580cbff 失敗（test_bonded_zinc_ca2）
+**最後已知結果**：`fail`，commit `580cbff`，證據 https://github.com/fstcch-cmd/md20-workstation/actions/runs/42374500293。依據：heavy[metal] 在 580cbff 與 58d81bc 失敗（test_bonded_zinc_ca2）；D-133 修正後待 CI
 
 **benchmark 範圍**：none
 
@@ -495,12 +499,12 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 
 `replicas`
 
-**實作**：`md20/engine/replicas.py::run_replicas`、`md20/engine/replica_plan.py::plan_replicas`、`md20/workflow.py::Workflow.analyse`
+**實作**：`md20/engine/replicas.py::run_replicas`、`md20/engine/replica_plan.py::plan_replicas`、`md20/workflow.py::Workflow.analyse`、`md20/analysis/replica_set.py::aggregate_replica_set`、`md20/report/replica_section.py`
 
 **支援的系統類型**：任何 MD 工作流程（SMD／傘狀採樣不隨重複數變）
 
 **限制**：
-- 分析與報告的跨重複彙總尚未完成（D-130 待做）：Workflow.analyse 目前只讀第一條（run_ids[0]）；只有結合自由能跨重複彙總（D-96）
+- D-130：Workflow.analyse 分析每一條重複並彙總（mean／SD／t 區間、k/n；n=1 不給重複間不確定性）；ΔRMSF 殘基 CI、水合、DSSP、PCA 盆地比例、DCCM、tICA/MSM、膜指標仍只用代表重複；真實 mdtraj 路徑待 CI
 - 重複計畫與預設 3 條（D-131）合入 main 後尚未有 CI 結果
 - 每條從同一個建好的系統開始、各自 seed（2026+1000×條序）；不是從同一平衡結構分出
 
@@ -510,6 +514,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 |---|---|---|
 | `tests/test_queue_replicas.py` | unit | `ci.yml:pure-python` |
 | `tests/test_replica_plan.py` | unit | `ci.yml:pure-python` |
+| `tests/test_replica_analysis.py` | synthetic | `ci.yml:pure-python` |
 
 **狀態**：implemented=`partial`｜synthetic_tested=`yes`｜real_engine_tested=`no`｜scientifically_benchmarked=`none`｜released_installer=`v0.1.0a17 (older code)`
 
@@ -621,13 +626,14 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 
 `assessment`
 
-**實作**：`md20/sampling/assessment.py::assess_pmf`、`md20/sampling/assessment.py::eligibility_of`
+**實作**：`md20/sampling/assessment.py::assess_pmf`、`md20/sampling/assessment.py::eligibility_of`、`md20/sampling/assessment.py::claim_status`
 
 **支援的系統類型**：任何有傘狀採樣窗口的 PMF 結果
 
 **限制**：
 - 門檻為保守啟發式，未對外部資料校準
 - 沒有專屬真實引擎測試：run_binding 寫入評估的路徑只在全流程間接走過，但測試沒有斷言它
+- D-134：證據矩陣、圖說、比較、GUI 讀同一份 claim 評估；舊版結果需重新分析才可能 supported
 
 **測試**：
 
@@ -635,6 +641,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 |---|---|---|
 | `tests/test_assessment.py` | synthetic | `ci.yml:pure-python` |
 | `tests/test_pmf_diagnostics.py` | unit | `ci.yml:pure-python` |
+| `tests/test_evidence_assessment.py` | unit | `ci.yml:pure-python` |
 
 **狀態**：implemented=`yes`｜synthetic_tested=`yes`｜real_engine_tested=`no`｜scientifically_benchmarked=`none`｜released_installer=`unreleased (main only)`
 
@@ -649,7 +656,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 
 `interactions_persistence`
 
-**實作**：`md20/analysis/interactions.py::fingerprint`、`md20/analysis/persistence.py::persistence_for_runs`、`md20/analysis/extended.py`
+**實作**：`md20/analysis/interactions.py::fingerprint`、`md20/analysis/persistence.py::persistence_for_runs`、`md20/analysis/extended.py`、`md20/analysis/persistence.py::EventAccumulator`、`md20/analysis/stream.py::stream_production_persistence`
 
 **支援的系統類型**：蛋白–小分子／胜肽軌跡（有氫與無氫拓撲）
 
@@ -657,6 +664,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 - 配體電荷未知時鹽橋標『帶電接近，配體電荷未知』，不當作中性
 - 水橋在無水軌跡時標不可用
 - 單一軌跡的持續性估計不含不確定性
+- D-135：抽幀時持續性改在全部儲存幀上串流計算；串流失敗則標 limited；真實 mdtraj 串流待 CI
 
 **測試**：
 
@@ -666,6 +674,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 | `tests/test_interactions_report.py` | synthetic | `ci.yml:pure-python` |
 | `tests/test_extended_fingerprint_wiring.py` | unit | `ci.yml:pure-python` |
 | `tests/test_extended_analysis.py` | real_engine | `ci.yml:openmm-stack` |
+| `tests/test_analysis_resolution.py` | unit | `ci.yml:pure-python` |
 
 **狀態**：implemented=`yes`｜synthetic_tested=`yes`｜real_engine_tested=`partial`｜scientifically_benchmarked=`none`｜released_installer=`v0.1.0a17 (older code)`
 
@@ -917,3 +926,58 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 **benchmark 範圍**：none
 
 **已發行安裝程式**：v0.1.0a17 (older code)（a17 含較舊版本：9/9 個實作檔存在於 a17，7 個與 main 相同；main 的差異未發行）
+
+<a id="analysis_cache"></a>
+## 分析快取指紋與原子替換（R4，D-135）
+
+`analysis_cache`
+
+**實作**：`md20/analysis/fingerprint.py::analysis_fingerprint`、`md20/analysis/fingerprint.py::reuse_decision`、`md20/workflow.py::Workflow._reuse_analysis_manifest`
+
+**支援的系統類型**：一般軌跡分析（膜-only 分析仍用舊的 PASS 規則）
+
+**限制**：
+- analyse_run 每次重算整個 run 的分析；recompute_parts 只供參考
+- DCD 以頭尾雜湊辨識，中段改動且大小不變偵測不到
+
+**測試**：
+
+| 檔案 | 類型 | CI job |
+|---|---|---|
+| `tests/test_analysis_fingerprint.py` | unit | `ci.yml:pure-python` |
+| `tests/test_analysis_run_wiring.py` | synthetic | `ci.yml:pure-python` |
+
+**狀態**：implemented=`yes`｜synthetic_tested=`yes`｜real_engine_tested=`no`｜scientifically_benchmarked=`none`｜released_installer=`unreleased (main only)`
+
+**最後已知結果**：`unverified`，commit `-`，證據 。依據：只有容器純 Python 測試；尚無 CI 結果
+
+**benchmark 範圍**：none
+
+**已發行安裝程式**：unreleased (main only)（D-13x，2026-11-07 新增）
+
+<a id="autonomy_ledger"></a>
+## 有界自主行動帳本（R8，D-137）
+
+`autonomy_ledger`
+
+**實作**：`md20/autonomy/controller.py`、`md20/autonomy/ledger.py`
+
+**支援的系統類型**：補窗、延長、加重複、重新分析的提案
+
+**限制**：
+- 預設只提建議：沒有使用者核准的計算預算與政策檔就不執行任何動作
+- 尚未接入 binding／GUI 執行路徑
+
+**測試**：
+
+| 檔案 | 類型 | CI job |
+|---|---|---|
+| `tests/test_autonomy.py` | unit | `ci.yml:pure-python` |
+
+**狀態**：implemented=`yes`｜synthetic_tested=`yes`｜real_engine_tested=`no`｜scientifically_benchmarked=`none`｜released_installer=`unreleased (main only)`
+
+**最後已知結果**：`unverified`，commit `-`，證據 。依據：只有容器純 Python 測試；尚無 CI 結果
+
+**benchmark 範圍**：none
+
+**已發行安裝程式**：unreleased (main only)（D-13x，2026-11-07 新增）
