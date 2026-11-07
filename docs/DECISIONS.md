@@ -20,7 +20,8 @@
   - 更正程式註解與決策日誌文字中 padding 的意義；`docs/specs/solvent_box.md` 加更正（保留原文）。
 - 成本（照實說）：GRP 類幾何 padding 2.0 → 4.2 nm，盒子約 237 → 541 nm³（×2.3），MD 與 SMD 的算力同比例增加；小分子埋在口袋（3PTB 類）多半 PASS、不變。
 - 被否決：把固定規則改成更大的常數（仍與 SMD 規則脫鉤，小分子會白白多算）；SMD 前自動以更大盒子重新溶劑化（等於新增步驟，且平衡過的結構要重新平衡）；縮短胜肽的拉離距離（改科學模型，未獲授權）；放寬 SMD 的安全距離（同上）。
-- **另一個需要使用者決定的問題（未改）**：既然 padding 是溶質到影像的距離，classroom／teaching 預設 0.8 nm 代表蛋白與自己的影像只隔 0.8 nm，**小於非鍵截斷 1.0 nm**——蛋白會直接與自己的影像有實空間作用。research 1.0 nm 剛好等於截斷。常見做法（GROMACS `-d 1.0` ＝到盒邊 1.0 ＝影像 2.0 nm）約等於 OpenMM padding 2.0。提高預設會讓所有案例的水變多（算力約 ×1.5–2）；屬科學設定與成本取捨，等使用者決定。`MIN_PADDING_NM` 的說明文字目前也以「< 0.8 才會碰到影像」為前提，一併待決。
+- **使用者決定（11/07 16:30）：padding 預設全部 2.0 nm**（選項「全部 2.0（等同 GROMACS -d 1.0）」）。實作：`TIER_PADDING_NM` classroom／teaching／research 全部 2.0；篩 pose 的短 MD 也用同一個值（原 `min(pad, 0.8)`）；下限 `MIN_PADDING_NM` 0.6 → 1.0，且以 `max(MIN_PADDING_NM, 非鍵截斷)` 判斷（小於截斷＝蛋白直接與影像作用 → NEEDS_HUMAN）；顧問建議值 2.0、< 1.0 為 error、1.0–2.0 為 warning、結合計算為 info（建模會依 SMD 規則加大）；顧問的原子數估算改用 OpenMM 盒寬公式（2R + padding，原為 2(R + padding)）；兩個論文驗證案例拿掉明寫的 1.0（非論文設定）改用預設；報告的預設值 0.8 → 2.0。CI 測試仍明寫 1.0 以下的值者改為 ≥ 1.0（`test_full_workflow_3ptb` 等），避免 CI 逾時。代價：一般案例水約 ×2、MD 時間同比例增加。
+- 原文：**另一個需要使用者決定的問題（未改）**：既然 padding 是溶質到影像的距離，classroom／teaching 預設 0.8 nm 代表蛋白與自己的影像只隔 0.8 nm，**小於非鍵截斷 1.0 nm**——蛋白會直接與自己的影像有實空間作用。research 1.0 nm 剛好等於截斷。常見做法（GROMACS `-d 1.0` ＝到盒邊 1.0 ＝影像 2.0 nm）約等於 OpenMM padding 2.0。提高預設會讓所有案例的水變多（算力約 ×1.5–2）；屬科學設定與成本取捨，等使用者決定。`MIN_PADDING_NM` 的說明文字目前也以「< 0.8 才會碰到影像」為前提，一併待決。
 - 測試：`tests/test_smd_box_sizing.py`（12 項：OpenMM 盒寬公式的最小且足夠 padding、padding 只加一次、GRP 類幾何舊規則失敗而新規則通過、埋藏小分子維持原 padding、無 anchor 擋下、anchor 規則與原 select_groups 相同、只有要拉離的案例才套用）；`test_workflow_integration.py::test_full_workflow_3ptb` 加斷言（真實 OpenMM 建模出現「box size for SMD」閘門且 PASS／AUTO_FIXED、SMD 沒有遇到水盒太小）。容器 710 passed、49 skipped。
 - 未決：GRP 教學二的真實重跑（需使用者在筆電執行；盒子變大，時間會變長）；漂移餘裕 0.5 nm 是否足夠，待真實案例的 SMD 起點紀錄驗證。
 

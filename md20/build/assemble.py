@@ -13,7 +13,7 @@ from pathlib import Path
 import math
 import numpy as np
 
-MIN_PADDING_NM = 0.6      # below this the protein sees its own image inside the 1.0 nm cutoff — never allowed
+MIN_PADDING_NM = 1.0      # D-99: padding = solute-to-image distance; below the 1.0 nm cutoff the protein sees its image
 
 from ..util import now_iso, DecisionLog, atomic_write_json, sha256_file
 from .gates import Gate, GateReport, PASS, AUTO_FIXED, NEEDS_HUMAN
@@ -425,11 +425,13 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
         # volume for the same image distance), and padding no larger than the solvation shell needs.
         # D-99 correction: OpenMM adds padding ONCE (width = 2R + padding), so padding is the solute-to-own-image
         # distance, not the solute-to-edge distance (earlier comments said "2×padding" / "to the box edge").
-        if padding_nm < MIN_PADDING_NM:
+        if padding_nm < max(MIN_PADDING_NM, nonbonded_cutoff_nm):
+            lim = max(MIN_PADDING_NM, nonbonded_cutoff_nm)
             report.add(Gate("padding", NEEDS_HUMAN,
-                            f"padding {padding_nm} nm 小於 {MIN_PADDING_NM} nm：蛋白會與自己的週期影像在截斷半徑（1.0 nm）內互相作用，"
-                            "溶劑化殼層也不完整；省下的算力會換來錯的結果。",
-                            options=[f"md.padding_nm ≥ {MIN_PADDING_NM}（教學 0.8、研究 1.0）", "md.solvent: gbn2（真的要省算力時用隱式溶劑）"]))
+                            f"padding {padding_nm} nm 小於非鍵截斷 {lim} nm：OpenMM 的 padding 是溶質到自己週期影像的距離（只加一次），"
+                            "比截斷小時蛋白會直接與自己的影像作用；省下的算力會換來錯的結果。",
+                            options=["md.padding_nm: 2.0（預設，等同 GROMACS -d 1.0）", f"md.padding_nm ≥ {lim}（最低）",
+                                     "md.solvent: gbn2（真的要省算力時用隱式溶劑）"]))
             res = BuildResult(status=NEEDS_HUMAN, gates=report.to_dict(), solvent=solvent)
             atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")
             return res

@@ -323,7 +323,7 @@ def actual_values(wf) -> dict:
          "docking_mode": dk.get("mode", "independent"), "exhaustiveness": dk.get("exhaustiveness", 16), "n_poses": dk.get("n_poses", 9),
          "binding": bool(b.get("enabled"))}
     from ..workflow import TIER_PADDING_NM
-    v["padding_nm"] = md.get("padding_nm") if md.get("padding_nm") is not None else TIER_PADDING_NM.get(tier, 0.8)
+    v["padding_nm"] = md.get("padding_nm") if md.get("padding_nm") is not None else TIER_PADDING_NM.get(tier, 2.0)
     ions = md.get("ions") or {}
     v.update({"ion_positive": ions.get("positive", "Na+"), "ion_negative": ions.get("negative", "Cl-"),
               "ion_concentration_molar": ions.get("concentration_molar", md.get("ionic_strength_molar", 0.15)),

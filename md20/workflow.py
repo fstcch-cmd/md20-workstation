@@ -44,7 +44,9 @@ from .util import atomic_write_json, load_json, now_iso, ensure_dir, safe_name
 
 SYSTEM_MODES = ("apo", "docked_single", "docked_multi")
 # minimum protein–box-edge distance when md.padding_nm is not given (rhombic dodecahedron box)
-TIER_PADDING_NM = {"classroom": 0.8, "teaching": 0.8, "research": 1.0}
+# D-99 (user 11/07): padding is the solute-to-own-image distance in OpenMM (added once); 2.0 nm everywhere
+# (= GROMACS -d 1.0, the common literature setting).  Before: 0.8 / 0.8 / 1.0 — below / at the 1.0 nm cut-off.
+TIER_PADDING_NM = {"classroom": 2.0, "teaching": 2.0, "research": 2.0}
 
 
 
@@ -1272,7 +1274,7 @@ class Workflow:
         md = self.cfg.get("md", {})
         tier = md.get("tier", "teaching")
         if md.get("padding_nm") is None:
-            pad = TIER_PADDING_NM.get(tier, 0.8)
+            pad = TIER_PADDING_NM.get(tier, 2.0)
             if not getattr(self, "_pad_default_logged", False):
                 self.dec.record("build.box", "padding_nm", pad,
                                 f"未指定 padding：{tier} tier 預設 {pad} nm（溶質到自己週期影像的最小距離——OpenMM 的 padding 只加一次，"
@@ -1282,7 +1284,7 @@ class Workflow:
         else:
             pad = float(md["padding_nm"])
         if screen:
-            return min(pad, 0.8)          # the short pose screen only asks whether the pose falls apart
+            return pad                    # D-99: the short pose screen uses the same image distance (user: all 2.0)
         if (self.cfg.get("binding") or {}).get("enabled") and ligands and not screen:
             bc = self.cfg["binding"].get("config") or {}
             need = float(bc.get("pull_distance_nm", bc.get("pull_distance", 1.5))) + 0.5

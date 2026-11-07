@@ -57,20 +57,20 @@ def test_no_recommendation_blocks_pose_selection(tmp_path):
 
 
 def test_binding_raises_padding(tmp_path):
+    """D-99: tier default 2.0 nm everywhere (solute-to-image distance); the binding floor (pull + 0.5, clamped
+    1.5–2.5) stays as a floor; the real size of a pulled case is set at build time by the SMD rule."""
     wf = _wf(tmp_path)
-    assert wf._padding_nm(["BEN"]) >= 1.5
-    assert wf._padding_nm([]) == 0.8                       # apo is never pulled from; teaching tier default 0.8 nm
-    assert wf._padding_nm(["BEN"], screen=True) == 0.8     # nor is the short-MD pose screen
-    wf.cfg["binding"]["config"] = {"pull_distance_nm": 1.8}   # the key binding actually uses
-    assert wf._padding_nm(["BEN"]) == 2.3
-    wf.cfg["binding"]["config"] = {"pull_distance_nm": 0.6}
-    assert wf._padding_nm(["BEN"]) == 1.5                  # floor
+    assert wf._padding_nm([]) == 2.0                       # teaching tier default
+    assert wf._padding_nm(["BEN"], screen=True) == 2.0     # the pose screen uses the same image distance
+    assert wf._padding_nm(["BEN"]) == 2.0
+    wf.cfg["binding"]["config"] = {"pull_distance_nm": 2.5}
+    assert wf._padding_nm(["BEN"]) == 2.5                  # floor above the default
     wf.cfg["binding"]["enabled"] = False
-    assert wf._padding_nm(["BEN"]) == 0.8
+    assert wf._padding_nm(["BEN"]) == 2.0
     wf.cfg["md"]["tier"] = "research"
-    assert wf._padding_nm([]) == 1.0
+    assert wf._padding_nm([]) == 2.0
     wf.cfg["md"]["padding_nm"] = 1.2                       # explicit value always wins
-    assert wf._padding_nm([]) == 1.2 and wf._padding_nm(["BEN"], screen=True) == 0.8
+    assert wf._padding_nm([]) == 1.2 and wf._padding_nm(["BEN"], screen=True) == 1.2
     assert any(r["what"] == "padding_nm" and "預設" in r["why"] for r in wf.dec.read())
 
 

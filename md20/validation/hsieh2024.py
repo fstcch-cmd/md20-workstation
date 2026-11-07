@@ -70,7 +70,7 @@ def workflow_config(pdb_id: str = "1VKX", *, tier: str = "classroom") -> dict:
         "docking": {"mode": "simultaneous", "exhaustiveness": 32 if tier == "research" else CLASSROOM_EXHAUSTIVENESS,
                     "n_poses": 9, "seed": 2026},
         "pose_choices": {},
-        "md": {"systems": ["apo", "docked_multi"], "tier": tier, "replicas": 1, "padding_nm": 1.0},
+        "md": {"systems": ["apo", "docked_multi"], "tier": tier, "replicas": 1},           # padding: tier default (D-99)
         # the most abundant metabolite; a weak, polar binder — expect a shallow PMF
         "binding": {"enabled": False, "ligands": ["PGA"], "config": {}},
         "validation": {"case": "hsieh2024", "paper": PAPER},

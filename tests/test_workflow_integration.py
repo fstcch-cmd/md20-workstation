@@ -23,7 +23,7 @@ def test_full_workflow_3ptb(pdb_3ptb, tmp_path):
     cfg["receptor"] = {"file": str(pdb_3ptb)}
     cfg["docking"].update({"exhaustiveness": 4, "n_poses": 5})
     short = {"length_ps": 6.0, "checkpoint_interval_ps": 3.0, "report_interval_ps": 0.2, "trajectory_interval_ps": 0.5, "accept": {}}
-    cfg["md"] = {"systems": ["apo", "docked_single"], "tier": "classroom", "production_ns": 0.01, "padding_nm": 0.8, "replicas": 1,
+    cfg["md"] = {"systems": ["apo", "docked_single"], "tier": "classroom", "production_ns": 0.01, "padding_nm": 1.0, "replicas": 1,
                  "stage_overrides": {"minimize": {"max_iterations": 300}, "nvt": short, "npt": short,
                                      "production": {**short, "length_ps": 10.0, "checkpoint_interval_ps": 5.0}}}
     cfg["binding"] = {"enabled": True, "ligands": ["BEN"],
@@ -87,7 +87,7 @@ def test_pose_md_screen_3ptb(pdb_3ptb, tmp_path):
                            "pose_md_screen": {"enabled": True, "top_n": 2, "nvt_ps": 2.0, "npt_ps": 2.0,
                                               "production_ps": 10.0, "frame_interval_ps": 0.5}})
     short = {"length_ps": 4.0, "checkpoint_interval_ps": 2.0, "report_interval_ps": 0.2, "trajectory_interval_ps": 0.5, "accept": {}}
-    cfg["md"] = {"systems": ["docked_single"], "tier": "classroom", "production_ns": 0.006, "padding_nm": 0.8, "replicas": 1,
+    cfg["md"] = {"systems": ["docked_single"], "tier": "classroom", "production_ns": 0.006, "padding_nm": 1.0, "replicas": 1,
                  "stage_overrides": {"minimize": {"max_iterations": 300}, "nvt": short, "npt": short,
                                      "production": {**short, "length_ps": 6.0, "checkpoint_interval_ps": 3.0}}}
     cfg["binding"] = {"enabled": False}

@@ -347,26 +347,17 @@ def _recommend_raw(f: CaseFeatures, goal: str) -> dict[str, dict]:
                           "명시적 물은 수소 결합 네트워크와 이온 차폐를 제대로 나타냅니다. 결합과 안정성 분석에서는 표준 "
                           "선택입니다.")
     want_binding = f.binding or goal in ("binding", "publication")
-    pad = 1.2 if want_binding else (1.0 if tier == "research" else 0.8)
-    o["padding_nm"] = {0.8: _r(0.8, "蛋白到盒邊留 0.8 nm，搭配 1.0 nm 截斷距離就不會和自己的鏡像作用，水分子也最少。",
-                               "0.8 nm from protein to box edge, with a 1.0 nm cut-off, avoids interaction with the periodic "
-                               "image while keeping the fewest waters.",
-                               "タンパク質から箱の端まで 0.8 nm あれば、カットオフ 1.0 nm と合わせて自分の周期イメージとの相互作用を"
-                               "避けられ、水分子も最小限で済みます。",
-                               "단백질에서 상자 가장자리까지 0.8 nm를 두면 1.0 nm 컷오프와 함께 자기 주기 이미지와의 상호작용을 "
-                               "피하고 물 분자도 가장 적습니다."),
-                       1.0: _r(1.0, "研究等級留 1.0 nm，蛋白構形改變時仍與鏡像保持足夠距離。",
-                               "The research tier keeps 1.0 nm so that a conformational change cannot bring the protein "
-                               "close to its image.",
-                               "研究レベルでは 1.0 nm を取り、構造が変化してもタンパク質が周期イメージに近づかないようにします。",
-                               "연구 등급은 1.0 nm를 두어 구조가 바뀌어도 단백질이 주기 이미지에 가까워지지 않게 합니다."),
-                       1.2: _r(1.2, "計算結合強度時要把配體拉出口袋 1.5 nm 以上。邊距要容得下這段拉離路徑，否則配體會靠近鏡像蛋白。",
-                               "Binding calculations pull the ligand 1.5 nm or more out of the pocket. The padding has to "
-                               "hold that path, or the ligand comes close to the periodic image of the protein.",
-                               "結合の強さの計算ではリガンドをポケットから 1.5 nm 以上引き離します。余白がこの経路を収められないと、"
-                               "リガンドがタンパク質の周期イメージに近づきます。",
-                               "결합 세기 계산에서는 리간드를 포켓에서 1.5 nm 이상 당겨 냅니다. 여백이 이 경로를 담지 못하면 "
-                               "리간드가 단백질의 주기 이미지에 가까워집니다.")}[pad]
+    o["padding_nm"] = _r(2.0, "蛋白和自己的週期鏡像至少隔 2.0 nm（OpenMM 的 padding 是到鏡像的距離，只加一次；等同 GROMACS 的 -d 1.0），"
+                            "遠大於 1.0 nm 截斷距離。要計算結合強度時，建模會依拉離路徑自動再加大。",
+                         "The protein stays at least 2.0 nm from its own periodic image (in OpenMM the padding is the distance "
+                         "to the image, added once; the same as GROMACS -d 1.0), well beyond the 1.0 nm cut-off. For binding "
+                         "calculations the build enlarges the box further to fit the pulling path.",
+                         "タンパク質と自分の周期イメージの間を 2.0 nm 以上空けます（OpenMM の余白はイメージまでの距離で、一度だけ"
+                         "加わります。GROMACS の -d 1.0 と同じ）。カットオフ 1.0 nm より十分に大きく、結合の強さを計算するときは"
+                         "引き離し経路に合わせて自動でさらに広げます。",
+                         "단백질과 자기 주기 이미지 사이를 2.0 nm 이상 둡니다(OpenMM의 여백은 이미지까지의 거리이며 한 번만 "
+                         "더해집니다. GROMACS의 -d 1.0과 같습니다). 1.0 nm 컷오프보다 충분히 크며, 결합 세기를 계산할 때는 "
+                         "당김 경로에 맞춰 자동으로 더 넓힙니다.")
     o["box_shape"] = _r("dodecahedron", "邊距相同時，菱形十二面體的水比立方體少約 29 %，跑得比較快。",
                         "A rhombic dodecahedron holds about 29 % less water than a cube with the same padding, so it runs faster.",
                         "余白が同じなら、菱形十二面体は立方体より水が約 29 % 少なく、計算が速くなります。",
@@ -810,19 +801,30 @@ def check(values: dict, f: CaseFeatures, *, goal: str = "teaching", budget_hours
                       "正味電荷を中和しないと、PME が一様な背景電荷を加えるため、電荷を持つリガンドの結合エネルギーに偏りが出ます。",
                       "알짜 전하를 중화하지 않으면 PME가 균일 배경 전하를 더해 전하를 띤 리간드의 결합 에너지가 치우칩니다.", True))
     pad = float(v["padding_nm"])
-    if explicit and pad < 0.8:
-        out.append(_i("error", "padding_nm", f"邊距 {pad:g} nm 小於 0.8 nm，蛋白會和自己的鏡像作用（截斷距離 1.0 nm）。",
-                      f"A padding of {pad:g} nm is below 0.8 nm, so the protein interacts with its own image (1.0 nm cut-off).",
-                      f"余白 {pad:g} nm は 0.8 nm 未満のため、タンパク質が自分の周期イメージと相互作用します（カットオフ 1.0 nm）。",
-                      f"여백 {pad:g} nm는 0.8 nm보다 작아 단백질이 자기 주기 이미지와 상호작용합니다(컷오프 1.0 nm).", 0.8))
-    if v["binding"] and pad < 1.2:
-        out.append(_i("warning", "padding_nm", "結合強度計算要把配體拉出口袋。邊距不夠時，拉離路徑會靠近鏡像蛋白。",
-                      "Binding calculations pull the ligand out of the pocket. With this padding the path comes close to "
-                      "the periodic image.",
-                      "結合の強さの計算ではリガンドをポケットから引き離します。余白が足りないと、引き離し経路が周期イメージの"
-                      "タンパク質に近づきます。",
-                      "결합 세기 계산에서는 리간드를 포켓 밖으로 당깁니다. 여백이 부족하면 당김 경로가 주기 이미지 단백질에 "
-                      "가까워집니다.", 1.2))
+    if explicit and pad < 1.0:
+        out.append(_i("error", "padding_nm", f"邊距 {pad:g} nm 小於截斷距離 1.0 nm：OpenMM 的邊距是蛋白到自己鏡像的距離，蛋白會直接和鏡像作用。",
+                      f"A padding of {pad:g} nm is below the 1.0 nm cut-off: in OpenMM the padding is the distance from the "
+                      "protein to its own image, so the protein interacts with its image.",
+                      f"余白 {pad:g} nm はカットオフ 1.0 nm 未満です。OpenMM の余白はタンパク質から自分のイメージまでの距離なので、"
+                      "タンパク質がイメージと直接相互作用します。",
+                      f"여백 {pad:g} nm는 컷오프 1.0 nm보다 작습니다. OpenMM의 여백은 단백질에서 자기 이미지까지의 거리라서 "
+                      "단백질이 이미지와 직접 상호작용합니다.", 2.0))
+    elif explicit and pad < 2.0:
+        out.append(_i("warning", "padding_nm", f"邊距 {pad:g} nm 低於預設 2.0 nm：蛋白與鏡像之間只有 {pad:g} nm，構形改變時可能靠近截斷距離。",
+                      f"A padding of {pad:g} nm is below the default 2.0 nm: only {pad:g} nm separates the protein from its "
+                      "image, which a conformational change can bring close to the cut-off.",
+                      f"余白 {pad:g} nm は既定の 2.0 nm 未満です。タンパク質とイメージの間は {pad:g} nm しかなく、構造変化で"
+                      "カットオフに近づくことがあります。",
+                      f"여백 {pad:g} nm는 기본값 2.0 nm보다 작습니다. 단백질과 이미지 사이가 {pad:g} nm뿐이라 구조가 바뀌면 "
+                      "컷오프에 가까워질 수 있습니다.", 2.0))
+    if v["binding"] and explicit:
+        out.append(_i("info", "padding_nm", "結合強度計算：建模時會依拉離路徑、配體大小與安全距離自動加大水盒（box size for SMD）。",
+                      "Binding calculation: the build enlarges the box to fit the pulling path, the ligand size and the safety "
+                      "margin (box size for SMD).",
+                      "結合の強さの計算：モデル構築時に、引き離し経路・リガンドの大きさ・安全距離に合わせて水ボックスを自動で"
+                      "広げます（box size for SMD）。",
+                      "결합 세기 계산: 모델 구축 때 당김 경로, 리간드 크기, 안전 거리에 맞춰 물 상자를 자동으로 넓힙니다"
+                      "(box size for SMD).", None))
     if v["binding"] and not explicit:
         out.append(_i("error", "solvent", "隱式溶劑沒有週期性水盒，不能做 SMD 與傘狀採樣。",
                       "Implicit solvent has no periodic box, so SMD and umbrella sampling are not possible.",
@@ -905,14 +907,14 @@ def check(values: dict, f: CaseFeatures, *, goal: str = "teaching", budget_hours
 
 
 # ----------------------------------------------------------------------------------- cost
-def system_atoms(f: CaseFeatures, padding_nm: float = 0.8, solvent: str = "explicit") -> int:
+def system_atoms(f: CaseFeatures, padding_nm: float = 2.0, solvent: str = "explicit") -> int:
     """Rough atom count of the solvated system (protein with hydrogens, water, ions)."""
     n = f.n_residues or 300
     protein = n * 16
     if solvent == "gbn2":
         return protein
     r_nm = 0.1 * 1.29 * 2.2 * n ** 0.38          # sphere radius ≈ 1.29·Rg, Rg ≈ 2.2·N^0.38 Å
-    edge = 2 * (r_nm + padding_nm)
+    edge = 2 * r_nm + padding_nm                   # OpenMM: box width = 2R + padding (padding added once; D-99)
     vol = 0.707 * edge ** 3                        # rhombic dodecahedron ≈ 0.707 a³
     water = max(0.0, vol - n * 0.135) * 33.4 * 3   # 33.4 waters nm⁻³, protein ≈ 0.135 nm³ per residue
     return int(protein + water)

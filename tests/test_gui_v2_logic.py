@@ -53,7 +53,7 @@ def test_teaching_cases_and_content_are_bilingual():
         assert cfg["confirm_before_md"] and cfg["md"]["tier"] == "classroom"
         assert cfg["validation"]["case"] == case
     c24, c25 = teaching_config("hsieh2024"), teaching_config("hsieh2025")
-    assert c24["docking"]["mode"] == "simultaneous" and len(c24["ligands"]) == 6 and c24["md"]["padding_nm"] == 1.0
+    assert c24["docking"]["mode"] == "simultaneous" and len(c24["ligands"]) == 6 and c24["md"].get("padding_nm") == 2.0   # D-99: advisor default 2.0
     assert c25["ligands"][0]["sequence"] == "GGGGGKP" and c25["md"]["restraints"] == "gentle"
     assert t("estimate_text", "en", total=1, md=1, bind=0, atoms=2, speed=3).startswith("About 1 h")
     for lang in ("zh", "ja", "ko"):
