@@ -21,14 +21,14 @@ def build_case(case: Case, *, receptor: Path | str, ligand_references: list[str 
                ligand_names: list[str] | None = None, peptide_policy: dict | None = None,
                exclude_chains: set[str] | None = None, metal_policy: dict | None = None, ligand_metal: str | None = None, accept_geometry: bool = False,
                metal_params: dict | None = None, solvent: str = "explicit", box_shape: str = "dodecahedron",
-               membrane: dict | None = None) -> dict:
+               membrane: dict | None = None, decisions=None) -> dict:
     """Build a case.
 
     `cocrystal_resnames[i]` (optional) names the HETATM residue whose coordinates are the pose for ligand i.
     `peptides`: [{"name", "sequence", "pose" (SDF/PDB, optional), "cocrystal_chain" (optional), "termini",
                   "target_location", "cpp_evidence", "cpp_override"}] — built with ff14SB on their own chain.
     """
-    decisions = case.project.decisions
+    decisions = decisions if decisions is not None else case.project.decisions   # D-96: workflow-scoped when given
     bdir = case.build_dir
     rec_in = case.import_input(receptor, "receptor")
     cocrystal = list(cocrystal_resnames or [])

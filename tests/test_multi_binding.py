@@ -20,9 +20,22 @@ def test_path_blocker_detects_ligand_on_exit_path():
     assert pull_path_blockers(lig.mean(0), lig, on_path, pull_distance_nm=1.5)[0]["reason"]   # undefined direction
 
 
-def _r(dpmf, err=None, dG=None, ligand=None, status="PASS"):
-    return {"status": status, "delta_pmf_kj_mol": dpmf, "delta_pmf_err_kj_mol": err, "dG_standard_kj_mol": dG,
-            "ligand": ligand}
+def _ok(dG):
+    """A qualified D-96 assessment (every required diagnostic passed)."""
+    return {"eligibility": {"delta_pmf_curve": True, "delta_pmf_path_specific": True, "dG_standard": dG is not None,
+                            "affinity_ranking": dG is not None}, "reasons": []}
+
+
+COND = {"cv": "com_distance_radial", "temperature_k": 300.0, "backbone_restraint_kj_mol_nm2": 100.0, "spectators": [],
+        "anchor": "automatic"}
+
+
+def _r(dpmf, err=None, dG=None, ligand=None, status="PASS", qualified=True):
+    r = {"status": status, "delta_pmf_kj_mol": dpmf, "delta_pmf_err_kj_mol": err, "dG_standard_kj_mol": dG,
+         "ligand": ligand}
+    if qualified:
+        r.update(assessment=_ok(dG), condition=dict(COND))
+    return r
 
 
 def test_compare_uses_dpmf_when_any_dG_withheld_and_applies_2sigma():
@@ -32,7 +45,8 @@ def test_compare_uses_dpmf_when_any_dG_withheld_and_applies_2sigma():
     assert c["quantity"].startswith("ΔΔPMF") and c["reference"] == "A"
     rows = {r["key"]: r for r in c["rows"]}
     assert "不可區分" in rows["B"]["verdict"]                  # 1.0 < 2·√2
-    assert "弱於參考" in rows["C"]["verdict"] and rows["C"]["delta"] == 10.0
+    assert "井深較淺" in rows["C"]["verdict"] and rows["C"]["delta"] == 10.0
+    assert c["status"] == "PATH_SPECIFIC" and "最強" not in str(c) and "strongest" not in str(c)
 
 
 def test_compare_dG_when_all_allowed_and_missing_errors_never_significant():
@@ -46,7 +60,7 @@ def test_compare_insufficient_and_co_occupancy():
            "multi:B": _r(10.0, 1.0, ligand="B", status="NEEDS_HUMAN")}
     out = compare_binding(res, contexts={"single": ["A"], "multi:docked_multi": ["multi:A", "multi:B"]})
     assert out["contexts"]["single"]["status"] == "INSUFFICIENT"
-    assert out["contexts"]["multi:docked_multi"]["status"] == "INSUFFICIENT"
+    assert out["contexts"]["multi:docked_multi"]["status"] == "DESCRIPTIVE"     # D-96: never ranked
     co = out["co_occupancy"][0]
     assert co["ligand"] == "A" and co["shift_kj_mol"] == 6.0 and co["significant"]
 
@@ -72,7 +86,8 @@ def test_workflow_multi_targets_and_comparison(tmp_path, monkeypatch):
         calls.append((ligand_resname, other_ligand_indices))
         d = {"L01": 30.0, "L02": 22.0}[ligand_resname] + (2.0 if other_ligand_indices else 0.0)
         return SimpleNamespace(status="PASS", caveats=[], pmf={}, smd={}, figures={}, delta_pmf_kj_mol=d,
-                               delta_pmf_err_kj_mol=0.8, dG_standard_kj_mol=None, dG_standard_kcal_mol=None)
+                               delta_pmf_err_kj_mol=0.8, dG_standard_kj_mol=None, dG_standard_kcal_mol=None,
+                               assessment=_ok(None), condition=dict(COND))
 
     monkeypatch.setattr(B, "run_binding", fake)
     built, runs = {}, {}
@@ -92,8 +107,8 @@ def test_workflow_multi_targets_and_comparison(tmp_path, monkeypatch):
     assert set(out) == {"A", "B", "multi:A", "multi:B"}
     assert ("L01", {"B": [20, 21]}) in calls and ("L02", {"A": [10, 11]}) in calls
     comp = wf.state()["steps"]["binding"]["comparison"]
-    assert comp["contexts"]["single"]["reference"] == "A"
-    assert comp["contexts"]["multi:docked_multi"]["reference"] == "multi:A"
+    assert comp["contexts"]["single"]["reference"] == "A" and comp["contexts"]["single"]["status"] == "PATH_SPECIFIC"
+    assert comp["contexts"]["multi:docked_multi"]["status"] == "DESCRIPTIVE"      # D-96: co-occupancy pulls not ranked
     assert {c["ligand"] for c in comp["co_occupancy"]} == {"A", "B"}
     from md20.report.workflow_report import _binding_section
     html = _binding_section(wf)
@@ -130,7 +145,7 @@ def test_aggregate_replicas_uses_larger_of_scatter_and_bootstrap():
     from md20.sampling.multi import aggregate_binding_replicas
     a = aggregate_binding_replicas([_rep(20.0, 0.5, -20.0, 0.5), _rep(26.0, 0.5, -24.0, 0.5, hs=1.5), _rep(23.0, 0.5, -22.0, 0.5)])
     assert a["delta_pmf"] == 23.0 and a["delta_pmf_err"] == pytest.approx(3.0 / np.sqrt(3), abs=1e-3)   # scatter dominates
-    assert a["dG"] == -22.0 and a["half_split"]["diff_kj_mol"] == 1.5 and "3 個獨立 replica" in a["why"]
+    assert a["dG"] == -22.0 and a["half_split"]["diff_kj_mol"] == 1.5 and "沒有起點紀錄" in a["why"] and a["n_independent_md_starts"] == 0
     b = aggregate_binding_replicas([_rep(20.0, 2.0, None), _rep(20.1, 2.0, -20.0)])
     assert b["dG"] is None and b["dG_withheld"] and b["delta_pmf_err"] == pytest.approx(np.hypot(2, 2) / 2, abs=1e-3)
 
@@ -146,7 +161,8 @@ def test_research_tier_needs_completed_replicas(tmp_path, monkeypatch):
         seen.append((str(start), config.seed, str(out_dir)))
         return SimpleNamespace(status="PASS", caveats=[], smd={}, figures={}, delta_pmf_kj_mol=25.0 + len(seen),
                                delta_pmf_err_kj_mol=0.4, dG_standard_kj_mol=-20.0 - len(seen), dG_err_kj_mol=0.5,
-                               dG_standard_kcal_mol=None, pmf={"half_split": {"diff_kj_mol": 0.5}, "r_min_nm": 0.4})
+                               dG_standard_kcal_mol=None, pmf={"half_split": {"diff_kj_mol": 0.5}, "r_min_nm": 0.4},
+                               assessment=_ok(-20.0), condition=dict(COND))
 
     monkeypatch.setattr(B, "run_binding", fake)
     out = {}
@@ -164,13 +180,14 @@ def test_research_tier_needs_completed_replicas(tmp_path, monkeypatch):
         seen.clear()
         out[n] = (wf.binding(runs, built, SimpleNamespace(name="CPU", properties={}))["BEN"], list(seen))
     r1, calls1 = out[1]
-    assert len(calls1) == 1 and r1["dG_standard_kj_mol"] is None and "實際完成 1" in r1["dG_withheld"]
+    assert len(calls1) == 1 and r1["dG_standard_kj_mol"] is None and "實際只有 1 個不同的 MD 起點" in r1["dG_withheld"]
     r3, calls3 = out[3]
     assert [c[1] for c in calls3] == [2026, 3026, 4026]                      # independent seeds
     from pathlib import Path
     assert [Path(c[0]).parts[-4] for c in calls3] == ["mdA", "mdB", "mdC"]   # from different MD replicas
     assert [Path(c[2]).name for c in calls3] == ["rep1", "rep2", "rep3"]
     assert r3["replicas"] == 3 and r3["dG_standard_kj_mol"] == -22.0 and r3["dG_err_kj_mol"] is not None
+    assert r3["n_independent_md_starts"] == 3 and [x["md_run_id"] for x in r3["replica_sources"]] == ["mdA", "mdB", "mdC"]
 
 
 def test_exit_direction_avoids_other_ligands_and_prefers_open_side():
@@ -275,3 +292,64 @@ def test_anchor_residues_to_ca(tmp_path):
     p = tmp_path / "t.pdb"; p.write_text("\n".join(lines) + "\nEND\n")
     idx, missing = anchor_atoms_from_residues(p, "120, 121，B:120, 999")
     assert idx == [1, 4, 7] and missing == ["999"]
+
+
+def test_three_smd_seeds_from_one_md_endpoint_are_not_independent_starts():
+    """Spec Test 7 / A9: one MD end point pulled with three seeds is one starting configuration, not three."""
+    from md20.sampling.multi import aggregate_binding_replicas
+    reps = [_rep(20.0, 0.5, -20.0, 0.5), _rep(21.0, 0.5, -21.0, 0.5), _rep(22.0, 0.5, -22.0, 0.5)]
+    src = [{"md_run_id": "md1", "seed": 2026 + 1000 * i} for i in range(3)]
+    a = aggregate_binding_replicas(reps, sources=src)
+    assert a["n_independent_md_starts"] == 1 and a["n_pulls_sharing_start"] == 2
+    assert "只有 1 個不同的 MD 起點" in a["why"] and "not independent equilibrium starts" in a["why_i18n"][1]
+    assert "各自從不同的 MD 起點" not in a["why"]
+    b = aggregate_binding_replicas(reps, sources=[{"md_run_id": f"md{i}"} for i in range(3)])
+    assert b["n_independent_md_starts"] == 3 and "各自從不同的 MD 起點" in b["why"]
+
+
+def test_research_tier_counts_md_starts_not_pulls(tmp_path, monkeypatch):
+    """binding.replicas = 3 with a single MD replica cycles one end point: ΔG° stays withheld (A9)."""
+    import md20.sampling.binding as B
+    from md20.project.store import Project
+    from md20.util.jsonio import atomic_write_json
+    from md20.workflow import Workflow, example_config
+
+    def fake(system_xml, topology_pdb, start, out_dir, *, config, **kw):
+        return SimpleNamespace(status="PASS", caveats=[], smd={}, figures={}, delta_pmf_kj_mol=25.0, delta_pmf_err_kj_mol=0.4,
+                               dG_standard_kj_mol=-20.0, dG_err_kj_mol=0.5, dG_standard_kcal_mol=None,
+                               pmf={"half_split": {"diff_kj_mol": 0.5}}, assessment=_ok(-20.0), condition=dict(COND))
+    monkeypatch.setattr(B, "run_binding", fake)
+    cfg = copy.deepcopy(example_config())
+    cfg["md"]["tier"] = "research"
+    cfg["binding"] = {"enabled": True, "replicas": 3, "config": {"window_prod_ps": 2000.0}}
+    wf = Workflow(Project.create(tmp_path, "p"), cfg)
+    case = wf.project.new_case("p_docked_BEN")
+    case.build_dir.mkdir(parents=True, exist_ok=True)
+    atomic_write_json({"system_xml": "s", "topology_pdb": "t",
+                       "assembly": {"ligands": [{"name": "L01", "heavy_atom_indices": [1, 2]}]}}, case.build_dir / "build_manifest.json")
+    built = {"docked_BEN": {"case_id": case.case_id, "mode": "docked_single", "ligands": ["BEN"], "ligand_map": {"BEN": "L01"}}}
+    r = wf.binding({"docked_BEN": {"case_id": case.case_id, "run_ids": ["mdA"]}}, built, SimpleNamespace(name="CPU", properties={}))["BEN"]
+    assert r["replicas"] == 3 and r["n_independent_md_starts"] == 1 and r["dG_standard_kj_mol"] is None
+    assert [x["shares_start_with_earlier"] for x in r["replica_sources"]] == [False, True, True]
+    assert r["assessment"]["eligibility"]["dG_standard"] is False
+
+
+def test_completed_but_unqualified_pmfs_are_not_ranked():
+    """Spec Test 1 / A1: calculations completed, but QC failed or is unknown → no ranking, no 'strongest'."""
+    bad = {"eligibility": {"delta_pmf_curve": True, "delta_pmf_path_specific": False, "dG_standard": False},
+           "reasons": ["overlap_graph: fail"]}
+    res = {"A": {**_r(40.0, 0.1, ligand="A"), "assessment": bad}, "B": _r(20.0, 0.1, ligand="B"),
+           "C": _r(10.0, 0.1, ligand="C", qualified=False)}           # legacy: no assessment at all
+    c = compare_binding(res, contexts={"single": ["A", "B", "C"]})["contexts"]["single"]
+    assert c["status"] == "INSUFFICIENT" and "rows" not in c
+    why = {x["key"]: x["why"] for x in c["not_compared"]}
+    assert "overlap_graph: fail" in why["A"] and "awaiting reanalysis" in why["C"]
+    # tiny bootstrap errors do not rescue an ineligible result
+    assert "strongest" not in str(c) and "最強" not in str(c)
+
+
+def test_different_conditions_are_not_compared():
+    res = {"A": _r(30.0, 0.5, ligand="A"), "B": _r(20.0, 0.5, ligand="B")}
+    res["B"]["condition"] = {**COND, "anchor": "user residues"}
+    c = compare_binding(res, contexts={"single": ["A", "B"]})["contexts"]["single"]
+    assert c["status"] == "INSUFFICIENT" and "conditions" in c["why_i18n"][1]

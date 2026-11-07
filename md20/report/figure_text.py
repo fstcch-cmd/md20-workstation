@@ -503,17 +503,42 @@ def classify_smd(pos, force, work, name: str) -> list[dict]:
     return out
 
 
-def classify_umbrella(coverage: dict, name: str) -> list[dict]:
+def _diag(assessment: dict | None, did: str) -> str | None:
+    """Status of one diagnostic in a D-96 Assessment (None when no assessment is attached)."""
+    for d in (assessment or {}).get("diagnostics") or []:
+        if d.get("id") == did:
+            return d.get("status")
+    return None
+
+
+_GRAPH = {
+    "pass": ("全部窗口對的重疊圖是連通的", "the overlap graph over all window pairs is connected",
+             "すべてのウィンドウ対の重なりグラフはつながっています", "모든 윈도우 쌍의 겹침 그래프는 연결되어 있습니다"),
+    "fail": ("但全部窗口對的重疊圖不連通，剖面在斷開處沒有依據", "but the overlap graph over all window pairs is disconnected, so the "
+             "profile is unsupported across the break", "しかしすべてのウィンドウ対の重なりグラフはつながっておらず、切れ目をまたぐプロファイルには根拠がありません",
+             "그러나 모든 윈도우 쌍의 겹침 그래프가 끊어져 있어 끊긴 곳을 넘는 프로파일은 근거가 없습니다"),
+    "unknown": ("全部窗口對的重疊圖連通性沒有紀錄", "the connectivity of the full overlap graph is not recorded",
+                "全ウィンドウ対の重なりグラフの連結性は記録されていません", "전체 겹침 그래프의 연결성은 기록되지 않았습니다"),
+}
+
+
+def classify_umbrella(coverage: dict, name: str, assessment: dict | None = None) -> list[dict]:
+    """Pooled histogram coverage is a LOCAL check (D-96, A2): it never asserts that the windows overlap or that the
+    profile is connected; the full-graph status comes from the Assessment."""
     if not coverage:
         return []
     br = coverage.get("breaks") or []
+    gs = _diag(assessment, "overlap_graph")
     if coverage.get("continuous") and not br:
         nw = coverage.get("n_windows")
-        return [S("good",
-                  f"{name}：{f'{nw} 個' if nw else '所有'}窗口的分佈在整條路徑上互相重疊，剖面連續。",
-                  f"{name}: {f'the {nw}' if nw else 'all'} windows overlap along the whole path, so the profile is continuous.",
-                  f"{name}：{f'{nw} 個の' if nw else 'すべての'}ウィンドウの分布が経路全体で重なっており、プロファイルは連続しています。",
-                  f"{name}: {f'{nw}개' if nw else '모든'} 윈도우의 분포가 경로 전체에서 겹치므로 프로파일이 연속적입니다.")]
+        g = _GRAPH.get(gs or "unknown")
+        lvl = "caution" if gs == "fail" else "note"
+        return [S(lvl,
+                  f"{name}：{f'{nw} 個' if nw else '所有'}窗口合起來的直方圖在路徑上沒有空隙（這只檢查涵蓋範圍）；{g[0]}。",
+                  f"{name}: the pooled histogram of {f'the {nw}' if nw else 'all'} windows has no gap along the path (a coverage "
+                  f"check only); {g[1]}.",
+                  f"{name}：{f'{nw} 個の' if nw else 'すべての'}ウィンドウを合わせたヒストグラムには経路上のすき間がありません（範囲の確認だけです）。{g[2]}。",
+                  f"{name}: {f'{nw}개' if nw else '모든'} 윈도우를 합친 히스토그램에 경로상의 빈틈이 없습니다(범위 확인일 뿐입니다). {g[3]}.")]
     parts = [f"{b[0]:.2f}–{b[1]:.2f} nm" if isinstance(b, (list, tuple)) and len(b) == 2 else str(b) for b in br[:5]]
     wz, we = "、".join(parts), ", ".join(parts)
     return [S("caution",
@@ -521,7 +546,6 @@ def classify_umbrella(coverage: dict, name: str) -> list[dict]:
               f"{name}: the distributions leave gaps at {we}. The profile is unreliable there and windows must be added.",
               f"{name}：{wz} で分布にすき間があります。この位置の自由エネルギープロファイルは信頼できないため、ウィンドウを追加する必要があります。",
               f"{name}: {we}에서 분포에 틈이 있습니다. 이 위치의 자유 에너지 프로파일은 믿을 수 없으므로 윈도우를 추가해야 합니다.")]
-
 
 def classify_pmf(grid, W, err, name: str) -> list[dict]:
     g, W = np.asarray(grid, float), np.asarray(W, float)
@@ -1166,51 +1190,126 @@ def classify_water(name: str, wb: dict) -> list[dict]:
               f"{name}: 물 다리가 거의 없습니다(평균 {m:.1f}). 리간드와 단백질이 주로 직접 접촉합니다.")]
 
 
-def classify_overlap(name: str, o: dict) -> list[dict]:
+def classify_overlap(name: str, o: dict, assessment: dict | None = None) -> list[dict]:
+    """Adjacent-window overlap is LOCAL (D-96, A2): a low adjacent value does not by itself disconnect the profile —
+    other windows may bridge it.  Connectivity is stated from the full-graph diagnostic."""
     if not o or "min_neighbour" not in o:
         return []
     mn = o["min_neighbour"]
     c = o.get("centers") or []
     i = int(np.argmin(o.get("neighbour") or [0]))
     where = f"{c[i]:.2f}–{c[i + 1]:.2f} nm" if len(c) > i + 1 else ""
+    gs = _diag(assessment, "overlap_graph")
+    if gs is None and o.get("matrix") is not None:
+        from ..sampling.assessment import graph_connected, THRESHOLDS
+        gc = graph_connected(o["matrix"], THRESHOLDS["overlap_edge_min"][0])
+        gs = None if gc is None else ("pass" if gc else "fail")
+    g = _GRAPH.get(gs or "unknown")
     if mn >= 0.2:
-        return [S("good",
-                  f"{name}：相鄰窗口的重疊最低為 {mn:.2f}（≥ 0.2），整條路徑的取樣連續。",
-                  f"{name}: the lowest neighbour overlap is {mn:.2f} (≥ 0.2), so sampling is continuous along the path.",
-                  f"{name}：隣り合うウィンドウの重なりは最低でも {mn:.2f} です（≥ 0.2）。経路全体でサンプリングが連続しています。",
-                  f"{name}: 이웃한 윈도우의 겹침이 최저 {mn:.2f}입니다(≥ 0.2). 경로 전체에서 샘플링이 연속적입니다.")]
-    if mn >= 0.05:
+        lvl = "caution" if gs == "fail" else "good"
+        return [S(lvl,
+                  f"{name}：相鄰窗口的重疊最低為 {mn:.2f}（≥ 0.2，局部檢查）；{g[0]}。",
+                  f"{name}: the lowest adjacent-window overlap is {mn:.2f} (≥ 0.2, a local check); {g[1]}.",
+                  f"{name}：隣り合うウィンドウの重なりは最低でも {mn:.2f} です（≥ 0.2、局所的な確認）。{g[2]}。",
+                  f"{name}: 이웃한 윈도우의 겹침은 최저 {mn:.2f}입니다(≥ 0.2, 국소 확인). {g[3]}.")]
+    if gs == "pass":
         return [S("note",
-                  f"{name}：最低重疊 {mn:.2f}，位置在 {where}。低於 0.2 但仍連通，該處誤差較大。",
-                  f"{name}: the lowest overlap is {mn:.2f} (at {where}). It is below 0.2 but still connected, and the error is larger there.",
-                  f"{name}：最も低い重なりは {mn:.2f} です（{where}）。0.2 を下回りますがつながってはおり、そこでは誤差が大きくなります。",
-                  f"{name}: 가장 낮은 겹침은 {mn:.2f}입니다({where}). 0.2보다 낮지만 아직 이어져 있으며, 그 위치의 오차가 큽니다.")]
-    return [S("caution",
-              f"{name}：{where} 的重疊只有 {mn:.2f}（< 0.05），剖面在這裡斷開，需要補窗口。",
-              f"{name}: overlap at {where} is only {mn:.2f} (< 0.05). The profile is broken there and windows must be added.",
-              f"{name}：{where} の重なりは {mn:.2f} しかありません（< 0.05）。プロファイルはここで途切れているため、ウィンドウを追加する必要があります。",
-              f"{name}: {where}의 겹침이 {mn:.2f}에 불과합니다(< 0.05). 프로파일이 여기서 끊어지므로 윈도우를 추가해야 합니다.")]
+                  f"{name}：{where} 的相鄰重疊只有 {mn:.2f}（局部偏低），但其他窗口在此處搭起橋梁，全部窗口對的重疊圖仍連通；該處誤差較大。",
+                  f"{name}: the adjacent overlap at {where} is only {mn:.2f} (locally low), but other windows bridge it and the "
+                  "overlap graph over all window pairs is still connected; the error is larger there.",
+                  f"{name}：{where} の隣接ウィンドウの重なりは {mn:.2f} しかありません（局所的に低い）が、ほかのウィンドウが橋渡しをしており、"
+                  "全ウィンドウ対の重なりグラフはつながっています。そこでは誤差が大きくなります。",
+                  f"{name}: {where}의 이웃 겹침은 {mn:.2f}에 불과하지만(국소적으로 낮음) 다른 윈도우가 이어 주어 전체 윈도우 쌍의 겹침 "
+                  "그래프는 연결되어 있습니다. 그 위치의 오차가 큽니다.")]
+    lvl = "caution" if (gs == "fail" or mn < 0.05) else "note"
+    return [S(lvl,
+              f"{name}：{where} 的相鄰重疊只有 {mn:.2f}；{g[0]}。",
+              f"{name}: the adjacent overlap at {where} is only {mn:.2f}; {g[1]}.",
+              f"{name}：{where} の隣接ウィンドウの重なりは {mn:.2f} しかありません。{g[2]}。",
+              f"{name}: {where}의 이웃 겹침은 {mn:.2f}에 불과합니다. {g[3]}.")]
 
-
-def classify_convergence(name: str, conv: dict) -> list[dict]:
+def classify_convergence(name: str, conv: dict, assessment: dict | None = None) -> list[dict]:
+    """The change between the last two cumulative estimates is LOCAL (D-96, A2).  "Converged" is never said from it;
+    an overall statement comes only from `classify_assessment`."""
     vals = [(k, v.get("delta_pmf")) for k, v in sorted(conv.items()) if isinstance(v, dict) and v.get("delta_pmf") is not None]
     if len(vals) < 2:
         return []
     d = abs(vals[-1][1] - vals[-2][1])
     p = float(vals[-2][0])
+    drift = _diag(assessment, "cumulative_drift")
+    if d <= 2.0 and drift != "fail":
+        return [S("note",
+                  f"{name}：取樣從 {p:.0%} 增加到全部時，井深變化 {d:.1f} kJ mol⁻¹（≤ 2）。這只是最後兩個累積估計的比較，不單獨代表收斂。",
+                  f"{name}: the depth changes by {d:.1f} kJ mol⁻¹ from {p:.0%} to all samples (≤ 2). This compares only the last "
+                  "two cumulative estimates and does not by itself establish convergence.",
+                  f"{name}：サンプルを {p:.0%} から全体に増やしたときの井戸の深さの変化は {d:.1f} kJ mol⁻¹ です（≤ 2）。最後の2つの累積推定値の"
+                  "比較にすぎず、これだけで収束とはいえません。",
+                  f"{name}: 샘플을 {p:.0%}에서 전체로 늘릴 때 우물 깊이 변화는 {d:.1f} kJ mol⁻¹입니다(≤ 2). 마지막 두 누적 추정값의 "
+                  "비교일 뿐이며 이것만으로 수렴했다고 할 수 없습니다.")]
     if d <= 2.0:
-        return [S("good",
-                  f"{name}：取樣從 {p:.0%} 增加到全部時，井深只變化 {d:.1f} kJ mol⁻¹（≤ 2），自由能已收斂。",
-                  f"{name}: the depth changes by only {d:.1f} kJ mol⁻¹ from {p:.0%} to all samples (≤ 2), so the free energy has converged.",
-                  f"{name}：サンプルを {p:.0%} から全体に増やしても、井戸の深さの変化は {d:.1f} kJ mol⁻¹ だけです（≤ 2）。自由エネルギーは収束しています。",
-                  f"{name}: 샘플을 {p:.0%}에서 전체로 늘려도 우물 깊이 변화가 {d:.1f} kJ mol⁻¹에 그칩니다(≤ 2). 자유 에너지가 수렴했습니다.")]
+        return [S("caution",
+                  f"{name}：最後兩個累積估計只差 {d:.1f} kJ mol⁻¹，但從 50% 起的累積估計仍在漂移，取樣尚未穩定。",
+                  f"{name}: the last two cumulative estimates differ by only {d:.1f} kJ mol⁻¹, but the estimates from 50 % on are "
+                  "still drifting, so sampling has not stabilised.",
+                  f"{name}：最後の2つの累積推定値の差は {d:.1f} kJ mol⁻¹ だけですが、50% 以降の推定値はまだ動き続けており、サンプリングは安定していません。",
+                  f"{name}: 마지막 두 누적 추정값 차이는 {d:.1f} kJ mol⁻¹뿐이지만 50%부터의 추정값이 계속 움직여 샘플링이 안정되지 않았습니다.")]
     return [S("caution",
-              f"{name}：取樣從 {p:.0%} 增加到全部時，井深仍變化 {d:.1f} kJ mol⁻¹（> 2），尚未收斂，需要更長的窗口。",
-              f"{name}: the depth still changes by {d:.1f} kJ mol⁻¹ from {p:.0%} to all samples (> 2). It has not converged and "
+              f"{name}：取樣從 {p:.0%} 增加到全部時，井深仍變化 {d:.1f} kJ mol⁻¹（> 2），尚未穩定，需要更長的窗口。",
+              f"{name}: the depth still changes by {d:.1f} kJ mol⁻¹ from {p:.0%} to all samples (> 2). It has not stabilised and "
               "longer windows are needed.",
-              f"{name}：サンプルを {p:.0%} から全体に増やすと、井戸の深さがまだ {d:.1f} kJ mol⁻¹ 変化します（> 2）。収束していないため、ウィンドウを長くする必要があります。",
-              f"{name}: 샘플을 {p:.0%}에서 전체로 늘리면 우물 깊이가 아직 {d:.1f} kJ mol⁻¹ 바뀝니다(> 2). 수렴하지 않았으므로 윈도우를 더 길게 해야 합니다.")]
+              f"{name}：サンプルを {p:.0%} から全体に増やすと、井戸の深さがまだ {d:.1f} kJ mol⁻¹ 変化します（> 2）。安定していないため、ウィンドウを長くする必要があります。",
+              f"{name}: 샘플을 {p:.0%}에서 전체로 늘리면 우물 깊이가 아직 {d:.1f} kJ mol⁻¹ 바뀝니다(> 2). 안정되지 않았으므로 윈도우를 더 길게 해야 합니다.")]
 
+
+_DIAG_NAME = {
+    "histogram_coverage": ("直方圖涵蓋", "histogram coverage", "ヒストグラムの範囲", "히스토그램 범위"),
+    "adjacent_overlap_min": ("相鄰窗口重疊", "adjacent-window overlap", "隣接ウィンドウの重なり", "이웃 윈도우 겹침"),
+    "overlap_graph": ("全窗口重疊圖連通", "full overlap-graph connectivity", "全ウィンドウ重なりグラフの連結", "전체 겹침 그래프 연결"),
+    "window_ess": ("每窗口有效樣本數", "per-window effective samples", "ウィンドウごとの有効サンプル数", "윈도우별 유효 표본 수"),
+    "solver": ("求解收斂", "solver convergence", "ソルバーの収束", "솔버 수렴"),
+    "half_split": ("前後半一致", "half-split agreement", "前半後半の一致", "전후반 일치"),
+    "cumulative_drift": ("累積估計漂移", "cumulative-estimate drift", "累積推定値のドリフト", "누적 추정값 드리프트"),
+    "endpoint_plateau": ("末端持平", "endpoint plateau", "終端の平坦性", "끝부분 평탄"),
+    "range_coverage": ("PMF 涵蓋取樣範圍", "PMF covers the sampled range", "PMF がサンプル範囲を覆う", "PMF의 샘플 범위 포함"),
+}
+
+
+def classify_assessment(name: str, a: dict | None) -> list[dict]:
+    """One overall sentence from the D-96 Assessment — the only place an overall sampling statement is made."""
+    if not a:
+        return [S("caution",
+                  f"{name}：這個結果沒有取樣品質評估（D-96 之前的舊資料），待重新分析；不做任何比較或排名。",
+                  f"{name}: this result has no sampling assessment (written before D-96) and awaits reanalysis; it is not "
+                  "compared or ranked.",
+                  f"{name}：この結果には取得品質の評価がありません（D-96 以前の旧データ）。再解析待ちで、比較や順位づけはしません。",
+                  f"{name}: 이 결과에는 샘플링 품질 평가가 없습니다(D-96 이전 데이터). 재분석 대기 중이며 비교나 순위를 매기지 않습니다.")]
+    pick = lambda ids, k: "、".join(_DIAG_NAME.get(i, (i,) * 4)[k] for i in ids) if k in (0, 2) else \
+        ", ".join(_DIAG_NAME.get(i, (i,) * 4)[k] for i in ids)  # noqa: E731
+    failed, unknown = a.get("failed") or [], a.get("unknown") or []
+    el = a.get("eligibility") or {}
+    out = []
+    if el.get("delta_pmf_path_specific"):
+        out.append(S("good",
+                     f"{name}：所有必要的取樣診斷都通過，ΔPMF 可作為這條拉離路徑、這組條件下的井深；不是內在親和力。",
+                     f"{name}: every required sampling diagnostic passes, so ΔPMF qualifies as the well depth along this pull "
+                     "path under these conditions; it is not an intrinsic affinity.",
+                     f"{name}：必要な取得診断はすべて合格し、ΔPMF はこの引き離し経路・この条件での井戸の深さとして使えます。固有の親和性ではありません。",
+                     f"{name}: 필요한 샘플링 진단을 모두 통과하여 ΔPMF는 이 당김 경로와 이 조건에서의 우물 깊이로 쓸 수 있습니다. 고유 친화도는 아닙니다."))
+    else:
+        out.append(S("caution",
+                     f"{name}：取樣評估未通過（未通過：{pick(failed, 0) or '—'}；無紀錄：{pick([u for u in unknown if u not in failed], 0) or '—'}）。"
+                     "剖面只當診斷曲線，不做比較或排名。",
+                     f"{name}: the sampling assessment does not pass (failed: {pick(failed, 1) or '—'}; not recorded: "
+                     f"{pick([u for u in unknown if u not in failed], 1) or '—'}). The profile is a diagnostic curve only and is "
+                     "not compared or ranked.",
+                     f"{name}：取得評価は不合格です（不合格：{pick(failed, 2) or '—'}、記録なし：{pick([u for u in unknown if u not in failed], 2) or '—'}）。"
+                     "プロファイルは診断曲線としてだけ扱い、比較や順位づけはしません。",
+                     f"{name}: 샘플링 평가를 통과하지 못했습니다(미통과: {pick(failed, 3) or '—'}; 기록 없음: "
+                     f"{pick([u for u in unknown if u not in failed], 3) or '—'}). 프로파일은 진단 곡선으로만 쓰며 비교하거나 순위를 매기지 않습니다."))
+    for c in a.get("conflicts") or []:
+        out.append(S("note", f"{name}：診斷之間不一致：{c}。", f"{name}: diagnostics disagree: {c}.",
+                     f"{name}：診断どうしが一致しません：{c}。", f"{name}: 진단끼리 일치하지 않습니다: {c}."))
+    return out
 
 def classify_properties(props: list[dict]) -> list[dict]:
     if not props:

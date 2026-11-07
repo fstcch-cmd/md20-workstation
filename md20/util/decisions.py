@@ -22,6 +22,8 @@ class Decision:
     kind: str = "auto"      # auto | auto_fixed | human
     evidence: dict = field(default_factory=dict)
     at: str = field(default_factory=now_iso)
+    # D-96 (A10): which workflow wrote it; None = project-level or written before D-96 (attribution unknown)
+    workflow: str | None = None
 
 
 class DecisionLog:
@@ -67,3 +69,33 @@ class DecisionLog:
             out.append(f"| {r.get('at','')} | {r.get('stage','')} | {r.get('what','')} | "
                        f"`{r.get('choice','')}` | {r.get('kind','')} | {r.get('why','')} |")
         return "\n".join(out)
+
+
+class ScopedDecisionLog:
+    """A DecisionLog view bound to one workflow (D-96, A10).  `record`/`add` stamp `workflow`; `read` returns only
+    this workflow's rows; `unattributed` returns rows with no workflow id (project-level steps, or anything written
+    before D-96) — they are shown as "attribution unknown", never guessed from their text."""
+
+    def __init__(self, base: DecisionLog, workflow: str):
+        self.base, self.workflow = base, workflow
+        self.path = base.path
+
+    def add(self, decision: Decision) -> Decision:
+        if decision.workflow is None:
+            decision.workflow = self.workflow
+        return self.base.add(decision)
+
+    def record(self, stage: str, what: str, choice: Any, why: str, *, kind: str = "auto", **evidence) -> Decision:
+        return self.add(Decision(stage=stage, what=what, choice=choice, why=why, kind=kind, evidence=evidence))
+
+    def read(self) -> list[dict]:
+        return [r for r in self.base.read() if r.get("workflow") == self.workflow]
+
+    def unattributed(self) -> list[dict]:
+        return [r for r in self.base.read() if not r.get("workflow")]
+
+    def by_stage(self, prefix: str) -> list[dict]:
+        return [r for r in self.read() if str(r.get("stage", "")).startswith(prefix)]
+
+    def to_markdown(self, rows: Iterable[dict] | None = None) -> str:
+        return self.base.to_markdown(self.read() if rows is None else rows)

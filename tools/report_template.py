@@ -202,8 +202,19 @@ def build(root: Path, lang: str):
     b["BEN"].update(ligand="BEN", status="PASS")
     b["multi:BEN"] = {**base, "ligand": "BEN", "context": "multi:docked_multi", "delta_pmf_kj_mol": 28.9, "delta_pmf_err_kj_mol": 1.9, "figures": {}}
     b["multi:PGA"] = {**base, "ligand": "PGA", "context": "multi:docked_multi", "delta_pmf_kj_mol": 19.0, "delta_pmf_err_kj_mol": 1.7, "figures": {}}
+    # D-96: synthetic template data carry a synthetic *qualified* assessment so that the comparison and cooperativity
+    # figures can be shown; real results get theirs from sampling/assessment.py
+    from md20.sampling.assessment import THRESHOLDS_VERSION
     for v in b.values():
         v["status"] = "PASS"
+        v.setdefault("assessment", {"schema": "md20.assessment.pmf/1", "thresholds_version": THRESHOLDS_VERSION,
+                                    "synthetic_template": True, "diagnostics": [], "failed": [], "unknown": [], "conflicts": [],
+                                    "sampling_adequate": True, "reasons": [],
+                                    "eligibility": {"delta_pmf_curve": True, "delta_pmf_path_specific": True,
+                                                    "dG_standard": v.get("dG_standard_kj_mol") is not None,
+                                                    "affinity_ranking": v.get("dG_standard_kj_mol") is not None}})
+        v.setdefault("condition", {"cv": "com_distance_radial", "temperature_k": 300.0, "anchor": "automatic",
+                                   "backbone_restraint_kj_mol_nm2": 100.0, "spectators": []})
     ctx = {"single": ["BEN", "PGA"], "multi:docked_multi": ["multi:BEN", "multi:PGA"]}
     comp = compare_binding(b, contexts=ctx)
     comp["cooperativity"] = cooperativity(b, ctx)

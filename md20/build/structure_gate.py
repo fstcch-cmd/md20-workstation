@@ -2,7 +2,7 @@
 
 Reads only the PDB text (header REMARKs + ATOM/HETATM columns), so it is pure Python and fast.
 
-Gates (each PASS / AUTO_FIXED / NEEDS_HUMAN, with a Chinese explanation):
+Gates (each PASS / NEEDS_HUMAN, with a Chinese explanation; an accepted, unrepaired limitation is PASS + `limitation`, D-96):
   experiment      — X-ray / EM / NMR; NMR and predicted models get a warning.
   resolution      — ≤ 2.5 Å PASS, ≤ 3.2 Å warning, > 3.2 Å NEEDS_HUMAN.
   R-free          — ≤ 0.28 PASS, ≤ 0.32 warning, > 0.32 NEEDS_HUMAN.
@@ -59,6 +59,14 @@ def header_info(pdb_text: str) -> dict:
     return info
 
 
+def _lim(what: str, rule: str) -> dict:
+    """D-96 (A3): accepted, unrepaired limitation.  The global value applies to the whole entry; it neither proves nor
+    disproves the quality of any one pocket."""
+    return {"what": what, "rule": rule, "accepted": True, "repaired": False,
+            "policy": "continue with warning (preauthorised: structure limitations within the NEEDS_HUMAN bounds)",
+            "scope": "whole entry, not pocket-specific"}
+
+
 def structure_confidence(pdb_text: str, *, pocket_center=None, pocket_radius_A: float = 8.0,
                          ligand_resname: str | None = None, metal_policy: dict | None = None) -> GateReport:
     rep = GateReport()
@@ -66,10 +74,11 @@ def structure_confidence(pdb_text: str, *, pocket_center=None, pocket_radius_A: 
     atoms = _atoms(pdb_text)
     method = (info["method"] or "").upper()
     if not method:
-        rep.add(Gate("experiment", AUTO_FIXED, "檔案沒有 EXPDTA（可能是預測模型或處理過的檔案）；無法評估實驗品質，請確認來源。",
-                     evidence=info))
+        rep.add(Gate("experiment", PASS, "檔案沒有 EXPDTA（可能是預測模型或處理過的檔案）；無法評估實驗品質，請確認來源。",
+                     evidence=info, limitation=_lim("experimental quality unknown", "no EXPDTA record")))
     elif "NMR" in method:
-        rep.add(Gate("experiment", AUTO_FIXED, "NMR 結構：口袋側鏈構形較不確定；建議比對多個 model 或改用晶體結構。", evidence=info))
+        rep.add(Gate("experiment", PASS, "NMR 結構：口袋側鏈構形較不確定；建議比對多個 model 或改用晶體結構。", evidence=info,
+                     limitation=_lim("NMR model: pocket side chains less certain", "method NMR")))
     else:
         rep.add(Gate("experiment", PASS, f"實驗方法：{info['method']}。", evidence=info))
     r = info["resolution_A"]
@@ -77,7 +86,9 @@ def structure_confidence(pdb_text: str, *, pocket_center=None, pocket_radius_A: 
         if r <= 2.5:
             rep.add(Gate("resolution", PASS, f"解析度 {r:.2f} Å。"))
         elif r <= 3.2:
-            rep.add(Gate("resolution", AUTO_FIXED, f"解析度 {r:.2f} Å 偏低：側鏈位置與水分子較不可靠，對接排名的可信度下降。"))
+            rep.add(Gate("resolution", PASS, f"解析度 {r:.2f} Å，比 2.5 Å 差（數值較大）：側鏈位置與水分子較不可靠，對接排名的可信度下降；"
+                                             "這是結構本身的限制，沒有被修正。",
+                         limitation=_lim(f"resolution {r:.2f} Å (worse than 2.5 Å)", "2.5 < resolution ≤ 3.2 Å")))
         else:
             rep.add(Gate("resolution", NEEDS_HUMAN, f"解析度 {r:.2f} Å > 3.2 Å：口袋原子位置不足以支持對接結論。",
                          options=["換一個更高解析度的結構", "仍要使用（structure_override.resolution）"]))
@@ -86,7 +97,8 @@ def structure_confidence(pdb_text: str, *, pocket_center=None, pocket_radius_A: 
         if rf <= 0.28:
             rep.add(Gate("R-free", PASS, f"R-free {rf:.3f}。"))
         elif rf <= 0.32:
-            rep.add(Gate("R-free", AUTO_FIXED, f"R-free {rf:.3f} 偏高：模型與實驗數據吻合度一般。"))
+            rep.add(Gate("R-free", PASS, f"R-free {rf:.3f} 偏高：模型與實驗數據吻合度一般；這是結構本身的限制，沒有被修正。",
+                         limitation=_lim(f"R-free {rf:.3f}", "0.28 < R-free ≤ 0.32")))
         else:
             rep.add(Gate("R-free", NEEDS_HUMAN, f"R-free {rf:.3f} > 0.32：模型可能有明顯錯誤。",
                          options=["換結構", "仍要使用（structure_override.r_free）"]))
@@ -114,12 +126,14 @@ def structure_confidence(pdb_text: str, *, pocket_center=None, pocket_radius_A: 
                 rep.add(Gate("pocket occupancy", NEEDS_HUMAN, f"口袋 {len(near)} 個原子中 {low_occ:.0%} 的 occupancy < 0.5：口袋沒有被好好解出。",
                              options=["換結構", "仍要使用（structure_override.pocket）"]))
             elif mean_b > 80 or partial > 0.2:
-                rep.add(Gate("pocket B-factor", AUTO_FIXED,
-                             f"口袋平均 B {mean_b:.0f} Å²、部分佔據 {partial:.0%}：口袋柔性高，建議以 MD 檢驗 pose 穩定性。"))
+                rep.add(Gate("pocket B-factor", PASS,
+                             f"口袋平均 B {mean_b:.0f} Å²、部分佔據 {partial:.0%}：口袋柔性高，建議以 MD 檢驗 pose 穩定性。",
+                             limitation=_lim(f"pocket mean B {mean_b:.0f} Å², partial occupancy {partial:.0%}", "B > 80 or partial > 20 %")))
             else:
                 rep.add(Gate("pocket B-factor", PASS, f"口袋 {len(near)} 個原子，平均 B {mean_b:.0f} Å²。"))
             if len(chains) > 1:
-                rep.add(Gate("assembly", AUTO_FIXED, f"口袋位於鏈 {', '.join(chains)} 交界：請保留所有相關鏈（不要只取單鏈）。"))
+                rep.add(Gate("assembly", PASS, f"口袋位於鏈 {', '.join(chains)} 交界：請保留所有相關鏈（不要只取單鏈）。",
+                             limitation=_lim(f"pocket spans chains {', '.join(chains)}", "interface pocket")))
             # metals
             mp = metal_policy or {}
             for a in atoms:
@@ -141,12 +155,16 @@ def structure_confidence(pdb_text: str, *, pocket_center=None, pocket_radius_A: 
                                           "metal_policy: {" + rn + ": remove}（若金屬非功能必要）", "換一個系統"],
                                  evidence={"metal": key, "distance_A": round(d, 1)}))
                 elif rn in TRANSITION_METALS:
-                    rep.add(Gate("metal", AUTO_FIXED, f"金屬 {key} 依使用者設定：{mp.get(key) or mp.get(rn)}。"))
+                    rep.add(Gate("metal", PASS, f"金屬 {key} 依使用者設定：{mp.get(key) or mp.get(rn)}。",
+                                 evidence={"metal": key, "policy": mp.get(key) or mp.get(rn)},
+                                 limitation=_lim(f"metal {key} modelled by policy {mp.get(key) or mp.get(rn)}", "user metal_policy")))
                 else:
-                    rep.add(Gate("metal", AUTO_FIXED, f"口袋附近有 {key}（{d:.1f} Å）；以非鍵結離子保留。"))
+                    rep.add(Gate("metal", PASS, f"口袋附近有 {key}（{d:.1f} Å）；以非鍵結離子保留。",
+                                 limitation=_lim(f"{key} kept as a non-bonded ion", "alkaline-earth ion near the pocket")))
     if info["biomt_chains"]:
         au = sorted({a["chain"] for a in atoms if a["rec"] == "ATOM"})
         if set(info["biomt_chains"]) - set(au):
-            rep.add(Gate("assembly", AUTO_FIXED, f"生物組裝（REMARK 350）包含檔案中沒有的鏈 {sorted(set(info['biomt_chains']) - set(au))}："
-                         f"真實口袋可能由對稱複本組成，請檢查。"))
+            rep.add(Gate("assembly", PASS, f"生物組裝（REMARK 350）包含檔案中沒有的鏈 {sorted(set(info['biomt_chains']) - set(au))}："
+                         f"真實口袋可能由對稱複本組成，請檢查。",
+                         limitation=_lim("biological assembly has chains absent from the file", "REMARK 350")))
     return rep

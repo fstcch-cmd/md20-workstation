@@ -1016,13 +1016,14 @@ def _binding(doc: Doc, wf, vals, f, goal) -> str:
             out += doc.table([tx(("第幾次", "Run", "回", "회차"), L), "ΔPMF (kJ mol⁻¹)", "ΔG° (kJ mol⁻¹)"], prs,
                              ("各次 SMD＋傘狀採樣", "Each SMD and umbrella-sampling run", "各回の SMD と傘サンプリング",
                               "각 회차의 SMD와 우산 샘플링"), {1, 2})
-            out += "<p>" + _esc(tx((f"上表 {len(per)} 次各自獨立（不同亂數種子、不同 MD 起點）；結果表的數值是平均，誤差取重複之間的標準誤與 bootstrap 合併誤差的較大者。",
-                                    f"The {len(per)} runs above are independent (different seeds and MD starting points). The results table gives "
-                                    "their mean; its error is the larger of the standard error between runs and the combined bootstrap error.",
-                                    f"上の {len(per)} 回はそれぞれ独立です（乱数の種と MD の出発点が異なる）。結果表の値は平均で、誤差は回どうしの標準誤差と"
-                                    "ブートストラップを合わせた誤差の大きい方です。",
-                                    f"위의 {len(per)}회는 서로 독립입니다(난수 시드와 MD 출발점이 다름). 결과 표의 값은 평균이며, 오차는 회차 간 표준오차와 "
-                                    "부트스트랩 합산 오차 중 큰 쪽입니다."), L)) + "</p>"
+            # D-96 (A9): say how many distinct MD starting points there really were; reuse the aggregation sentence
+            prs_md = [str(p_.get("md_run_id") or "?") for p_ in per]
+            out += "<p>" + _esc(tx(tuple(r["replicas_why_i18n"]) if isinstance(r.get("replicas_why_i18n"), (list, tuple)) and len(r["replicas_why_i18n"]) == 4 else (
+                f"上表 {len(per)} 次拉離的 MD 起點：{'、'.join(prs_md)}。共用同一個起點的拉離只換亂數種子，不是獨立的平衡起點。",
+                f"MD starting points of the {len(per)} pulls above: {', '.join(prs_md)}. Pulls that share a starting point "
+                "differ only in the random seed and are not independent equilibrium starts.",
+                f"上の {len(per)} 回の引き離しの MD 出発点：{'、'.join(prs_md)}。同じ出発点を共有する引き離しは乱数シードだけが異なり、独立した平衡の出発点ではありません。",
+                f"위 {len(per)}회 당김의 MD 시작점: {', '.join(prs_md)}. 같은 시작점을 공유하는 당김은 난수 시드만 다르며 독립적인 평형 시작점이 아닙니다."), L)) + "</p>"
         out += _binding_figures(doc, name, r)
         if r.get("dG_withheld"):
             out += (f"<p class=warn>{_esc(tx(('ΔG° 不輸出的原因', 'Why ΔG° is not reported', 'ΔG° を出力しない理由', 'ΔG°를 출력하지 않는 이유'), L))}"
@@ -1031,12 +1032,36 @@ def _binding(doc: Doc, wf, vals, f, goal) -> str:
     out += _comparison_html(comp, L)
     out += _cooperativity_html(doc, comp.get("cooperativity") or [], b)
     # the profile itself is described under its figure; here the reported numbers and the convergence check
-    findings = doc.collected[start:] + [x for x in I.binding(b) if "ΔG°" in x["text"][1] or "halves" in x["text"][1]]
+    b_asm = {k: ({**v, "assessment": _assessment_for(v)} if v.get("status", "PASS") == "PASS" else v) for k, v in b.items()}
+    findings = doc.collected[start:] + [x for x in I.binding(b_asm) if "ΔG°" in x["text"][1] or "halves" in x["text"][1]
+                                         or "assessment" in x["text"][1] or "diagnostics disagree" in x["text"][1]]
     for ctx, c in (comp.get("contexts") or {}).items():
-        if c.get("status") == "PASS" and c.get("why"):
+        if c.get("status") in ("PASS", "PATH_SPECIFIC", "DESCRIPTIVE", "INSUFFICIENT") and c.get("why"):
             w = tuple(c.get("why_i18n") or (c["why"],) * 4)
             findings.append(I.F("note", *w))
     return _section(doc, doc.next(), "binding", params, out, findings)
+
+
+def _binding_manifest_pmf(r: dict) -> dict:
+    figs = r.get("figures") or {}
+    anchor = next((figs[k]["png"] for k in ("pmf", "smd", "histograms") if figs.get(k)), None)
+    bdir = Path(anchor).parent if anchor else None
+    return ((load_json(bdir / "binding_manifest.json", {}) if bdir else {}).get("result") or {}).get("pmf") or {}
+
+
+def _assessment_for(r: dict) -> dict | None:
+    """D-96: the ONE assessment every caption, summary and table of a binding result reads — the stored one, else
+    re-assessed from the stored PMF fields (a report rebuild, no MD); missing fields stay unknown, so legacy data
+    come out as not qualified.  None when nothing at all is stored."""
+    if r.get("assessment"):
+        return r["assessment"]
+    pm = _binding_manifest_pmf(r)
+    if not pm:
+        return None
+    from ..sampling.assessment import assess_pmf
+    a = assess_pmf(pm, dG_withheld=r.get("dG_withheld"), has_dG=r.get("dG_standard_kj_mol") is not None)
+    a["reassessed_from_manifest"] = True
+    return a
 
 
 def _binding_figures(doc: Doc, name: str, r: dict) -> str:
@@ -1057,20 +1082,24 @@ def _binding_figures(doc: Doc, name: str, r: dict) -> str:
     elif figs.get("smd"):
         out += doc.figure_block(figs["smd"]["png"], "smd", [], name)
     pm = ((load_json(bdir / "binding_manifest.json", {}) if bdir else {}).get("result") or {}).get("pmf") or {}
+    # D-96: every caption reads ONE assessment — the stored one, else re-assessed from the stored PMF fields (a report
+    # rebuild, no MD); missing fields stay unknown, so legacy data come out as "awaiting reanalysis"
+    asm = _assessment_for(r)
     if figs.get("histograms"):
-        out += doc.figure_block(figs["histograms"]["png"], "umbrella", FT.classify_umbrella(pm.get("coverage") or {}, name), name)
+        out += doc.figure_block(figs["histograms"]["png"], "umbrella", FT.classify_umbrella(pm.get("coverage") or {}, name, asm), name)
     if (pm.get("overlap_matrix") or {}).get("matrix"):
         o = pm["overlap_matrix"]
         out += doc.figure_block(FG.heatmap(o["matrix"], doc.figdir / f"overlap_{name}.png", cmap="Blues", vmin=0, vmax=1, label="Overlap",
                                            ticks=[f"{c:.2f}" for c in o.get("centers") or []], xlabel="Window centre (nm)", ylabel="Window centre (nm)"),
-                                "overlap_matrix", FT.classify_overlap(name, o), name)
+                                "overlap_matrix", FT.classify_overlap(name, o, asm), name)
     if pm.get("convergence"):
         out += doc.figure_block(FG.pmf_convergence(pm["convergence"], doc.figdir / f"pmf_conv_{name}.png"), "pmf_convergence",
-                                FT.classify_convergence(name, pm["convergence"]), name)
+                                FT.classify_convergence(name, pm["convergence"], asm), name)
     if pm.get("grid_nm") and pm.get("pmf_radial_kj_mol"):
         g, W = pm["grid_nm"], pm["pmf_radial_kj_mol"]
         err = pm.get("err_kj_mol")
-        out += doc.figure_block(FG.pmf(g, W, err, doc.figdir / f"pmf_{name}.png"), "pmf", FT.classify_pmf(g, W, err, name), name)
+        out += doc.figure_block(FG.pmf(g, W, err, doc.figdir / f"pmf_{name}.png"), "pmf",
+                                FT.classify_pmf(g, W, err, name) + FT.classify_assessment(name, asm), name)
     elif figs.get("pmf"):
         out += doc.figure_block(figs["pmf"]["png"], "pmf", [], name)
     return out
@@ -1113,6 +1142,20 @@ def _cooperativity_html(doc: Doc, coop: list, b: dict) -> str:
     return out
 
 
+def key_findings(pool: list[dict], limit: int = 10) -> list[dict]:
+    """D-96 (A10): de-duplicated key findings.  Every caution is kept whatever its position in the pool (a serious PMF
+    problem found late must not be cut by early repeated warnings); good and note findings fill up to `limit`."""
+    seen, cau, rest = set(), [], []
+    for f_ in pool:
+        t = tuple(f_["text"]) if isinstance(f_.get("text"), (list, tuple)) else f_.get("text")
+        if t in seen:
+            continue
+        seen.add(t)
+        (cau if f_.get("level") in ("caution", "warn") else rest).append(f_)
+    rest = [x for x in rest if x.get("level") == "good"] + [x for x in rest if x.get("level") != "good"]
+    return cau + rest[:max(0, limit - len(cau))]
+
+
 def _ml(d: dict, key: str, lang: str) -> str:
     """A field recorded by sampling.multi in Chinese, in the report language when its 4-language twin exists (D-74)."""
     v = d.get(key + "_i18n")
@@ -1132,8 +1175,20 @@ def _comparison_html(comp: dict, lang: str = "zh") -> str:
         else:
             pk = _esc(ctx.split(":", 1)[1])
             label = t(f"共同口袋（{pk}）", f"Shared pocket ({pk})", f"共通ポケット（{pk}）", f"공유 포켓 ({pk})")
-        if c.get("status") != "PASS":
-            parts.append(f"<p class=muted>{label}{colon(L)}{_esc(_ml(c, 'why', L))}</p>")
+        nc = c.get("not_compared") or []
+        nc_html = ("<ul class=muted>" + "".join(
+            f"<li>{_esc(x['key'])}{colon(L)}{_esc(t('未納入比較', 'not compared', '比較に含めない', '비교에서 제외'))}"
+            f"{paren(_esc(x['why']), L)}</li>" for x in nc) + "</ul>") if nc else ""
+        if c.get("status") == "DESCRIPTIVE":       # D-96: shared-pocket pulls are condition-specific values, never ranked
+            parts.append(f"<p><b>{label}</b>{colon(L)}{_esc(_ml(c, 'why', L))}</p><ul>" + "".join(
+                f"<li>{_esc(v['key'])}{colon(L)}ΔPMF {v['delta_pmf_kj_mol']:.2f}"
+                + ("" if v.get("err") is None else f" ± {v['err']}") + " kJ/mol"
+                + ("" if v.get("qualified") else paren(_esc(t('僅診斷，未通過取樣評估', 'diagnostic only, sampling assessment not passed',
+                                                            '診断のみ、取得評価は不合格', '진단용, 샘플링 평가 미통과')), L))
+                + "</li>" for v in c.get("values") or []) + "</ul>" + nc_html)
+            continue
+        if c.get("status") not in ("PASS", "PATH_SPECIFIC"):
+            parts.append(f"<p class=muted>{label}{colon(L)}{_esc(_ml(c, 'why', L))}</p>" + nc_html)
             continue
         parts.append(f"<p><b>{label}</b>{colon(L)}{_esc(_ml(c, 'why', L))}</p><table><tr><th>{t('配體', 'Ligand', 'リガンド', '리간드')}</th>"
                      f"<th class=num>{_esc(c['quantity'])} ({_esc(c['unit'])})</th><th class=num>σ</th>"
@@ -1141,7 +1196,7 @@ def _comparison_html(comp: dict, lang: str = "zh") -> str:
         for r in c["rows"]:
             parts.append(f"<tr><td>{_esc(r['key'])}</td><td class=num>{r['delta']:+.2f}</td><td class=num>{'—' if r['sigma'] is None else r['sigma']}</td>"
                          f"<td>{_esc(_ml(r, 'verdict', L))}</td></tr>")
-        parts.append("</table>")
+        parts.append("</table>" + nc_html)
     if comp.get("co_occupancy"):
         parts.append("<p><b>" + t("共存效應", "Co-occupancy effect", "共存の効果", "공존 효과") + "</b>"
                      + paren(t("共同口袋減去單獨結合", "shared pocket minus alone", "共通ポケットから単独結合を引いた値", "공유 포켓에서 단독 결합을 뺀 값"), L)
@@ -1378,19 +1433,27 @@ def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None 
     st = wf.state()
     pool = I.peptide(st.get("cpp") or {}, st.get("peptide_access") or {}) + doc.collected + \
         I.structure((load_json(wf.dir / "structure_gates.json", {}) or {}).get("gates") or [])[:1]
-    seen, key = set(), []
-    for f_ in [x for x in pool if x["level"] == "caution"] + [x for x in pool if x["level"] == "good"] + [x for x in pool if x["level"] == "note"]:
-        if f_["text"] not in seen:
-            seen.add(f_["text"]); key.append(f_)
-    key = key[:10]
-    rows_log = [r for r in wf.project.decisions.read() if str(r.get("stage", "")).startswith(
-        ("workflow", "docking", "binding", "build", "engine", "screen", "gui", "peptide"))]
+    key = key_findings(pool)
+    stages = ("workflow", "docking", "binding", "build", "engine", "screen", "gui", "peptide", "analysis", "structure")
+    dec = getattr(wf, "dec", None)
+    if hasattr(dec, "unattributed"):          # D-96 (A10): this workflow's rows; unattributed ones listed apart, never guessed
+        rows_log = [r for r in dec.read() if str(r.get("stage", "")).startswith(stages)]
+        rows_unknown = [r for r in dec.unattributed() if str(r.get("stage", "")).startswith(stages)]
+    else:
+        rows_log, rows_unknown = [r for r in wf.project.decisions.read() if str(r.get("stage", "")).startswith(stages)], []
     log = doc.table([tx(("時間", "Time", "日時", "시각"), L), tx(("階段", "Stage", "段階", "단계"), L), tx(("項目", "Item", "項目", "항목"), L),
                      tx(("選擇", "Choice", "選択", "선택"), L), tx(("類型", "Type", "種類", "유형"), L), tx(("理由", "Reason", "理由", "이유"), L)],
                     [[_esc(str(r.get("at", ""))[:19].replace("T", " ")), _esc(r.get("stage", "")), _esc(r.get("what", "")),
                       f"<code>{_esc(r.get('choice', ''))}</code>", _esc(r.get("kind", "")), _esc(r.get("why", ""))] for r in rows_log],
                     ("自動與人工的決策（依時間排列）", "Automatic and human decisions (chronological)",
                      "自動と手動の判断（時系列）", "자동 및 수동 결정 (시간순)"))
+    if rows_unknown:
+        log += (f"<p class=muted>{_esc(tx(('下列紀錄沒有流程標記（專案層級的步驟，或 D-96 之前寫入），無法確認是否屬於本流程，只列出不歸屬。', 'The records below carry no workflow id (project-level steps, or written before D-96); whether they belong to this workflow cannot be confirmed, so they are listed without attribution.', '以下の記録にはワークフローの識別子がありません（プロジェクト単位の手順、または D-96 以前の記録）。このワークフローのものか確認できないため、帰属させずに示します。', '아래 기록에는 워크플로 식별자가 없습니다(프로젝트 단위 단계 또는 D-96 이전 기록). 이 워크플로의 것인지 확인할 수 없어 귀속하지 않고 나열합니다.'), L))}</p>"
+                + doc.table([tx(("時間", "Time", "日時", "시각"), L), tx(("階段", "Stage", "段階", "단계"), L), tx(("項目", "Item", "項目", "항목"), L),
+                             tx(("選擇", "Choice", "選択", "선택"), L), tx(("理由", "Reason", "理由", "이유"), L)],
+                            [[_esc(str(r.get("at", ""))[:19].replace("T", " ")), _esc(r.get("stage", "")), _esc(r.get("what", "")),
+                              f"<code>{_esc(r.get('choice', ''))}</code>", _esc(r.get("why", ""))] for r in rows_unknown],
+                            ("歸屬不明的決策紀錄", "Decision records of unknown attribution", "帰属不明の判断記録", "귀속 불명의 결정 기록")))
     n_meth = nxt()
     n_lim = nxt()
     html = [f"<!doctype html><html lang={HTML_LANG[L]}><head><meta charset=utf-8>"

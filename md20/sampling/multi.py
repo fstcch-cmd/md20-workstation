@@ -125,41 +125,111 @@ def _sig(a: float | None, b: float | None) -> float | None:
     return math.sqrt(a * a + b * b)
 
 
+def _elig(r: dict) -> dict:
+    from .assessment import eligibility_of
+    return eligibility_of(r)
+
+
+def _cond_key(r: dict) -> str | None:
+    import json as _json
+    c = (r or {}).get("condition")
+    if not c:
+        return None
+    c = {k: v for k, v in c.items() if k != "spectators"} | {"n_spectators": len(c.get("spectators") or [])}
+    return _json.dumps(c, sort_keys=True)
+
+
+def _not_compared(keys, results, why_fn) -> list[dict]:
+    out = []
+    for k in keys:
+        r = results.get(k) or {}
+        if r.get("status") != "PASS":
+            out.append({"key": k, "why": f"execution status {r.get('status') or 'missing'}"})
+            continue
+        e = _elig(r)
+        if e.get("legacy"):
+            out.append({"key": k, "why": "no stored assessment: awaiting reanalysis (D-96)"})
+        elif not why_fn(r, e):
+            reasons = "; ".join((r.get("assessment") or {}).get("reasons") or []) or "not eligible"
+            out.append({"key": k, "why": reasons})
+    return out
+
+
 def compare_binding(results: dict, *, contexts: dict[str, list[str]]) -> dict:
     """`results[key]` is a workflow binding result; `contexts[ctx]` lists result keys measured in the same context.
 
-    Larger ΔPMF / more negative ΔG° = stronger binding.  Returns per-context rankings and co-occupancy shifts."""
+    D-96 (A1/A8): execution PASS is not enough.  A result enters a comparison only through its `assessment`
+    eligibility; results without one (written before D-96) are "awaiting reanalysis".
+      * ΔΔG° only when every compared ΔG° is qualified and the condition signatures agree;
+      * otherwise ΔPMF only as a *path-specific* well-depth ordering (single-ligand context, every ΔPMF qualified,
+        identical conditions) — never labelled affinity or "strongest";
+      * shared-pocket (multi) contexts are DESCRIPTIVE: values under a specific co-occupancy condition, no ranking.
+    Larger ΔPMF / more negative ΔG° = deeper well / more favourable."""
     out = {"contexts": {}, "co_occupancy": [], "notes": []}
     for ctx, keys in contexts.items():
-        ok = [k for k in keys if (results.get(k) or {}).get("status") == "PASS" and results[k].get("delta_pmf_kj_mol") is not None]
-        if len(ok) < 2:
-            if keys:
-                w = (f"{ctx}：只有 {len(ok)} 個配體有可用的 PMF，無法比較。",
-                     f"{ctx}: only {len(ok)} ligand(s) have a usable PMF, so there is nothing to compare.",
-                     f"{ctx}：使える PMF があるリガンドが {len(ok)} 個しかないため、比較できません。",
-                     f"{ctx}: 사용할 수 있는 PMF가 있는 리간드가 {len(ok)}개뿐이라 비교할 수 없습니다.")
-                out["contexts"][ctx] = {"status": "INSUFFICIENT", "keys": ok, "why": w[0], "why_i18n": w}
+        executed = [k for k in keys if (results.get(k) or {}).get("status") == "PASS"
+                    and results[k].get("delta_pmf_kj_mol") is not None]
+        path_ok = [k for k in executed if _elig(results[k]).get("delta_pmf_path_specific")]
+        excluded = _not_compared(keys, results, lambda r, e: e.get("delta_pmf_path_specific"))
+        if ctx.startswith("multi"):
+            vals = [{"key": k, "delta_pmf_kj_mol": results[k]["delta_pmf_kj_mol"],
+                     "err": results[k].get("delta_pmf_err_kj_mol"), "qualified": k in path_ok} for k in executed]
+            w = (f"{ctx}：共同口袋中每個配體各自從同一個複合物拉離，旁觀配體與路徑都不同，這些是「特定共同佔據條件下的拉離結果」，"
+                 "不互相排名，也不是內在親和力。",
+                 f"{ctx}: each ligand was pulled from the shared complex with different spectators and exit paths. These are "
+                 "pulling results under a specific co-occupancy condition; they are not ranked and are not intrinsic affinities.",
+                 f"{ctx}：共通ポケットの各リガンドは同じ複合体からそれぞれ引き離され、傍観リガンドも経路も異なります。これは"
+                 "「特定の共占有条件での引き離し結果」であり、順位づけせず、固有の親和性でもありません。",
+                 f"{ctx}: 공동 포켓의 각 리간드는 같은 복합체에서 각각 당겨졌고 관찰 리간드와 경로가 다릅니다. 이것은 '특정 "
+                 "공동 점유 조건의 당김 결과'이며 순위를 매기지 않고 고유 친화도도 아닙니다.")
+            out["contexts"][ctx] = {"status": "DESCRIPTIVE", "values": vals, "not_compared": excluded,
+                                    "why": w[0], "why_i18n": w}
             continue
-        use_dG = all(results[k].get("dG_standard_kj_mol") is not None for k in ok)
+        conds = {_cond_key(results[k]) for k in path_ok}
+        ok = path_ok
+        cond_bad = len(conds) > 1 or None in conds
+        if len(ok) < 2 or cond_bad:
+            if keys:
+                if cond_bad and len(ok) >= 2:
+                    w = (f"{ctx}：合格的配體拉離條件不同（CV、約束、anchor 或溫度），估計的是不同的量，不比較。",
+                         f"{ctx}: the qualified pulls used different conditions (CV, restraints, anchor or temperature), so "
+                         "they estimate different quantities and are not compared.",
+                         f"{ctx}：合格した引き離しの条件（CV、拘束、アンカー、温度）が異なり、別の量を推定しているため比較しません。",
+                         f"{ctx}: 적격한 당김의 조건(CV, 구속, anchor, 온도)이 달라 서로 다른 양을 추정하므로 비교하지 않습니다.")
+                else:
+                    w = (f"{ctx}：通過取樣品質評估的配體只有 {len(ok)} 個（算完 {len(executed)} 個），無法比較；未通過的只保留診斷曲線。",
+                         f"{ctx}: only {len(ok)} ligand(s) passed the sampling assessment ({len(executed)} computed), so "
+                         "there is nothing to compare; the others keep their diagnostic curves only.",
+                         f"{ctx}：取得品質の評価に合格したリガンドは {len(ok)} 個だけで（計算済み {len(executed)} 個）、比較できません。"
+                         "不合格のものは診断曲線だけを残します。",
+                         f"{ctx}: 샘플링 품질 평가를 통과한 리간드가 {len(ok)}개뿐이라(계산 완료 {len(executed)}개) 비교할 수 "
+                         "없습니다. 통과하지 못한 것은 진단 곡선만 남깁니다.")
+                out["contexts"][ctx] = {"status": "INSUFFICIENT", "keys": ok, "not_compared": excluded,
+                                        "why": w[0], "why_i18n": w}
+            continue
+        use_dG = all(_elig(results[k]).get("dG_standard") and results[k].get("dG_standard_kj_mol") is not None for k in ok)
         if use_dG:
-            val = {k: float(results[k]["dG_standard_kj_mol"]) for k in ok}       # lower = stronger
+            val = {k: float(results[k]["dG_standard_kj_mol"]) for k in ok}       # lower = more favourable
             err = {k: results[k].get("dG_err_kj_mol") for k in ok}
             ref = min(ok, key=lambda k: val[k])
             quantity, unit = "ΔΔG°", "kJ/mol"
             q4 = (quantity,) * 4
         else:
-            val = {k: -float(results[k]["delta_pmf_kj_mol"]) for k in ok}       # −well depth: lower = stronger
+            val = {k: -float(results[k]["delta_pmf_kj_mol"]) for k in ok}       # −well depth: lower = deeper
             err = {k: results[k].get("delta_pmf_err_kj_mol") for k in ok}
             ref = min(ok, key=lambda k: val[k])
-            quantity = "ΔΔPMF（定性）"
+            quantity = "ΔΔPMF（路徑特定）"
             unit = "kJ/mol"
-            q4 = (quantity, "ΔΔPMF (qualitative)", "ΔΔPMF（定性的）", "ΔΔPMF(정성적)")
+            q4 = (quantity, "ΔΔPMF (path-specific)", "ΔΔPMF（経路固有）", "ΔΔPMF(경로 특이적)")
         rows = []
         for k in sorted(ok, key=lambda k: val[k]):
             dd = round(val[k] - val[ref], 3)
             s = _sig(err[k], err[ref]) if k != ref else None
             if k == ref:
-                v4 = ("參考（最強）", "reference (strongest)", "基準（最も強い）", "기준(가장 강함)")
+                v4 = (("參考（ΔG° 最負）", "reference (most negative ΔG°)", "基準（ΔG° が最も負）", "기준(ΔG°가 가장 음수)")
+                      if use_dG else
+                      ("參考（沿其路徑井最深）", "reference (deepest well along its path)", "基準（経路に沿った井戸が最も深い）",
+                       "기준(경로를 따른 우물이 가장 깊음)"))
             elif s is None:
                 v4 = ("缺誤差估計，只給順序，不判斷是否顯著", "no error estimate, order only, significance not judged",
                       "誤差の推定がないため、順位だけを示し有意性は判断しません", "오차 추정이 없어 순서만 제시하고 유의성은 판단하지 않음")
@@ -169,22 +239,27 @@ def compare_binding(results: dict, *, contexts: dict[str, list[str]]) -> dict:
                       f"基準と区別できません（{cmp}）", f"기준과 구별되지 않음({cmp})")
             else:
                 cmp = f"|Δ| {abs(dd):.1f} ≥ 2σ {2 * s:.1f}"
-                v4 = (f"弱於參考（{cmp}）", f"weaker than the reference ({cmp})", f"基準より弱い（{cmp}）", f"기준보다 약함({cmp})")
+                v4 = ((f"ΔG° 比參考高（{cmp}）", f"ΔG° above the reference ({cmp})", f"ΔG° が基準より高い（{cmp}）",
+                       f"ΔG°가 기준보다 높음({cmp})") if use_dG else
+                      (f"井深較淺（{cmp}）", f"shallower well ({cmp})", f"井戸が浅い（{cmp}）", f"우물이 더 얕음({cmp})"))
             rows.append({"key": k, "value": round(val[k], 3), "err": err[k], "delta": dd,
                          "sigma": None if s is None else round(s, 3), "verdict": v4[0], "verdict_i18n": v4})
         reason = (("所有配體都有等級允許輸出的 ΔG°", "Every ligand has a ΔG° that its tier allows",
                    "すべてのリガンドにレベルで許された ΔG° があります", "모든 리간드에 등급이 허용한 ΔG°가 있습니다")
                   if use_dG else
-                  ("至少一個配體沒有輸出 ΔG°，所以改用 ΔPMF 井深，只做定性排序",
-                   "At least one ligand has no ΔG°, so ΔPMF well depths give a qualitative ranking only",
-                   "ΔG° が出ていないリガンドが少なくとも1つあるため、ΔPMF の井戸の深さで定性的に順位づけするだけです",
-                   "ΔG°가 없는 리간드가 하나 이상 있어 ΔPMF 우물 깊이로 정성적 순위만 매깁니다"))
+                  ("至少一個配體沒有合格的 ΔG°，所以只列出沿各自拉離路徑的 ΔPMF 井深順序；這是路徑與 anchor 相依的量，不是親和力排名",
+                   "At least one ligand has no qualified ΔG°, so only the ordering of ΔPMF well depths along each pull path is "
+                   "listed. That quantity depends on the path and anchor; it is not an affinity ranking",
+                   "合格した ΔG° がないリガンドが少なくとも1つあるため、各引き離し経路に沿った ΔPMF の井戸の深さの順序だけを示します。"
+                   "これは経路とアンカーに依存する量で、親和性の順位ではありません",
+                   "적격한 ΔG°가 없는 리간드가 하나 이상 있어 각 당김 경로를 따른 ΔPMF 우물 깊이 순서만 제시합니다. 이것은 경로와 "
+                   "anchor에 따라 달라지는 양이며 친화도 순위가 아닙니다"))
         why = (f"{ctx}：以 {q4[0]} 比較。{reason[0]}。差距小於 2σ 視為不可區分。",
                f"{ctx}: compared by {q4[1]}. {reason[1]}. A difference below 2σ counts as not distinguishable.",
                f"{ctx}：{q4[2]} で比較します。{reason[2]}。差が 2σ 未満なら区別できないとみなします。",
                f"{ctx}: {q4[3]}로 비교합니다. {reason[3]}. 차이가 2σ보다 작으면 구별되지 않는 것으로 봅니다.")
-        out["contexts"][ctx] = {"status": "PASS", "quantity": quantity, "unit": unit, "reference": ref, "rows": rows,
-                                "why": why[0], "why_i18n": why}
+        out["contexts"][ctx] = {"status": "PASS" if use_dG else "PATH_SPECIFIC", "quantity": quantity, "unit": unit,
+                                "reference": ref, "rows": rows, "not_compared": excluded, "why": why[0], "why_i18n": why}
     # co-occupancy: the same ligand pulled alone vs from the shared complex
     singles = {results[k].get("ligand", k): k for k in contexts.get("single", [])}
     for ctx, keys in contexts.items():
@@ -198,15 +273,29 @@ def compare_binding(results: dict, *, contexts: dict[str, list[str]]) -> dict:
             if r.get("status") != "PASS" or rs.get("status") != "PASS" or r.get("delta_pmf_kj_mol") is None \
                     or rs.get("delta_pmf_kj_mol") is None:
                 continue
+            if not (_elig(r).get("delta_pmf_path_specific") and _elig(rs).get("delta_pmf_path_specific")):
+                out["co_occupancy"].append({"ligand": name, "context": ctx, "shift_kj_mol": None, "status": "NOT_ELIGIBLE",
+                                            "why": f"{name}：單獨或共同口袋的 ΔPMF 未通過取樣評估（或為舊資料待重新分析），不計算位移。",
+                                            "why_i18n": (f"{name}：單獨或共同口袋的 ΔPMF 未通過取樣評估（或為舊資料待重新分析），不計算位移。",
+                                                         f"{name}: the single or shared-pocket ΔPMF did not pass the sampling "
+                                                         "assessment (or is legacy data awaiting reanalysis); no shift is computed.",
+                                                         f"{name}：単独または共通ポケットの ΔPMF が取得評価に合格していない（または再解析待ちの旧データ）"
+                                                         "ため、ずれは計算しません。",
+                                                         f"{name}: 단독 또는 공동 포켓 ΔPMF가 샘플링 평가를 통과하지 못했거나 재분석을 기다리는 "
+                                                         "이전 데이터라 이동량을 계산하지 않습니다.")})
+                continue
             d = round(float(r["delta_pmf_kj_mol"]) - float(rs["delta_pmf_kj_mol"]), 3)
             s = _sig(r.get("delta_pmf_err_kj_mol"), rs.get("delta_pmf_err_kj_mol"))
             sig = s is not None and abs(d) >= 2 * s
             deep, x = d > 0, f"{abs(d):.1f}"
             if sig:
-                tail = (f"，已達 2σ（{2 * s:.1f}），可能有協同或互斥效應",
-                        f", which reaches 2σ ({2 * s:.1f}) and may mean cooperativity or competition",
-                        f"、2σ（{2 * s:.1f}）以上なので協同または競合の可能性があります",
-                        f"으며 2σ({2 * s:.1f}) 이상이라 협동 또는 경쟁 효과가 있을 수 있습니다")
+                tail = (f"，超過 2σ（{2 * s:.1f}）；兩種條件的拉離路徑與旁觀配體不同，這是條件差異，不是協同或競爭的證據",
+                        f", beyond 2σ ({2 * s:.1f}). The two conditions differ in pull path and spectators, so this is a "
+                        "condition difference, not evidence of cooperativity or competition",
+                        f"、2σ（{2 * s:.1f}）を超えます。二つの条件は引き離し経路と傍観リガンドが異なるため、これは条件の違いであり、"
+                        "協同や競合の証拠ではありません",
+                        f"으며 2σ({2 * s:.1f})를 넘습니다. 두 조건은 당김 경로와 관찰 리간드가 달라 이것은 조건 차이이며 협동이나 "
+                        "경쟁의 증거가 아닙니다")
             elif s is not None:
                 tail = ("，在誤差範圍內，不判斷協同或互斥", ", within the error, so neither cooperativity nor competition is claimed",
                         "、誤差の範囲内なので協同とも競合とも判断しません", "지만 오차 범위 안이라 협동이나 경쟁을 판단하지 않습니다")
@@ -254,7 +343,7 @@ def delta_pmf_error(grid: np.ndarray, err: np.ndarray | None, i_min: int, tail: 
     return round(math.sqrt(float(e[i_min]) ** 2 + float(np.mean(e[-tail:])) ** 2), 3)
 
 
-def aggregate_binding_replicas(reps: list) -> dict:
+def aggregate_binding_replicas(reps: list, sources: list[dict] | None = None) -> dict:
     """Combine independent binding replicas (BindingResult-like objects).
 
     Mean over replicas; σ of the mean = max(SD/√n across replicas, √(Σσ_i²)/n from the bootstraps) — the larger
@@ -274,7 +363,15 @@ def aggregate_binding_replicas(reps: list) -> dict:
         cands = [x for x in (sem, boot) if x is not None]
         return round(mean, 3), (round(max(cands), 3) if cands else None)
 
-    out = {"n": n, "per_replica": per}
+    # A9 (D-96): count independent MD starting points, not pulls.  Without provenance the starts are unknown and the
+    # replicas are NOT assumed independent.
+    src = list(sources or [])
+    md_ids = [x.get("md_run_id") for x in src[:n]] if len(src) >= n else []
+    n_starts = len(set(md_ids)) if md_ids and all(md_ids) else (1 if n == 1 else 0)
+    for p, x in zip(per, src):
+        p.update({k: x.get(k) for k in ("md_run_id", "seed", "start_state")})
+    out = {"n": n, "per_replica": per, "n_independent_md_starts": n_starts,
+           "n_pulls_sharing_start": (n - n_starts) if n_starts else None}
     if any(x is None for x in dp):
         out.update(delta_pmf=None, delta_pmf_err=None)
     else:
@@ -292,14 +389,30 @@ def aggregate_binding_replicas(reps: list) -> dict:
     if n > 1 and out.get("delta_pmf") is not None:
         val = f"ΔPMF = {out['delta_pmf']} ± {out['delta_pmf_err']} kJ/mol"
         each = ", ".join(str(round(x, 1)) for x in dp)
-        w = (f"{n} 個獨立 replica，MD 起點與亂數種子都不同。{val}。各 replica 的值為 {each}。"
-             "σ 取 replica 標準誤與 bootstrap 合成誤差中較大的一個。",
-             f"{n} independent replicas with different MD starting points and random seeds. {val}. Per replica: {each}. "
-             "σ is the larger of the replica standard error and the combined bootstrap error.",
-             f"独立した replica が {n} 個あり、MD の出発点と乱数シードはそれぞれ異なります。{val}。各 replica の値は {each} です。"
-             "σ には replica の標準誤差と bootstrap の合成誤差のうち大きいほうを使います。",
-             f"독립 replica {n}개로, MD 시작점과 난수 시드가 모두 다릅니다. {val}. 각 replica 값은 {each}입니다. "
-             "σ는 replica 표준오차와 bootstrap 합성 오차 중 큰 값을 씁니다.")
+        if n_starts == n:
+            head = (f"{n} 個 replica，各自從不同的 MD 起點出發、亂數種子也不同。",
+                    f"{n} replicas, each from a different MD starting point with its own random seed.",
+                    f"replica は {n} 個で、それぞれ異なる MD の出発点と乱数シードを使います。",
+                    f"replica {n}개로, 각각 다른 MD 시작점과 난수 시드를 씁니다.")
+        elif n_starts:
+            head = (f"{n} 次拉離，但只有 {n_starts} 個不同的 MD 起點；其餘 {n - n_starts} 次與前面共用同一個起點、只換亂數種子，"
+                    "不是獨立的平衡起點。",
+                    f"{n} pulls but only {n_starts} distinct MD starting point(s); the other {n - n_starts} reuse an earlier "
+                    "starting point with a new random seed and are not independent equilibrium starts.",
+                    f"引き離しは {n} 回ですが、異なる MD の出発点は {n_starts} 個だけです。残りの {n - n_starts} 回は前と同じ出発点を"
+                    "使い乱数シードだけを変えたもので、独立した平衡の出発点ではありません。",
+                    f"당김은 {n}회지만 서로 다른 MD 시작점은 {n_starts}개뿐입니다. 나머지 {n - n_starts}회는 앞과 같은 시작점에서 "
+                    "난수 시드만 바꾼 것으로 독립적인 평형 시작점이 아닙니다.")
+        else:
+            head = (f"{n} 次拉離，沒有起點紀錄，不能確認是否來自不同的 MD 起點，因此不當作獨立 replica。",
+                    f"{n} pulls without starting-point records, so it cannot be confirmed that they come from different MD "
+                    "starting points; they are not treated as independent replicas.",
+                    f"引き離しは {n} 回ですが出発点の記録がなく、異なる MD の出発点からかどうか確認できないため、独立した replica とはみなしません。",
+                    f"당김 {n}회에 시작점 기록이 없어 서로 다른 MD 시작점에서 왔는지 확인할 수 없으므로 독립 replica로 보지 않습니다.")
+        w = (f"{head[0]}{val}。各次的值為 {each}。σ 取 replica 標準誤與 bootstrap 合成誤差中較大的一個。",
+             f"{head[1]} {val}. Per pull: {each}. σ is the larger of the replica standard error and the combined bootstrap error.",
+             f"{head[2]}{val}。各回の値は {each} です。σ には replica の標準誤差と bootstrap の合成誤差のうち大きいほうを使います。",
+             f"{head[3]} {val}. 각 회의 값은 {each}입니다. σ는 replica 표준오차와 bootstrap 합성 오차 중 큰 값을 씁니다.")
     else:
         w = ("只有一個 replica，σ 只含 bootstrap 抽樣誤差。", "A single replica. σ contains only the bootstrap sampling error.",
              "replica は 1 個だけなので、σ には bootstrap のサンプリング誤差しか含まれません。",
@@ -334,8 +447,9 @@ def cooperativity(results: dict, contexts: dict[str, list[str]]) -> list[dict]:
         for k in keys:
             r, name = results.get(k) or {}, (results.get(k) or {}).get("ligand")
             rs = results.get(singles.get(name, ""), {})
-            if r.get("status") == "PASS" and rs.get("status") == "PASS":
-                legs[name] = (r, rs)
+            if r.get("status") == "PASS" and rs.get("status") == "PASS" \
+                    and _elig(r).get("delta_pmf_path_specific") and _elig(rs).get("delta_pmf_path_specific"):
+                legs[name] = (r, rs)      # D-96: unqualified or legacy legs count as missing
         names = sorted(legs)
         missing = sorted({(results.get(k) or {}).get("ligand", k.split(":", 1)[-1]) for k in keys} - set(names))
         if len(names) < 2:
@@ -351,7 +465,8 @@ def cooperativity(results: dict, contexts: dict[str, list[str]]) -> list[dict]:
                                 f"필요합니다. 부족: {', '.join(missing) or '—'}. md.systems에 docked_single과 docked_multi를 모두 "
                                 "넣으십시오.")})
             continue
-        use_dG = all(r.get("dG_standard_kj_mol") is not None and rs.get("dG_standard_kj_mol") is not None for r, rs in legs.values())
+        use_dG = all(r.get("dG_standard_kj_mol") is not None and rs.get("dG_standard_kj_mol") is not None
+                     and _elig(r).get("dG_standard") and _elig(rs).get("dG_standard") for r, rs in legs.values())
 
         def leg(name):
             r, rs = legs[name]
@@ -430,7 +545,16 @@ def cooperativity(results: dict, contexts: dict[str, list[str]]) -> list[dict]:
                             f"{a}+{b}: the cycle closes, with the legs {x} kJ/mol apart. {cv} (≥ 2σ). This is {kind[1]}.",
                             f"{a}+{b}：サイクルは閉じています（経路の差 {x} kJ/mol）。{cv} で 2σ 以上あり、{kind[2]}。",
                             f"{a}+{b}: 순환이 닫힙니다(경로 차이 {x} kJ/mol). {cv}로 2σ 이상이며, {kind[3]}."))
-        if not use_dG:
+        if not use_dG and rec.get("status") in ("COOPERATIVE", "ANTICOOPERATIVE"):
+            # D-96 (A8): path-specific well depths with different spectators are not a standard-state cycle
+            rec["status"] = "HYPOTHESIS"
+            rec["why"] = tuple(w + q for w, q in zip(rec["why"], (
+                "但這是以路徑特定的 ΔPMF 井深計算，不是標準態一致的熱力學循環，只能當作待驗證的假設。",
+                " It is computed from path-specific ΔPMF well depths, not a thermodynamic cycle with consistent standard "
+                "states, so it is only a hypothesis to test.",
+                "ただし経路固有の ΔPMF の井戸の深さから求めたもので、標準状態がそろった熱力学サイクルではないため、検証すべき仮説にとどまります。",
+                " 다만 경로 특이적 ΔPMF 우물 깊이로 계산했으며 표준 상태가 일관된 열역학 순환이 아니므로 검증할 가설일 뿐입니다.")))
+        elif not use_dG:
             rec["why"] = tuple(w + q for w, q in zip(rec["why"], ("以 ΔPMF 井深計算，屬定性結果。",
                                                                   " This uses ΔPMF well depths and is qualitative.",
                                                                   "ΔPMF の井戸の深さから求めた定性的な結果です。",

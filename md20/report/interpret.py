@@ -15,26 +15,35 @@ def F(level: str, zh: str, en: str, ja: str = "", ko: str = "") -> dict:
 
 # ----------------------------------------------------------------------------------- structure
 def structure(gates: list[dict]) -> list[dict]:
+    """D-96 (A3): "repaired" counts only gates with a recorded change (`diff`); an unchanged limitation — including a
+    legacy AUTO_FIXED record without a diff — is an accepted limitation, not a fix."""
     out = []
-    n = {s: sum(1 for g in gates if g.get("status") == s) for s in ("PASS", "AUTO_FIXED", "NEEDS_HUMAN")}
     if not gates:
         return [F("note", "沒有結構可信度紀錄。", "No structure-validity record is available.",
                   "構造の信頼性の記録はありません。", "구조 신뢰성 기록이 없습니다.")]
-    out.append(F("good" if not n["NEEDS_HUMAN"] else "caution",
-                 f"結構檢查共 {len(gates)} 項，{n['PASS']} 項通過，{n['AUTO_FIXED']} 項已自動修正並記錄，{n['NEEDS_HUMAN']} 項需要你決定。",
-                 f"Of {len(gates)} structure checks, {n['PASS']} passed, {n['AUTO_FIXED']} were corrected automatically and "
-                 f"recorded, and {n['NEEDS_HUMAN']} need your decision.",
-                 f"構造チェック {len(gates)} 項目のうち、{n['PASS']} 項目が合格、{n['AUTO_FIXED']} 項目は自動で修正済み（記録あり）、"
-                 f"{n['NEEDS_HUMAN']} 項目は判断が必要です。",
-                 f"구조 검사 {len(gates)}개 항목 중 {n['PASS']}개 통과, {n['AUTO_FIXED']}개 자동 수정됨(기록됨), "
-                 f"{n['NEEDS_HUMAN']}개는 결정이 필요합니다."))
+    fixed = [g for g in gates if g.get("status") == "AUTO_FIXED" and g.get("diff")]
+    lim = [g for g in gates if g.get("limitation") or (g.get("status") == "AUTO_FIXED" and not g.get("diff"))]
+    need = [g for g in gates if g.get("status") == "NEEDS_HUMAN"]
+    ok = [g for g in gates if g.get("status") == "PASS" and not g.get("limitation")]
+    nf, nl, nn, npass = len(fixed), len(lim), len(need), len(ok)
+    out.append(F("good" if not nn and not nl else "caution",
+                 f"結構檢查共 {len(gates)} 項：{npass} 項通過，{nf} 項實際修正（有修改紀錄），{nl} 項是接受的限制（沒有被修正），{nn} 項需要你決定。",
+                 f"Of {len(gates)} structure checks, {npass} passed, {nf} were repaired (with a recorded change), "
+                 f"{nl} accepted limitation{'s' if nl != 1 else ''} (not repaired), and {nn} need your decision.",
+                 f"構造チェック {len(gates)} 項目のうち、{npass} 項目が合格、{nf} 項目は実際に修正（変更の記録あり）、{nl} 項目は受け入れた制約"
+                 f"（修正されていません）、{nn} 項目は判断が必要です。",
+                 f"구조 검사 {len(gates)}개 항목 중 {npass}개 통과, {nf}개 실제 수정(변경 기록 있음), {nl}개는 받아들인 제약(수정되지 않음), "
+                 f"{nn}개는 결정이 필요합니다."))
     for g in gates:
-        if g.get("name") == "resolution" and g.get("status") != "PASS":
+        if g.get("name") == "resolution" and (g.get("status") != "PASS" or g.get("limitation")):
             out.append(F("note",
-                         "解析度低於 2.5 Å 時，側鏈與水分子的位置不確定度較高，判讀口袋內的氫鍵要保守。",
-                         "Below 2.5 Å resolution, side-chain and water positions are uncertain, so read pocket hydrogen bonds conservatively.",
-                         "分解能が 2.5 Å より低いと側鎖や水分子の位置の不確かさが大きくなるため、ポケット内の水素結合は慎重に解釈してください。",
-                         "분해능이 2.5 Å보다 낮으면 곁사슬과 물 분자 위치의 불확실성이 커지므로 포켓 안의 수소 결합은 보수적으로 해석하십시오."))
+                         "解析度比 2.5 Å 差（數值較大）時，側鏈與水分子的位置不確定度較高，判讀口袋內的氫鍵要保守；這是整個結構的數值，不代表每個口袋都一樣。",
+                         "At a resolution worse than 2.5 Å (a larger value), side-chain and water positions are uncertain, so read "
+                         "pocket hydrogen bonds conservatively; the value describes the whole entry, not each pocket.",
+                         "分解能が 2.5 Å より悪い（数値が大きい）と、側鎖や水分子の位置の不確かさが大きくなるため、ポケット内の水素結合は慎重に解釈して"
+                         "ください。この値は構造全体のもので、各ポケットに同じとは限りません。",
+                         "분해능이 2.5 Å보다 나쁘면(값이 크면) 곁사슬과 물 분자 위치의 불확실성이 커지므로 포켓 안의 수소 결합은 보수적으로 "
+                         "해석하십시오. 이 값은 구조 전체의 값이며 모든 포켓에 똑같이 적용되지는 않습니다."))
     return out
 
 
@@ -293,15 +302,22 @@ def binding(results: dict) -> list[dict]:
                          f"{name}: ΔG°는 출력하지 않았습니다(이유는 아래 설명 참고). ΔPMF는 같은 설정으로 계산한 리간드끼리 비교할 때만 쓸 수 있습니다."))
         hs = (r.get("half_split") or {}).get("diff_kj_mol")
         if hs is not None:
+            # D-96 (A2): half-split agreement is ONE diagnostic; it never declares convergence on its own
             conv = hs <= 2.0
-            out.append(F("good" if conv else "caution",
-                         f"{name}：前後半段的 ΔPMF 相差 {hs:.1f} kJ mol⁻¹" + ("，取樣已收斂。" if conv else "（> 2 kJ mol⁻¹），取樣尚未收斂，需要更長的窗口。"),
+            out.append(F("note" if conv else "caution",
+                         f"{name}：前後半段的 ΔPMF 相差 {hs:.1f} kJ mol⁻¹" + ("（≤ 2，這一項檢查通過；整體是否合格見取樣評估）。" if conv else "（> 2 kJ mol⁻¹），前後半段不一致，需要更長的窗口。"),
                          f"{name}: first and second halves differ by {hs:.1f} kJ mol⁻¹"
-                         + (", so sampling has converged." if conv else " (> 2 kJ mol⁻¹). Sampling has not converged and longer windows are needed."),
+                         + (" (≤ 2, this one check passes; whether the result qualifies overall is given by the sampling assessment)."
+                            if conv else " (> 2 kJ mol⁻¹). The halves disagree and longer windows are needed."),
                          f"{name}：前半と後半の ΔPMF の差は {hs:.1f} kJ mol⁻¹ "
-                         + ("で、サンプリングは収束しています。" if conv else "（> 2 kJ mol⁻¹）です。サンプリングはまだ収束しておらず、ウィンドウを長くする必要があります。"),
+                         + ("です（≤ 2、この項目は合格。全体として合格かは取得評価を参照）。" if conv else "（> 2 kJ mol⁻¹）です。前半と後半が一致しないため、ウィンドウを長くする必要があります。"),
                          f"{name}: 전반부와 후반부의 ΔPMF 차이가 {hs:.1f} kJ mol⁻¹"
-                         + ("로 샘플링이 수렴했습니다." if conv else "(> 2 kJ mol⁻¹)입니다. 샘플링이 아직 수렴하지 않았으므로 윈도우를 더 길게 해야 합니다.")))
+                         + ("입니다(≤ 2, 이 항목은 통과. 전체 적격 여부는 샘플링 평가 참고)." if conv else "(> 2 kJ mol⁻¹)입니다. 전후반이 일치하지 않으므로 윈도우를 더 길게 해야 합니다.")))
+        a = r.get("assessment")
+        if a is not None or "half_split" in r:
+            from .figure_text import classify_assessment
+            for x in classify_assessment(name, a):
+                out.append({"level": x["level"], "text": x["text"]})
         if d > 80:
             out.append(F("caution",
                          f"{name}：井深超過 80 kJ mol⁻¹，對多數藥物大小的分子來說不合理。常見原因是窗口取樣不足，或拉離路徑扭曲了蛋白。",

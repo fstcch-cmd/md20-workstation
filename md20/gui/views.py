@@ -133,7 +133,7 @@ def timeline(wf, *, limit: int = 200, lang: str = "zh") -> list[dict]:
         if s.get("at"):
             ev.append({"at": s["at"], "kind": "step", "title": _step(k, lang), "status": s.get("status", ""),
                        "text": s.get("message", "")})
-    for d in wf.project.decisions.read():
+    for d in wf.dec.read():                         # D-96: this workflow only
         if "stage" not in d:
             continue
         ev.append({"at": d.get("at", ""), "kind": d.get("kind", "auto"), "title": f"{d['stage']} · {d.get('what', '')}",

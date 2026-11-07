@@ -224,7 +224,8 @@ class Workflow:
         if create:
             ensure_dir(self.dir)
         self.state_path = self.dir / "state.json"
-        self.dec = project.decisions
+        from .util.decisions import ScopedDecisionLog
+        self.dec = ScopedDecisionLog(project.decisions, self.name)      # D-96 (A10): rows carry this workflow's id
         cfg_path = self.dir / "config.json"
         if create and (not cfg_path.is_file() or load_json(cfg_path, {}) != config):   # only touch the file when the content changes
             atomic_write_json(config, cfg_path)
@@ -1008,7 +1009,7 @@ class Workflow:
                     st.trajectory_interval_ps = scfg.frame_interval_ps
                     st.checkpoint_interval_ps = min(st.checkpoint_interval_ps, st.length_ps)
             summ = run_replicas(case, proto, make_factory(case, proto), n=1, should_pause=should_pause,
-                                progress_cb=progress_cb, group_id=f"screen_{rank}")
+                                progress_cb=progress_cb, group_id=f"screen_{rank}", decisions=self.dec)
             r0 = summ["runs"][0]
             if r0["status"] == "PAUSED":
                 return None
@@ -1234,7 +1235,7 @@ class Workflow:
                  "termini": lspec[n].get("termini", "charged"), "target_location": lspec[n].get("target_location"),
                  "cpp_evidence": lspec[n].get("cpp_evidence"), "cpp_override": lspec[n].get("cpp_override")}
                 for n in names if lspec.get(n, {}).get("sequence")]
-        s = build_case(case, receptor=raw, ligand_references=[picks[n]["smiles"] for n in small],
+        s = build_case(case, receptor=raw, decisions=self.dec, ligand_references=[picks[n]["smiles"] for n in small],
                        ligand_poses=[picks[n]["sdf"] for n in small], ph=self.cfg.get("ph", 7.4),
                        padding_nm=self._padding_nm(names, screen=screen), keep_hetero=set(self.cfg.get("keep_hetero", [])),
                        extra_ligand_resnames=drop, peptides=peps or None, ligand_names=small,
@@ -1407,7 +1408,7 @@ class Workflow:
             self._plan_long_run(key, case, proto, runs)
             group = runs.get(key, {}).get("group_id") or f"wf_{self.name}_{key}"
             summary = run_replicas(case, proto, make_factory(case, proto), n=proto.replicas, should_pause=should_pause,
-                                   progress_cb=progress_cb, group_id=group)
+                                   progress_cb=progress_cb, group_id=group, decisions=self.dec)
             statuses = {r["status"] for r in summary["runs"]}
             status = "COMPLETE" if statuses == {"COMPLETE"} and len(summary["runs"]) == proto.replicas else \
                      ("PAUSED" if "PAUSED" in statuses else "NEEDS_HUMAN")
@@ -1529,6 +1530,20 @@ class Workflow:
         cfg = BindingConfig(**user_cfg)
         return cfg
 
+    @staticmethod
+    def _binding_assessment(reps: list, dG, withheld) -> dict:
+        """Replica-combined assessment (every replica must support a conclusion); the tier rule and replica
+        aggregation may withhold ΔG° further, which removes the ΔG°-based eligibility but not the diagnostics."""
+        from .sampling.assessment import assess_pmf, combine_assessments
+        per = [getattr(r, "assessment", None) or assess_pmf(r.pmf, dG_withheld=(r.pmf or {}).get("dG_withheld"),
+                                                            has_dG=r.dG_standard_kj_mol is not None) for r in reps]
+        a = combine_assessments(per)
+        if dG is None:
+            a["eligibility"] = {**a["eligibility"], "dG_standard": False, "affinity_ranking": False}
+            if withheld:
+                a["reasons"] = sorted(set(a["reasons"]) | {f"ΔG° withheld: {withheld}"})
+        return a
+
     def _tier_withholds_dG(self, cfg, res, n_done: int = 1) -> str | None:
         tier = self.cfg.get("md", {}).get("tier", "teaching")
         rule = self.TIER_BINDING.get(tier, self.TIER_BINDING["teaching"])
@@ -1538,8 +1553,8 @@ class Workflow:
             return (f"{tier} 等級要求每個 window ≥ {rule['min_window_ps']:.0f} ps，本次只有 {cfg.window_prod_ps:.0f} ps；"
                     f"ΔG° 不輸出，ΔPMF 僅供定性比較。")
         if rule.get("min_replicas") and int(n_done) < rule["min_replicas"]:
-            return (f"research 等級要求 ≥ {rule['min_replicas']} 個獨立 replica 的結合計算；實際完成 {n_done} 個"
-                    f"（設定 binding.replicas），ΔG° 不輸出。")
+            return (f"research 等級要求 ≥ {rule['min_replicas']} 個獨立 MD 起點的結合計算；實際只有 {n_done} 個不同的 MD 起點"
+                    f"（共用同一個 MD 終點的拉離不算獨立起點；設定 binding.replicas 與 md.replicas），ΔG° 不輸出。")
         hs = (res.pmf.get("half_split") or {}).get("diff_kj_mol")
         if rule.get("max_half_split_kj") and (hs is None or hs > rule["max_half_split_kj"]):
             return f"前後半段 ΔPMF 差 {hs} kJ/mol > {rule['max_half_split_kj']}：未收斂，ΔG° 不輸出。"
@@ -1654,10 +1669,16 @@ class Workflow:
                 others[o] = orec["heavy_atom_indices"]
             n_rep = want
             md_runs = runs[key]["run_ids"]
-            reps, paused = [], False
+            reps, paused, rep_src = [], False, []
             for i in range(n_rep):
-                # replica i starts from MD replica i (cycled) with its own seed → independent SMD/umbrella paths
-                rdir = case.dir / "runs" / md_runs[i % len(md_runs)]
+                # replica i starts from MD replica i; when there are more binding replicas than MD replicas the MD end
+                # point is reused (cycled) — those pulls share a starting configuration and are NOT independent
+                # equilibrium starts (A9, D-96): the provenance below keeps them apart
+                md_id = md_runs[i % len(md_runs)]
+                rdir = case.dir / "runs" / md_id
+                rep_src.append({"replica": i, "md_run_id": md_id, "seed": cfg.seed + 1000 * i,
+                                "start_state": str(rdir / "stages" / "production" / "production_state.xml"),
+                                "shares_start_with_earlier": md_id in [r["md_run_id"] for r in rep_src]})
                 rcfg = BindingConfig(**{**cfg.to_dict(), "seed": cfg.seed + 1000 * i,
                                         "extra_windows": list((b.get("manual_windows") or {}).get(name, []))})
                 odir = binding_replica_dir(self.dir / "binding" / name.replace(":", "_"), i, n_rep)
@@ -1692,10 +1713,12 @@ class Workflow:
                 results[name] = {"status": "PAUSED", "ligand": t["ligand"], "replicas_done": len(reps)}
                 st = self.state(); st["steps"]["binding"] = {"status": "PAUSED", "results": results}; atomic_write_json(st, self.state_path)
                 return results
-            agg = aggregate_binding_replicas(reps)
+            rep_src = rep_src[:len(reps)]
+            agg = aggregate_binding_replicas(reps, sources=rep_src)
             res = reps[0]
             dG, dGk, withheld = agg["dG"], agg["dG_kcal"], agg["dG_withheld"]
-            reason = self._tier_withholds_dG(cfg, SimpleNamespace(pmf={"half_split": agg["half_split"]}), n_done=len(reps))
+            reason = self._tier_withholds_dG(cfg, SimpleNamespace(pmf={"half_split": agg["half_split"]}),
+                                             n_done=agg["n_independent_md_starts"])
             if reason and dG is not None:
                 dG, dGk, withheld = None, None, reason
                 self.dec.record("binding.result", name, "ΔG° withheld", reason)
@@ -1709,7 +1732,13 @@ class Workflow:
                              "dG_standard_kcal_mol": dGk, "dG_withheld": withheld,
                              "per_replica": agg["per_replica"], "half_split": agg["half_split"],
                              "r_min_nm": res.pmf.get("r_min_nm"), "figures": res.figures, "caveats": res.caveats,
-                             "max_force": res.smd.get("max_force_kj_mol_nm"), "work": res.smd.get("final_work_kj_mol")}
+                             "max_force": res.smd.get("max_force_kj_mol_nm"), "work": res.smd.get("final_work_kj_mol"),
+                             # D-96: execution PASS above; what the evidence supports is in `assessment`
+                             "assessment": self._binding_assessment(reps, dG, withheld),
+                             "condition": getattr(res, "condition", None) or {},
+                             "replica_sources": rep_src, "n_independent_md_starts": agg["n_independent_md_starts"],
+                             "n_pulls_sharing_start": agg["n_pulls_sharing_start"],
+                             "replicas_why_i18n": agg.get("why_i18n")}
         comparison = compare_binding(results, contexts={k: v for k, v in contexts.items() if v})
         for c in comparison["contexts"].values():
             if c.get("why"):

@@ -28,7 +28,8 @@ def replica_protocol(base: Protocol, index: int) -> Protocol:
 
 
 def run_replicas(case: Case, base: Protocol, make_backend: Callable, *, n: int | None = None, identity_extra: dict | None = None,
-                 progress_cb=None, should_pause=None, batch_steps: int | None = None, group_id: str | None = None) -> dict:
+                 progress_cb=None, should_pause=None, batch_steps: int | None = None, group_id: str | None = None,
+                 decisions=None) -> dict:
     """Run (or resume) N replicas.  With `group_id`, existing runs of that group are resumed from file truth."""
     n = int(n or base.replicas or 1)
     group_id = group_id or f"rep_{now_iso().replace(':', '').replace('-', '')}"
@@ -45,7 +46,7 @@ def run_replicas(case: Case, base: Protocol, make_backend: Callable, *, n: int |
             m = run.manifest(); m.update({"replica_group": group_id, "replica_index": i}); run.save_manifest(m)
         ident = {"case_id": case.case_id, "run_id": run.run_id, "project_uuid": case.project.uuid, **(identity_extra or {})}
         try:
-            st = run_protocol(run.dir, proto, make_backend, identity=ident, decisions=case.project.decisions,
+            st = run_protocol(run.dir, proto, make_backend, identity=ident, decisions=decisions if decisions is not None else case.project.decisions,
                               progress_cb=progress_cb, should_pause=should_pause, batch_steps=batch_steps)
             results.append({"run_id": run.run_id, "status": st["status"]})
         except Paused as exc:

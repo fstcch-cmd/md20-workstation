@@ -13,14 +13,16 @@ def _res(a_alone, a_with, b_alone, b_with, err=1.0, dG=False):
         r[k] = {"status": "PASS", "ligand": lig, key: v, ekey: err, "delta_pmf_kj_mol": v, "delta_pmf_err_kj_mol": err}
         if not dG:
             r[k]["dG_standard_kj_mol"] = None
+        r[k]["assessment"] = {"eligibility": {"delta_pmf_path_specific": True, "dG_standard": dG}, "reasons": []}
     return r, {"single": ["A", "B"], "multi:docked_multi": ["multi:A", "multi:B"]}
 
 
 def test_positive_cooperativity_from_pmf_depths():
     r, ctx = _res(20, 25, 15, 20.5)                 # both wells deeper with the partner → −ΔΔPMF ≈ −5
     c = cooperativity(r, ctx)[0]
-    assert c["status"] == "COOPERATIVE" and c["coop_kj_mol"] == pytest.approx(-5.25) and abs(c["closure_kj_mol"]) == pytest.approx(0.5)
-    assert "qualitative" in c["why"][1] and classify_cooperativity(c)[0]["level"] == "note"
+    # D-96 (A8): from path-specific well depths this is a hypothesis, not a demonstrated cooperativity
+    assert c["status"] == "HYPOTHESIS" and c["coop_kj_mol"] == pytest.approx(-5.25) and abs(c["closure_kj_mol"]) == pytest.approx(0.5)
+    assert "hypothesis" in c["why"][1] and classify_cooperativity(c)[0]["level"] == "note"
 
 
 def test_cycle_that_does_not_close_is_not_interpreted():

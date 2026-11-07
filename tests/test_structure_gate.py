@@ -45,11 +45,27 @@ def test_bad_resolution_rfree_occupancy_block():
 def test_metal_in_pocket():
     assert _st(structure_confidence(_pdb(metal="ZN"), ligand_resname="LIG"), "metal") == ["NEEDS_HUMAN"]
     assert _st(structure_confidence(_pdb(metal="ZN"), ligand_resname="LIG", metal_policy={"ZN": "keep_nonbonded"}),
-               "metal") == ["AUTO_FIXED"]
-    assert _st(structure_confidence(_pdb(metal="MG"), ligand_resname="LIG"), "metal") == ["AUTO_FIXED"]
+               "metal") == ["PASS"]                      # D-96: a policy applied later is not a repair
+    rep = structure_confidence(_pdb(metal="MG"), ligand_resname="LIG")
+    assert _st(rep, "metal") == ["PASS"] and [g.limitation for g in rep.gates if g.name == "metal"][0]["repaired"] is False
 
 
 def test_3ptb_is_trusted(pdb_3ptb):
     rep = structure_confidence(pdb_3ptb.read_text(), ligand_resname="BEN")
     assert rep.status != "NEEDS_HUMAN", rep.to_markdown()
     assert header_info(pdb_3ptb.read_text())["resolution_A"] < 2.0
+
+
+def test_unchanged_resolution_is_not_counted_as_fixed():
+    """Spec Test 14 / A3: a 3.0 Å structure stays a 3.0 Å structure — PASS with an accepted limitation, never AUTO_FIXED."""
+    from md20.report.interpret import structure
+    rep = structure_confidence(_pdb(res=3.0), ligand_resname="LIG")
+    g = [x for x in rep.gates if x.name == "resolution"][0]
+    assert g.status == "PASS" and g.limitation["repaired"] is False and not g.diff
+    assert all(x.status != "AUTO_FIXED" for x in rep.gates)
+    txt = structure([x.to_dict() for x in rep.gates])[0]["text"]
+    assert "corrected automatically" not in txt[1] and "accepted limitation" in txt[1]
+    # legacy record: AUTO_FIXED without a diff is reported as a limitation, not a repair
+    legacy = structure([{"name": "resolution", "status": "AUTO_FIXED", "explanation": "2.9 Å"}])
+    assert "0 were repaired" in legacy[0]["text"][1] and "1 accepted limitation" in legacy[0]["text"][1]
+    assert all("Below 2.5" not in f["text"][1] for f in legacy)

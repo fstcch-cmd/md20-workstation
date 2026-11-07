@@ -7,6 +7,23 @@
 
 ## 2026-11-07
 
+### D-96　整合規格 P0 第一批：執行狀態／科學評估／比較資格分開（A1、A2）、replica 起點語意（A9）、結構限制不算修正（A3）、決策紀錄依流程分開與摘要不截斷（A10）
+- 依據：使用者 11/07 09:39 提供的 `MD20_Claude_Code_Master_Iteration_Prompt_EN.md`（取代先前片段）。逐項複核表與 F01–F19 盤點在 `docs/specs/master_iteration_2026-11-07.md` §1–§2（每項附 `5561dd7` 的檔案與行號）。
+- 決定與理由：
+  1. **A1**：`BindingResult` 新增 `assessment` 與 `condition`；`sampling/assessment.py` 把既有品質欄位整理成一個評估物件（每項診斷：方法、範圍 local／global、pass／fail／unknown、門檻與來源、版本 `2026-11-07.1`）。缺欄位＝unknown，不算通過。`compare_binding` 只用 `eligibility`：ΔG° 全部合格才做 ΔΔG°；否則只有「路徑特定」合格且條件簽章相同時列 ΔPMF 順序（狀態 `PATH_SPECIFIC`，用語「沿其路徑井最深／井深較淺」，不再出現「最強」「弱於」）；共同口袋情境一律 `DESCRIPTIVE`（列值、不排名）；沒有評估的舊結果「待重新分析」。共同佔據位移與協同循環同樣要求雙方合格；以 ΔPMF 算出的協同結果狀態改為 `HYPOTHESIS`。
+  2. **A2**：三個 PMF 圖說（直方圖涵蓋、相鄰重疊、累積估計）改讀同一個評估；局部檢查只說局部，「已收斂」只在 `classify_assessment` 依全部必要診斷給出；矛盾（例如相鄰重疊低但全圖連通）明講。`interpret.binding` 的前後半段句子不再說「取樣已收斂」。報告中所有圖說與摘要讀 `_assessment_for(r)`（存的評估，否則由儲存的 PMF 欄位重新評估，不重跑 MD）。
+  3. **A9**：workflow 為每次拉離記錄 `md_run_id`、seed、起點檔與「是否與前面共用起點」；`aggregate_binding_replicas(sources=...)` 回報 `n_independent_md_starts` 與 `n_pulls_sharing_start`，文字分三種（全部獨立／部分共用／沒有起點紀錄→不當獨立）；research tier 的 replica 下限改看獨立 MD 起點數。報告「上表 N 次各自獨立」一句改用同一段彙總文字。
+  4. **A3**：解析度 2.5–3.2 Å、R-free 0.28–0.32、缺 EXPDTA、NMR、口袋 B 值高、跨鏈口袋、生物組裝缺鏈、金屬依政策處理，改為 `PASS` + `Gate.limitation`（`repaired: False`，範圍是整個結構而非單一口袋）。`interpret.structure` 分開數「通過／實際修正（有 diff）／接受的限制／需要決定」，舊紀錄中沒有 diff 的 AUTO_FIXED 計為限制。英文「Below 2.5 Å resolution」方向相反，四語改為「比 2.5 Å 差（數值較大）」。
+  5. **A10**：`Decision.workflow` 欄位＋`ScopedDecisionLog`；Workflow 的 `self.dec` 自動標記流程名稱，`build_case`、`run_replicas` 可接收它。報告與 GUI 時間線只列本流程；沒有流程標記的紀錄另列「歸屬不明」，不從文字猜。重點摘要改 `key_findings()`：去重後 caution 全部保留，其餘補滿 10 條。
+- 被否決：
+  - 把 `status` 從 PASS 改成新的第四態（會破壞 `PASS / AUTO_FIXED / NEEDS_HUMAN` 相容性與 GUI 卡片邏輯；規格也要求保留三態）。
+  - 舊結果自動推定合格（違反「缺 QC 不可預設通過」）。
+  - 共同口袋情境保留 ΔPMF 排名但加註「定性」（規格 A1：加註不能修補不可比的條件）。
+  - 依文字內容把舊決策紀錄歸屬到流程（規格 A10 明文禁止猜）。
+- 測試：新增 `tests/test_assessment.py`（9 項，含 A2 三個反例）、`tests/test_provenance.py`（4 項）、`test_multi_binding.py` 5 項（未合格不排名、條件不同不比較、單一 MD 終點三個種子不是三個起點、research tier 看獨立起點）、`test_structure_gate.py` 1 項（Test 14）。既有測試中編碼舊行為的斷言（排名「弱於參考」、報告「has converged」、金屬 AUTO_FIXED、協同 COOPERATIVE）依新規則更新，原意在註解說明。`python3 -m pytest -o addopts="" -q`：654 passed、48 skipped（基線 635 passed）。
+- 相容性／遷移：舊專案重建報告時，沒有 assessment 的結合結果會從 manifest 重新評估；因為 D-96 之前沒寫 `plateau`、ESS 等欄位，會顯示「未通過（無紀錄）」且不排名——這是刻意的，要重新分析才可比較。回退：revert 本 commit 即回到舊行為，資料格式只是增加欄位。
+- 未決：真實 `run_binding` 路徑寫入的 `assessment` 只有 CI heavy workflow 能驗證（容器沒有 OpenMM）；本 commit 未 push。
+
 ### D-95　CI 紅燈的真正原因：openmmforcefields 在 PyPI 唯一的版本被撤回（yanked），不是網路 flake；所有安裝指令改成 `==0.15.1` 精確釘選
 - 起因：`5561dd7` 的 CI 第一輪（attempt 1）與 09:34 重跑（attempt 2）都在同一步失敗：`pip install "openmmforcefields>=0.14"` → 「Could not find a version … (from versions: none)」。
 - 查證（11/07 09:45）：

@@ -25,6 +25,10 @@ class Gate:
     evidence: dict = field(default_factory=dict)
     # advisory = scientific-limitation notice (D-48): never blocks, but the GUI shows it as a card with its options
     advisory: bool = False
+    # D-96 (A3): an accepted scientific limitation that nothing repaired — e.g. a 3.0 Å structure.  The execution
+    # status stays PASS (continuation follows policy); `limitation` records what is limited and why it was accepted.
+    # AUTO_FIXED is reserved for a performed repair with a `diff`.
+    limitation: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)

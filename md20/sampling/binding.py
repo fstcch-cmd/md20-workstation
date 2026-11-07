@@ -181,6 +181,9 @@ class BindingResult:
     dG_standard_kcal_mol: float | None = None
     figures: dict = field(default_factory=dict)
     caveats: list = field(default_factory=list)
+    # D-96: scientific assessment (sampling/assessment.py) — execution status above, eligibility here
+    assessment: dict = field(default_factory=dict)
+    condition: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -902,6 +905,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                                f"已改用 {tr['replaced_by']} 以同一批樣本計算全範圍（D-62）。")
         else:
             reasons.append(f"PMF 只涵蓋 {tr['finite_nm']} nm，未涵蓋 window 取樣範圍 {tr['sampled_nm']} nm（MBAR 與 WHAM 皆是）")
+    res.pmf["plateau"] = bool(rp.get("plateau", True))          # D-96: explicit, so a missing field means "unknown"
     if not rp.get("plateau", True):
         reasons.append(f"PMF 末端（{rp['r_max']:.2f} nm）仍未持平（尾段變化 {rp['tail_rise_kj_mol']:.1f} kJ/mol > 1 kT）：ΔPMF 是邊緣值不是井深；"
                        "可加長 pull_distance_nm 或檢查盒子大小")
@@ -916,12 +920,26 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     if hint:
         res.caveats.insert(1, hint)
         res.pmf["well_depth_flag"] = True
+    # D-96: one structured assessment; execution PASS ≠ scientifically qualified
+    from .assessment import assess_pmf
+    res.assessment = assess_pmf(res.pmf, dG_withheld=res.pmf.get("dG_withheld"), has_dG=res.dG_standard_kj_mol is not None)
+    res.condition = binding_condition(cfg, other_ligand_indices, anchor_indices)
     manifest.update({"status": "PASS", "result": res.to_dict()})
     atomic_write_json(json.loads(json.dumps(manifest, default=_np_default)), out / "binding_manifest.json")
     if decisions:
         decisions.record("binding.result", "ΔPMF / ΔG°", f"{res.delta_pmf_kj_mol} / {res.dG_standard_kj_mol} kJ/mol",
                          "；".join(res.caveats[:2]))
     return res
+
+
+def binding_condition(cfg, other_ligand_indices=None, anchor_indices=None) -> dict:
+    """Condition signature of a pull (A8): results whose signatures differ estimate different quantities."""
+    return {"cv": "com_distance_radial", "temperature_k": float(cfg.temperature_k),
+            "backbone_restraint_kj_mol_nm2": round(float(cfg.backbone_restraint_scale) * 1000.0, 3),
+            "spectators": sorted(other_ligand_indices or {}), "hold_spectators": ({"on": bool(cfg.hold_spectators), "width_nm": float(cfg.spectator_hold_nm)}
+                                if other_ligand_indices else None),
+            "anchor": "user residues" if anchor_indices is not None else "automatic",
+            "funnel_restraint": False, "standard_state": "1 M radial integral (no orientational correction)"}
 
 
 def _np_default(o):

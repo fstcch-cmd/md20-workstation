@@ -107,7 +107,10 @@ def test_report_structure_and_interpretation(tmp_path, lang):
         assert "Table 1." in html and "AutoDock Vina" in html and "Amber ff14SB" in html
         assert "Redocking reproduces the co-crystal pose at 0.40 Å" in html      # scenario sentences from the data
         assert "top two poses differ by 0.50 kcal" in html
-        assert "24.3 ± 1.8" in html and "has converged" in html
+        # D-96 (A2): one diagnostic never declares convergence; the overall statement comes from the assessment
+        assert "24.3 ± 1.8" in html and "has converged" not in html
+        # the fixture's manifest predates D-96 (no ESS, solver, plateau fields): re-assessed → not qualified, everywhere
+        assert "the sampling assessment does not pass" in html and "awaits reanalysis" not in html
         assert "ASP189 (92%)" in html and "Recommended for this case" in html
         # every figure carries the general reading guide and the project-specific result (D-54)
         assert html.count("How to read") >= 20 and html.count("In this project") >= 20         # D-58: extended figures
@@ -116,7 +119,7 @@ def test_report_structure_and_interpretation(tmp_path, lang):
                      "Window overlap matrix", "Convergence of the free-energy profile", "Protein solvent-accessible surface area",
                      "Protein internal hydrogen bonds", "Ligand–pocket centre-of-mass distance"):
             assert kind in html, kind
-        assert "ASP189:OD1 ← L01:N1 (83%)" in html and "deeply buried" in html and "has converged" in html
+        assert "ASP189:OD1 ← L01:N1 (83%)" in html and "deeply buried" in html
         idx = json.loads((wf.dir / "report_figures" / "index_en.json").read_text(encoding="utf-8"))
         assert len(idx["figures"]) >= 20 and all(f["read"] and Path(f["path"]).is_file() for f in idx["figures"])
         for kind in ("Docking pose scores", "Backbone RMSD", "Radius of gyration", "Ligand displacement in the pocket",
