@@ -13,11 +13,42 @@ Write-Host "安裝位置：$Root（可用空間 $freeGB GB；環境約需 6 GB�
 if ($freeGB -lt 8) { Write-Host "!! 可用空間不足 8 GB。請清出空間，或改裝到其他磁碟：  .\installer\install.ps1 -Root D:\MD20"; exit 2 }
 $Mamba = Join-Path $Root "micromamba.exe"
 New-Item -ItemType Directory -Force -Path $Root | Out-Null
+# D-117: micromamba is pinned to one release and its sha256 is checked before use (the old URL .../latest gave every student
+# whatever was newest that day, unverified).  Source: GitHub mamba-org/micromamba-releases, asset "micromamba-win-64"
+# (a single .exe; its official .sha256 asset matches the hash below).  Keep in sync with install.sh (tests/test_installer_pins.py).
+# MD20_MICROMAMBA_LATEST=1 is the explicit, unverified escape hatch (the previous behaviour).
+$MambaVersion = "2.10.0-0"
+$MambaSha256 = @{ "win-64" = "f8b4284bd4eb1134122eaf93b3ea6c7be567e596de5829e1a6f478e34e41974a" }
 if (-not (Test-Path $Mamba)) {
-  Write-Host "[1/4] 下載 micromamba ..."
-  Invoke-WebRequest -Uri "https://micro.mamba.pm/api/micromamba/win-64/latest" -OutFile "$Root\micromamba.tar.bz2"
-  tar -xjf "$Root\micromamba.tar.bz2" -C $Root
-  Copy-Item "$Root\Library\bin\micromamba.exe" $Mamba -Force
+  if ($env:MD20_MICROMAMBA_LATEST -eq "1") {
+    Write-Host "[1/4] 下載最新版 micromamba（MD20_MICROMAMBA_LATEST=1，未驗證 sha256 / UNVERIFIED: latest micromamba, no sha256 check）..."
+    Invoke-WebRequest -Uri "https://micro.mamba.pm/api/micromamba/win-64/latest" -OutFile "$Root\micromamba.tar.bz2"
+    tar -xjf "$Root\micromamba.tar.bz2" -C $Root
+    Copy-Item "$Root\Library\bin\micromamba.exe" $Mamba -Force
+  } else {
+    Write-Host "[1/4] 下載 micromamba $MambaVersion（釘選版本，驗證 sha256 / pinned, sha256 verified）..."
+    $MambaUrl = "https://github.com/mamba-org/micromamba-releases/releases/download/$MambaVersion/micromamba-win-64"
+    $MambaPart = "$Mamba.part"
+    $ProgressPreference = "SilentlyContinue"   # Windows PowerShell 5.1 downloads very slowly with the progress bar
+    try { Invoke-WebRequest -UseBasicParsing -Uri $MambaUrl -OutFile $MambaPart }
+    catch {
+      if (Test-Path $MambaPart) { Remove-Item -Force $MambaPart }
+      Write-Host "!! 下載 micromamba 失敗 / Download of micromamba failed: $MambaUrl"; Write-Host "   $_"
+      Write-Host "   請檢查網路後重跑安裝器（不會改抓未驗證的最新版）。 / Check the network and rerun; the installer does not fall back to an unverified latest build."
+      exit 5
+    }
+    $MambaGot = (Get-FileHash -Algorithm SHA256 -Path $MambaPart).Hash.ToLower()
+    if ($MambaGot -ne $MambaSha256["win-64"]) {
+      Remove-Item -Force $MambaPart
+      Write-Host "!! micromamba 的 sha256 與釘選值不符，已刪除該檔，未使用。 / micromamba sha256 does not match the pinned value; the file was deleted and not used."
+      Write-Host "   版本 version: $MambaVersion"
+      Write-Host "   預期 expected: $($MambaSha256['win-64'])"
+      Write-Host "   實際 got:      $MambaGot"
+      Write-Host "   可能是下載被中斷或被代理／防毒改寫；請換網路重試並回報開發者。 / The download may be truncated or rewritten by a proxy or antivirus; retry on another network and tell the developer."
+      exit 4
+    }
+    Move-Item -Force -Path $MambaPart -Destination $Mamba
+  }
 }
 if ($Gpu -eq "auto") { $Gpu = if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { "cuda" } else { "opencl" } }
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path

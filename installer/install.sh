@@ -10,6 +10,69 @@ case "$OS" in
   *) IS_WIN=0 ;;
 esac
 
+# ---------------------------------------------------------------------------- micromamba pin (D-117)
+# micromamba is pinned to one release and its sha256 is verified before use (the old URL .../latest gave every student
+# whatever was newest that day, unverified).  Source: GitHub mamba-org/micromamba-releases, asset "micromamba-<platform>"
+# (a single executable; each official .sha256 asset matches the hash below).  Keep in sync with install.ps1
+# (tests/test_installer_pins.py).  MD20_MICROMAMBA_LATEST=1 is the explicit, unverified escape hatch (the previous behaviour).
+MICROMAMBA_VERSION="2.10.0-0"
+micromamba_sha256() {
+  case "$1" in
+    win-64)        echo "f8b4284bd4eb1134122eaf93b3ea6c7be567e596de5829e1a6f478e34e41974a" ;;
+    osx-64)        echo "8421462a1ef1df9f7acd114f9e2a24c1332ce4f4e29f44465b4acb44e2755172" ;;
+    osx-arm64)     echo "c547639f5caf742236641c362746abb4a3505774753ecd08fe341643670c4c01" ;;
+    linux-64)      echo "701f39c06f8e6a670a0e186c8479b9e5c0502a2f0cda6cef65d83bdd2875e8bd" ;;
+    linux-aarch64) echo "3bb56786e21b9b24024f599fe9185b4a59dc3f9f59937a42311ee583adbbb23c" ;;
+    *)             echo "" ;;
+  esac
+}
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+  else echo ""; fi
+}
+# fetch_micromamba <platform> <destination file> <member inside the legacy latest .tar.bz2>
+fetch_micromamba() {
+  local plat="$1" dest="$2" member="$3"
+  mkdir -p "$(dirname "$dest")"
+  if [ "${MD20_MICROMAMBA_LATEST:-}" = "1" ]; then
+    echo "!! MD20_MICROMAMBA_LATEST=1：下載最新版 micromamba，未驗證 sha256 / UNVERIFIED: latest micromamba, no sha256 check"
+    local lt="$(dirname "$dest")/mamba-latest"; mkdir -p "$lt"
+    curl -fLs "https://micro.mamba.pm/api/micromamba/$plat/latest" -o "$lt/micromamba.tar.bz2"
+    tar -xjf "$lt/micromamba.tar.bz2" -C "$lt" "$member"
+    cp "$lt/$member" "$dest"; chmod +x "$dest"
+    return 0
+  fi
+  local want url part got
+  want="$(micromamba_sha256 "$plat")"
+  if [ -z "$want" ]; then echo "!! 沒有 $plat 的釘選 micromamba / no pinned micromamba for platform $plat"; exit 4; fi
+  url="https://github.com/mamba-org/micromamba-releases/releases/download/$MICROMAMBA_VERSION/micromamba-$plat"
+  part="$dest.part"
+  echo "    micromamba ${MICROMAMBA_VERSION}（釘選版本，驗證 sha256 / pinned, sha256 verified）: $url"
+  if ! curl -fSL --retry 3 -o "$part" "$url"; then
+    rm -f "$part"
+    echo "!! 下載 micromamba 失敗 / Download of micromamba failed: $url"
+    echo "   請檢查網路後重跑安裝器（不會改抓未驗證的最新版）。 / Check the network and rerun; the installer does not fall back to an unverified latest build."
+    exit 5
+  fi
+  got="$(sha256_of "$part")"
+  if [ -z "$got" ]; then
+    rm -f "$part"
+    echo "!! 找不到 sha256sum 或 shasum，無法驗證 micromamba，已刪除下載檔。 / Neither sha256sum nor shasum found; cannot verify micromamba, the download was deleted."
+    exit 4
+  fi
+  if [ "$got" != "$want" ]; then
+    rm -f "$part"
+    echo "!! micromamba 的 sha256 與釘選值不符，已刪除該檔，未使用。 / micromamba sha256 does not match the pinned value; the file was deleted and not used."
+    echo "   版本 version: $MICROMAMBA_VERSION  平台 platform: $plat"
+    echo "   預期 expected: $want"
+    echo "   實際 got:      $got"
+    echo "   可能是下載被中斷或被代理改寫；請換網路重試並回報開發者。 / The download may be truncated or rewritten by a proxy; retry on another network and tell the developer."
+    exit 4
+  fi
+  chmod +x "$part"; mv -f "$part" "$dest"
+}
+
 if [ "$IS_WIN" = 1 ]; then
   # Git Bash on Windows.  Default root %LOCALAPPDATA%\MD20; override with MD20_ROOT=/d/MD20 to use another drive.
   ROOT="${MD20_ROOT:-$(cygpath -u "${LOCALAPPDATA:-$USERPROFILE/AppData/Local}")/MD20}"
@@ -24,9 +87,7 @@ if [ "$IS_WIN" = 1 ]; then
   MAMBA="$ROOT/micromamba.exe"
   if [ ! -f "$MAMBA" ]; then
     echo "[1/4] 下載 micromamba (win-64) ..."
-    curl -Ls https://micro.mamba.pm/api/micromamba/win-64/latest -o "$ROOT/micromamba.tar.bz2"
-    tar -xjf "$ROOT/micromamba.tar.bz2" -C "$ROOT" Library/bin/micromamba.exe
-    cp "$ROOT/Library/bin/micromamba.exe" "$MAMBA"
+    fetch_micromamba win-64 "$MAMBA" Library/bin/micromamba.exe
   fi
   if [ "$GPU" = auto ]; then
     if command -v nvidia-smi >/dev/null 2>&1 || [ -f "/c/Windows/System32/nvidia-smi.exe" ]; then GPU=cuda; else GPU=opencl; fi
@@ -91,12 +152,12 @@ fi
 if [ ! -x "$MAMBA" ]; then
   echo "[1/4] 下載 micromamba / downloading micromamba ..."
   case "$OS-$(uname -m)" in
-    Darwin-arm64) URL=https://micro.mamba.pm/api/micromamba/osx-arm64/latest ;;
-    Darwin-*)     URL=https://micro.mamba.pm/api/micromamba/osx-64/latest ;;
-    Linux-aarch64) URL=https://micro.mamba.pm/api/micromamba/linux-aarch64/latest ;;
-    *)            URL=https://micro.mamba.pm/api/micromamba/linux-64/latest ;;
+    Darwin-arm64) MM_PLAT=osx-arm64 ;;
+    Darwin-*)     MM_PLAT=osx-64 ;;
+    Linux-aarch64) MM_PLAT=linux-aarch64 ;;
+    *)            MM_PLAT=linux-64 ;;
   esac
-  curl -fLs "$URL" | tar -xj -C "$ROOT" bin/micromamba
+  fetch_micromamba "$MM_PLAT" "$MAMBA" bin/micromamba
 fi
 if [ "$GPU" = auto ]; then
   if command -v nvidia-smi >/dev/null 2>&1; then GPU=cuda; else GPU=opencl; fi
