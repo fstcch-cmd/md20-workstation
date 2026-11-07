@@ -5,7 +5,19 @@
 
 ## 0. 新 session 第一步
 
-> **2026-11-07 交接（session_016gcJz9hwPAMieHsNEctkzL 關閉前）。** 目前版本 **v0.1.0a18**，決策到 **D-94**。本週（11/04–11/07）這個 session 做的，全部已 push 到 `main`（HEAD `5561dd7`）：
+> **2026-11-07 第二次交接（session_016gcJzASwmZ7ZUPX5BewTyo）。** 本地 HEAD **`99c233f`**，決策到 **D-97**，**未 push、未發行**（依使用者指示）。本 session 做了整合規格（`MD20_Claude_Code_Master_Iteration_Prompt_EN.md`）的 P0 兩批：
+> - **D-95**：發現 `5561dd7` CI 紅燈真正原因是 **openmmforcefields 0.15.1 在 PyPI 被上游撤回**（唯一版本，理由「Missing deps」），不是前次判斷的 infra flake。CI 三處＋安裝程式兩處改成 `==0.15.1`。**a18 安裝程式新安裝也會壞**，修好需重新發行。
+> - **D-96**：A1/A2（執行狀態／科學評估／比較資格分開，`sampling/assessment.py`）、A9（replica 起點語意）、A3（結構限制不算修正）、A10（決策依流程分開、摘要不截斷）。
+> - **D-97**：A5（互作化學統一，`analysis/interactions.py`）、A6（完整動態接觸）、A4（配體狀態不靠單一 RMSD）、F09/A12（互作持續性與節奏契約，`analysis/persistence.py`）、F07（初始 vs 新接觸）。
+>
+> **接手第一件事：** ① 若使用者已授權 push，先 push 讓 CI 驗證 D-95（釘選）與 D-96/97 的真實引擎路徑（openmm-stack heavy workflow）；② 讀 `docs/specs/master_iteration_2026-11-07.md`（A1–A12 複核表、F01–F19 盤點、§5 後續精確清單）。
+>
+> **下一批（未做）：** A7（docking fallback reason code）、A8（PMF 參考態／漏斗約束）、A11（跨系統 PCA 共同基底）；F10/F11/F12、F01/F05 證據矩陣；P1A 自動行動迴圈；F19 MM/GBSA pilot（先決條件見 §5，需使用者授權預算）；配體原子形式電荷寫入 build manifest（讓鹽橋能出現在配體上，需 RDKit）。
+>
+> **未經使用者授權：不 push、不發版、不跑正式模擬、不改科學模型。**
+>
+> ---
+> **2026-11-07 第一次交接（session_016gcJz9hwPAMieHsNEctkzL 關閉前）。** 目前版本 **v0.1.0a18**，決策到 **D-94**。本週（11/04–11/07）這個 session 做的，全部已 push 到 `main`（HEAD `5561dd7`）：
 > - **D-91** zip 內直接執行安裝程式→提示先解壓縮（a16）。
 > - **D-92** 多配體拉離路徑被擋→自動改道＋可按的「略過這個配體」（a17）。
 > - **D-93** 路徑判定修正（貼著的鄰居不再算擋路，修好筆電 hsieh2024 URI 改道失敗）、「只做 MD」真的清掉 `binding.added`、閘門加「只算單獨結合（`binding.alone`）」與「指定 anchor 殘基（`binding.anchor_residues`）」、`reconnect_timeout` 180 秒（a18）。

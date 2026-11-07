@@ -3,6 +3,13 @@
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
+## 進行中（未發行）：整合規格 P0（D-95、D-96、D-97，2026-11-07）
+本地 HEAD `99c233f`，**尚未 push、未發行**（依使用者指示）。這批是科學正確性修正，不是新 phase。
+- **(A) 真實跑過並通過**：容器內 `pytest -o addopts="" -q` → **673 passed、48 skipped**（skip 為缺 OpenMM/RDKit/mdtraj 的整合測試）。新增純 Python 測試：assessment 9、interactions 14、persistence（含在 interactions）、extended 接線 2、報告持續性 1、provenance 4、structure 1、multi-binding 6。
+- **(B) 寫好、靠 CI 驗證**：真實 mdtraj 下的新 fingerprint／ligand_state／動態接觸、`run_binding` 寫入的 assessment——只有 CI openmm-stack heavy workflow 能驗；本批未 push，CI 尚未跑。
+- **(C) 已知限制／未完成**：A7（docking fallback reason code）、A8（PMF 參考態／漏斗約束）、A11（跨系統 PCA 共同基底）仍待做；配體原子形式電荷未寫入 build manifest（在那之前配體不判鹽橋，只標「帶電接近，配體電荷未知」）；F19 MM/GBSA pilot 未開始。詳見 `docs/specs/master_iteration_2026-11-07.md` §5。
+- **D-95 的 CI/安裝程式修正尚未驗證**：需使用者授權 push 才能讓 CI 確認 `openmmforcefields==0.15.1` 的釘選。
+
 ## 目前版本：v0.1.0a18（2026-11-04 發行，新功能為初步）
 - 拉離路徑判定修正（貼著的鄰居不再算擋路）、「只做 MD」真的停下結合自由能、閘門加「只算單獨結合」與「指定 anchor 殘基」（D-93）。**測試過**：純 Python（5 項新測試）；以筆電 hsieh2024 的 topology.pdb 重算路徑：原方向淨空。**沒測過**：筆電上 URI 的實際 SMD／PMF；「連線丟失」是否消失（reconnect_timeout 180 秒）。
 - GUI「3D 檢視」分頁空白的修正（D-94，NiceGUI 3 清掉 iframe）。**測試過**：CI gui-preview e2e 點分頁並確認 iframe 內畫出 canvas（以該次 CI 為準）。報告內的 3D 一直正常（筆電報告實測）。

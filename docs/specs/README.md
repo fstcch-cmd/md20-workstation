@@ -24,6 +24,7 @@
 | [binding_funnel_restraints.md](binding_funnel_restraints.md) | 結合自由能的漏斗約束與標準態校正：沿拉離軸投影 CV、圓錐＋圓柱側向約束、解析 K_b；筆電 3PTB 證據（一維距離 PMF 高估 3 倍以上） | **設計中**（a3 不含；請審查 §5） |
 | [gui_v2.md](gui_v2.md) | GUI v2：四種模式、教學頁、依個案建議參數、雙語、進 MD 前確認 | 已實作・隨 v0.1.0a3 發行（CI 渲染；互動部分筆電確認） |
 | [multi_ligand.md](multi_ligand.md) | 多配體同時對接進 MD：穿環／重疊／漂浮檢查、剛體微調、軟核鬆弛、協同自由能熱力學循環 | 已驗證（CI openmm-stack；D-60、D-61、D-64） |
+| [master_iteration_2026-11-07.md](master_iteration_2026-11-07.md) | 整合規格複核：A1–A12 逐項判定、F01–F19 盤點、P0 兩批增量（評估／比較資格、replica 語意、結構限制、決策分流程、互作化學、動態接觸、配體狀態、互作持續性）、驗收對照與後續計畫 | 已實作・純 Python 驗證（D-95/96/97；真實引擎路徑待 CI） |
 | [report_language.md](report_language.md) | 報告用語規範與圖表 F1–F42：每種圖的怎麼讀、門檻與中英文句型 | 已實作（`figure_text.py`，測試檢查一致） |
 | [membrane.md](membrane.md) | 膜系統：膜蛋白、膜表面接觸、純膜；定向、建膜、膜專用流程、分析 | **部分實作，未在真實引擎驗證**（D-80） |
 | [structure_prediction.md](structure_prediction.md) | 輸入序列一鍵摺疊（OmegaFold、ESMFold、Boltz-2、ColabFold、上傳）與 pLDDT 閘門 | **設計中**（D-80） |

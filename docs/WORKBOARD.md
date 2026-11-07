@@ -9,6 +9,10 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **整合規格 P0（D-95 CI 相依、D-96 A1/A2/A3/A9/A10、D-97 A4/A5/A6/A12/F07/F09）**：完成，本地 HEAD `99c233f`，**未 push**（待使用者授權）。673 passed。下一批：A7、A8、A11、F10/F11/F12、P1A 自動行動、F19 pilot | 使用者（MD20_Claude_Code_Master_Iteration_Prompt_EN.md） | session_016gcJzASwmZ7ZUPX5BewTyo | 2026-11-07 09:40 | 見 docs/specs/master_iteration_2026-11-07.md；勿動 md20/sampling/assessment.py、md20/analysis/interactions.py、md20/analysis/persistence.py |
+
+| 項目 | 來源 | 認領 session | 開始 | 備註 |
+|---|---|---|---|---|
 | **D-94 GUI 3D 分頁空白（NiceGUI 3 清掉 iframe）修正＋e2e 3D 檢查，併入 v0.1.0a18**（使用者 11/07 09:03）：完成 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-07 09:05 | 見 DECISIONS D-94 |
 | **D-93 拉離路徑誤判修正、「只做 MD」真的停下、加「只算單獨結合」「指定 anchor 殘基」，發行 v0.1.0a18**（使用者 11/04）：完成，待筆電確認 URI 實際 SMD 與連線丟失 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-04 12:30 | 見 docs/specs/multi_ligand.md 第十二節 |
 | **D-89 折線圖重新規劃（時間軸、圖例在外、命名、顏色、小圖），發行 v0.1.0a15**（使用者 11/04 09:50）：完成 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-04 09:55 | 見 docs/specs/figures.md |
