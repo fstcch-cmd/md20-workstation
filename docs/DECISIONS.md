@@ -6,6 +6,36 @@
 ---
 
 ## 2026-11-07
+### D-130（重做）重複分析彙總：每一條獨立重複都分析，跨重複 mean／SD／t 區間、k／n，單一軌跡不給不確定性
+- 背景：這是 R1（`docs/specs/evidence_driven_repair_prompt.md`）的**重做**。先前的 D-130 嘗試沒有進 main，這次從規格 D-129 §2 重新做，沒有沿用舊程式。查證的缺口（已驗證）：`Workflow.analyse`、`_comparability`、`_common_basis` 只用 `run_ids[0]`；報告 `actual_values` 讀 `md.get("replicas", 1)`，而預設已是 3 條（D-131）。範圍：只改分析、彙總與報告的 MD／重複部分；不新增 phase／step；不動 `report/evidence.py`、`sampling/*`、`analysis/traj.py`、`extended.py`、`persistence.py`、`common_basis.py`（其他代理負責）。
+- **決定**：
+  - 新純函式模組 `md20/analysis/replica_set.py`（schema `md20.replica_set/1`）：輸出明寫 case → 獨立重複 → 後代（拉動、視窗）的關係，只有獨立 MD 重複計入 n。每個觀測量宣告 estimand：每條重複先算一個數（後半段時間平均、每殘基接觸占有率、是／否結果），再跨重複算平均、樣本 SD（ddof = 1）、SEM、Student-t 95 % CI（df = n−1）。二元結果報 k／n。每條的值都帶 `run_id`。
+  - n = 1：重複間不確定性「不可得」，理由固定為「單一軌跡無法估計重複間不確定性」，SD 與 CI 是 `null`；n = 2 照算但標 `below_recommended_n`。單條軌跡內的變異（區塊平均標準誤）另列於 `within_trajectory`，不與重複間不確定性混合。失敗、未完成、被排除的重複留在輸出並附原因。重複不接合：事件長短與持續性只在單條內算。
+  - `Workflow.analyse` 對每個 `run_id` 分析；`summaries[key]` 原欄位保持第一條可分析的重複（向下相容），新增 `replicas`、`n_replicas_analysed`、`replica_set_file`、`replica_overlay`；彙總檔 `<workflow>/analysis_replicas_<系統>.json` 以 `atomic_write_json` 寫入；疊圖（每條一線加平均 ± SD 灰帶）。沿用既有 per-run manifest 的邏輯集中在 `_reuse_analysis_manifest()` 一處，方便之後換成快取指紋。
+  - `_comparability` 讀每一條重複的 `run.json`：任何一條條件不同或不明 → 該比較不可比（並區分系統之間或同一系統的重複之間），但各條自己的分析與彙總不受影響。`_common_basis` 讓每條重複各自成為一條軌跡（標籤 `系統/run_id`），不頭尾接合。
+  - 報告（四語，`md20/report/replica_section.py`，只在 `workflow_report.py` 加一個呼叫）：逐條表、跨重複 mean ± SD 與 t 區間、k／n、接觸占有率、疊圖、n = 1 的說明；`actual_values` 與限制段的重複數改讀實際條數，沒寫就 3，不再讀成 1。
+- **理由與取捨**：
+  - 只用 `run_ids[0]` 時，一條好看的軌跡可以掩蓋其他重複的矛盾；跨重複彙總是 R1 的核心。幀有自相關，所以 n 是重複數而不是幀數，這是唯一不灌水的做法。
+  - t 分位數用內建表，因為 scipy 不是相依套件（df 1 到 30 與 scipy 一致到 4 位，更大的 df 以 1/df 內插，誤差 < 1e-3）。
+  - `divergent` 用變異係數 > 0.25，這是經驗起始值（與 `ligand_state` 門檻同性質），報告裡只當警示，不拿來排除重複。
+  - 合併視圖：同一系統的重複在某欄位不一致時，該欄位變成不會與任何其他系統相等的標記字串（不明則是 `null`），這樣既有的成對可比性矩陣不必改就會被擋，而不是悄悄取第一條的值。
+  - `compare_runs` 的 RMSF 改用重複平均，RMSD 曲線仍取一條代表重複並在圖例寫明；因為 `traj.py` 不在這次範圍，沒有改成逐條疊圖。
+  - 報告的新區段放在新檔，避免與同時修改 `workflow_report.py` 結合／證據段的代理衝突。
+- **被否決**：
+  - 把所有重複的幀串成一條再算 SE：自相關未處理、事件跨越接縫會被切斷或合併，且違反「不接合」。
+  - n = 1 時給 SD = 0 或用區塊 SE 當區間：那是單條內部的變異，不是重複間不確定性；會偽造一個很窄的區間。
+  - 只改成取「最好」或「最像代表」的一條：仍是單一軌跡下結論。
+  - 一條重複分析失敗就整個 analyse 失敗：會讓其他合格的重複也看不到；改成保留原因與 DecisionLog，全部失敗才丟出錯誤。
+  - 在比較時只檢查第一條的條件：其餘重複條件不同時會誤判可比。
+- **證據**：`tests/test_replica_analysis.py`（26 項）：三條刻意分歧的重複全部可見且改變摘要（平均 5 而非第一條的 2；k／n = 2／3；`divergent` 與 `inconsistent` 標註）、單條重複 SD／CI 為 null 且 reason 固定、同一母軌跡的 5 次拉動與 24 個視窗不增加 n、失敗／未完成重複附原因保留、n = 0 不丟錯、合併條件阻擋不一致與保留不明、`analyse` 對 r1／r2／r3 都呼叫分析且 `summaries` 向下相容、再執行時每條沿用 manifest、單條失敗不遮蔽其他、一條重複溫度不同 → 該比較不可比但四條都分析且彙總完整、一條沒有 run.json → 不明而擋下、共同基底含每條（5 條軌跡、各自 30 幀）、四語報告含 mean ± SD／區間／k／n 與 n = 1 的說明、重複數讀實際條數。疊圖已實際繪出並目視檢查。全套 pytest 結果見 commit 訊息。
+- **未驗證**：真實 mdtraj／OpenMM 路徑（容器裝不了，只用偽分析輸出）；報告 HTML 在瀏覽器的版面；真實多重複專案的數值。
+- **未決**：
+  - 規格 §2 表中尚未跨重複彙總的項目：apo–複合物 ΔRMSF 的每殘基 CI（要兩邊各 3 條與 Welch t）、水合位點、DSSP、PCA 低谷佔比、DCCM、tICA／MSM 合併、膜指標。需要逐條讀 `extended.json` 的對應欄位，下一輪做。
+  - `engine/replicas.aggregate_replicas` 在 n = 1 寫 SD = 0.0，與本條「不給不確定性」不一致。
+  - `report/evidence.py` 仍讀 `md.get("replicas") or 1`；平衡階段圖與驗收表（`_equil_figures`、驗收檢查）仍只取第一條，應逐條列出。
+  - `descendants`（拉動與視窗的數量）目前沒有由 binding 結果自動填入；schema 已有欄位，測試證明它不增加 n。
+  - 結合自由能的跨重複彙總仍是既有 D-96 做法，沒有搬進 `replica_set`。
+- **相關檔案**：`md20/analysis/replica_set.py`（新）、`md20/report/replica_figs.py`（新）、`md20/report/replica_section.py`（新）、`md20/workflow.py`（`analyse`、`_reuse_analysis_manifest`、`_analyse_one_run`、`_comparability`、`_common_basis`）、`md20/report/workflow_report.py`（`_replica_count` 與兩處重複數、`_md` 一個呼叫）、`tests/test_replica_analysis.py`（新）、`docs/specs/replicas.md`（§7）、`docs/specs/README.md`。
 ### D-131　重複計畫與開始前告知：預設 3 條、時間倍數與 ETA、一鍵改條數、舊專案補跑（D-129 §3–§5）
 - 範圍：只做「需要幾條、花多少時間、使用者怎麼選」。分析與報告的跨重複彙總（`workflow.analyse`、`md20/analysis/`、`md20/report/`）是另一個代理同時做的，這裡沒動。不新增 phase／step。
 - **決定**：

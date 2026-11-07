@@ -42,6 +42,12 @@ def _fmt(x, nd: int = 2) -> str:
     return "—" if x is None else f"{float(x):.{nd}f}"
 
 
+def _replica_count(wf) -> int:
+    """D-130: replicas that really ran (smallest count over the systems), else the configured number (default 3, never 1)."""
+    from .replica_section import configured_or_actual
+    return configured_or_actual(wf.cfg, wf)
+
+
 CSS = """
 :root{--ink:#1f2933;--muted:#52606d;--line:#d9dee3;--soft:#f4f6f8;--accent:#2f6f9f;--good:#2f7d5b;--warn:#a86a12;--bad:#b8433f}
 body{font-family:"Inter","Segoe UI","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;color:var(--ink);max-width:1040px;
@@ -318,7 +324,7 @@ def actual_values(wf) -> dict:
     cfg = wf.cfg
     md, dk, b = cfg.get("md") or {}, cfg.get("docking") or {}, cfg.get("binding") or {}
     tier = md.get("tier", "teaching")
-    v = {"tier": tier, "restraints": md.get("restraints") or "standard", "replicas": int(md.get("replicas", 1)),
+    v = {"tier": tier, "restraints": md.get("restraints") or "standard", "replicas": _replica_count(wf),
          "solvent": md.get("solvent", "explicit"), "box_shape": md.get("box_shape", "dodecahedron"),
          "docking_mode": dk.get("mode", "independent"), "exhaustiveness": dk.get("exhaustiveness", 16), "n_poses": dk.get("n_poses", 9),
          "binding": bool(b.get("enabled"))}
@@ -939,6 +945,8 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
     eq = _equil_figures(doc, wf, cases, runs)
     if eq:
         out += _sub(doc, "平衡過程的品質", "Equilibration quality", "平衡化の品質", "평형화 품질") + eq
+    from .replica_section import replica_html            # D-130: every replica, mean ± SD, CI, k of n, the n = 1 note
+    out += replica_html(doc, wf, sums)
     if metrics:
         disp = {key: {v: u for u, v in (c.get("ligand_map") or {}).items()} for key, c in cases.items()}
         out += _md_figures(doc, sums, metrics, ext, disp)
@@ -1638,10 +1646,10 @@ def _limitations(doc: Doc, wf) -> list[str]:
                          "This workflow used the classroom tier (2 ns). It is for learning and checking the workflow and does not support scientific conclusions.",
                          "このワークフローは授業用の等級（2 ns）で実行しました。手順の学習と確認のためのもので、科学的な結論の根拠にはなりません。",
                          "이 워크플로는 수업용 등급(2 ns)으로 실행했습니다. 절차를 배우고 확인하는 용도이며 과학적 결론의 근거가 되지 못합니다."), L))
-    if int((wf.cfg.get("md") or {}).get("replicas", 1)) < 3:
-        items.append(tx(("只跑了一次模擬，無法報告重複之間的標準差。", "Only one replica was run, so no standard deviation between replicas can be reported.",
-                         "シミュレーションは 1 回だけなので、繰り返し間の標準偏差は報告できません。",
-                         "시뮬레이션을 한 번만 실행했으므로 반복 간 표준편차를 보고할 수 없습니다."), L))
+    if _replica_count(wf) < 3:
+        items.append(tx(("重複的條數少於 3，無法可靠地報告重複之間的標準差與信賴區間。", "Fewer than 3 replicas were run, so the standard deviation and confidence interval between replicas cannot be reported reliably.",
+                         "反復が 3 本未満のため、反復間の標準偏差と信頼区間を確かな形では報告できません。",
+                         "반복이 3개 미만이라 반복 간 표준편차와 신뢰구간을 신뢰성 있게 보고할 수 없습니다."), L))
     items.append(tx(("對接分數是經驗評分，誤差約 1 到 2 kcal mol⁻¹，不要直接當成結合親和力。",
                      "Docking scores are empirical, with an error of about 1 to 2 kcal mol⁻¹. Do not read them as binding affinities.",
                      "ドッキングスコアは経験的な評価値で、誤差は約 1〜2 kcal mol⁻¹ です。結合親和性としてそのまま読まないでください。",

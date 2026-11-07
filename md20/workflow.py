@@ -1707,95 +1707,208 @@ class Workflow:
         st.setdefault("long_run", {})[key] = {k: v for k, v in plan.to_dict().items() if k not in ("decisions",)}
         atomic_write_json(st, self.state_path)
 
+    # ------------------------------------------------------------------ analysis of every replica (D-130 redo, docs/specs/replicas.md §2)
+    def _reuse_analysis_manifest(self, run_dir: Path) -> dict | None:
+        """The ONE place that decides whether a stored per-run analysis can be reused (today: a PASS manifest exists).
+        A cache fingerprint check belongs here and nowhere else."""
+        man = load_json(run_dir / "analysis" / "analysis_manifest.json", {})
+        return man if man.get("status") == "PASS" else None
+
+    def _analyse_one_run(self, key: str, case, run_dir: Path, label: str, advisory_key: str) -> dict:
+        """Analysis of one replica (reuse, or the usual / membrane-only analysis) -> its analysis manifest."""
+        from .analysis.traj import analyse_run
+        top = load_json(case.build_dir / "build_manifest.json", {}).get("topology_pdb")
+        membrane = bool((self.cfg.get("md") or {}).get("membrane"))
+        man = self._reuse_analysis_manifest(run_dir)
+        if man is None:
+            bm = load_json(case.build_dir / "build_manifest.json", {})
+            if self.membrane_only_type():
+                # cases B and C have no receptor: membrane analysis only (analysis/membrane_run.py)
+                from .analysis.membrane_run import membrane_only_analysis
+                man = membrane_only_analysis(run_dir, bm, label=label, decisions=self.dec)
+            else:
+                groups = {l["name"]: l["heavy_atom_indices"] for l in manifest_ligands(bm) if l.get("heavy_atom_indices")}
+                man = analyse_run(run_dir, top, label=label, ligand_groups=groups or None, metal_indices=metal_indices_from_manifest(bm),
+                                  decisions=self.dec, ligand_charges=manifest_ligand_charges(bm))
+                if membrane:            # case A: membrane metrics and the equilibration acceptance next to the usual ones
+                    from .analysis.membrane_run import analyse_membrane_run
+                    try:
+                        ms = analyse_membrane_run(run_dir, bm, label=label, decisions=self.dec)
+                        man = {**man, "membrane_metrics_file": str(run_dir / "analysis" / "membrane_metrics.json"),
+                               "membrane_acceptance": ms.get("acceptance"),
+                               **({"membrane_file": ms["membrane_file"]} if ms.get("membrane_file") else {})}
+                    except Exception as exc:  # noqa: BLE001 — the general analysis above stands; the failure is recorded
+                        self.dec.record("analysis.membrane", label, "failed", f"膜分析失敗：{type(exc).__name__}: {exc}。"
+                                        "一般分析的結果仍保留，膜的面積、厚度與平衡驗收沒有計算。", kind="auto")
+        acc = man.get("membrane_acceptance")
+        if acc and acc.get("status") != "PASS":
+            st = self.state()
+            st.setdefault("advisories", {})[advisory_key] = acc
+            atomic_write_json(st, self.state_path)
+        return man
+
+    @staticmethod
+    def _replica_label(key: str, rid: str, n: int) -> str:
+        """Display label of one replica: the system key alone when it has a single run (as before), else key/run_id."""
+        return key if n <= 1 else f"{key}/{rid}"
+
     def analyse(self, runs: dict) -> dict:
-        from .analysis.traj import analyse_run, compare_runs
+        from .analysis.traj import compare_runs
+        from .analysis.replica_set import aggregate_replica_set, headline_lines
+        from .engine.replica_plan import configured_replicas
         out = {}
         metrics = {}
+        analysed_ids: dict[str, list[str]] = {}
         for key, r in runs.items():
             case = self.project.case(r["case_id"])
-            top = load_json(case.build_dir / "build_manifest.json", {}).get("topology_pdb")
-            rid = r["run_ids"][0]
-            run_dir = case.dir / "runs" / rid
-            man = load_json(run_dir / "analysis" / "analysis_manifest.json", {})
-            membrane = bool((self.cfg.get("md") or {}).get("membrane"))
-            if man.get("status") != "PASS":
-                bm = load_json(case.build_dir / "build_manifest.json", {})
-                if self.membrane_only_type():
-                    # cases B and C have no receptor: membrane analysis only (analysis/membrane_run.py)
-                    from .analysis.membrane_run import membrane_only_analysis
-                    man = membrane_only_analysis(run_dir, bm, label=key, decisions=self.dec)
-                else:
-                    groups = {l["name"]: l["heavy_atom_indices"] for l in manifest_ligands(bm) if l.get("heavy_atom_indices")}
-                    man = analyse_run(run_dir, top, label=key, ligand_groups=groups or None, metal_indices=metal_indices_from_manifest(bm),
-                                      decisions=self.dec, ligand_charges=manifest_ligand_charges(bm))
-                    if membrane:            # case A: membrane metrics and the equilibration acceptance next to the usual ones
-                        from .analysis.membrane_run import analyse_membrane_run
-                        try:
-                            ms = analyse_membrane_run(run_dir, bm, label=key, decisions=self.dec)
-                            man = {**man, "membrane_metrics_file": str(run_dir / "analysis" / "membrane_metrics.json"),
-                                   "membrane_acceptance": ms.get("acceptance"),
-                                   **({"membrane_file": ms["membrane_file"]} if ms.get("membrane_file") else {})}
-                        except Exception as exc:  # noqa: BLE001 — the general analysis above stands; the failure is recorded
-                            self.dec.record("analysis.membrane", key, "failed", f"膜分析失敗：{type(exc).__name__}: {exc}。"
-                                            "一般分析的結果仍保留，膜的面積、厚度與平衡驗收沒有計算。", kind="auto")
-            acc = man.get("membrane_acceptance")
-            if acc and acc.get("status") != "PASS":
-                st = self.state()
-                st.setdefault("advisories", {})[f"membrane equilibration {key}"] = acc
-                atomic_write_json(st, self.state_path)
+            rids = list(r.get("run_ids") or [])
+            n_ids = len(rids)
+            records, first_exc = [], None
+            for i, rid in enumerate(rids):
+                run_dir = case.dir / "runs" / rid
+                rj = load_json(run_dir / "run.json", {})
+                rec = {"run_id": rid, "replica_index": rj.get("replica_index", i), "status": rj.get("status"),
+                       "analysis_status": None, "metrics": None, "manifest": None, "reason": ""}
+                records.append(rec)
+                if rj.get("status") not in (None, "COMPLETE"):
+                    rec["reason"] = f"MD 狀態是 {rj.get('status')}，這條重複沒有完成，不分析也不納入彙總。"
+                    continue
+                label = key if i == 0 else f"{key} {rid}"
+                adv = f"membrane equilibration {key}" if i == 0 else f"membrane equilibration {key} ({rid})"
+                try:
+                    man = self._analyse_one_run(key, case, run_dir, label, adv)
+                    rec["manifest"] = man
+                    rec["analysis_status"] = man.get("status")
+                    rec["metrics"] = load_json(man["metrics_file"], {}) if man.get("metrics_file") else None
+                    if not rec["metrics"]:
+                        rec["reason"] = "分析沒有產生 metrics.json，不納入彙總。"
+                except Exception as exc:  # noqa: BLE001 — one failing replica must not hide the others; it is kept with its reason
+                    first_exc = first_exc or exc
+                    rec["analysis_status"] = "FAILED"
+                    rec["reason"] = f"分析失敗：{type(exc).__name__}: {exc}"
+                    self.dec.record("analysis.replicas", f"{key}/{rid}", "failed",
+                                    f"{key} 的重複 {rid} 分析失敗（{type(exc).__name__}: {exc}）；保留原因、不納入彙總，其他重複照常分析。", kind="auto")
+            good = [x for x in records if x["manifest"] is not None and x["metrics"]]
+            if not good:
+                if first_exc is not None:
+                    raise first_exc
+                self._block("analysis", f"{key} 沒有任何完成的重複可以分析（" + "；".join(x["reason"] for x in records if x["reason"]) + "）")
+            agg = aggregate_replica_set([{k: v for k, v in x.items() if k != "manifest"} | {
+                "analysis_manifest": str(case.dir / "runs" / x["run_id"] / "analysis" / "analysis_manifest.json"),
+                "extended_file": (x["manifest"] or {}).get("extended_file")} for x in records],
+                system=key, n_requested=configured_replicas(self.cfg)[0])
+            agg_path = self.dir / f"analysis_replicas_{safe_name(key)}.json"
+            atomic_write_json(agg, agg_path, backup=False)
+            fig = None
+            try:
+                from .report.replica_figs import replica_overlay
+                if len(good) >= 1:
+                    fig = replica_overlay({x["run_id"]: x["metrics"] for x in good}, self.dir / "figures" / f"replicas_{safe_name(key)}",
+                                          label=key)
+            except Exception as exc:  # noqa: BLE001 — the figure is a convenience; the numbers are in the file
+                fig = None
+                self.dec.record("analysis.replicas", key, "figure failed", f"{key} 的重複疊圖沒有畫出（{type(exc).__name__}: {exc}）；數字仍在 {agg_path.name}。", kind="auto")
+            if agg["flags"] and any(f in agg["flags"] for f in ("single_replica", "below_recommended_n", "excluded_replicas",
+                                                                 "no_analysed_replica")):
+                self.dec.record("analysis.replicas", key, f"{agg['n_analysed']} replicas", "；".join(headline_lines(agg)) +
+                                f"。需要的最少條數是 {agg['min_recommended']}；少於此數時結論降級為描述。", kind="auto")
+            head = good[0]
+            man = dict(head["manifest"])                 # backward compatible: the first analysed replica keeps its fields
+            man["replicas"] = [{"run_id": x["run_id"], "replica_index": x["replica_index"], "status": x["status"],
+                                "analysis_status": x["analysis_status"], "analysed": x in good, "reason": x["reason"],
+                                "metrics_file": (x["manifest"] or {}).get("metrics_file"),
+                                "analysis_manifest": str(case.dir / "runs" / x["run_id"] / "analysis" / "analysis_manifest.json"),
+                                "rmsd_backbone_mean_A": (x["manifest"] or {}).get("rmsd_backbone_mean_A"),
+                                "ligands": (x["manifest"] or {}).get("ligands"),
+                                "restrained_production": (x["manifest"] or {}).get("restrained_production")} for x in records]
+            man["representative_run_id"] = head["run_id"]
+            man["n_replicas_analysed"] = len(good)
+            man["replica_set_file"] = str(agg_path)
+            if fig:
+                man["replica_overlay"] = fig
             out[key] = man
-            metrics[key] = load_json(man["metrics_file"], {})
+            analysed_ids[key] = [x["run_id"] for x in good]
+            m0 = dict(head["metrics"])
+            rm = (agg.get("per_residue") or {}).get("rmsf_ca_A")
+            if len(good) > 1:
+                if rm and rm.get("residues"):     # apo-vs-complex flexibility compares the replica mean, not one trajectory
+                    m0["rmsf_ca_A"], m0["rmsf_residues"] = rm["mean"], rm["residues"]
+                metrics[f"{key} ({head['run_id']} RMSD; RMSF mean of {len(good)})"] = m0
+            else:
+                metrics[key] = m0
         cmp_ok = None
         if len(metrics) > 1 and not self.membrane_only_type():
-            cmp_ok = self._comparability(runs)
+            cmp_ok = self._comparability(runs, analysed_ids)
         comp = compare_runs(metrics, self.dir / "figures", cmp_ok) if len(metrics) > 1 and not self.membrane_only_type() else {}
         if cmp_ok is not None:
             comp["comparability"] = cmp_ok
-            cb = self._common_basis(runs, cmp_ok)
+            comp["compare_basis"] = "RMSF: mean over the analysed replicas of each system; RMSD curve: one representative replica (named in the legend)"
+            cb = self._common_basis(runs, cmp_ok, analysed_ids)
             if cb:
                 comp["common_basis_file"] = cb
         self._mark("analysis", summaries=out, comparison=comp)
         return {"summaries": out, "comparison": comp}
 
-    def _comparability(self, runs: dict) -> dict:
-        """D-106 (F10): may these runs be compared at all?  Conditions from run.json and the build manifests."""
+    def _comparability(self, runs: dict, analysed_ids: dict | None = None) -> dict:
+        """D-106 (F10): may these runs be compared at all?  Conditions from run.json and the build manifests, of EVERY
+        analysed replica (D-130): one replica run under different or unknown conditions makes the comparison not
+        comparable; the per-replica analyses are not affected.  ``conditions[key]`` is the system's merged view (a field
+        its replicas disagree on is no longer a single value), ``replica_conditions`` keeps each replica."""
         from .analysis.common_basis import conditions, comparability
-        conds = {}
+        from .analysis.replica_set import merge_replica_conditions
+        merged, per_rep, within, flat = {}, {}, {}, {}
         for key, r in runs.items():
             case = self.project.case(r["case_id"])
-            conds[key] = conditions(load_json(case.dir / "runs" / r["run_ids"][0] / "run.json", {}),
-                                    load_json(case.build_dir / "build_manifest.json", {}))
-        res = comparability(conds)
-        res["conditions"] = conds
+            bm = load_json(case.build_dir / "build_manifest.json", {})
+            rids = (analysed_ids or {}).get(key) or list(r.get("run_ids") or [])
+            rc = {rid: conditions(load_json(case.dir / "runs" / rid / "run.json", {}), bm) for rid in rids}
+            per_rep[key] = rc
+            merged[key], within[key] = merge_replica_conditions(rc)
+            for rid, c in rc.items():
+                flat[self._replica_label(key, rid, len(rc))] = c
+        res = comparability(flat)
+        res["conditions"] = merged
+        res["replica_conditions"] = per_rep
+        res["within_system"] = within
+        res["n_replicas"] = {k: len(v) for k, v in per_rep.items()}
         if not res["comparable"]:
             what = "、".join(d["field"] for d in res["differences"]) or "—"
             unk = "、".join(res["unknown"]) or "—"
+            inner = [k for k, w in within.items() if not w.get("comparable", True)]
+            extra = f"（其中 {'、'.join(inner)} 的重複彼此之間條件就不同或無法確認）" if inner else ""
             self.dec.record("analysis.compare", "comparability", {"differences": what, "unknown": unk},
-                            f"系統之間條件不同（{what}）或無法確認（{unk}）：apo 與複合物的 RMSF 差異、共同基底地形只列出、不做比較結論。"
-                            "條件不同時，差異可能來自設定而不是配體。", kind="auto")
+                            f"系統之間條件不同（{what}）或無法確認（{unk}）{extra}：apo 與複合物的 RMSF 差異、共同基底地形只列出、不做比較結論。"
+                            "條件不同時，差異可能來自設定而不是配體。比較檢查了每一條重複的 run.json；各條自己的分析不受影響。", kind="auto")
         return res
 
-    def _common_basis(self, runs: dict, cmp_ok: dict) -> str | None:
+    def _common_basis(self, runs: dict, cmp_ok: dict, analysed_ids: dict | None = None) -> str | None:
         """D-106 (A11/F12): one PCA basis for all systems (common Cα), landscapes on the same bins, representative
-        frames, half-split check.  Written to <workflow>/analysis_common.json."""
+        frames, half-split check.  Written to <workflow>/analysis_common.json.  D-130: every analysed replica enters
+        as its own trajectory (label ``key/run_id``; a system with one run keeps its key); replicas are never joined
+        end to end, so each has its own landscape and basin shares."""
         import numpy as np
         from .analysis.common_basis import common_basis
-        systems = {}
+        systems, labels = {}, {}
         order = sorted(runs, key=lambda k: (not k.lower().startswith("apo"), k))
         for key in order:
             r = runs[key]
-            adir = self.project.case(r["case_id"]).dir / "runs" / r["run_ids"][0] / "analysis"
-            lab = load_json(adir / "ca_labels.json", {})
-            if not lab.get("labels") or not (adir / "ca_xyz.npy").is_file():
-                continue
-            systems[key] = {"labels": lab["labels"], "time_ns": lab.get("time_ns"), "xyz": np.load(adir / "ca_xyz.npy")}
-        if len(systems) < 2:
+            rids = (analysed_ids or {}).get(key) or list(r.get("run_ids") or [])
+            for rid in rids:
+                adir = self.project.case(r["case_id"]).dir / "runs" / rid / "analysis"
+                lab = load_json(adir / "ca_labels.json", {})
+                if not lab.get("labels") or not (adir / "ca_xyz.npy").is_file():
+                    continue
+                name = self._replica_label(key, rid, len(rids))
+                systems[name] = {"labels": lab["labels"], "time_ns": lab.get("time_ns"), "xyz": np.load(adir / "ca_xyz.npy")}
+                labels[name] = {"system": key, "run_id": rid}
+        if len({v["system"] for v in labels.values()}) < 2:
             return None
         try:
             res = common_basis(systems)
         except Exception as exc:  # noqa: BLE001 — optional comparison
             res = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
         res["comparable"] = bool(cmp_ok.get("comparable"))
+        res["trajectory_labels"] = labels
         path = self.dir / "analysis_common.json"
         atomic_write_json(res, path, backup=False)
         return str(path)
