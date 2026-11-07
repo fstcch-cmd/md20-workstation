@@ -5,6 +5,36 @@
 
 ## 0. 新 session 第一步
 
+> **2026-11-07 第四個 session（session_016gcJz7pQmKkZzkUxg6SqVs）交接。本 session 以 Opus 5.5 開始，中途切換為 Opus 4.8；commit 屬名現在用 `Claude Opus 4.8`。**
+>
+> **⚠ 第一件事：有 CI 正在 GitHub VM 上跑，別急著 push。**
+> - 驗證 commit 是 **`ac5fba5`**（`ac5fba5`，HEAD 是其後的 docs-only commit，不觸發 CI）。它含本週全部未驗證的真實引擎改動（D-102 膜、D-104 建膜 3D、D-105 工具箱、D-106 共同基底、D-107 declash 修正）。
+> - 之前每次 push 都把上一輪排隊中的 CI 取代掉，所以 openmm-stack 三 OS／heavy workflow **從沒跑完過**。本 session 已停手讓 `ac5fba5` 跑完。**在確認它跑完之前，只改 `docs/**`（paths-ignore，不觸發 CI），不要 push 任何程式改動。**
+> - 查法（單次，不要輪詢）：`gh api "repos/fstcch-cmd/md20-workstation/actions/runs?head_sha=ac5fba5332983223982ef59b3bb31c458444c41f" --jq '.workflow_runs[]|select(.name|startswith("MD20 CI"))|.id'` → `gh api ".../actions/runs/<id>/jobs?per_page=40" --jq '.jobs[]|[(.conclusion//.status),.name]|@tsv'`。
+> - 重點看：openmm-stack 三 OS 的膜測試 **water overlaps 閘門 PASS/AUTO_FIXED 且 case B 400 步不 NaN**（D-102）、**live3d 階段 solute→bilayer→declashed**（D-104）、**toolbox 真 mdtraj**（D-105）、**共同基底 3PTB apo+複合物可比**（D-106）；pure-python 六個與 heavy-metal 應已由 D-107 轉綠；heavy workflow、paper-docking。紅的用單次 `gh api .../jobs/<id>/logs` 判斷是程式還是 infra，當場修（同一 commit 附測試與 DECISIONS）。
+> - 本 session 已用 send_later 排了一個 `ac5fba5` CI 檢查（約 2026-11-07 11:53 UTC 觸發）；若它在你接手時觸發，照本段做即可，不需重做。更早排的 `f61f305`／`77480b1` 檢查已過時，忽略。
+>
+> **本 session 做了（全部已 push main；a20，未發行；容器 770 passed）：**
+> - **D-103 GUI 穩定性**：計算改獨立子程序 `md20/gui/worker.py`（不 import NiceGUI），狀態／進度／即時曲線從 `<workflow>/_gui_job/` 檔案讀回；GUI 斷線或重開後接回同一計算、不重啟；報告重建移出事件迴圈。**行為改變**：關掉 GUI 不再中斷計算（按「暫停」才停）——需使用者確認是否要改成「關 GUI＝暫停」。規格 `docs/specs/gui_stability.md`。
+> - **D-104 建膜即時 3D**：`md20/build/live3d.py` 建模每步寫場景（solute＋目標磷平面、bilayer、declashed），GUI 3D 分頁每 3 秒重讀、新階段自動重畫、除非學生自己選過否則跟著建模走。
+> - **D-105 分析工具箱**：`md20/analysis/toolbox.py`——tICA、MSM（資格三級，單一軌跡永不報速率）、側鏈氫鍵網路、水合位點；接 `extended.py` 與報告。**盤點更正**：藍圖列為缺的 PCA/FEL/分群/SASA/DSSP/DCCM 其實 D-58 早有。
+> - **D-106 系統比較**：`md20/analysis/common_basis.py`——先查可比性（溫度／系綜／約束／水模型／力場 XML／溶劑／HMR／長度 ×1.25，未知即不可比），再放到同一組 PCA 軸、低谷代表幀、前後半一致性、殘基對應的 ΔRMSF。
+> - **D-107**：修 CI 第一次真跑 D-99~D-102 抓到的兩紅——declash 沒 SciPy 時漏查 O–H（加 numpy 後備）、金屬／real-case 測試 padding 0.8 低於截斷（改 1.0，閘門不動）。
+> - **D-108 證據覆蓋矩陣**：`md20/report/evidence.py`，報告開頭列 計畫／執行／支持什麼（三級，讀不到不算有證據）。
+> - **D-109**：移除無呼叫者 `sampling/runner.py`，`binding_summary` 搬到 `pmf.py`。
+> - **D-110**：docking 拒絕理由四語化（理由帶 params，報告依語言渲染）。
+>
+> **待使用者（接手可問或先做好等審）：**
+> 1. **a19 發行**：`e0a0f77`（D-95~D-98）CI 全綠、`docs/releases/v0.1.0a19.md` 已寫好。推 tag 是公開動作、**本 session 權限被擋，需使用者執行**：`git tag -a v0.1.0a19 e0a0f77 -m "MD20 v0.1.0a19" && git push origin v0.1.0a19`。a19 只含 D-95~D-98；D-99~D-110 屬 a20。
+> 2. **需授權才能做（屬協定變更或需計算預算，別自行動工）**：A8 漏斗約束 ΔG°／PMF 參考態、P1A 自動補窗迴圈（`adaptive.py` 可接）；藍圖第 2–4 階段——GaMD／well-tempered metadynamics、REST2/H-REMD、RBFE/ABFE（OpenFE）、恆定 pH、QM/MM、ML 勢能。F19 MM/GBSA pilot 也需計算預算授權。
+> 3. **F11 口袋體積／水合事件**：需 fpocket／P2Rank（Windows 可行性待查）。
+> 4. **使用者的既有需求**：D-72 筆電實測、hsieh2024 URI 的實際 SMD/PMF 數值、D-103 關掉 GUI 主控台後計算是否存活（CI 測不到，需筆電）。
+>
+> **規矩提醒（CLAUDE.md）**：不新增 phase 只強化；三態閘門；判斷寫 DECISIONS（最上面）＋ specs、與程式同 commit；改動要有測試、真實路徑交 CI；**未經授權不跑正式模擬、不改科學模型、不發版、不推 tag**。使用者 11/07 另交代：**避免使用付費 API**（目前程式只呼叫免費的 GitHub API 查 Vina）、已掃過工作樹與全部 git 歷史無金鑰洩漏（只有公鑰 `owner_pub.pem`）。repo 目前公開（開發期間；關回私人則 CI 計費、release 需登入）。
+>
+> ---
+>
+
 > **2026-11-07 第三個 session（session_016gcJzAV8UjRW4ixPZLxddG）交接。**
 >
 > **本 session 做了（全部已 push main，HEAD 見 git log；容器測試通過，真實引擎路徑交 CI）：**
