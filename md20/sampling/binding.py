@@ -867,7 +867,8 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                              extensions_done=ext_count, max_extensions=cfg.max_extensions_per_window)
         final_plan = rp
         entry = {"round": rnd + 1, "insert": rp.insert, "extend": [e["center"] for e in rp.extend],
-                 "holes": rp.holes, "unsamplable": rp.unsamplable, "notes": rp.notes, "continuous": rp.continuous}
+                 "holes": rp.holes, "unsamplable": rp.unsamplable, "notes": rp.notes, "continuous": rp.continuous,
+                     "skipped": list(getattr(rp, "skipped", []) or [])}          # D-119 drops with reasons (D-122 report)
         if not refine_log or refine_log[-1].get("round") != rnd + 1:
             refine_log.append(entry)
         else:

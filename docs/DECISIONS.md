@@ -31,6 +31,7 @@
   - 嘗試次數、牆鐘時間仍不在紀錄裡。
 - 檔案：`md20/report/auto_actions.py`（新）、`md20/report/workflow_report.py`（`_auto_actions_html`）、`md20/report/evidence.py`（`auto` 列）、`tests/test_auto_actions.py`（新）、`docs/specs/master_iteration_2026-11-07.md`（F17 列）。
 
+- 整合時補上（主 session）：`binding.py` 的 `refine_log.json` 每輪紀錄加入 `skipped`（D-119 放棄的提案與理由），報告直接讀結構化欄位；舊紀錄仍走 notes 文字後備。
 ### D-121　ac5fba5 openmm-stack ubuntu `test_extended_metrics_on_synthetic_trajectory`：蛋白氫鍵在無氫拓撲上失敗、錯誤被 guard 收走
 - 證據：run 42364949922 ubuntu job，`tests/test_extended_analysis.py:97` `KeyError: 'hbonds_protein'`——`extended_metrics` 的 `guard` 把例外收進 `errors`，該鍵不存在；斷言在取鍵時就失敗，所以 CI 沒印出 `errors` 內容（原因是推斷，不是讀到的）。
 - 判斷：合成軌跡的蛋白只有重原子；`md.wernet_nilsson` 找氫鍵需要 H，無 H 時在空的供體–氫–受體陣列上出錯。D-105 之前同一段也會失敗，只是沒有斷言它存在。真實拓撲（OpenMM 建模）都含 H，不受影響。
