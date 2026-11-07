@@ -58,6 +58,7 @@
 - **未決**：建膜即時 3D（需求 b）未開始；定時更新（每 2 秒重讀 state.json／決策紀錄）尚未改成「檔案有變才讀」，目前在事件迴圈上只是小量 I/O，先不動，筆電若仍卡再處理。
 - 規格：`docs/specs/gui_stability.md`。檔案：`md20/gui/worker.py`（新）、`md20/gui/logic.py`、`md20/gui/app.py`、`md20/gui/gate_text.py`、`tools/gui_preview.py`、`tests/test_gui_worker.py`。
 - **更正（同日，gui-preview run 42360796483）**：瀏覽器檢查中「關 GUI → 計算仍跑 → 重開 → 首頁顯示計算中 → 再按開始不重啟」**全部通過**（starts 一直是 1，beats 13→57 持續增加）；唯一失敗的「重開後進度列是空的」是**檢查本身的錯**：測試用的 fake run 事件沒有 MD 心跳欄位（`temperature_k`、`absolute_step`），`live_series` 本來就不會為它產生進度列，而且進度列在「即時曲線」分頁、不在預設分頁。修正：fake run 帶上 chunk 心跳的同一組欄位（只影響測試替身），檢查先點即時曲線分頁再看。
+- **更正 2（同日，gui-preview 28e87aa）**：檢查程式在 fake run 改寫 `_fake_run.json` 的瞬間讀檔，讀到空檔（JSONDecodeError）——D-103 後 fake run 在另一個程序寫，讀寫真的並行。測試替身改為原子寫入（tmp＋os.replace），讀取端遇到半檔重試。只影響測試替身與檢查程式。
 
 ### D-102　膜 NaN 根因找到並修復：OpenMM 溶劑化放出重疊的水 → 建模階段去碰撞（不是平台問題）
 - 診斷結論（run 42351281001 第一輪、42355183065 第二輪）：

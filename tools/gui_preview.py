@@ -125,7 +125,12 @@ def extras(pg, base: str, out: Path, code: str) -> None:
 def _fake_state(wf_dir: Path) -> dict:
     import json
     f = wf_dir / "_fake_run.json"
-    return json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+    for _ in range(20):                          # the stand-in rewrites the file every second (atomically since D-103)
+        try:
+            return json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+        except (ValueError, OSError):
+            time.sleep(0.1)
+    return {}
 
 
 def _stop_worker(root: Path) -> None:

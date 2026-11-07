@@ -299,6 +299,18 @@ class Runner:
         return None
 
 
+def _atomic_text(path: Path, text: str) -> None:
+    """Whole-file replace, so a reader in another process never sees a half-written file (D-103 browser check)."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    for k in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(0.05 * (k + 1))
+
+
 def _fake_run(wf: Workflow, seconds: float, progress_cb) -> dict:
     """Test stand-in for wf.run (env MD20_GUI_FAKE_RUN=<seconds>; tools/gui_preview.py, D-74): counts its starts and
     heartbeats in <workflow>/_fake_run.json so a test can prove that a language switch neither stops, restarts nor
@@ -314,13 +326,13 @@ def _fake_run(wf: Workflow, seconds: float, progress_cb) -> dict:
     for k in range(n):
         st["beats"] = int(st.get("beats", 0)) + 1
         st["t"] = time.time()
-        f.write_text(json.dumps(st), encoding="utf-8")
+        _atomic_text(f, json.dumps(st))
         # the same fields an MD chunk heartbeat carries, so the progress line and live curves are exercised (D-103)
         progress_cb({"stage": "fake", "case_id": "fake", "completed_local_steps": k + 1, "total_steps": n, "elapsed_s": float(k),
                      "absolute_step": k + 1, "temperature_k": 300.0, "potential_kj_mol": -1000.0})
         time.sleep(1.0)
     st["finished"] = True
-    f.write_text(json.dumps(st), encoding="utf-8")
+    _atomic_text(f, json.dumps(st))
     return {"status": "COMPLETE"}
 
 
