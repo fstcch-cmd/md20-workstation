@@ -32,6 +32,8 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "${{ matrix.python }}" }
       - run: pip install -e ".[dev]"
+      - name: Capability manifest is in sync with the tree (D-136, R7; cheap, pure Python)
+        run: python tools/capability_manifest.py --check
       - shell: bash
         run: pytest -q --ignore=tests/test_openmm_integration.py --ignore=tests/test_real_case_integration.py --ignore=tests/test_docking_integration.py --ignore=tests/test_workflow_integration.py --ignore=tests/test_binding_integration.py --ignore=tests/test_screen_integration.py 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
       - run: python -m md20.cli demo --dir ${{ runner.temp }}/md20demo
@@ -207,6 +209,9 @@ jobs:
   paper-docking:
     # Hsieh 2024/2025 docking reproductions: hours of Vina on 4 cores, so they live here — non-blocking, never
     # holding the openmm-stack gate.  Results are posted as a commit comment like the other validation JSON.
+    # D-136 (R7): a green mark here is NOT a qualification — the assertions are consistency checks, the search is reduced
+    # (exhaustiveness 8) and continue-on-error hides a failure.  The label below says so in every job list.
+    name: "paper-docking (BENCHMARK, non-blocking - not qualification)"
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 200

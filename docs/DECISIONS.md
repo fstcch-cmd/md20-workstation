@@ -6,6 +6,36 @@
 ---
 
 ## 2026-11-07
+### D-136　R7 能力清單與 R5 膜診斷驗收器：單一機器可讀清單、五種狀態分開、診斷與驗收分開、版本對齊
+- 範圍：規格 `docs/specs/evidence_driven_repair_prompt.md` 的 R7（單一能力清單、區分測試類型、非阻擋 job 不得默默成為資格、版本對齊）與 R5 膜部分（保留診斷收集、另加 artifact 驗收器）。**沒有改 `md20/` 套件程式（只改版本字串）、沒有改任何物理模型或門檻、沒有建立 tag 或 release、沒有 push。**
+- **決定**：
+  - **單一清單**：`docs/capabilities.json`（schema `md20.capabilities/1`，手維護的唯一來源）＋`docs/CAPABILITIES.md`（`tools/capability_manifest.py --write` 產生）。27 個功能、14 個 CI job。欄位：功能、實作位置、支援系統類型、限制、測試（檔案、類型、CI job）、最後已知結果（狀態、commit、證據網址）、benchmark 範圍、已發行安裝程式。歷史留在 STATUS／DECISIONS。
+  - **五種狀態分開，彼此不得推論**：implemented／synthetic_tested／real_engine_tested／scientifically_benchmarked／released_installer。`--check` 會擋：沒有阻擋型真實引擎測試卻標 real_engine_tested、只靠非阻擋 job 卻標 benchmark `yes`、statuses 沒有 commit＋網址、released_installer 不是真的已發行 tag（精確比對）。**目前沒有任何功能是 benchmark `yes`**；`docking_vina` 是 `observed`（paper-docking 縮減搜尋，hsieh2024 與論文殘基 recall 0/11 未重現）。
+  - **證據基準 `580cbff`**（run 42374500293，2026-11-07 最後一輪在 main 完整跑完）：15 個 job 中 14 成功、`heavy[metal]` 失敗。每個功能另算『證據之後實作或測試檔是否改過』（git blob 比對），改過的標 `stale`，不把舊綠燈當現況。鋅鍵結模型標 `fail`：HIS119:ND1–Zn 平均 2.324 Å 對 r0 2.02 Å，偏差 0.0304 nm > 0.03 nm（run 的 job log；任務敘述寫 2.36 Å，580cbff 的 log 是 2.324 Å，以 log 為準）；另行修復，本條不動門檻。
+  - **非阻擋與診斷 job 不能當資格**：清單的 `ci_jobs` 規定 benchmark／diagnostic 類 job 必須非阻擋且 `counts_for` 為空；`--check` 要求這類 job 的顯示名稱含 "not qualification"。改了顯示名稱：`ci.yml` 的 `paper-docking`（"BENCHMARK, non-blocking - not qualification"）、`diag-membrane.yml` 的 workflow 與兩個 job、`gui-preview` 與 `report-template` 的 job（GUI 檢查／合成資料，不是科學驗證）。job 的 key 沒變。
+  - **CI**：`ci.yml` 的 `pure-python` 加一步 `python tools/capability_manifest.py --check`（純 Python，約 0.1 秒）。`diag-membrane.yml` 的 `build`、`cross` 在診斷步驟後各加一個 `if: always()` 的驗收步驟。
+  - **膜診斷（R5）**：`tools/diag_membrane_nan.py` 維持回傳 0，只加輸出欄位（`protocol` 區塊、每個 build 的 `construction_seed`、`finished` 結束標記），模擬行為不變。新 `tools/validate_membrane_diag.py`：**只在 artifact 不完整時回傳非 0**（缺檔／不可讀、沒結束標記、缺 build 或 run、build 有 error、被截斷的 run、欄位缺漏、protocol 與 CI 輸入不符、舊格式又無期望值）；**NaN 只報告**（總數、短／長最小化各自、每個 build、每個 velocity seed），並把 construction 變異（獨立 build、construction seed、起始結構雜湊）與 velocity seed 變異分開描述。報告固定寫明是特定 protocol 的觀察，不是資格，也不是一般穩定性結論。
+  - **版本對齊**：`md20/__init__.py` 原寫 `0.1.0a19`（`pyproject.toml` 已在 D-132 改 `0.1.0a20.dev0`）→ 改為 `0.1.0a20.dev0`。學生文件（`docs/students/*` 八個）與 `docs/WINDOWS_QUICKSTART.md` 叫人下載 `MD20-…-v0.1.0a19.zip`——那個檔案不存在——改成 a17。`--check` 之後會擋：版本漂移、README 沒寫最新已發行版、這些文件提到從未發行的 tag。
+- **理由**：
+  - 讀者要的是『現在能信什麼』；STATUS 是累積歷史，拼出現況要讀十幾段，而且 `paper-docking`（continue-on-error）與永遠回傳 0 的診斷本來就容易被讀成通過。把狀態拆成五個獨立欄位並用機器檢查矛盾，比寫一段『請小心』可靠。
+  - 驗收器只擋完整性、不擋 NaN：診斷的價值是量出失敗率；NaN 讓 job 變紅，下次沒人敢跑。NaN 是否可接受是回歸測試與科學驗收的事。
+  - 『stale』狀態：580cbff 之後 D-126（離子清理不移除結構金屬）、D-128 授權、D-131 重複計畫都改了檔，不能把當時的綠燈算到現在的程式上。
+- **被否決**：
+  - 把清單寫進 STATUS：STATUS 是歷史累積，與『只寫現況』衝突。
+  - 在 `docs/releases/v0.1.0a18.md／a19.md` 加『未發行』橫幅：`release-windows.yml` 會把 `docs/releases/<tag>.md` 原樣當 release 內文，橫幅會進公開頁面；改記錄在清單的 `unpublished_release_note_drafts`。
+  - 讓診斷在 NaN 時回傳非 0，或讓驗收器設 NaN 門檻：見理由。
+  - 用 PyYAML 解析 workflow：pure-python job 沒裝 PyYAML；改用小型逐行解析，並用測試鎖住它對真實 workflow 的輸出。
+  - 把 paper-docking 的綠燈算成 benchmark：斷言只檢查一致性、搜尋縮減、continue-on-error；只給 `observed`。
+- **證據**：`tests/test_capability_manifest.py`（16 項：真實清單通過全部檢查；缺路徑／符號／測試檔、從合成測試推真實引擎、非阻擋 job 當資格、benchmark 範圍與狀態矛盾、缺證據網址、released_installer 前綴誤放行 `v0.1.0a19`、版本漂移、學生文件提未發行 tag、未標示的非阻擋 job、未列入的 job、CI 缺檢查步驟、.md 不同步）；`tests/test_validate_membrane_diag.py`（16 項，合成 artifact JSON：完整 OK、缺 run／缺 build、build error、未結束、被截斷、缺欄位、protocol 不符、舊格式無期望值、跨 OS 找不到 builds、NaN 計數與 velocity／construction 變異、非有限值、結束碼與 json／markdown 輸出）。檢查過程中工具抓到一個我自己的清單錯誤（鋅鍵結功能漏列純 Python 測試）與一個檢查器的 bug（`v0.1.0a19` 被 `v0.1.0a1` 前綴放行），都已修並加測試。全套結果見 commit 訊息。
+  - 查證方式：`gh api repos/fstcch-cmd/md20-workstation/releases`（已發行 a1–a4、a6–a17，無 a5、a18、a19）、`gh api actions/runs/42374500293/jobs` 與 580cbff 的 commit 留言（Ubuntu 1002 passed／9 skipped／1 xfailed、Windows 1003 passed／8 skipped／1 xfailed；跳過清單中沒有膜、對接、HTS、binding 的整合測試）、a17 tag 的 git tree 與目前樹的 blob 比對（決定每個功能是否在 a17）。
+- **未決／限制**：
+  - **未能驗證的事實**：①580cbff 膜診斷 artifact（run 42374753967）無法由代理下載（blob 403），『32 次 0 NaN、對照組 3/32』只引用 STATUS，清單標為未重驗；②macOS openmm-stack 的通過數（留言只被截斷尾端）；③58d81bc 之後的 CI 結果（當時 run 42385841086 尚在排隊）——D-128 授權、D-131 重複計畫等標 `unverified`／`stale`；④a17 zip 對新安裝可能因 openmmforcefields 撤回版失敗，只是 STATUS 的記載，沒有重現。
+  - 驗收器只能判斷 artifact 是否完整，無法分辨『建構問題』與『動力學問題』：診斷中 construction seed 沒有被變動（獨立 build 的差異來自 seed 不控制的步驟）、barostat 亂數種子 md20 不設定、CPU 加總順序除非 `OPENMM_CPU_THREADS=1` 不固定。要做因果分離需要另一個有明確變動 construction seed 的診斷設計（未做）。
+  - R7 驗收項『乾淨安裝與有文件的續跑／重連路徑在支援平台通過』仍未達成：安裝有 CI（CPU 路徑），續跑／重連只有 FakeBackend 與假計算測試，已寫在 `md_openmm_restart`、`gui_worker`、`installer` 的限制。
+  - 環境鎖版（conda lock）仍未做；`CLAUDE.md` 的『現況』段落仍寫『a19 待 CI 全綠後發行、決策到 D-98』，與事實不符，不在本任務可編輯範圍，需主 session 更新。
+  - 清單需人工維護；`--stale` 會提醒狀態比程式舊，但不會自動重算。
+- **相關檔案**：`docs/capabilities.json`、`docs/CAPABILITIES.md`、`docs/specs/capabilities.md`（已在 `docs/specs/README.md` 登記）、`tools/capability_manifest.py`、`tools/validate_membrane_diag.py`、`tools/diag_membrane_nan.py`（僅輸出欄位）、`tests/test_capability_manifest.py`、`tests/test_validate_membrane_diag.py`、`.github/workflows/ci.yml`、`diag-membrane.yml`、`gui-preview.yml`、`report-template.yml`（只加步驟與顯示名稱）、`md20/__init__.py`（版本字串）、`docs/students/*.md`、`docs/WINDOWS_QUICKSTART.md`。
+
 ### D-131　重複計畫與開始前告知：預設 3 條、時間倍數與 ETA、一鍵改條數、舊專案補跑（D-129 §3–§5）
 - 範圍：只做「需要幾條、花多少時間、使用者怎麼選」。分析與報告的跨重複彙總（`workflow.analyse`、`md20/analysis/`、`md20/report/`）是另一個代理同時做的，這裡沒動。不新增 phase／step。
 - **決定**：

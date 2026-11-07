@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   template:
+    name: "template (SYNTHETIC data: proves figures render, not that results are right)"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

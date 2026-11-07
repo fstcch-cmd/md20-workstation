@@ -2,6 +2,7 @@
 
 ## 當前事實（2026-11-07 第六個 session 收尾，main 650bc65）
 - **對外發行最新為 a17**（a18、a19 從未發行；main 為開發中 a20，見 D-132）。先前「待發行 a19」的段落保留為歷史。
+- **現況請看 `docs/CAPABILITIES.md`**（D-136：每個功能的實作／合成測試／真實引擎／benchmark／已發行安裝程式五種狀態，機器可讀版 `docs/capabilities.json`）；本檔以下是累積歷史。
 - 授權：第 1 層 LICENSE（D-124）、第 2 層簽章驗證（D-125）、簽發端在私人 repo（D-127）已 push。第 3 層（D-128）設計完成、實作待重做。
 - 膜 NaN：D-115/D-126 後 580cbff 膜診斷 32 次 0 NaN（對照組 3/32）。
 - 使用者上傳「Evidence-Driven Repair」規格（`docs/specs/evidence_driven_repair_prompt.md`）：R1–R8 已授權全做；R5 鋅鍵結已授權改參數。R2/R4/R7 為本地未修真缺口。
