@@ -117,13 +117,16 @@ def common_basis(systems: dict[str, dict], *, temperature_k: float = 300.0, min_
     bins = int(np.clip(np.sqrt(len(P)) / 1.5, 12, 30))
     xe = np.linspace(P[:, 0].min(), P[:, 0].max(), bins + 1)
     ye = np.linspace(P[:, 1].min(), P[:, 1].max(), bins + 1)
-    out = {"status": "ok", "systems": names, "n_common_ca": len(order), "explained": explained.round(4).tolist(),
+    out = {"status": "ok", "systems": names, "sampling_note": "each system contributes a uniform subsample of its analysed frames "
+                                                              "(per_system.*.sampling); populations are of the subsample, "
+                                                              "and agreement between splits is reported, not guaranteed", "n_common_ca": len(order), "explained": explained.round(4).tolist(),
            "xedges": xe.tolist(), "yedges": ye.tolist(), "per_system": {}, "representatives": []}
     for n in names:
         p = P[owner == n]
         t = list(systems[n].get("time_ns") or range(len(p)))
         land = free_energy_landscape(p[:, 0], p[:, 1], temperature_k=temperature_k, edges=(xe, ye))
         hs = half_split(p, land.get("basins") or [])
+        il = interleaved_split(p, land.get("basins") or [])
         reps = []
         for b_i, b in enumerate(land.get("basins") or []):
             f = int(np.argmin(((p - np.array(b[:2])) ** 2).sum(1)))
@@ -131,8 +134,11 @@ def common_basis(systems: dict[str, dict], *, temperature_k: float = 300.0, min_
                          "population": b[3] if len(b) > 3 else None})
         out["representatives"] += reps
         step = max(1, len(p) // 400)
-        out["per_system"][n] = {"landscape": land, "half_split": hs, "projection": p[::step].round(3).tolist(),
-                                "n_frames": int(len(p))}
+        out["per_system"][n] = {"landscape": land, "half_split": hs, "interleaved_split": il,
+                                "projection": p[::step].round(3).tolist(), "n_frames": int(len(p)),
+                                "sampling": systems[n].get("sampling") or {
+                                    "status": "not_recorded", "note": "this Cα file predates D-135: how many frames were "
+                                    "kept from how many, and at what stride, is unknown"}}
     return out
 
 
@@ -148,6 +154,22 @@ def half_split(p: np.ndarray, basins: list) -> dict:
     diff = float(np.abs(a - b).max())
     return {"status": "ok", "first": a.round(3).tolist(), "second": b.round(3).tolist(), "max_change": round(diff, 3),
             "consistent": diff <= HALF_SPLIT_MAX}
+
+
+def interleaved_split(p: np.ndarray, basins: list) -> dict:
+    """D-135 (R3): like `half_split` but on the even vs odd frames of the subsample — insensitive to slow drift, so it
+    shows how much the basin populations depend on WHICH frames of the subsample are used."""
+    if len(p) < 20 or not basins:
+        return {"status": "insufficient"}
+    centres = np.array([b[:2] for b in basins])
+    lab = np.argmin(((p[:, None, :] - centres[None]) ** 2).sum(-1), axis=1)
+    ev, od = lab[0::2], lab[1::2]
+    a = np.bincount(ev, minlength=len(centres)) / len(ev)
+    b = np.bincount(od, minlength=len(centres)) / len(od)
+    diff = float(np.abs(a - b).max())
+    return {"status": "ok", "even": a.round(3).tolist(), "odd": b.round(3).tolist(), "max_change": round(diff, 3),
+            "consistent": diff <= HALF_SPLIT_MAX, "tolerance": HALF_SPLIT_MAX,
+            "note": "reported sensitivity to the choice of frames; not a convergence guarantee"}
 
 
 # ------------------------------------------------------------------------------------------- ΔRMSF

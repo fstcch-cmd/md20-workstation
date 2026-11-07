@@ -323,8 +323,12 @@ def ca_labels(top, atom_indices) -> list[str]:
     return out
 
 
-def save_ca_coordinates(traj, adir: Path, ligand_groups=None, max_frames: int = 250) -> None:
-    """analysis/ca_xyz.npy (frames ≤ max_frames, Å, already centred and superposed) + ca_labels.json."""
+def save_ca_coordinates(traj, adir: Path, ligand_groups=None, max_frames: int = 250, *, resolution: dict | None = None) -> None:
+    """analysis/ca_xyz.npy (frames ≤ max_frames, Å, already centred and superposed) + ca_labels.json.
+
+    D-135 (R3): the kept frames are a uniform subsample of the analysed frames, and ca_labels.json now says so
+    (`sampling`: n kept of N, scheme, role, plus the stride/cadence context in `resolution`) so the common basis can
+    report what its populations are made of."""
     try:
         lig = {int(i) for v in (ligand_groups or {}).values() for i in v}
         ca = [int(i) for i in traj.topology.select("protein and name CA") if int(i) not in lig]
@@ -333,17 +337,44 @@ def save_ca_coordinates(traj, adir: Path, ligand_groups=None, max_frames: int = 
         sel = np.unique(np.linspace(0, traj.n_frames - 1, min(max_frames, traj.n_frames)).round().astype(int))
         np.save(Path(adir) / "ca_xyz.npy", (traj.xyz[sel][:, ca, :] * 10.0).astype(np.float32))
         t = (np.asarray(traj.time)[sel] / 1000.0).round(4).tolist() if traj.time is not None and len(traj.time) == traj.n_frames else sel.tolist()
-        atomic_write_json({"labels": ca_labels(traj.topology, ca), "time_ns": t}, Path(adir) / "ca_labels.json", backup=False)
+        sampling = {"scheme": "uniform subsample: np.linspace(0, N-1, n).round().astype(int), unique indices",
+                    "role": "estimator input for the common-basis PCA/landscape (not a display-only thinning)",
+                    "max_frames": int(max_frames), "n_frames_analysed": int(traj.n_frames), "n_kept": int(len(sel)),
+                    "resolution": resolution}
+        atomic_write_json({"labels": ca_labels(traj.topology, ca), "time_ns": t, "sampling": sampling},
+                          Path(adir) / "ca_labels.json", backup=False)
     except Exception:  # noqa: BLE001 — the comparison is optional; the per-system analysis stands
         pass
 
 
+def _resolution_context(traj, stride: int, n_source: int | None) -> dict:
+    """Source cadence, stride and counts of the trajectory `traj` that analyse_run loaded (D-135, R3)."""
+    from .persistence import resolution_record
+    rec = resolution_record(traj.time if traj.time is not None and len(traj.time) else None, effective_stride=int(stride),
+                            n_frames_source=n_source, origin="frames of the analysed trajectory (after any memory stride)")
+    if rec["n_frames_used"] == 0:
+        rec["n_frames_used"] = int(traj.n_frames)
+    return rec
+
+
 def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 1, label: str = "",
                 ligand_groups: dict[str, list[int]] | None = None, metal_indices: list[int] | None = None,
-                decisions=None, ligand_charges: dict[str, dict[int, int]] | None = None) -> dict:
+                decisions=None, ligand_charges: dict[str, dict[int, int]] | None = None,
+                fingerprint: dict | None = None, provenance: dict | None = None) -> dict:
     """ligand_charges (D-98) = {ligand name: {full-system atom index: ±1}} from the build manifest; a ligand absent
-    from it has an unknown charge (no salt bridge is called for it)."""
+    from it has an unknown charge (no salt bridge is called for it).
+
+    D-135: `fingerprint` (analysis.fingerprint.analysis_fingerprint, computed by the caller BEFORE the analysis so the
+    reuse check and the stored value are the same) is stored in analysis_manifest.json; computed here when absent.  The
+    JSON/NPY outputs are staged and swapped in together with the manifest (written last), keeping the previous result
+    (analysis_manifest.prev.json, analysis/prev/) — an interrupted regeneration never replaces a complete result."""
+    from .fingerprint import analysis_fingerprint, begin_staging, commit_staging
     run_dir = Path(run_dir)
+    if fingerprint is None:
+        fingerprint = analysis_fingerprint(run_dir, topology_pdb, ligand_groups=ligand_groups, metal_indices=metal_indices,
+                                           ligand_charges=ligand_charges)
+    orig_charges = ligand_charges
+    staging = begin_staging(run_dir)
     # long runs (docs/specs/long_timescale.md): solute-only DCDs renumber atoms; a trajectory too large for memory
     # is read with a stride here and at full resolution by the streaming pass below
     from .stream import production_info, production_topology, remap_groups, remap_indices, remap_charges, \
@@ -355,8 +386,10 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
         ligand_groups, metal_indices = remap_groups(ligand_groups, subset), remap_indices(metal_indices, subset)
         ligand_charges = remap_charges(ligand_charges, subset)
     auto_stride = 1
-    if stride == 1 and pinfo["dcds"] and pinfo.get("dcd_atom_count"):
+    n_fr = None
+    if pinfo["dcds"] and pinfo.get("dcd_atom_count"):
         n_fr = sum(dcd_frame_count(p, int(pinfo["dcd_atom_count"])) for p in pinfo["dcds"])
+    if stride == 1 and n_fr:
         auto_stride = choose_stride(n_fr, int(pinfo["dcd_atom_count"]))
         if auto_stride > 1:
             stride = auto_stride
@@ -369,7 +402,9 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
     m = compute_metrics(traj, ligand_groups)
     adir = run_dir / "analysis"
     adir.mkdir(parents=True, exist_ok=True)
-    save_ca_coordinates(traj, adir, ligand_groups)     # D-106: for the common basis across systems
+    res_rec = _resolution_context(traj, stride, n_fr)  # D-135: source vs effective cadence of everything below
+    m["resolution"] = res_rec
+    save_ca_coordinates(traj, staging, ligand_groups, resolution=res_rec)     # D-106: for the common basis across systems
     try:
         cen = export_centered(run_dir, topology_pdb, metal_indices=metal_indices, ligand_groups=ligand_groups, stride=stride)
     except Exception as exc:  # noqa: BLE001 — the centred export is a convenience; metrics above are already imaged
@@ -378,7 +413,8 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
     if auto_stride > 1:
         m["stride"] = auto_stride
         try:
-            sm = stream_production_metrics(run_dir, topology_pdb, ligand_groups=full_groups, metal_indices=full_metals)
+            sm = stream_production_metrics(run_dir, topology_pdb, ligand_groups=full_groups, metal_indices=full_metals,
+                                           out_dir=staging)
             m["stream_metrics_file"] = str(adir / "stream_metrics.json")
             m["stream_n_frames"] = sm["n_frames"]
         except Exception as exc:  # noqa: BLE001 — the strided metrics above remain; the failure is recorded
@@ -395,7 +431,7 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
         m["restrained_production"] = restrained
         label = f"{label}（受約束：{', '.join(restrained)}）" if label else f"受約束：{', '.join(restrained)}"
     figs = plot_metrics(m, run_dir / "figures", label=label)
-    summary = {"status": "PASS", "restrained_production": restrained, "metrics_file": str(adir / "metrics.json"), "figures": figs, "created_at": now_iso(),
+    summary = {"status": "PASS", "resolution": res_rec, "restrained_production": restrained, "metrics_file": str(adir / "metrics.json"), "figures": figs, "created_at": now_iso(),
                "n_frames": m["n_frames"], "centered": {k: v for k, v in cen.items() if k != "pbc_checks"},
                "pbc_checks": cen.get("pbc_checks", {}),
                "rmsd_backbone_mean_A": float(np.mean(m["rmsd_backbone_A"])) if "rmsd_backbone_A" in m else None,
@@ -413,16 +449,33 @@ def analyse_run(run_dir: Path | str, topology_pdb: Path | str, *, stride: int = 
         if groups is None:
             top = traj.topology
             groups = {rn: top.select(f"resname {rn} and not element H").tolist() for rn in _ligand_resnames(top)}
-        ext = extended_metrics(traj, groups, ligand_charges=ligand_charges)
-        atomic_write_json(ext, adir / "extended.json", backup=False)
+        ext = extended_metrics(traj, groups, ligand_charges=ligand_charges,
+                               resolution={"effective_stride": int(stride), "n_frames_source": n_fr})
+        if stride > 1:
+            # R3: contact events must not be judged on decimated frames — repeat the persistence on every stored frame
+            try:
+                from .stream import stream_production_persistence
+                sp = stream_production_persistence(run_dir, topology_pdb, ligand_groups=full_groups, metal_indices=full_metals,
+                                                   ligand_charges=orig_charges, out_dir=staging)
+                for rn, per in (sp.get("ligands") or {}).items():
+                    fpb = ((ext.get("ligands") or {}).get(rn) or {}).get("fingerprint")
+                    if fpb is not None:
+                        fpb["persistence_decimated_status"] = (fpb.get("persistence") or {}).get("status")
+                        fpb["persistence"] = per
+                ext["streamed_persistence_file"] = str(adir / "stream_persistence.json")
+                summary["streamed_persistence_file"] = ext["streamed_persistence_file"]
+            except Exception as exc:  # noqa: BLE001 — the decimated persistence stays, marked "limited"; the failure is recorded
+                ext["streamed_persistence_error"] = f"{type(exc).__name__}: {exc}"
+                summary["streamed_persistence_error"] = ext["streamed_persistence_error"]
+        atomic_write_json(ext, staging / "extended.json", backup=False)
         summary["extended_file"] = str(adir / "extended.json")
         summary["extended_errors"] = {**ext.get("errors", {}), **{f"{k}:{n}": e for k, l in (ext.get("ligands") or {}).items()
                                                                    for n, e in (l.get("errors") or {}).items()}}
     except Exception as exc:  # noqa: BLE001
         summary["extended_errors"] = {"all": f"{type(exc).__name__}: {exc}"}
-    atomic_write_json(m, adir / "metrics.json", backup=False)
-    atomic_write_json(summary, adir / "analysis_manifest.json")
-    return summary
+    atomic_write_json(m, staging / "metrics.json", backup=False)
+    return commit_staging(run_dir, staging, summary, fingerprint=fingerprint,
+                          provenance={"reason": (provenance or {}).get("reason", "analysis run"), **(provenance or {})})
 
 
 def compare_runs(metrics: dict[str, dict], out_dir: Path | str, comparability: dict | None = None) -> dict:

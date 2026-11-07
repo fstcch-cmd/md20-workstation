@@ -73,6 +73,7 @@
 - `traj.analyse_run`：只存溶質的 DCD 自動切拓樸、重新編號配體與金屬索引；原子數和拓樸算出的不一致就停止（不猜原子對應）。
   估計記憶體（幀數 × 原子 × 12 bytes × 3 份）超過 4 GB（`MD20_ANALYSIS_MEM_GB`）時，一般分析自動加 stride（AUTO_FIXED，寫入決策日誌），
   並以串流讀全部幀寫 `analysis/stream_metrics.json`（主鏈 RMSD、Cα RMSF、口袋接觸頻率）。
+- D-135：stride > 1 時另以 `stream_production_persistence` 在全部儲存幀上算互作持續性（`analysis/stream_persistence.json`），取代抽幀版；`resolution` 記錄來源／有效節奏與 stride（`analysis_cache.md`）。
 - 還沒做：叢集、PCA、MSM 的串流版本；報告尚未顯示 `stream_metrics.json`。
 
 ### 6.6 驗證

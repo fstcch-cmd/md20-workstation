@@ -265,9 +265,11 @@ def iter_chunks(dcds: Iterable, top, *, chunk: int = 500, stride: int = 1, prepa
 
 
 def stream_production_metrics(run_dir: Path | str, topology_pdb: Path | str, *, ligand_groups: dict | None = None,
-                              metal_indices: list[int] | None = None, chunk: int = 500) -> dict:
+                              metal_indices: list[int] | None = None, chunk: int = 500,
+                              out_dir: Path | str | None = None) -> dict:
     """Full-resolution backbone RMSD, Cα RMSF and pocket contact frequencies, chunk by chunk (mdtraj required).
-    Writes analysis/stream_metrics.json.  `ligand_groups` and `metal_indices` are full-system indices."""
+    Writes analysis/stream_metrics.json (or `out_dir`, a staging directory that is swapped in later, D-135).
+    `ligand_groups` and `metal_indices` are full-system indices."""
     from .traj import center_trajectory, _ligand_resnames
     run_dir = Path(run_dir)
     info = production_info(run_dir)
@@ -335,7 +337,118 @@ def stream_production_metrics(run_dir: Path | str, topology_pdb: Path | str, *, 
         r = sm.result()
         freq = sorted(r.get("residue_frequency", {}).items(), key=lambda kv: -kv[1])
         out["ligands"][name] = {"contact_frequency": dict(freq), "contact_residues": r.get("contact_residues", [])}
-    adir = run_dir / "analysis"
+    adir = Path(out_dir) if out_dir is not None else run_dir / "analysis"
     adir.mkdir(parents=True, exist_ok=True)
     atomic_write_json(out, adir / "stream_metrics.json", backup=False)
+    return out
+
+
+# ----------------------------------------------------------------------------------- full-cadence persistence (D-135, R3)
+class PersistenceStream:
+    """Contact fingerprint + event tables of ONE ligand at the STORED cadence, chunk by chunk (pure numpy).
+
+    Every chunk gets the complete neighbour search (`interactions.dynamic_pairs`) and the chemical labels
+    (`interactions.fingerprint`); only the per-frame on/off state of each (residue, label) leaves the chunk, so memory
+    is O(frames × interactions) booleans in run-length form, never coordinates.  The open event of every interaction
+    is carried over chunk boundaries by `persistence.EventAccumulator`, which also ends it at a recorded segment break
+    (time jump, restart discontinuity) — events are never bridged across one, and separate runs get separate streams.
+
+        ps = PersistenceStream(lig_idx, prot_heavy_idx, atoms, ligand_charges=charges, run_id="run1")
+        for xyz, t in chunks: ps.update(xyz, t)          # nm, ps
+        out = ps.result(effective_stride=1, source_frame_interval_ps=…)"""
+
+    def __init__(self, lig_idx, prot_idx, atoms: dict, *, ligand_charges: dict | None = None, run_id: str = "this_run",
+                 max_gap_ps: float = 0.0, reference_dt_ps: float | None = None):
+        from .persistence import EventAccumulator
+        self.lig, self.prot, self.atoms, self.charges = np.asarray(lig_idx, int), np.asarray(prot_idx, int), atoms, ligand_charges
+        self.acc = EventAccumulator(run_id=run_id, max_gap_ps=max_gap_ps, reference_dt_ps=reference_dt_ps)
+        self.count: dict = {}
+        self.n_frames = 0
+
+    def update(self, xyz, time_ps, segment_ids=None) -> None:
+        from . import interactions as IX
+        xyz = np.asarray(xyz, float)
+        if not len(xyz):
+            return
+        dyn = IX.dynamic_pairs(xyz, self.lig, self.prot, cutoff_nm=IX.SEARCH_NM)
+        fp = IX.fingerprint(dyn, self.atoms, ligand_charges=self.charges)
+        on = {}
+        for r, bm in zip(fp["residues"], fp["bitmask"]):
+            bm = np.asarray(bm)
+            for lab in IX.LABELS:
+                a = (bm & IX.BIT[lab]) > 0
+                if a.any():
+                    on[(r, lab)] = a
+                    self.count[(r, lab)] = self.count.get((r, lab), 0) + int(a.sum())
+        self.acc.update(on, time_ps, segment_ids)
+        self.n_frames += len(xyz)
+
+    def occupancy(self) -> dict:
+        from . import interactions as IX
+        occ = {lab: {} for lab in IX.LABELS}
+        for (r, lab), c in self.count.items():
+            occ[lab][r] = round(c / self.n_frames, 4)
+        return occ
+
+    def result(self, *, effective_stride: int | None = 1, source_frame_interval_ps: float | None = None,
+               n_frames_source: int | None = None, min_occupancy: float = 0.1, top: int = 12) -> dict:
+        from .persistence import resolution_record, select_interactions, persistence_report
+        rec = resolution_record(self.acc.t, source_frame_interval_ps=source_frame_interval_ps,
+                                effective_stride=effective_stride, n_frames_source=n_frames_source,
+                                origin="streamed pass over every stored frame (chunked, event state carried across chunks)")
+        out = persistence_report(self.acc, select_interactions(self.occupancy(), min_occupancy=min_occupancy, top=top),
+                                 resolution=rec, source="streamed_full_cadence")
+        out["occupancy_all_frames"] = self.occupancy()
+        out["n_chunks"] = self.acc.n_updates
+        return out
+
+
+def stream_production_persistence(run_dir: Path | str, topology_pdb: Path | str, *, ligand_groups: dict | None = None,
+                                  metal_indices: list[int] | None = None, ligand_charges: dict | None = None,
+                                  chunk: int = 500, max_gap_ps: float = 0.0, out_dir: Path | str | None = None) -> dict:
+    """Interaction persistence of each ligand over EVERY stored production frame (mdtraj required), written to
+    analysis/stream_persistence.json.  Inputs are full-system indices, as for `stream_production_metrics`.  Needs the real
+    time axis (stage record); without it nothing is claimed (FileNotFoundError / RuntimeError)."""
+    from .traj import center_trajectory, _ligand_resnames
+    from . import interactions as IX
+    run_dir = Path(run_dir)
+    info = production_info(run_dir)
+    if not info["dcds"]:
+        raise FileNotFoundError("production 沒有 DCD")
+    top, subset = production_topology(run_dir, topology_pdb)
+    if isinstance(top, str):
+        import mdtraj as md
+        top = md.load_topology(top)
+    groups = remap_groups(ligand_groups, subset)
+    metals = remap_indices(metal_indices, subset)
+    charges = remap_charges(ligand_charges, subset)
+    if groups is None:
+        groups = {rn: top.select(f"resname {rn} and not element H").tolist() for rn in _ligand_resnames(top)}
+    lig_all = np.array(sorted({i for v in groups.values() for i in v}), dtype=int)
+    prot = np.setdiff1d(top.select("protein"), lig_all)
+    prot_heavy = np.array([i for i in prot if top.atom(int(i)).element is not None and top.atom(int(i)).element.symbol != "H"], int)
+    times = production_times_ps(run_dir, info["dcds"])
+    if times is None:
+        raise RuntimeError("沒有階段紀錄的時間軸，無法在儲存幀的真實時間上算持續性")
+    streams = {}
+    for name, idx in groups.items():
+        if len(idx) and len(prot_heavy):
+            atoms = IX.atoms_from_topology(top, list(idx) + prot_heavy.tolist())
+            streams[name] = PersistenceStream(idx, prot_heavy, atoms, ligand_charges=(charges or {}).get(name), run_id=name,
+                                              max_gap_ps=max_gap_ps)
+    seen = 0
+    for ch in iter_chunks(info["dcds"], top, chunk=chunk, prepare=lambda t: center_trajectory(t, metal_indices=metals, superpose=False)):
+        n = len(ch.xyz)
+        if seen + n > len(times):
+            raise RuntimeError("DCD 幀數比階段紀錄的時間軸多，停止（不猜時間）")
+        tt = times[seen:seen + n]
+        seen += n
+        for sm in streams.values():
+            sm.update(ch.xyz, tt)
+    out = {"status": "PASS", "schema": "md20.stream_persistence/1", "n_frames": int(seen), "chunk_frames": int(chunk),
+           "trajectory_atoms": info["dcd_atoms"], "created_at": now_iso(),
+           "ligands": {n: sm.result(effective_stride=1) for n, sm in streams.items()}}
+    adir = Path(out_dir) if out_dir is not None else run_dir / "analysis"
+    adir.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(out, adir / "stream_persistence.json", backup=False)
     return out

@@ -6,6 +6,56 @@
 ---
 
 ## 2026-11-07
+### D-135　R3 分析解析度與 R4 分析快取指紋：來源／有效節奏要記錄、事件在儲存幀上串流算、PASS 清單不再等於可重用
+- 範圍：`evidence_driven_repair_prompt.md` §3 R3、R4。只動 `md20/analysis/`（`persistence`、`extended`、`stream`、`traj`、`common_basis`、新檔 `fingerprint`）與測試；`workflow.py`、`report/`、`sampling/` 沒動（接線由主 session 做，見「整合說明」）。不新增 phase／step。規格：`docs/specs/analysis_cache.md`（新）。
+- **決定**：
+  - **R3 解析度紀錄**：新 `persistence.resolution_record`（`source_frame_interval_ps`、`effective_stride`、`effective_interval_ps`、`n_frames_source`、`n_frames_used`、`observation_length_ps`、`resolution.{status: full／limited／unverified, reasons}`）。寫進 `metrics.json`、`analysis_manifest.json`、`extended.json`、每個指紋與持續性、tICA。stride > 1 時指紋與持續性的 `status` 一律 `limited`，附原因（短於有效間隔的中斷看不見、事件長度是上限）；item 有 `lifetime_qualifier`。持續性不改名為滯留時間或 k_off。呼叫端沒宣告 stride → `unverified`（不宣稱全解析度）。
+  - **R3 真正的修正（不只是標註）**：`EventAccumulator`（跨 chunk 帶開著的事件、段落斷點不橋接、不同 run 不串接）＋ `stream.PersistenceStream`／`stream_production_persistence`（每個 chunk 做完整鄰居搜尋與化學標籤，只留 on/off 的 run-length 狀態）。`analyse_run` 在 stride > 1（記憶體保護或使用者指定）時用它在**全部儲存幀**上重算持續性，取代抽幀版；失敗則保留 `limited` 並記錄錯誤。`events()` 改為 `EventAccumulator` 一次餵完，所以 chunked＝unchunked 是構造上的。
+  - **R3 子樣本**：`extended.json.sampling`（均勻、決定性、n／N、使用與不使用子樣本的區塊清單）；`pca.sensitivity`（奇偶交錯兩半的解釋變異／PC1 |cos|／子空間重疊，成本允許時與全部分析幀比較）、`clusters.sensitivity`、`common_basis.per_system.*.interleaved_split` 與 `sampling`；`ca_labels.json` 記錄保留幀數與 stride。報告敏感度，**不承諾收斂**；`consistent` 只對宣告的報告門檻比較。`frame_indices` 預設上限改成呼叫時讀 `MAX_FRAMES`（原本在定義時綁死，測試與調整都無效）。
+  - **R4 指紋**：新 `analysis/fingerprint.py`：`analysis_fingerprint`（DCD 大小＋前後 64 KiB 雜湊並與 chunk 當時記錄比對、stage 封存 SHA、拓樸 SHA、配體群／金屬／電荷／膜、`run.json` protocol hash、`ANALYSIS_VERSION = "2026-11-07.1"`、persistence／interactions／extended schema、extended 與 ligand_state 門檻、`THRESHOLDS_VERSION`、`MD20_ANALYSIS_MEM_GB`、`extra`）→ 扁平 `components` ＋ `digest`。`reuse_decision` → `reuse／reason／changed／recompute_parts／missing／modified／notes`；舊清單（PASS 但無 `fingerprint`）→ `legacy`、不重用；清單指到的檔不存在 → `missing_files`；輸出內容 SHA 與清單不符 → `output_modified`。
+  - **R4 原子重算**：`begin_staging`／`commit_staging`／`write_manifest_atomic`：輸出寫暫存區，備份現有輸出到 `analysis/prev/` 與 `analysis_manifest.prev.json`（加 `superseded` 來源說明），寫日誌，逐檔 `os.replace`，**清單最後換**。中途當機由 `recover_interrupted`（`reuse_decision` 開頭會呼叫）還原。`analyse_run` 新增 `fingerprint=`、`provenance=` 參數並回傳最終清單（含 `fingerprint`、`analysis_version`、`outputs`、`commit_id`）。重算**不重跑 MD**。
+- **理由與取捨**：
+  - 事件偵測用 run-length 狀態而不是存整條 bool 序列：500 條互作 × 50 萬幀（10 µs／20 ps）的 bool 序列會到 250 MB；run-length 只和事件數成正比。
+  - 參考步長（判斷「時間跳躍」）在串流時沒有全域中位數：由呼叫端宣告（`production_times_ps` 是等距），沒宣告就用第一個有 ≥ 2 幀的 chunk 的中位數；測試用明確值比較 chunked 與 unchunked。
+  - DCD 用 `cheap_fingerprint`（前後 64 KiB）而不全檔雜湊：與引擎續跑檢查同標準；mtime 不進雜湊（複製專案不該使快取失效）。代價：只改動中間位元組、大小與前後 64 KiB 都不變的竄改看不出來；stage 封存的 `state_sha256` 和 `production_record` 另外進指紋，但那不涵蓋 DCD 中段。
+  - 清單寫最後＋日誌回滾，而不是整個 `analysis/` 目錄換名：workflow 與報告用固定路徑讀 `analysis/metrics.json`，且 `production_centered.dcd` 是 GB 級大檔，不適合搬。
+  - `recompute_parts` 只供顯示：`analyse_run` 的各區塊共用同一份載入的軌跡，部分重算要重構成可單獨跑的步驟，這次不做。
+- **被否決**：
+  - 只在輸出標「解析度有限」而不去串流：持續性要用的恰好是被抽掉的幀，標註救不回短中斷（R3 明文要求在原節奏上串流）。
+  - 把 `MAX_FRAMES` 調大宣稱收斂：規格明文不可；改為報告子樣本敏感度。
+  - 用 manifest 的 `created_at` 或檔案 mtime 判斷新舊：複製、解壓會改 mtime；內容雜湊才可靠。
+  - 舊清單自動「升級」成新格式：舊結果缺新欄位，補欄位等於偽造；一律 `legacy` 重算，舊結果留在 `.prev`。
+  - 把 chunk 檔邊界當段落斷點：續跑的 chunk 是同一條連續軌跡，切斷會把一個事件拆兩個、低估壽命。
+- **證據**：`tests/test_analysis_resolution.py`（25 項：chunk 大小 1…1000 的 chunked＝unchunked、跨 chunk 事件、短中斷在全節奏看得見而抽幀看不見且 `limited`、不規則時間戳的佔有率、時間跳躍與 `segment_ids` 在 chunk 邊界不橋接、左右設限、replica 不串接、串流持續性與 `extended` 路徑一致、`MAX_FRAMES` 改 250→4 不改全解析度持續性／佔有率／位元遮罩、PCA 敏感度能抓到子樣本漏掉的稀有運動且全幀 PCA 過大時略過、叢集與共同基底的交錯分割、`ca_labels.json` 的子樣本紀錄）；`tests/test_analysis_fingerprint.py`（23 項：不變→重用；拓樸／選擇／電荷／金屬／膜／protocol／DCD 同大小換內容／記憶體預算／extra 變動→重算並列出變動鍵；schema／門檻／版本變動→對應 `recompute_parts`；legacy；缺檔；輸出被改；中途當機兩種位置回滾後舊結果完好、首次當機清掉新建檔、已完成的日誌殘留只清理）；`tests/test_analysis_run_wiring.py`（`analyse_run` 以替身跑過：清單含指紋與解析度、stride 4 → `limited` 並記錄串流失敗）。全套結果見 commit 訊息。
+- **未決／限制**：
+  - 真實 mdtraj 路徑（`stream_production_persistence`、`analyse_run` 串流分支）容器無法跑，待 CI `openmm-stack`；不能宣稱「已驗證」。
+  - `analyse_run` 不做部分重算；`production_centered.dcd`、`figures/` 仍就地覆寫（清單只檢查圖存在）；膜分析的清單沒有指紋，會被當 `legacy` 每次重算。
+  - `stream_production_metrics` 的接觸頻率仍是第一幀 1.2 nm 候選版；tICA／MSM 仍在 stride 後的幀上算（已附 `resolution`）。
+  - 報告端要顯示 `resolution`／`status`／`reason`（`md20/report/*` 是別人的檔，沒動）；`workflow._common_basis` 要把 `ca_labels.json.sampling` 傳進 `common_basis`（目前舊檔標 `not_recorded`）。
+  - `SENSITIVITY_TOLERANCES` 是經驗報告門檻，需要使用者審查。
+- **整合說明（給主 session，`Workflow.analyse` 怎麼接）**：
+  ```python
+  from .analysis.fingerprint import analysis_fingerprint, reuse_decision
+  # 每個 run、在決定要不要分析之前（參數用「原始」的全系統索引，與傳給 analyse_run 的相同）
+  fp = analysis_fingerprint(run_dir, top, ligand_groups=groups or None, metal_indices=metal_indices_from_manifest(bm),
+                            ligand_charges=manifest_ligand_charges(bm), membrane=membrane)
+  dec = reuse_decision(run_dir, fp)          # 會先回滾被中斷的換檔；不重跑 MD
+  if dec["reuse"]:
+      man = load_json(run_dir / "analysis" / "analysis_manifest.json", {})
+  else:
+      self.dec.record("analysis.cache", key, dec["reason"],
+                      f"分析結果不重用（{dec['reason']}；變動：{', '.join(dec['changed']) or '—'}；缺檔：{', '.join(dec['missing']) or '—'}）。"
+                      "重新分析（不重跑 MD）；舊結果留在 analysis/analysis_manifest.prev.json。", kind="auto")
+      man = analyse_run(run_dir, top, label=key, ligand_groups=groups or None, metal_indices=...,
+                        decisions=self.dec, ligand_charges=..., fingerprint=fp,
+                        provenance={"reason": dec["reason"], "changed": dec["changed"]})
+  ```
+  - 取代現行 `if man.get("status") != "PASS":`；`membrane_only_type()` 的案例走 `membrane_only_analysis`，它的清單沒有指紋，要嘛維持現狀（每次重算），要嘛也改用 `reuse_decision` 並自行寫 `fingerprint`。
+  - 案例 A 的膜分析（`analyse_membrane_run`）在 `analyse_run` 之後把 `membrane_*` 欄位只加在記憶體中的 `man`；要讓膜設定也進指紋，傳 `membrane=` 並把 `extra={"membrane_...": ...}` 放進 `analysis_fingerprint`。
+  - `man["resolution"]`、`man["streamed_persistence_error"]`、`extended.json` 的 `resolution／sampling／*.sensitivity／fingerprint.status` 可供報告顯示；`status in ("limited","unverified")` 時報告不得把持續性寫成滯留時間或 k_off。
+  - `_common_basis`：`systems[key] = {..., "sampling": lab.get("sampling")}`。
+- 相關檔案：`md20/analysis/{fingerprint,persistence,extended,stream,traj,common_basis}.py`、`tests/test_analysis_{resolution,fingerprint,run_wiring}.py`、`docs/specs/analysis_cache.md`（新）、`docs/specs/{README,master_iteration_2026-11-07,long_timescale}.md`。
+
 ### D-131　重複計畫與開始前告知：預設 3 條、時間倍數與 ETA、一鍵改條數、舊專案補跑（D-129 §3–§5）
 - 範圍：只做「需要幾條、花多少時間、使用者怎麼選」。分析與報告的跨重複彙總（`workflow.analyse`、`md20/analysis/`、`md20/report/`）是另一個代理同時做的，這裡沒動。不新增 phase／step。
 - **決定**：
