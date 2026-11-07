@@ -20,12 +20,12 @@
 > - 新功能：D-113 MBAR overlap 評估、D-114 Vina 釘選 v1.2.7＋sha256、D-116 SMD 路徑接觸釋放（F13）、D-117 micromamba 釘選 2.10.0-0＋sha256、D-118／D-123 約束策略建議（只建議）、D-119 補窗近重複提案、D-120 可比性矩陣（F05）、D-122 自動行動成本效益（F17）。D-103：開發者決定維持「關 GUI 不中斷計算」。
 > - **授權與數位簽章（使用者 21:50–22:11 討論）：**
 >   - 使用者需求：repo 因 CI 費用暫時公開，之後轉私人；**別人拿到程式必須由使用者核發簽章才能用，最怕被逆向破解**；之後可能做商業授權。
->   - 決定：第 1 層 LICENSE 專有條款（D-124，已在 main，待法務審閱）；第 2 層簽章授權檔（D-125，已審查合併進 main：驗證、閘門、學生一鍵解鎖、GUI 授權卡片；959 passed）；**D-127 進行中**：簽發端從 md20 搬到私人 repo `md-digital-signature`（md20 只留驗證；兩邊以格式規格＋測試向量對齊），分支 `agent/verify-only`——若本 session 結束時它不在 GitHub，就照 D-125 與私人 repo README 重做；不做「加密核心放 repo」（使用者 22:03 選擇），改在**發行版**做保護：Cython 編譯核心＋AES-256-GCM 加密、金鑰只在綁機器的授權檔、簽章完整性檢查、撤銷清單、輸出蓋授權編號。
+>   - 決定：第 1 層 LICENSE 專有條款（D-124，已在 main，待法務審閱）；第 2 層簽章授權檔（D-125，已審查合併進 main：驗證、閘門、學生一鍵解鎖、GUI 授權卡片；959 passed）；**D-127 完成**：簽發端已搬到私人 repo `md-digital-signature`（已推，`python3 -m md20sign` keygen／issue／issue-batch／unlock-this-pc／verify／fingerprint，自動記錄 `licenses/registry.csv`，45 tests）；md20 只留驗證（`license status|machine|install`），套件內無簽章 API 與擁有者工具；兩邊以 `docs/FORMAT.md`＋測試向量 `v1.json`（md20 副本 `tests/data/license_vector_v1.json`，逐位元組相同）對齊；966 passed；不做「加密核心放 repo」（使用者 22:03 選擇），改在**發行版**做保護：Cython 編譯核心＋AES-256-GCM 加密、金鑰只在綁機器的授權檔、簽章完整性檢查、撤銷清單、輸出蓋授權編號。
 >   - 設計文件（Claude Doc）：https://claude.ai/artifact/222jyPJRrE1Pzspv7shAS6 （金鑰架構圖、授權檔欄位與等級、防逆向分析、營運流程、商業授權模式、實作階段）。
 >   - 分工：md20 只放**驗證**（驗簽、匯入、狀態、信任公鑰）；`md-digital-signature` 放**簽發**（金鑰產生、簽發／批次、一鍵解鎖本機、撤銷清單、發行主金鑰、所有簽出授權的紀錄）。**任何 repo 都不得出現私鑰**（擁有者離線保管；與 `md20/util/owner_pub.pem` 成對）。
 >   - 誠實限制（已告知使用者）：持有有效授權又具專業逆向能力的人無法在技術上完全阻止；靠綁機器、輸出可追溯、可撤銷與合約。沒有授權檔者拿到安裝包只有密文（密碼學級）。
 > - **待使用者：** ① LICENSE 條文請法務／技轉中心審閱；② 確認持有 `owner_pub.pem` 的私鑰（找不到就用簽發工具新產一組，只把公鑰給開發者）；③ 第 4 層前產生發行主金鑰放 GitHub Secret（開發者看不到值）；④ 商業授權前確認智財歸屬。
-> - **下一步（開發者自行排序）：** 合併並審查 D-125 → 簽發端搬到 `md-digital-signature` → 第 3 層（等級、功能、席次、簽章撤銷清單、輸出蓋授權編號）→ 第 4 層（發行版編譯＋加密，需 Secret）；heavy-metal 鋅鍵長（需改參數＝科學模型，先問使用者）。
+> - **下一步（開發者自行排序）：** 合併並審查 D-125 → 簽發端搬到 `md-digital-signature` → 第 3 層（等級、功能、席次、簽章撤銷清單、輸出蓋授權編號）→ 第 4 層（發行版編譯＋加密，需 Secret）；heavy-metal 鋅鍵長（f3ecf71 再紅：HIS119–Zn 0.236 nm vs r0 0.202，GLU106 在 3 Å 內；含 D-126 仍紅，與 D-115 無關；需改金屬鍵結參數＝科學模型，先問使用者）。
 >
 > ---
 >
