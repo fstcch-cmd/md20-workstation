@@ -17,7 +17,7 @@ Config (JSON):
   "ligands": [{"name": "BEN", "smiles": "NC(=[NH2+])c1ccccc1", "reference_resname": "BEN"}],
   "docking": {"mode": "independent", "scoring": "vina", "exhaustiveness": 16, "n_poses": 9},
   "pose_choices": {"BEN": 2},               # optional overrides (rank); simultaneous: {"joint": 3}
-  "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 1, "production_ns": null,
+  "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 3, "production_ns": null,
          "padding_nm": null,                  # null = tier default (0.8 nm teaching/classroom, 1.0 research)
          "box_shape": "dodecahedron",         # 71 % of a cube's water for the same image distance
          "ions": {"positive": "Na+", "negative": "Cl-",        # Na+ K+ Li+ Rb+ Cs+ ; Cl- Br- F- I- (monovalent only)
@@ -138,7 +138,7 @@ def example_config(screen: bool = False) -> dict:
                        "select": [], "next_mode": "independent"},
             "docking": {"mode": "independent", "scoring": "vina", "exhaustiveness": 16, "n_poses": 9},
             "pose_choices": {},
-            "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 1, "production_ns": None, "padding_nm": None, "box_shape": "dodecahedron", "ions": {"positive": "Na+", "negative": "Cl-", "concentration_molar": 0.15, "neutralize": True}},
+            "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 3, "production_ns": None, "padding_nm": None, "box_shape": "dodecahedron", "ions": {"positive": "Na+", "negative": "Cl-", "concentration_molar": 0.15, "neutralize": True}},
             "binding": {"enabled": False, "ligands": [], "config": {}},
         }
     return {
@@ -149,7 +149,7 @@ def example_config(screen: bool = False) -> dict:
         "ligands": [{"name": "BEN", "smiles": "NC(=[NH2+])c1ccccc1", "reference_resname": "BEN"}],
         "docking": {"mode": "independent", "scoring": "vina", "exhaustiveness": 16, "n_poses": 9},
         "pose_choices": {},
-        "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 1, "production_ns": None, "padding_nm": None, "box_shape": "dodecahedron", "ions": {"positive": "Na+", "negative": "Cl-", "concentration_molar": 0.15, "neutralize": True}},
+        "md": {"systems": ["apo", "docked_single"], "tier": "teaching", "replicas": 3, "production_ns": None, "padding_nm": None, "box_shape": "dodecahedron", "ions": {"positive": "Na+", "negative": "Cl-", "concentration_molar": 0.15, "neutralize": True}},
         "binding": {"enabled": True, "ligands": ["BEN"], "config": {}},
     }
 
@@ -161,6 +161,7 @@ DECISION_KEYS: tuple[tuple[str, ...], ...] = (
     ("docking", "skip_redock"), ("box", "allow_blind"), ("binding", "manual_windows"),
     ("screen", "select"), ("screen", "next_mode"), ("screen", "allow_partial"), ("md_confirmed",), ("ligand_metal",),
     ("multi_ligand",), ("md", "long_run_confirmed"), ("md", "long_run"),
+    ("md", "replicas"),                    # replica plan one-click choice (D-131): 1 / 3 / custom / top-up
     ("md", "membrane", "oriented"),        # gate `membrane orientation` one-click choice (D-80)
     ("md", "resolution"), ("md", "membrane", "surface_distance_nm"),   # coarse-grained gates (D-86)
     ("binding", "added"), ("binding", "target_replicas"),               # targets and extra SMD runs chosen later (D-87)
@@ -1525,20 +1526,88 @@ class Workflow:
             outcome = "skipped"
             self.dec.record("md.restraints", "約束策略建議", outcome, f"採用建議的紀錄未寫入：{type(exc).__name__}: {exc}")
 
+    # ------------------------------------------------------------------ replica plan (D-131, docs/specs/replicas.md §3-§5)
+    def completed_replicas(self) -> dict:
+        """{system key: number of COMPLETE replicas on disk} for the systems whose MD has started (file truth)."""
+        out = {}
+        for key, r in ((self._done("md_runs") or {}).get("runs") or {}).items():
+            if not isinstance(r, dict) or r.get("cg") or not r.get("case_id"):
+                continue
+            try:
+                case = self.project.case(r["case_id"])
+                group = r.get("group_id")
+                out[key] = sum(1 for run in case.runs() if run.manifest().get("replica_group") == group
+                               and run.manifest().get("status") == "COMPLETE")
+            except Exception:  # noqa: BLE001  (information only)
+                continue
+        return out
+
+    def replica_plan(self, *, benchmark: dict | None = None) -> dict:
+        """The replica plan for this workflow's config (engine/replica_plan.py): required and configured number, time
+        factor and, when a benchmark is known, the time.  Never changes anything."""
+        from .engine.replica_plan import plan_replicas
+        st = self.state()
+        cases = ((st["steps"].get("md_cases") or {}).get("cases")) or {}
+        n_atoms = None
+        counts = []
+        for c in cases.values():
+            try:
+                bm = load_json(self.project.case(c["case_id"]).build_dir / "build_manifest.json", {})
+                counts.append(int((bm.get("assembly") or {}).get("n_atoms") or bm.get("n_atoms") or 0))
+            except Exception:  # noqa: BLE001
+                continue
+        counts = [x for x in counts if x > 0]
+        if counts:
+            n_atoms = max(counts)
+        return plan_replicas(self.cfg, benchmark=benchmark, n_atoms=n_atoms, built_keys=list(cases) or None,
+                             done=self.completed_replicas())
+
+    def record_replica_plan(self, *, benchmark: dict | None = None) -> dict:
+        """Write the replica plan to the DecisionLog (once for the same choice) and to state["replica_plan"].  It is
+        information plus a default: it never stops the run."""
+        from .engine.replica_plan import decision_why
+        plan = self.replica_plan(benchmark=benchmark)
+        choice = plan["configured"]
+        try:
+            rows = self.dec.by_stage("workflow.replicas")
+            if not any(r.get("what") == "replicas" and r.get("choice") == choice
+                       and (r.get("evidence") or {}).get("explicit") == plan["explicit"] for r in rows):
+                self.dec.record("workflow.replicas", "replicas", choice, decision_why(plan),
+                                kind="human" if plan["explicit"] else "auto", explicit=plan["explicit"],
+                                required=plan["required"], eta_hours=plan["eta_hours"], systems=plan["systems"])
+            st = self.state()
+            keep = {k: plan[k] for k in ("configured", "required", "explicit", "eta_hours", "systems", "seeds")}
+            if st.get("replica_plan") != keep:
+                st["replica_plan"] = keep
+                atomic_write_json(st, self.state_path)
+        except Exception as exc:  # noqa: BLE001  (information must never break the run)
+            self.dec.record("workflow.replicas", "replicas", "skipped", f"重複計畫的紀錄未寫入：{type(exc).__name__}: {exc}")
+        return plan
+
     def run_md(self, built: dict, make_factory: Callable, *, should_pause=None, progress_cb=None) -> dict:
         from .engine import make_protocol, run_replicas
+        from .engine.replica_plan import configured_replicas
         md = self.cfg.get("md", {})
         runs = dict((self._done("md_runs") or {}).get("runs", {}))
+        n_rep, _ = configured_replicas(self.cfg)             # D-131: not set -> 3 for every tier
+        self.record_replica_plan()
         for key, c in built.items():
             prev = runs.get(key, {})
             if prev.get("status") == "COMPLETE" and prev.get("case_id") == c["case_id"]:
-                continue
+                have = len(prev.get("run_ids") or [])
+                if have >= n_rep:
+                    continue
+                # fewer replicas than asked: resume the same group, only the missing replicas run (run_replicas skips the
+                # COMPLETE ones from file truth)
+                self.dec.record("workflow.replicas", key, f"top up {have} -> {n_rep}",
+                                f"{key} 已完成 {have} 條重複，設定要 {n_rep} 條；沿用同一組（{prev.get('group_id')}）續跑，"
+                                f"只跑缺的 {n_rep - have} 條，已完成的不重算。", kind="auto")
             if prev and prev.get("case_id") != c["case_id"]:
                 self.dec.record("workflow.md", key, "rebuilt case", f"{key} 的 MD 紀錄屬於舊 case {prev.get('case_id')}（pose 或設定改變後重新建模為 "
                                 f"{c['case_id']}）；舊結果不沿用，重新執行 MD。")
                 runs.pop(key, None)
             case = self.project.case(c["case_id"])
-            proto = make_protocol(md.get("tier", "teaching"), production_ns=md.get("production_ns"), replicas=md.get("replicas", 1),
+            proto = make_protocol(md.get("tier", "teaching"), production_ns=md.get("production_ns"), replicas=n_rep,
                                   restraints=self._restraint_strategy())
             if self._solvent() == "gbn2":
                 from .engine.protocol import implicit_solvent_protocol

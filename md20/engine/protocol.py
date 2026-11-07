@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field, asdict
+from .replica_plan import DEFAULT_REPLICAS   # D-131: 3 for every tier (the largest need of any analysis)
 
 
 @dataclass
@@ -177,7 +178,7 @@ def make_protocol(tier: str = "teaching", *, seed: int = 2026, replicas: int | N
     if restraints != "standard":
         notes += f" 約束策略：{restraints}。"
     return Protocol(tier=tier, hmr=bool(t["hmr"]), stages=stages,
-                    replicas=int(replicas if replicas is not None else (3 if tier == "research" else 1)),
+                    replicas=int(replicas if replicas is not None else DEFAULT_REPLICAS),
                     notes=notes)
 
 

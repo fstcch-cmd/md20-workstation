@@ -48,7 +48,7 @@ def workflow_config(*, tier: str = "classroom", cpp_override: str | None = None)
         "ligands": [lig],
         "docking": {"mode": "independent", "exhaustiveness": 32, "n_poses": 9, "seed": 2026},
         "pose_choices": {},
-        "md": {"systems": ["apo", "docked_single"], "tier": tier, "replicas": 1},           # padding: tier default (D-99)
+        "md": {"systems": ["apo", "docked_single"], "tier": tier, "replicas": 3},           # padding: tier default (D-99)
         "binding": {"enabled": False, "ligands": ["GRP"], "config": {}},
         "validation": {"case": "hsieh2025", "paper": PAPER},
     }

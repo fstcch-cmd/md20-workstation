@@ -55,4 +55,4 @@
 | [figures.md](figures.md) | 自動產圖規則：時間軸、圖例在圖外、每條線命名、顏色一致、多系列改小圖、細線＋移動平均（D-89） | 已實作・純 Python 與繪圖測試 |
 | [licensing.md](licensing.md) | 簽章授權（第 2 層）：授權檔格式、機器碼、期限、閘門清單（擋／不擋）、不可由外部關閉、誠實限制（D-125）；md20 只留驗證、簽發端在私人 repo、格式測試向量（D-127） | 已實作・純 Python 測試（Windows 工具與 GUI 卡片待真機／CI） |
 | [supply_chain.md](supply_chain.md) | 外部執行檔與環境版本：Vina 單一釘選版＋sha256 驗證、執行檔身分記錄；micromamba／conda 鎖版待做（D-114，REVIEW #19） | Vina 已實作・純 Python 測試 |
-| [replicas.md](replicas.md) | 獨立重複：每個分析是否需要重複、條數取最大值（3）、報告如何呈現跨重複不確定性、開始時告知使用者（D-129） | 規格，實作中 |
+| [replicas.md](replicas.md) | 獨立重複：每個分析是否需要重複、條數取最大值（3）、報告如何呈現跨重複不確定性、開始時告知使用者（D-129）；重複計畫與告知（D-131） | 規格；§3–§5 已實作，待 CI |

@@ -286,6 +286,47 @@ def apply_gate_action(wf, action: dict, text: str = "") -> dict:
     return {"config": new, "invalidated": dropped}
 
 
+# ------------------------------------------------------------------------------- D-131: replica plan, one-click choice
+MAX_REPLICAS = 50
+
+
+def set_replicas(wf, n: int, note: str = "") -> dict:
+    """The student picks the number of independent replicas on the replica-plan card (1 / the advised number / custom),
+    or asks for the missing ones of a finished workflow (the same call: the config now asks for more than exist).
+
+    Writes `md.replicas` to config.json, records the choice as a human decision, and drops only the analysis and report
+    steps (they must be redone with the new number).  The MD step is NOT dropped and nothing finished is deleted:
+    `Workflow.run_md` resumes the same replica group, runs only the missing replicas and keeps the COMPLETE ones.
+    The binding results are kept as well."""
+    from ..engine.replica_plan import configured_replicas, plan_replicas, decision_why
+    try:
+        n = int(n)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("重複條數要是整數") from exc
+    if not 1 <= n <= MAX_REPLICAS:
+        raise ValueError(f"重複條數要在 1 到 {MAX_REPLICAS} 之間")
+    cfg = load_json(wf.dir / "config.json", wf.cfg)
+    before, was_explicit = configured_replicas(cfg)
+    done = wf.completed_replicas()
+    cfg = copy.deepcopy(cfg)
+    cfg.setdefault("md", {})["replicas"] = n
+    atomic_write_json(cfg, wf.dir / "config.json")
+    wf.cfg = cfg
+    plan = plan_replicas(cfg, done=done)
+    dropped = []
+    if done:
+        st = wf.state()
+        dropped = [k for k in ("analysis", "report") if st["steps"].pop(k, None) is not None]
+        atomic_write_json(st, wf.state_path)
+    k = plan["topup_runs"]
+    what = (f"使用者在重複計畫卡片選擇每個系統 {n} 條獨立重複（原本 {before} 條" + ("，設定指定" if was_explicit else "，預設") + "）。"
+            + (f"已完成 {sum(done.values())} 條保留不動，只補跑缺的 {k} 條，已有的不重算；分析與報告會重做（{', '.join(dropped) or '無已完成步驟'}）。"
+               if k else "") + (" " + decision_why(plan)) + (f" 使用者備註：{note}" if note else ""))
+    wf.dec.record("gui.replicas", "replicas", n, what, kind="human", previous=before, done=done, topup_runs=k,
+                  patch=[{"path": ["md", "replicas"], "value": n}])
+    return {"replicas": n, "previous": before, "topup_runs": k, "invalidated": dropped, "config": cfg}
+
+
 # ------------------------------------------------------------------------------- umbrella: manual range resampling
 def binding_dirs(wf, target: str) -> list:
     """Every finished or started SMD/umbrella run of one target: the target folder itself (single run, or the first

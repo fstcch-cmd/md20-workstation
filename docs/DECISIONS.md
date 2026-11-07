@@ -6,6 +6,35 @@
 ---
 
 ## 2026-11-07
+### D-131　重複計畫與開始前告知：預設 3 條、時間倍數與 ETA、一鍵改條數、舊專案補跑（D-129 §3–§5）
+- 範圍：只做「需要幾條、花多少時間、使用者怎麼選」。分析與報告的跨重複彙總（`workflow.analyse`、`md20/analysis/`、`md20/report/`）是另一個代理同時做的，這裡沒動。不新增 phase／step。
+- **決定**：
+  - 預設重複數改為 3（所有 tier，含 classroom）：`make_protocol`、`example_config`（含 `--screen`）、`EXAMPLE` 文件字串、顧問建議值（`advisor.recommend`，所有目標）、GUI `config_from_form`、論文驗證案例（hsieh2024／hsieh2025）、`queue add` 與 `JobQueue.add` 都引用同一個常數 `DEFAULT_REPLICAS`（`md20/engine/replica_plan.py`，= 需要重複的分析最少條數的最大值 `required_replicas()`）。設定有寫 `md.replicas` 就照用；沒寫就 3（`configured_replicas`）。
+  - 新純函式模組 `md20/engine/replica_plan.py`：`plan_replicas(cfg, benchmark=, n_atoms=, done=)` 回傳所需條數、目前條數、是否明確設定、時間倍數、ETA、seed、已完成與缺的條數、選項；四語文字 `summary_text`／`line_text`／`independence_text`／`topup_text`；`lines()`（CLI）、`card_lines()`（GUI）。
+  - **時間**：有效能測試才給小時數。順序：`md.ns_per_day`（這個系統量到的速度）> doctor benchmark 依原子數與步長換算 > benchmark 原樣（標「以測試系統大小計算」）。沒有就只給倍數並說「不猜時間」。只算分子動力學（SMD／傘狀採樣不隨重複數變）。系統數取已建的 case，沒有就由設定推算。
+  - **告知位置（既有位置，不停下，沒有新步驟）**：CLI `pipeline run` 在平台訊息後（`md.replicas` 沒寫印完整計畫，有寫印一行）；CLI `run` 一開始印一行（該指令只跑 1 條，要 3 條用 `pipeline run` 或 `queue add --replicas 3`，並把它存的 protocol 寫成 `replicas=1`，demo 同）；GUI 流程頁「開始或繼續」上方的重複計畫卡片，一鍵「照建議」「改為 1 條」「補跑到 3 條」加自訂輸入，沒有 alert／confirm；MD 確認卡片多一行；顧問的建議值、四語理由與 `check()`（少於 3 條給 info，發表等級 warning，附一鍵套用 3）。
+  - **紀錄**：`Workflow.run_md` 開始時 `record_replica_plan()`（`workflow.replicas`；設定指定為 human、採預設為 auto；同一個選擇只寫一次）並存 `state["replica_plan"]`；GUI 選擇由 `gui.actions.set_replicas` 寫 `md.replicas` 與 `gui.replicas` 決策（human，含 patch，why 中文）。新決定鍵 `("md", "replicas")` 加入 `workflow.DECISION_KEYS`（原始檔沒寫條數時，GUI 的選擇不會被 `pipeline run` 洗掉；原始檔有寫則以原始檔為準，與其他鍵一致）。
+  - **舊專案補跑（沿用既有續跑機制，沒有新步驟）**：`run_md` 看到某系統 COMPLETE 但條數少於 `md.replicas`，沿用同一個 `replica_group` 呼叫 `run_replicas`；它從檔案判斷哪幾條 COMPLETE 並跳過，只新建缺的 `replica_index`。`set_replicas` 只丟掉 `analysis` 與 `report` 兩步，不動 `md_runs` 與 `binding`（不重算 SMD）。
+  - **每條的 seed 與起點（照 `run_replicas` 現況，已寫進計畫說明）**：seed = 2026 + 1000×條序（2026、3026、4026）；每條從同一個建好的系統開始，各自做最小化、加熱與平衡，初速由自己的 seed 產生；不是從同一個平衡後結構分出去。
+- **理由與取捨**：
+  - 告知加預設值，不是 NEEDS_HUMAN：D-129 使用者授權的做法；停下會讓每次執行多一次互動，且 3 是有理由的預設。
+  - 「設定有寫」判定看鍵是否存在：`pipeline example` 現在寫 `"replicas": 3`，所以由範例產生的設定在 CLI 多半只印一行（含倍數與時間）。要看完整說明與選項，把該鍵刪掉。這是接受的取捨：範例檔與預設值一致比每次印長文更重要。
+  - 補跑放在「設定要求的條數大於已完成條數」這個條件上，而不是新的決定鍵：使用者編輯 `md.replicas` 或按按鈕結果相同，邏輯只有一處。
+  - `md20 run` 維持一條軌跡（它跑的是一個 case 的一個 run，不是 workflow），只告知，不偷偷改成跑 3 條。
+- **被否決**：
+  - 在 `run_replicas` 或 `Protocol` 裡硬把舊 protocol 的 `replicas` 當 3：已存的 run.json 與 protocol hash 會變，續跑的身分檢查會失效。`Protocol.from_dict` 缺鍵仍讀成 1（歷史事實）。
+  - 補跑時 `invalidate_from(md_runs)`：會連 `binding` 一起丟掉，SMD 與傘狀採樣的結果要重算，代價遠大於補兩條 MD。
+  - GUI 用 `ui.dialog` 或 confirm：使用者指定不用。
+  - 沒有 benchmark 時用典型 ns/day 估時間：違反「不猜時間」。
+- **證據**：`tests/test_replica_plan.py`（預設 3 各處一致、明確設定照用、有／無 benchmark 的 ETA 與縮放、四語齊全、CLI 訊息、GUI 一鍵寫入 config 與決策紀錄、`md.replicas` 為承接的決定鍵、舊專案 1 條補到 3 條：原本那條的 `run.json` 未被改動、seed 為 2026／3026／4026、再要一次不重算）。全套 pytest 結果見 commit 訊息。
+- **未驗證**：GUI 卡片在真實 NiceGUI 上的渲染與按鈕（容器沒有 NiceGUI，只通過 `py_compile` 與純邏輯測試）；等 CI 的 `test_gui_server`／`gui-preview` 與筆電。
+- **未決**：
+  - 粗粒化（`md.resolution: cg`）目前每個系統只跑 1 條，`run_cg` 沒有重複；計畫卡片只告知，沒有選項。要不要做 CG 重複是另一個決定。
+  - 報告與證據矩陣仍有 `md.get("replicas", 1)`（`report/workflow_report.py`、`report/evidence.py`），設定沒寫時會讀成 1，與實際跑的 3 條不一致。應改用 `engine.replica_plan.configured_replicas(cfg)[0]`（或讀 `state["replica_plan"]`）；這在另一個代理負責的範圍，已回報主 session。
+  - 補跑中途暫停後，若使用者又改了 `md.replicas`，該條的 protocol hash（含 `replicas` 欄位）會變，未完成的那一條會從頭重跑；已 COMPLETE 的不受影響。
+  - 估時沒有納入膜、隱式溶劑的長度差異（只用 tier、`production_ns`、`stage_overrides`、約束策略）。
+- **相關檔案**：`md20/engine/replica_plan.py`（新）、`md20/engine/protocol.py`、`md20/engine/queue.py`、`md20/workflow.py`、`md20/advisor.py`、`md20/cli.py`、`md20/gui/actions.py`、`md20/gui/views.py`、`md20/gui/app.py`、`md20/gui/logic.py`、`md20/validation/hsieh2024.py`、`hsieh2025.py`、`tests/test_replica_plan.py`（新）、`docs/specs/replicas.md`、`docs/specs/README.md`、`docs/students/WINDOWS*.md`、`MAC*.md`。
+
 ### D-129　分析跨重複彙總、報告呈現不確定性；需要重複的分析取最大值（3 條），開始時告知使用者
 - 使用者 22:51：多條獨立模擬跑了，但主要分析只讀第一條軌跡，重複間的不確定性沒有呈現；授權開發者逐項判斷哪些分析需要重複，取最大值，並在開始模擬時告訴使用者會多花時間。
 - 查到的事實：`Workflow.analyse()` 只讀 `run_ids[0]`；只有結合自由能（D-96／A9）跨重複彙總。

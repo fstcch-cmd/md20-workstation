@@ -40,6 +40,7 @@ notepad trypsin.json
 ```
 - The third line opens Notepad. Change `"tier": "teaching"` to `"tier": "classroom"` (2 ns), save the file and close Notepad.
 - On an RTX 4060 laptop, classroom took 76.5 minutes (measured). If you leave it at teaching (10 ns), it takes about 3 hours (estimate). Without an NVIDIA graphics card it is much slower, so use classroom.
+- The times above are for one trajectory per system. Each system now runs 3 independent replicas by default, so the molecular dynamics part takes about 3 times as long (SMD and umbrella sampling do not change), and the report can show standard deviations. The replica plan and the estimated time appear when you start. To only walk through the workflow once, change `"replicas": 3` to `1`. The report then marks every place "single trajectory, uncertainty cannot be estimated".
 - Use only letters and digits in the project name. A Chinese name becomes a folder name made of unreadable codes.
 - **Plug the laptop in.** On battery the calculation pauses automatically.
 - You can close the window halfway. **Type the last line again and it continues from where it stopped.**

@@ -16,7 +16,7 @@ from .actions import apply_gate_action, resample_range, select_screen_ligands
 from . import actions as ACT
 from ..docking.screen import echart_screen, echart_ranking
 from .views import (gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html,
-                    coverage_targets, coverage_chart, coverage_summary)
+                    coverage_targets, coverage_chart, coverage_summary, replica_card)
 from .content import t
 from ..i18n import pick, colon, paren, LANGS, LANG_NAMES, QUASAR_LANG
 from .gate_text import gate_title, gate_general, option_text
@@ -685,6 +685,62 @@ def workflow_page(project: str, name: str):
         ui.label(f"{project} / {name}").classes("text-xl font-semibold")
         status = ui.label("").classes("text-lg")
         msg = ui.markdown("")
+        rep_box = ui.column().classes("w-full")
+        rep_sig = {"v": None}
+
+        def _bench():
+            return getattr(STATE.get("doctor"), "benchmark", None) or None
+
+        def render_replicas(force: bool = False):
+            """D-131: the replica plan before a start, with one-click choices (no dialog).  Shown while the MD is not
+            finished with all the replicas the settings ask for."""
+            card = replica_card(wf, lang=lang(), benchmark=_bench())
+            job = RUNNER.get(wf)
+            busy = bool(job and job.alive())
+            sig = (lang(), card["show"], card["current"], tuple(card["lines"]), busy, tuple(o["label"] for o in card["options"]))
+            if sig == rep_sig["v"] and not force:
+                return
+            rep_sig["v"] = sig
+            rep_box.clear()
+            if not card["show"]:
+                return
+
+            def choose(n):
+                j = RUNNER.get(wf)
+                if j and j.alive():
+                    ui.notify(t("busy", lang()), type="warning"); return
+                try:
+                    out = ACT.set_replicas(wf, int(n))
+                except (ValueError, TypeError) as exc:
+                    ui.notify(str(exc), type="negative"); return
+                k, nn = out["topup_runs"], out["replicas"]
+                ui.notify(_(f"已設定每個系統 {nn} 條重複" + (f"，會補跑缺的 {k} 條，已有的不重算" if k else "") + f"。按「{run_btn}」執行。",
+                            f"Set to {nn} replicas per system" + (f". The {k} missing one(s) will run and nothing is recomputed" if k else "") +
+                            f". Press {run_btn} to run.",
+                            f"系ごとに {nn} 回に設定しました" + (f"。不足の {k} 回を追加で計算し、既存の結果は再計算しません" if k else "") +
+                            f"。「{run_btn}」を押して実行してください。",
+                            f"계마다 {nn}회로 설정했습니다" + (f". 부족한 {k}회를 추가로 실행하며 이미 있는 것은 다시 계산하지 않습니다" if k else "") +
+                            f". '{run_btn}'을 눌러 실행하십시오."), type="positive")
+                render_replicas(force=True)
+            color = "c98a1a" if card["level"] == "warning" else "2f6f9f"
+            with rep_box, ui.card().classes("w-full md20-card").style(f"border-left: 4px solid #{color}").props("data-testid=replica-card"):
+                ui.label(card["title"]).classes("md20-section")
+                for line in card["lines"]:
+                    ui.label(line).classes("text-sm")
+                for o in card["options"]:
+                    if o["id"] == "custom":
+                        continue
+                    with ui.row().classes("items-center gap-2 no-wrap"):
+                        b = ui.button(o["label"], on_click=lambda n=o["replicas"]: choose(n)).props(
+                            f"{'color=primary' if o['replicas'] != card['current'] or o['id'] == 'topup' else 'outline'} no-caps "
+                            f"data-testid=replica-{o['id']}" + (" disable" if busy else ""))
+                        ui.label(o["note"]).classes("md20-why")
+                with ui.row().classes("items-center gap-2"):
+                    num = ui.number(next((o["label"] for o in card["options"] if o["id"] == "custom"), ""), value=card["current"],
+                                    min=1, max=ACT.MAX_REPLICAS, step=1, format="%d").classes("w-40")
+                    ui.button(_("套用", "Apply", "適用", "적용"), on_click=lambda: choose(num.value)).props(
+                        "outline no-caps data-testid=replica-custom" + (" disable" if busy else ""))
+
         confirm_box = ui.column().classes("w-full")
         confirm_sig = {"v": None}
 
@@ -713,6 +769,8 @@ def workflow_page(project: str, name: str):
                 sel = (wf.state()["steps"].get("pose_selection") or {}).get("selection") or {}
                 for line in selection_lines(sel, lang()):
                     ui.label("• " + line).classes("text-sm")
+                for line in replica_card(wf, lang=lang(), benchmark=_bench())["lines"][:1]:      # D-131: said before the start
+                    ui.label(line).classes("text-sm")
 
                 def proceed():
                     job = RUNNER.get(wf)
@@ -976,6 +1034,7 @@ def workflow_page(project: str, name: str):
             snap = job.snapshot() if job else {"status": "IDLE", "message": "", "steps": __import__("md20.gui.logic", fromlist=["step_rows"]).step_rows(wf.state()), "history": []}
             L = lang()
             status.set_text(t("status", L) + colon(L) + pick(STATUS_TEXT.get(str(snap["status"]), str(snap["status"])), L))
+            render_replicas()
             render_confirm()
             m = pick(snap["message"], L)                  # the runner's own messages are (zh, en, ja, ko) tuples
             msg.set_content(f"```\n{m}\n```" if m else "")

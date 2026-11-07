@@ -235,6 +235,6 @@ def test_long_run_plan_is_stored_for_the_report(tmp_path):
     from test_longrun import _wf_case
     from md20.engine.protocol import make_protocol
     wf, case = _wf_case(tmp_path, {"production_ns": 500, "ns_per_day": 330})
-    wf._plan_long_run("docked_single", case, make_protocol("teaching", production_ns=500), {})
+    wf._plan_long_run("docked_single", case, make_protocol("teaching", production_ns=500, replicas=1), {})
     p = wf.state()["long_run"]["docked_single"]
     assert p["production_ns"] == 500 and p["n_chunks"] > 0 and "decisions" not in p

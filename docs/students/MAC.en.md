@@ -42,6 +42,7 @@ sed -i '' 's/"tier": "teaching"/"tier": "classroom"/' trypsin.json
 ~/MD20/md20 pipeline run trypsin.json --project first_case
 ```
 - The third line changes the tier to classroom (2 ns). On a Mac this should take about 2–4 hours. This is an estimate and has not been measured yet.
+- The times above are for one trajectory per system. Each system now runs 3 independent replicas by default, so the molecular dynamics part takes about 3 times as long (SMD and umbrella sampling do not change), and the report can show standard deviations. The replica plan and the estimated time appear when you start. To only walk through the workflow once, change `"replicas": 3` to `1`. The report then marks every place "single trajectory, uncertainty cannot be estimated".
 - Use only letters and digits in the project name.
 - **Plug the laptop in** and do not let it go to sleep.
 - You can close Terminal halfway. **Type the last line again and it continues from where it stopped.**
