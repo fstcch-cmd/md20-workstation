@@ -95,6 +95,11 @@ PARAMS: dict[str, dict] = {
                           "gbn2": ("隱式溶劑（GBn2，沒有水盒）", "Implicit solvent (GBn2, no water box)",
                                    "陰溶媒（GBn2、水ボックスなし）", "암시적 용매(GBn2, 물 상자 없음)")}),
     "padding_nm": P("水盒邊距", "Box padding", "水ボックスの余白", "물 상자 여백", "nm", "system", min=0.5, max=3.0, step=0.1),
+    "box_for_smd": P("為 SMD 預留水盒", "Box ready for SMD", "SMD 用に水ボックスを確保", "SMD용 물 상자 확보", group="system",
+                     type="choice", choices={"auto": ("自動（便宜就先加大，否則事先提醒）", "Auto (enlarge when cheap, otherwise warn before MD)",
+                                                      "自動（安ければ先に広げ、そうでなければ MD 前に知らせる）", "자동(저렴하면 미리 넓히고, 아니면 MD 전에 알림)"),
+                                             "always": ("一律依 SMD 規則加大", "Always size for SMD", "常に SMD の規則で広げる", "항상 SMD 규칙으로 넓힘"),
+                                             "never": ("不檢查", "Do not check", "確認しない", "확인하지 않음")}),
     "box_shape": P("水盒形狀", "Box shape", "水ボックスの形", "물 상자 모양", group="system", type="choice",
                    choices={"dodecahedron": ("菱形十二面體", "Rhombic dodecahedron", "菱形十二面体", "마름모 십이면체"),
                             "cube": ("立方體", "Cube", "立方体", "정육면체")}),
@@ -358,6 +363,16 @@ def _recommend_raw(f: CaseFeatures, goal: str) -> dict[str, dict]:
                          "단백질과 자기 주기 이미지 사이를 2.0 nm 이상 둡니다(OpenMM의 여백은 이미지까지의 거리이며 한 번만 "
                          "더해집니다. GROMACS의 -d 1.0과 같습니다). 1.0 nm 컷오프보다 충분히 크며, 결합 세기를 계산할 때는 "
                          "당김 경로에 맞춰 자동으로 더 넓힙니다.")
+    o["box_for_smd"] = _r("always" if want_binding else "auto",
+                          "要計算結合強度時，水盒一開始就依拉離路徑加大。沒有排時先檢查：加大很便宜就先加大，否則在 MD 前提醒，"
+                          "免得 MD 跑完才發現不能做 SMD。",
+                          "When binding strength is calculated, the box is sized for the pulling path from the start. Otherwise "
+                          "the build checks anyway: it enlarges the box when that is cheap and warns before the MD when it is "
+                          "not, so you do not find out after the MD that SMD is impossible.",
+                          "結合の強さを計算するときは、最初から引き離し経路に合わせて水ボックスを広げます。予定がなくても確認し、"
+                          "安く済むなら先に広げ、高くつくなら MD の前に知らせます。MD の後で SMD ができないと分かることを防ぎます。",
+                          "결합 세기를 계산할 때는 처음부터 당김 경로에 맞춰 물 상자를 넓힙니다. 계획이 없어도 확인하여, 저렴하면 "
+                          "미리 넓히고 비싸면 MD 전에 알립니다. MD가 끝난 뒤 SMD를 할 수 없다는 것을 알게 되는 일을 막습니다.")
     o["box_shape"] = _r("dodecahedron", "邊距相同時，菱形十二面體的水比立方體少約 29 %，跑得比較快。",
                         "A rhombic dodecahedron holds about 29 % less water than a cube with the same padding, so it runs faster.",
                         "余白が同じなら、菱形十二面体は立方体より水が約 29 % 少なく、計算が速くなります。",

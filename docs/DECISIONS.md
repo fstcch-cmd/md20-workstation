@@ -6,6 +6,17 @@
 ---
 
 ## 2026-11-07
+### D-100　通則：任何含配體的建模都事先依 SMD 規則檢查水盒（不論現在有沒有排 SMD）
+- 使用者 11/07 16:38：「我要的是通則，不是範例……一般研究也會遇到……如何智慧化地在一開始給水盒大小時，就考量到使用者後面可能會做 SMD」。
+- 決定（`md.box_for_smd`，預設 `auto`；`workflow._smd_box` → `build.assemble.smd_padding`／`apply_smd_mode`）：
+  - **enforce**（`binding.enabled` 且要拉這個配體，或 `md.box_for_smd: always`）：依 D-99 規則加大，代價照實寫在閘門。
+  - **advise**（`auto`，現在沒排 SMD）：照樣算。所需 padding 不超過目前值 → PASS（附「這個盒子最多能拉多遠」）；需要加大但 MD 計算量 ≤ ×1.5（`SMD_PROACTIVE_MAX_COST`）→ **先加大**（AUTO_FIXED，說明是便宜的保險，之後做 SMD 不必重建）；更貴 → **不加大**，給 advisory 卡片（PASS、不擋流程，MD 前就看得到）：目前最多能拉幾 nm、要做 SMD 需要的 padding 與計算量倍數、一鍵選項 `md.box_for_smd: always`／`md.padding_nm: X`／維持現狀；找不到口袋 Cα 時也只給 advisory（不擋 MD）。
+  - **never**：不檢查（使用者明確不要）。
+  - 研究與教學同一套邏輯；GUI 的閘門卡片現在也顯示 PASS 的 advisory 卡片；顧問新增參數 `box_for_smd`（有結合計算建議 always，否則 auto）。
+- 理由：SMD 的需求在建模那一刻就能算（同一條規則、同一個 anchor），事後才發現等於整段 MD 重跑；但不是每個案例都要做 SMD，一律加大會讓大多數案例白白多算——所以便宜就做、貴就事先講清楚讓使用者決定。
+- 被否決：一律依 SMD 加大（多數案例用不到，算力 ×2 以上）；只在 binding 開啟時檢查（D-99 原狀，事後才發現）；擋下等使用者決定（沒排 SMD 的案例不該被擋）。
+- 測試：`tests/test_smd_box_sizing.py`（新增：模式判定、advise 便宜時加大、昂貴時 advisory 不加大且有一鍵選項、無 anchor 不擋）；`test_advisor` 新參數有四語理由。
+
 ### D-99　要拉離的案例在建模時就依 SMD 規則決定水盒大小；更正「padding」的意義（OpenMM 只加一次）
 - 起因：使用者 11/07 16:23「之前 GRP 的教學專案失敗，原因是水盒太小，無法做 SMD」（教學二 hsieh2025：Keap1 BTB 4CXT＋GGGGGKP）。
 - 根因（兩處規則不一致）：

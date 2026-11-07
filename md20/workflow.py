@@ -1299,19 +1299,24 @@ class Workflow:
         return pad
 
     def _smd_box(self, ligands: list[str] | None, *, screen: bool = False) -> dict | None:
-        """D-99: cases that will be pulled are sized by the SMD box rule at build time (build.assemble.smd_padding)."""
+        """D-99 general rule: every case with a ligand is checked against the SMD box rule at build time
+        (build.assemble.smd_padding).  enforce = SMD planned (binding enabled, or md.box_for_smd: always); advise = not
+        planned now, maybe later (default md.box_for_smd: auto); md.box_for_smd: never skips the check."""
         b = self.cfg.get("binding") or {}
-        if screen or not b.get("enabled") or not ligands:
+        if screen or not ligands:
             return None
+        policy = str((self.cfg.get("md") or {}).get("box_for_smd", "auto")).lower()     # auto | always | never
+        planned = bool(b.get("enabled")) and any(n in (b.get("ligands") or ligands) for n in ligands)
+        if policy == "never" and not planned:
+            return None
+        mode = "enforce" if planned or policy == "always" else "advise"
         bc = b.get("config") or {}
         from .sampling.binding import BindingConfig
         d = BindingConfig()
-        pulled = [n for n in ligands if n in (b.get("ligands") or ligands)]
-        if not pulled:
-            return None
+        pulled = [n for n in ligands if n in (b.get("ligands") or ligands)] if planned else list(ligands)
         return {"pull_nm": float(bc.get("pull_distance_nm", bc.get("pull_distance", d.pull_distance_nm))),
                 "margin_nm": float(bc.get("box_margin_nm", d.box_margin_nm)),
-                "allowance_nm": float(bc.get("box_allowance_nm", 0.5)), "ligands": pulled}
+                "allowance_nm": float(bc.get("box_allowance_nm", 0.5)), "ligands": pulled, "mode": mode}
 
     def _build_one(self, case, raw: Path, names: list[str], picks: dict, *, screen: bool = False) -> tuple[dict, dict]:
         """Build one case from chosen poses (`picks[name]` has sdf/smiles); returns (build summary, name → topology name)."""

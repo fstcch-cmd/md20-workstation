@@ -92,14 +92,58 @@ def test_pocket_anchor_matches_the_previous_select_groups_rule():
     assert set(sel) == set(ca[d <= used + 1e-9]) and len(sel) >= 4
 
 
-def test_workflow_passes_the_smd_rule_only_for_pulled_cases(tmp_path):
+def test_workflow_checks_every_ligand_case_and_sets_the_mode(tmp_path):
+    """General rule: every ligand case is checked; enforce when SMD is planned, advise when it may come later."""
     from md20.project.store import Project
     from md20.workflow import Workflow, example_config
     cfg = example_config()
     cfg["binding"] = {"enabled": True, "ligands": ["BEN"], "config": {"pull_distance_nm": 2.0}}
     wf = Workflow(Project.create(tmp_path, "p"), cfg)
-    box = wf._smd_box(["BEN"])
-    assert box == {"pull_nm": 2.0, "margin_nm": 1.0, "allowance_nm": 0.5, "ligands": ["BEN"]}
+    assert wf._smd_box(["BEN"]) == {"pull_nm": 2.0, "margin_nm": 1.0, "allowance_nm": 0.5, "ligands": ["BEN"], "mode": "enforce"}
     assert wf._smd_box(["BEN"], screen=True) is None and wf._smd_box([]) is None
     wf.cfg["binding"]["enabled"] = False
+    assert wf._smd_box(["BEN"])["mode"] == "advise"                  # not planned now — still checked
+    wf.cfg["md"]["box_for_smd"] = "always"
+    assert wf._smd_box(["BEN"])["mode"] == "enforce"
+    wf.cfg["md"]["box_for_smd"] = "never"
     assert wf._smd_box(["BEN"]) is None
+
+
+def _plan(pad, mode, R=2.2):
+    from md20.build.assemble import apply_smd_mode
+    xyz, m, ca, lig = _grp_like()
+    p = smd_padding_plan(xyz, m, ca, {"GRP": lig}, pad, pull_nm=1.5, margin_nm=1.0, allowance_nm=0.5, shape="dodecahedron")
+    return apply_smd_mode(p, mode, pad)
+
+
+def test_advise_mode_keeps_an_expensive_box_and_warns_before_md():
+    plan = _plan(2.0, "advise")
+    assert plan["status"] == "ADVISE_TOO_COSTLY" and plan["padding_nm"] == 2.0
+    g = smd_box_gate(plan, pull_nm=1.5, margin_nm=1.0)
+    assert g.status == PASS and g.advisory and g.limitation["padding_required_nm"] > 2.0
+    assert any(o.startswith("md.box_for_smd: always") for o in g.options) and "現在" in g.explanation
+
+
+def test_advise_mode_enlarges_when_cheap():
+    plan = _plan(4.0, "advise")            # 4.0 → ~4.2: a few percent more water
+    assert plan["status"] == AUTO_FIXED and plan.get("proactive") and plan["evidence"]["cost_factor"] <= 1.5
+    g = smd_box_gate(plan, pull_nm=1.5, margin_nm=1.0)
+    assert g.status == AUTO_FIXED and "沒有排 SMD" in g.explanation
+
+
+def test_advise_mode_never_blocks_without_anchor():
+    from md20.build.assemble import apply_smd_mode
+    prot = _protein()
+    xyz = np.vstack([prot, [[9.0, 9.0, 9.0], [9.1, 9.0, 9.0]]])
+    p = smd_padding_plan(xyz, np.full(len(xyz), 12.0), np.arange(len(prot)), {"X": [len(prot), len(prot) + 1]}, 2.0,
+                         pull_nm=1.5, margin_nm=1.0, allowance_nm=0.5, shape="dodecahedron")
+    g = smd_box_gate(apply_smd_mode(p, "advise", 2.0), pull_nm=1.5, margin_nm=1.0)
+    assert g.status == PASS and g.advisory
+
+
+def test_box_for_smd_options_are_one_click():
+    from md20.gui.actions import gate_actions
+    g = smd_box_gate(_plan(2.0, "advise"), pull_nm=1.5, margin_nm=1.0).to_dict()
+    acts, _ = gate_actions(g, step="md_cases")
+    paths = [a["patch"][0]["path"] for a in acts]
+    assert ["md", "box_for_smd"] in paths and ["md", "padding_nm"] in paths

@@ -102,7 +102,7 @@ def gate_cards(wf, *, include_pass: bool = False, lang: str = "zh") -> list[dict
         groups += [(f"{pick(SRC_LIGAND, lang)} {l.get('name')}", l.get("gates") or {}) for l in bm.get("ligands") or []]
         for src, rep in groups:
             for g in rep.get("gates", []):
-                if include_pass or g.get("status") != "PASS":
+                if include_pass or g.get("status") != "PASS" or g.get("advisory"):   # D-99: advisory PASS notices too
                     cards.append(_card(f"{key} · {src}", g, step="md_cases", lang=lang))
     # scientific-limitation notices (D-48): never blocking, shown with their options
     st_all = wf.state()

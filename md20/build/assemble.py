@@ -188,6 +188,9 @@ def add_flat_bottom_restraints(system, topology, positions, lig_atom_ranges, *, 
 
 # D-99: room for the ligand COM to move / a peptide to extend between the build and the SMD start (equilibration + MD)
 SMD_BOX_ALLOWANCE_NM = 0.5
+# D-99 general rule: a case not (yet) planned for SMD is still checked; enlarging it pre-emptively is done when it is
+# cheap (MD cost ≤ this factor), so a later SMD needs no rebuild; otherwise the build says so before the MD starts
+SMD_PROACTIVE_MAX_COST = 1.5
 
 # Monovalent ions OpenMM's Modeller.addSolvent can place; amber14/tip3p.xml carries Joung–Cheatham parameters for
 # all of them.  Divalent salts (MgCl2, CaCl2) need a different placement and are not supported yet (gate).
@@ -238,12 +241,16 @@ def smd_padding_plan(xyz: np.ndarray, masses: np.ndarray, ca: np.ndarray, ligand
     p_req = math.ceil(padding_for_half_box(R, half_needed) / 0.05 - 1e-9) * 0.05
     vf = {"dodecahedron": 0.7071, "octahedron": 0.7698, "cube": 1.0}[shape]
     w = lambda p: max(2 * R + p, 2 * p)                                   # noqa: E731
+    # how far the worst ligand could be pulled in the requested box (same rule, solved for the pull distance)
+    max_pull = w(padding_nm) / 2 - (per[worst]["d0_nm"] + per[worst]["ligand_radius_nm"] + margin_nm + allowance_nm)
     ev.update({"solute_radius_nm": round(R, 3), "half_box_needed_nm": round(half_needed, 3),
-               "padding_required_nm": round(p_req, 2), "half_box_at_requested_nm": round(w(padding_nm) / 2, 3)})
+               "padding_required_nm": round(p_req, 2), "half_box_at_requested_nm": round(w(padding_nm) / 2, 3),
+               "max_pull_nm_at_requested": round(max_pull, 2)})
     if p_req <= padding_nm + 1e-9:
         return {"status": PASS, "padding_nm": padding_nm, "worst": worst, "per": per, "evidence": ev}
     v0, v1 = vf * w(padding_nm) ** 3, vf * w(p_req) ** 3
-    ev.update({"volume_nm3_before": round(v0, 1), "volume_nm3_after": round(v1, 1), "approx_water_added": int((v1 - v0) * 33.4)})
+    ev.update({"volume_nm3_before": round(v0, 1), "volume_nm3_after": round(v1, 1), "approx_water_added": int((v1 - v0) * 33.4),
+               "cost_factor": round(v1 / v0, 2)})
     return {"status": AUTO_FIXED, "padding_nm": float(round(p_req, 2)), "worst": worst, "per": per, "evidence": ev}
 
 
@@ -266,6 +273,7 @@ def smd_padding(modeller, lig_atom_ranges, padding_nm: float, smd_box: dict, sha
     pull, margin = float(smd_box.get("pull_nm", 1.5)), float(smd_box.get("margin_nm", 1.0))
     allow = float(smd_box.get("allowance_nm", SMD_BOX_ALLOWANCE_NM))
     plan = smd_padding_plan(xyz, masses, ca, ligs, padding_nm, pull_nm=pull, margin_nm=margin, allowance_nm=allow, shape=shape)
+    plan = apply_smd_mode(plan, smd_box.get("mode", "enforce"), padding_nm)
     report.add(smd_box_gate(plan, pull_nm=pull, margin_nm=margin))
     if decisions and plan["status"] == AUTO_FIXED:
         decisions.record("build.box", "padding for SMD", plan["padding_nm"],
@@ -276,8 +284,43 @@ def smd_padding(modeller, lig_atom_ranges, padding_nm: float, smd_box: dict, sha
     return plan["padding_nm"]
 
 
+def apply_smd_mode(plan: dict, mode: str, padding_nm: float) -> dict:
+    """D-99 general rule.  enforce = SMD is planned: enlarge whatever it costs.  advise = SMD is not planned now but
+    may be later: enlarge only when cheap (≤ SMD_PROACTIVE_MAX_COST); otherwise keep the box and say — before the MD —
+    what a later SMD would need.  advise never blocks (no anchor → notice, not NEEDS_HUMAN)."""
+    plan = {**plan, "mode": mode}
+    if mode != "advise":
+        return plan
+    if plan["status"] == NEEDS_HUMAN:
+        return {**plan, "status": "ADVISE_NO_ANCHOR"}
+    if plan["status"] == AUTO_FIXED:
+        f = plan["evidence"].get("cost_factor", 99.0)
+        if f > SMD_PROACTIVE_MAX_COST:
+            return {**plan, "status": "ADVISE_TOO_COSTLY", "padding_nm": padding_nm}
+        return {**plan, "proactive": True}
+    return plan
+
+
 def smd_box_gate(plan: dict, *, pull_nm: float, margin_nm: float) -> Gate:
     ev, worst = plan["evidence"], plan["worst"]
+    if plan["status"] == "ADVISE_NO_ANCHOR":
+        return Gate("box size for SMD", PASS,
+                    "之後若要做 SMD：配體附近 1.6 nm 內找不到口袋 Cα，無法事先估算拉離需要的水盒（現在不影響 MD）。",
+                    options=["binding.config.anchor_residues 指定 anchor 後重建"], evidence=ev, advisory=True)
+    if plan["status"] == "ADVISE_TOO_COSTLY":
+        w = plan["per"][worst]
+        mp = ev.get("max_pull_nm_at_requested")
+        return Gate("box size for SMD", PASS,
+                    f"這個案例目前沒有排 SMD。現在的水盒（padding {ev['padding_requested_nm']} nm）"
+                    + (f"最多只能把 {worst} 拉離 {mp:.2f} nm" if mp is not None and mp > 0 else f"不夠把 {worst} 拉離")
+                    + f"；若之後要做 SMD（拉離 {pull_nm} nm）需要 padding {ev['padding_required_nm']:.2f} nm，MD 計算量約 ×{ev['cost_factor']:.1f}，"
+                    f"所以沒有先加大。要做的話**現在**加大，比 MD 跑完再重建省事。",
+                    options=["md.box_for_smd: always（現在就依 SMD 規則加大）",
+                             f"md.padding_nm: {ev['padding_required_nm']:.2f}",
+                             "維持現狀（之後要做 SMD 時再重建）"],
+                    evidence=ev, advisory=True, limitation={"what": "SMD not possible in this box",
+                                                            "padding_required_nm": ev["padding_required_nm"],
+                                                            "max_pull_nm": mp})
     if plan["status"] == NEEDS_HUMAN:
         return Gate("box size for SMD", NEEDS_HUMAN,
                     f"要拉離的配體 {', '.join(ev['unplanned_ligands']) or '—'} 附近找不到口袋 Cα（1.6 nm 內），無法依 SMD 規則決定水盒大小。",
@@ -288,8 +331,9 @@ def smd_box_gate(plan: dict, *, pull_nm: float, margin_nm: float) -> Gate:
         return Gate("box size for SMD", PASS,
                     f"padding {ev['padding_requested_nm']} nm 已足夠拉離 {worst}（盒子半長 {ev['half_box_at_requested_nm']:.2f} ≥ 需要的 "
                     f"{ev['half_box_needed_nm']:.2f} nm，含 MD 漂移餘裕 {ev['allowance_nm']} nm）。", evidence=ev)
+    pre = "（這個案例目前沒有排 SMD，但加大的代價很小，先加大，之後做 SMD 不必重建）" if plan.get("proactive") else ""
     return Gate("box size for SMD", AUTO_FIXED,
-                f"要拉離 {worst}：d0 {w['d0_nm']:.2f} + 拉離 {pull_nm} + 配體半徑 {w['ligand_radius_nm']:.2f} + 安全距離 {margin_nm} "
+                pre + f"要拉離 {worst}：d0 {w['d0_nm']:.2f} + 拉離 {pull_nm} + 配體半徑 {w['ligand_radius_nm']:.2f} + 安全距離 {margin_nm} "
                 f"+ MD 漂移餘裕 {ev['allowance_nm']} = 盒子半長需 {ev['half_box_needed_nm']:.2f} nm；溶質半徑 {ev['solute_radius_nm']:.2f} nm，"
                 f"padding 由 {ev['padding_requested_nm']} 提高到 {plan['padding_nm']:.2f} nm（盒子約 {ev['volume_nm3_before']:.0f} → "
                 f"{ev['volume_nm3_after']:.0f} nm³，水約多 {ev['approx_water_added']:,} 個，MD 計算量約 ×{ev['volume_nm3_after'] / ev['volume_nm3_before']:.1f}）。",

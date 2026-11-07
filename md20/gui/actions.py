@@ -112,6 +112,13 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
         return None
     if name == "ligand–metal coordination" and option.startswith("ligand_metal: restrain"):
         return _act(option, [{"path": ["ligand_metal"], "value": "restrain"}], "md_cases")
+    if name == "box size for SMD":      # D-99: size the box for a later SMD now (rebuilds the MD cases)
+        if option.startswith("md.box_for_smd: always"):
+            return _act(option, [{"path": ["md", "box_for_smd"], "value": "always"}], "md_cases")
+        m = re.match(r"md\.padding_nm:\s*([0-9.]+)", option)
+        if m:
+            return _act(option, [{"path": ["md", "padding_nm"], "value": float(m.group(1))}], "md_cases")
+        return None
     if name == "long run":              # engine/longrun.py: > 1 µs, disk space, trajectory size
         if option.startswith("md.long_run_confirmed: true"):
             return _act(option, [{"path": ["md", "long_run_confirmed"], "value": True}], "md_runs")
