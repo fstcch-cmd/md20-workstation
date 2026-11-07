@@ -9,6 +9,7 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **第五個 session：確認 ac5fba5 CI；D-111/D-112（28e87aa 紅燈＝測試錯）、D-113 MBAR overlap 評估、D-114 Vina 釘選＋sha256**——本地 commit，**等 ac5fba5 CI 跑完才 push**（避免取代它）。28e87aa 已證實：膜 case B Windows／macOS PASSED（D-102），case C water overlaps 閘門＋bilayer→declashed（D-104）。下一項：micromamba／conda 鎖版（supply_chain §2） | 使用者 11/07（開發順序由開發者決定） | session_016gcJz8q8wadWxHb24EMCKt | 2026-11-07 19:06 | 勿動 md20/sampling/assessment.py 的 mbar_overlap、md20/docking/vina_cli.py |
 | **GUI 穩定性（D-103）：計算改獨立子程序、狀態與進度從檔案讀回、GUI 重開接回；補 D-102 漏掉的 water overlaps 四語說明**；D-103～D-110 全部已推（a20）：GUI 穩定性、建膜即時 3D、分析工具箱、系統比較、證據矩陣、CI 修紅、runner 移除、拒絕理由四語。**驗證點 ac5fba5**（勿再 push，讓 openmm-stack 三 OS／heavy 跑完）。待授權：P1A 自動補窗、A8 漏斗約束（屬協定變更）、藍圖第 2–4 階段（需工作站＋計算預算）。待筆電：D-72、URI 數值、D-103 關主控台存活 | 使用者 11/07 | session_016gcJz7pQmKkZzkUxg6SqVs | 2026-11-07 17:35 | 勿動 md20/gui/worker.py、md20/gui/logic.py 的 Runner/ProcessJob |
 | **接手 P0 收尾＋下一批：配體原子形式電荷寫入 build manifest（讓鹽橋能判配體）、A7 docking fallback reason code**：D-98～D-102 完成並 push（D-99/100 水盒、D-101 傘狀採樣、D-102 膜 NaN 修復）；a19 待使用者推 tag；新需求：GUI 穩定性、建膜即時 3D；a19 發行待使用者（a18 從未發行） | 使用者／HANDOFF 11/07 | session_016gcJzAV8UjRW4ixPZLxddG | 2026-11-07 10:50 | 勿動 md20/build/ 的 manifest 配體段、md20/docking/ 的 fallback 路徑 |
 | **整合規格 P0（D-95 CI 相依、D-96 A1/A2/A3/A9/A10、D-97 A4/A5/A6/A12/F07/F09）**：完成，已 push（HEAD `ba4d7da`）；由 session_016gcJzAV8UjRW4ixPZLxddG 接手收尾。673 passed。下一批：A7、A8、A11、F10/F11/F12、P1A 自動行動、F19 pilot | 使用者（MD20_Claude_Code_Master_Iteration_Prompt_EN.md） | session_016gcJzASwmZ7ZUPX5BewTyo | 2026-11-07 09:40 | 見 docs/specs/master_iteration_2026-11-07.md；勿動 md20/sampling/assessment.py、md20/analysis/interactions.py、md20/analysis/persistence.py |
@@ -43,9 +44,9 @@
 | 金屬：力常數依元素×配位原子表（鋅偏移部分已認領，見進行中）、配位水納入鍵結、配體配位金屬的距離約束後備 | 同上 §3 |
 | umbrella：MBAR overlap matrix 門檻、OpenMM 內建 metadynamics 後備、funnel 約束（研究 tier ΔG°） | 同上 §2 |
 | 約束策略智慧建議 `recommend_restraint_strategy`；凍結／口袋截斷／資源估算（分組分階段已完成 D-23；其餘依會診 §1 Q2–Q6） | `docs/specs/restraints_freeze_truncation.md` |
-| Vina 執行檔 sha256 表、micromamba 與環境版本鎖定 | REVIEW #19 |
+| Vina 執行檔 sha256 表（**已做 D-114**）、micromamba 與環境版本鎖定（未做） | REVIEW #19 |
 | 戳記改為私鑰簽章（目前只有公鑰加密，不能證明來源） | REVIEW #20 |
-| `sampling/runner.py`（無呼叫者）移除或修正 | REVIEW #17 |
+| ~~`sampling/runner.py`（無呼叫者）移除或修正~~ 已做 D-109 | REVIEW #17 |
 
 ## 完成
 | 項目 | session | commit |
