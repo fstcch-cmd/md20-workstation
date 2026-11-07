@@ -2578,3 +2578,117 @@ def classify_common(cb: dict) -> list[dict]:
             out.append(S("note", f"{n}：{nb} 個低谷，前後兩半一致。", f"{n}: {nb} basins, consistent between the two halves.",
                          f"{n}：谷は {nb} 個で、前半と後半は一致しています。", f"{n}: 골 {nb}개, 앞뒤 절반이 일치합니다."))
     return out
+
+
+# D-116 (F13): which contacts are lost along the pulling path, and where the force peaks
+FIG.update({
+    "smd_contacts": {
+        "title": ("拉離路徑上斷開的接觸", "Contacts released along the pulling path",
+                  "引き離し経路で切れる接触", "당김 경로에서 끊어지는 접촉"),
+        "caption": ("橫軸是配體與口袋的距離，每一列是一個配體與殘基的接觸（重原子距離小於 0.4 nm）。色條是接觸存在的區段，標記是最後一次接觸的位置，灰色帶是力的峰值前後 0.05 nm。",
+                    "The x axis is the ligand–pocket distance. Each row is one ligand–residue contact (heavy atoms closer than 0.4 nm). "
+                    "The bar shows where the contact exists, the marker shows its last position and the grey band is the force peak ± 0.05 nm.",
+                    "横軸はリガンドとポケットの距離で、各行はリガンドと残基の接触（重原子の距離が 0.4 nm 未満）です。"
+                    "色の帯は接触がある区間、印は最後に接触していた位置、灰色の帯は力のピークの前後 0.05 nm を示します。",
+                    "가로축은 리간드와 포켓 사이의 거리이고, 각 행은 리간드와 잔기의 접촉(중원자 거리 0.4 nm 미만)입니다. "
+                    "색 막대는 접촉이 있는 구간, 표시는 마지막으로 접촉한 위치, 회색 띠는 힘 피크의 앞뒤 0.05 nm입니다."),
+        "read": ("灰色帶內結束的接觸，是在拉力最大的那一刻斷開的。比灰色帶早結束的接觸在峰值之前就斷了，晚結束的在峰值之後。"
+                 "清單只包含口袋附近和出口路徑上的殘基，也不含水。峰值和斷開的位置屬於這一次拉離，會隨拉速與彈簧硬度改變。"
+                 "它們不能用來排序作用力的強弱，也不是自由能。",
+                 "A contact that ends inside the grey band was lost when the force was highest. Contacts that end earlier were lost "
+                 "before the peak and contacts that end later were lost after it. The list covers only the residues near the pocket "
+                 "and along the exit path, and no water. The peak and the release positions belong to this one pull and change with "
+                 "the pulling speed and the spring stiffness. They do not rank the strength of interactions and are not a free energy.",
+                 "灰色の帯の中で終わる接触は、力が最大になった瞬間に切れたものです。帯より早く終わる接触はピークの前に、遅く終わる接触はピークの後に切れています。"
+                 "一覧に含まれるのはポケットの近くと出口の経路にある残基だけで、水は含みません。ピークと切れる位置はこの1回の引き離しのもので、"
+                 "引く速さとばねの硬さで変わります。相互作用の強さの順位づけには使えず、自由エネルギーでもありません。",
+                 "회색 띠 안에서 끝나는 접촉은 힘이 가장 컸던 순간에 끊어진 것입니다. 띠보다 일찍 끝나는 접촉은 피크 전에, 늦게 끝나는 접촉은 피크 후에 끊어졌습니다. "
+                 "목록에는 포켓 근처와 출구 경로에 있는 잔기만 들어 있고 물은 포함되지 않습니다. 피크와 끊어지는 위치는 이번 당김 한 번의 결과이며 "
+                 "당기는 속도와 스프링 강성에 따라 달라집니다. 상호작용의 세기 순위를 매기는 데 쓸 수 없고 자유 에너지도 아닙니다."),
+    },
+})
+
+SMD_CONTACTS_UNAVAILABLE = {
+    "no_path_file": ("這次拉離沒有記錄沿路徑的座標（舊結果，或記錄當時失敗），無法分析接觸釋放。重新拉離才會有這項分析。",
+                     "This pull did not store coordinates along the path (an older result, or the recording failed), so the contact release cannot be analysed. Pull again to get it.",
+                     "この引き離しは経路に沿った座標を保存していない（古い結果、または記録に失敗した）ため、接触の解離は解析できません。引き離しをやり直すと解析できます。",
+                     "이번 당김은 경로를 따라 좌표를 저장하지 않았기(이전 결과이거나 기록에 실패함) 때문에 접촉 해제를 분석할 수 없습니다. 다시 당기면 분석할 수 있습니다."),
+    "bad_path_file": ("沿路徑的座標檔讀不出來或格式不符，無法分析接觸釋放。",
+                      "The coordinate file along the path cannot be read or has the wrong format, so the contact release cannot be analysed.",
+                      "経路に沿った座標ファイルを読み込めないか形式が合わないため、接触の解離は解析できません。",
+                      "경로를 따라 저장한 좌표 파일을 읽을 수 없거나 형식이 맞지 않아 접촉 해제를 분석할 수 없습니다."),
+    "too_few_frames": ("記錄的幀數太少，無法分析接觸釋放。",
+                       "Too few frames were stored, so the contact release cannot be analysed.",
+                       "保存されたフレーム数が少なすぎるため、接触の解離は解析できません。",
+                       "저장된 프레임이 너무 적어 접촉 해제를 분석할 수 없습니다."),
+    "no_ligand_atoms": ("座標檔裡沒有配體重原子，無法分析接觸釋放。",
+                        "The coordinate file has no ligand heavy atoms, so the contact release cannot be analysed.",
+                        "座標ファイルにリガンドの重原子がないため、接触の解離は解析できません。",
+                        "좌표 파일에 리간드 중원자가 없어 접촉 해제를 분석할 수 없습니다."),
+    "no_environment": ("座標檔裡沒有口袋殘基，無法分析接觸釋放。",
+                       "The coordinate file has no pocket residues, so the contact release cannot be analysed.",
+                       "座標ファイルにポケットの残基がないため、接触の解離は解析できません。",
+                       "좌표 파일에 포켓 잔기가 없어 접촉 해제를 분석할 수 없습니다."),
+    "no_force_curve": ("找不到 SMD 的力曲線，無法把接觸釋放對應到力的峰值。",
+                       "The SMD force curve is missing, so the contact release cannot be matched to the force peak.",
+                       "SMD の力の曲線が見つからないため、接触の解離を力のピークと対応づけられません。",
+                       "SMD 힘 곡선을 찾을 수 없어 접촉 해제를 힘 피크와 연결할 수 없습니다."),
+}
+
+
+def _names(sc: dict, cats, lang_zh: bool, n: int = 6) -> str:
+    cs = [c for c in sc.get("contacts") or [] if c.get("category") in cats]
+    cs.sort(key=lambda c: abs(c["offset_from_peak_nm"]) if c.get("offset_from_peak_nm") is not None else 9)
+    labs = [c.get("label", c["residue"]) for c in cs[:n]]
+    return ("、" if lang_zh else ", ").join(labs) + (("等" if lang_zh else " and others") if len(cs) > n else "")
+
+
+def classify_smd_contacts(name: str, sc: dict) -> list[dict]:
+    """Scenario sentences for the contact-release figure.  Descriptive only: force and work are not free energies."""
+    if not sc or sc.get("status") not in ("ok", "limited"):
+        return []
+    out = []
+    pk, win = sc.get("peak") or {}, sc.get("peak_window_nm", 0.05)
+    n_i, n_ir, n_ip = sc.get("n_initial", 0), sc.get("n_initial_released", 0), sc.get("n_initial_at_peak", 0)
+    nm_zh, nm_other = _names(sc, ("at_peak",), True), _names(sc, ("at_peak",), False)
+    if pk.get("resolved"):
+        k = len(sc.get("at_peak") or [])
+        if k:
+            out.append(S("note",
+                         f"{name}：力的峰值在配體與口袋相距 {pk['d_nm']:.2f} nm 處，{k} 個接觸在峰值前後 {win:g} nm 內斷開，其中 {n_ip} 個是起始就有的接觸。斷開的有 {nm_zh}。",
+                         f"{name}: the force peaks at a ligand–pocket distance of {pk['d_nm']:.2f} nm. {k} contacts were released within {win:g} nm of the peak, "
+                         f"{n_ip} of them present at the start. They are {nm_other}.",
+                         f"{name}：力は、リガンドとポケットの距離が {pk['d_nm']:.2f} nm のところでピークになります。ピークの前後 {win:g} nm 以内に {k} 個の接触が切れ、"
+                         f"そのうち {n_ip} 個は開始時からありました。切れたのは {nm_zh} です。",
+                         f"{name}: 힘은 리간드와 포켓의 거리가 {pk['d_nm']:.2f} nm일 때 피크가 됩니다. 피크 앞뒤 {win:g} nm 안에서 접촉 {k}개가 끊어졌고, "
+                         f"그중 {n_ip}개는 처음부터 있던 접촉입니다. 끊어진 접촉은 {nm_other}입니다."))
+        else:
+            out.append(S("note",
+                         f"{name}：力的峰值在 {pk['d_nm']:.2f} nm 處，但追蹤的接觸裡沒有任何一個在峰值前後 {win:g} nm 內斷開。這份清單看不到峰值對應的事件。",
+                         f"{name}: the force peaks at {pk['d_nm']:.2f} nm, but none of the followed contacts was released within {win:g} nm of the peak. "
+                         "This list does not show what the peak corresponds to.",
+                         f"{name}：力は {pk['d_nm']:.2f} nm でピークになりますが、追跡した接触のうちピークの前後 {win:g} nm 以内に切れたものはありません。この一覧からはピークに対応する出来事は分かりません。",
+                         f"{name}: 힘은 {pk['d_nm']:.2f} nm에서 피크가 되지만, 추적한 접촉 중 피크 앞뒤 {win:g} nm 안에서 끊어진 것은 없습니다. 이 목록으로는 피크가 무엇에 해당하는지 알 수 없습니다."))
+    if n_i:
+        out.append(S("note",
+                     f"{name}：起始的 {n_i} 個接觸中，有 {n_ir} 個在拉離結束前斷開；拉離途中另外形成了 {sc.get('n_formed_later', 0)} 個接觸。",
+                     f"{name}: of the {n_i} contacts present at the start, {n_ir} were released before the pull ended. "
+                     f"{sc.get('n_formed_later', 0)} more contacts formed during the pull.",
+                     f"{name}：開始時にあった {n_i} 個の接触のうち、{n_ir} 個は引き離しが終わる前に切れました。引き離しの途中でさらに {sc.get('n_formed_later', 0)} 個の接触ができました。",
+                     f"{name}: 처음에 있던 접촉 {n_i}개 중 {n_ir}개가 당김이 끝나기 전에 끊어졌습니다. 당기는 동안 접촉 {sc.get('n_formed_later', 0)}개가 새로 생겼습니다."))
+    nr = sc.get("n_not_released", 0)
+    if nr:
+        nz, no = _names(sc, ("not_released",), True), _names(sc, ("not_released",), False)
+        out.append(S("caution",
+                     f"{name}：{nr} 個接觸到拉離結束時仍然存在（{nz}），在這段拉離距離內沒有斷開。",
+                     f"{name}: {nr} contacts were still present when the pull ended ({no}), so they were not released within this pulling distance.",
+                     f"{name}：{nr} 個の接触は引き離しが終わった時点でも残っていました（{nz}）。この引き離しの距離の中では切れていません。",
+                     f"{name}: 접촉 {nr}개({no})는 당김이 끝날 때까지 남아 있어 이 당김 거리 안에서는 끊어지지 않았습니다."))
+    lim = sc.get("limited_by") or []
+    if lim:
+        out.append(S("caution",
+                     f"{name}：路徑上的幀數或間距不足以把斷開的位置定到 {win:g} nm，「峰值時斷開」的判斷只能當參考。",
+                     f"{name}: the number of frames or their spacing along the path cannot place a release to within {win:g} nm, so the 'released at the peak' call is only a guide.",
+                     f"{name}：経路上のフレーム数または間隔では、切れる位置を {win:g} nm の精度で定められないため、「ピークで切れた」という判定は目安にとどまります。",
+                     f"{name}: 경로의 프레임 수나 간격으로는 끊어지는 위치를 {win:g} nm 단위로 정할 수 없어 '피크에서 끊어짐' 판정은 참고용입니다."))
+    return out

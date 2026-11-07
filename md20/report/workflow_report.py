@@ -1179,6 +1179,7 @@ def _binding_figures(doc: Doc, name: str, r: dict) -> str:
         out += doc.figure_block(FG.smd(pos, force, work, doc.figdir / f"smd_{name}.png"), "smd", FT.classify_smd(pos, force, work, name), name)
     elif figs.get("smd"):
         out += doc.figure_block(figs["smd"]["png"], "smd", [], name)
+    out += _smd_contacts_html(doc, name, r, bdir)
     pm = ((load_json(bdir / "binding_manifest.json", {}) if bdir else {}).get("result") or {}).get("pmf") or {}
     # D-96: every caption reads ONE assessment — the stored one, else re-assessed from the stored PMF fields (a report
     # rebuild, no MD); missing fields stay unknown, so legacy data come out as "awaiting reanalysis"
@@ -1206,6 +1207,53 @@ def _binding_figures(doc: Doc, name: str, r: dict) -> str:
                                 FT.classify_pmf(g, W, err, name) + FT.classify_assessment(name, asm), name)
     elif figs.get("pmf"):
         out += doc.figure_block(figs["pmf"]["png"], "pmf", [], name)
+    return out
+
+
+def _smd_contacts_for(r: dict, bdir) -> dict:
+    """D-116: the stored contact-release result of a pull (manifest), else computed from the pull's files, else
+    "unavailable".  Never inferred from the force curve."""
+    if not bdir:
+        return {}
+    sc = ((load_json(bdir / "binding_manifest.json", {}).get("result") or {}).get("smd_contacts")) or load_json(bdir / "smd_contacts.json", {})
+    if sc:
+        return sc
+    if (bdir / "smd.tsv").is_file():
+        from ..analysis import smd_contacts as SC
+        return SC.from_files(bdir)
+    return {}
+
+
+def _smd_contacts_html(doc: Doc, name: str, r: dict, bdir) -> str:
+    """D-116 (F13): contact-release figure and the table of contacts released at the force peak; a pull without the
+    stored path says so instead of leaving the section silent."""
+    L = doc.lang
+    sc = _smd_contacts_for(r, bdir)
+    if not sc:
+        return ""
+    if sc.get("status") not in ("ok", "limited"):
+        txt = FT.SMD_CONTACTS_UNAVAILABLE.get(sc.get("reason_code") or "no_path_file") or FT.SMD_CONTACTS_UNAVAILABLE["no_path_file"]
+        return f"<p class=muted>{_esc(name)}{colon(L)}{_esc(tx(txt, L))}</p>"
+    out = doc.figure_block(FG.smd_contacts_map(sc, doc.figdir / f"smd_contacts_{name}.png"), "smd_contacts",
+                           FT.classify_smd_contacts(name, sc), name)
+    rows = []
+    for c in sc.get("contacts") or []:
+        if c.get("category") != "at_peak":
+            continue
+        rows.append([_esc(c.get("label", c["residue"])), f"{c['release_d_nm']:.3f}", f"{c['offset_from_peak_nm']:+.3f}",
+                     _esc(tx(("是", "yes", "はい", "예") if c.get("initial") else ("否", "no", "いいえ", "아니오"), L)),
+                     _esc(str(c.get("closest_pair_at_first", "")))])
+    if rows:
+        out += doc.table([tx(("殘基", "Residue", "残基", "잔기"), L),
+                          tx(("最後一次接觸的距離 d (nm)", "Distance d at the last contact (nm)", "最後に接触していた距離 d (nm)", "마지막 접촉 때의 거리 d (nm)"), L),
+                          tx(("與力峰值的差 (nm)", "Offset from the force peak (nm)", "力のピークとの差 (nm)", "힘 피크와의 차이 (nm)"), L),
+                          tx(("起始就有", "Present at the start", "開始時からある", "처음부터 있음"), L),
+                          tx(("最先看到時最近的原子對（配體 - 殘基）", "Closest atom pair when first seen (ligand - residue)",
+                              "最初に見えたときに最も近い原子対（リガンド - 残基）", "처음 보였을 때 가장 가까운 원자쌍(리간드 - 잔기)"), L)],
+                         rows, (f"{name}：在力峰值前後 {sc.get('peak_window_nm', 0.05):g} nm 內斷開的接觸",
+                                f"{name}: contacts released within {sc.get('peak_window_nm', 0.05):g} nm of the force peak",
+                                f"{name}：力のピークの前後 {sc.get('peak_window_nm', 0.05):g} nm 以内に切れた接触",
+                                f"{name}: 힘 피크 앞뒤 {sc.get('peak_window_nm', 0.05):g} nm 안에서 끊어진 접촉"), {1, 2})
     return out
 
 

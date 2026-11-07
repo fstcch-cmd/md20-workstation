@@ -6,6 +6,31 @@
 ---
 
 ## 2026-11-07
+### D-116　F13「SMD 路徑與接觸釋放」：拉離期間稀疏存溶質座標，分析每個配體–殘基接觸在哪個距離斷開、是否在力峰值時斷開
+- 依據：`docs/specs/master_iteration_2026-11-07.md` F13（只有力與功曲線，看不到「拉力峰值那一刻斷了哪些接觸」）。使用者要求學生看得到接觸釋放，不只是力曲線。
+- 決定：
+  - **記錄**（`sampling/binding._SmdPathRecorder`，SMD 段落內）：沿用既有每 0.2 ps 的紀錄迴圈，每 `ceil(n_records/200)` 筆存一幀，另存最後一幀（總共約 ≤ 200 幀；預設拉離 1500 筆紀錄 → 每 8 筆、約 188 幀）。存的是配體重原子加「起始配體 0.8 nm 內、或在 anchor→配體方向直線出口路徑（長度 = pull_distance）距離 ≤ 配體半徑 + 0.6 nm 內」的蛋白（以及非水、非離子的其他配體）整個殘基的重原子，不存水。檔案 `smd_path.npz`（float32 座標、每幀盒子、時間、CV d、彈簧位置、原子索引與名稱、殘基標籤 `鏈:殘基名+號`、meta），先寫暫存檔再換名；在 `smd.json` 封存之前寫入。記錄失敗（設定或寫檔例外）只寫 DecisionLog，**拉離照常進行**，結果標「無法進行」。
+  - **分析**（純 numpy，`analysis/smd_contacts.py`）：接觸 = 配體任一重原子與殘基任一重原子的最小映像（正交或三斜盒）距離 < 0.40 nm，與 `interactions.SEARCH_NM` 同一半徑，殘基層級。每個接觸輸出：起始是否存在、最先出現的 d、**釋放點 = 最後一次存在那一幀的 d**（時間順序，因為 d 因 stick-slip 不單調）、仍存在於最後一幀者標 `not_released`（不猜釋放點）、最先看到時最近的原子對、存在區段（run）。力峰值 = 力以約 1% 紀錄數平滑後的最大處，取該處配體的 CV d（不是彈簧位置）。釋放點在峰值 d ± 0.05 nm 內 → `at_peak`（峰值時斷開），否則 `before_peak`／`after_peak`；峰值離最近的存檔幀 > 0.05 nm → `peak_unresolved`，一律不判。
+  - **「無法進行」三種**：舊結果沒有 `smd_path.npz`（`no_path_file`）、檔案讀不出或格式不符（`bad_path_file`）、幀數 < 5、沒有配體或環境原子、沒有 smd.tsv 力曲線。**不從力曲線或其他資料推測**。幀數 < 20、幀間距中位數 > 0.025 nm（峰值視窗的一半）、峰值不在路徑上 → `limited`，報告加註。
+  - **冪等**：分析只讀 `smd_path.npz` + `smd.tsv`，結果寫 `smd_contacts.json` 並放進 `BindingResult.smd_contacts`（新欄位，預設 `{}`，舊 manifest 照常載入）。續跑（`smd.json` 已 PASS 不重跑 SMD）與報告重建得到相同結果（測試涵蓋）。
+  - **報告**（`workflow_report._smd_contacts_html`，接在 SMD 力／功圖之後）：新圖種 `smd_contacts`（x = CV d，一列一個接觸，色條 = 起始就有／拉離中形成，標記 = 最後位置，灰帶 = 力峰值 ± 0.05 nm，峰值時斷開者用菱形與 `*`，最多 30 列、峰值時斷開者必留）、一張「峰值時斷開的接觸」表（殘基、釋放 d、與峰值差、是否起始就有、最近原子對）、四語情境句與四語「無法進行」說明（用 reason code 渲染，D-110 慣例）。圖遵守 `docs/specs/figures.md`（圖例在圖外、英文軸標、色盲另有標記形狀）。
+  - **語氣**（D-96）：力、功、釋放點都只描述這一次拉離；圖說明寫明會隨拉速與彈簧硬度改變，不能排序作用力強弱，也不是自由能。
+- 不做：不新增 phase／step，不改拉速、k、距離、窗口或任何取樣；不改 PMF 與 ΔG° 的任何計算。
+- 被否決：
+  - 事後用 SMD 窗口起始 XML 還原接觸（只有 13–40 個起始幀、間距由窗口規劃決定，且舊結果的 XML 不保證還在）。
+  - 每 0.2 ps 都存（約 1500 幀 × 數百原子，檔案大、分析慢，且 d 解析度已遠小於 0.05 nm 視窗）。
+  - 存整個溶質或含水（檔案數十倍；水合與水橋是另一個問題，這裡明講沒涵蓋）。
+  - 把「最後一次存在」改成「連續 ≥ 2 幀的最後一段」（會偏離使用者定義；改以 `n_runs`、`runs` 把閃爍留在資料裡，由讀者判斷）。
+  - 用彈簧位置（r0）當 x 軸（配體落後於彈簧；接觸是配體的性質，d 才是配體實際位置）。
+- 證據：`tests/test_smd_contacts.py` 22 項（合成拉離：依序斷開的釋放點與順序、峰值 ±0.05 nm 邊界、跨週期邊界與三斜盒、起始／後形成／未釋放、舊結果無檔與壞檔與無力曲線 → 無法進行且不猜、幀數少與間距粗 → limited、檔案來回與冪等、幀數上限 ≤ 200、擷取範圍選擇含跨盒殘基、記錄器用假拓撲選重原子／不含水／標籤／寫檔／失敗不影響、四語句子、圖可繪、報告四種語言渲染圖與表、舊結果報告寫「沒有記錄」）；`tests/test_report_v2.py` 的 make_wf 加入合成路徑，報告範本（`tools/report_template.py`）涵蓋新圖種。
+- 檔案：`md20/analysis/smd_contacts.py`（新）、`md20/sampling/binding.py`、`md20/report/{figures,figure_text,workflow_report}.py`、`tests/{test_smd_contacts,test_report_v2}.py`、`tests/smd_synth.py`（新，測試用合成資料）、`docs/specs/smd_contacts.md`（新）、`docs/specs/master_iteration_2026-11-07.md`。
+- 未決：
+  - **真實路徑沒跑過**：`_SmdPathRecorder` 對 OpenMM 真拓撲（殘基 `id`、`chain.id`、元素為 None 的原子）的行為只用假拓撲測過；需 CI 的 `test_binding_integration` 與 heavy workflow 確認 `smd_path.npz` 產生且分析不為 unavailable。
+  - 擷取半徑（0.8 nm／路徑 + 0.6 nm）是經驗值；配體實際走偏出口直線時，偏離處的新接觸不會被看到（報告以 `capture_limited` 碼記載在資料裡，圖說明寫「只含口袋附近和出口路徑」）。
+  - 只分析 replica 0（報告既有的 SMD 圖也是 replica 0）；多個 replica 的接觸釋放一致性尚未比較。
+  - 峰值只取全域最大；力曲線有多個主峰（`classify_smd` 會描述）時，其他峰的接觸釋放尚未逐一對應。
+  - 接觸是殘基層級、距離判定，沒有化學標籤（氫鍵、鹽橋）；要與 `interactions.py` 的多標籤指紋對照需另做。
+
 ### D-115　膜 NaN 的剩餘原因：離子落在重疊的水上（D-102 只查水對水）；去碰撞改為也查離子對水
 - 觸發：28e87aa 的 openmm-stack ubuntu `test_peptide_above_popc_case_b` 在 D-102 去水碰撞之後仍 `Particle coordinate is NaN`（Windows、macOS 同一 run 通過）。
 - 重讀 D-102 的診斷資料（run 42355183065 四個 job 的 log；artifact 下載被代理擋住）：
