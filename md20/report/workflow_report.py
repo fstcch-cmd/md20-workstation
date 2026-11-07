@@ -1020,7 +1020,7 @@ def _md_figures(doc: Doc, sums: dict, metrics: dict, ext: dict | None = None, na
         ff = [x for k, (t, y) in sasa.items() for x in FT.classify_growth(k, y, ("溶劑可及面積", "solvent-accessible area", "溶媒接触表面積", "용매 접근 면적"))]
         out += doc.figure_block(FG.timeseries(sasa, "Protein SASA (Å²)", doc.figdir / "md_sasa.png"), "protein_sasa", ff)
     hbp = {k: ((ext[k].get("hbonds_protein") or {}).get("time_ns") or [], (ext[k].get("hbonds_protein") or {}).get("count") or [])
-           for k in order if (ext.get(k) or {}).get("hbonds_protein")}
+           for k in order if ((ext.get(k) or {}).get("hbonds_protein") or {}).get("count")}      # D-121: unavailable → no line
     if hbp:
         ff = [x for k, (t, y) in hbp.items() for x in FT.classify_growth(k, y, ("內部氫鍵數", "internal hydrogen bonds", "内部水素結合の数", "내부 수소 결합 수"))]
         out += doc.figure_block(FG.timeseries(hbp, "Protein hydrogen bonds", doc.figdir / "md_hbond_protein.png"), "hbond_protein", ff)

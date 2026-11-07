@@ -6,6 +6,14 @@
 ---
 
 ## 2026-11-07
+### D-121　ac5fba5 openmm-stack ubuntu `test_extended_metrics_on_synthetic_trajectory`：蛋白氫鍵在無氫拓撲上失敗、錯誤被 guard 收走
+- 證據：run 42364949922 ubuntu job，`tests/test_extended_analysis.py:97` `KeyError: 'hbonds_protein'`——`extended_metrics` 的 `guard` 把例外收進 `errors`，該鍵不存在；斷言在取鍵時就失敗，所以 CI 沒印出 `errors` 內容（原因是推斷，不是讀到的）。
+- 判斷：合成軌跡的蛋白只有重原子；`md.wernet_nilsson` 找氫鍵需要 H，無 H 時在空的供體–氫–受體陣列上出錯。D-105 之前同一段也會失敗，只是沒有斷言它存在。真實拓撲（OpenMM 建模）都含 H，不受影響。
+- 決定：`hb_protein` 先檢查拓撲有沒有 H；沒有 → `status: unavailable`＋中文原因、`network.status: insufficient`，不呼叫演算法、不猜。報告只在有數列時畫蛋白氫鍵圖。測試斷言改為先檢查鍵存在並附 `errors`，下次失敗一定看得到原因。
+- 被否決：在合成拓撲補 H 讓測試通過（掩蓋真實的無氫輸入情境）。
+- 測試：CI 真 mdtraj 路徑（容器無 mdtraj）。
+- 同一 run 的 `test_popc_bilayer_case_c`（256≠128）是 D-112 已修項目；ubuntu 這輪膜情境 B 通過（不含 D-115，NaN 屬偶發）。
+
 ### D-120　跨候選可比性矩陣（F05）：每一對候選可以比到什麼程度、不能比的具體原因
 - 依據：master_iteration F05（只有比較表，學生看不到「哪兩個候選可以比、比到哪一級、為什麼不行」）。D-96 的比較表是**群組**判斷（同一情境內全部合格且條件相同才比），表只列「未納入」的個別原因。
 - **決定**：新模組 `md20/report/comparability.py`（純 Python），`comparability_matrix(results, md_conditions=None)` 對每一對 binding 結果給一個等級與原因清單：

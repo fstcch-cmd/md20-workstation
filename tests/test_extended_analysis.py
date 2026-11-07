@@ -94,6 +94,6 @@ def test_extended_metrics_on_synthetic_trajectory():
     # D-105: the toolbox blocks run on a real mdtraj trajectory without raising; 40 frames are too few for tICA, and
     # the result says so instead of producing a model; one water in the trajectory → hydration is attempted
     assert out["tica"]["status"] == "insufficient", out.get("tica")
-    assert "network" in out["hbonds_protein"], out["errors"]
+    assert "hbonds_protein" in out and "network" in out["hbonds_protein"], out["errors"]   # D-121: errors always shown
     assert out["hbonds_protein"]["network"]["status"] in ("ok", "insufficient")
     assert L["hydration"]["status"] in ("ok", "insufficient"), L.get("errors")

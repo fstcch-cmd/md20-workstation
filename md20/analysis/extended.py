@@ -271,6 +271,11 @@ def extended_metrics(traj, ligand_groups: dict[str, list[int]] | None = None, *,
     def hb_protein():
         step = max(1, sub.n_frames // 100)                      # ≤ 100 frames: the whole protein is the slow part
         cplx = sub[::step].atom_slice(prot)
+        if not any(a.element is not None and a.element.symbol == "H" for a in cplx.topology.atoms):
+            # D-121: no hydrogens in the topology (heavy-atom-only input) — an H-bond needs the H; say so, do not guess
+            why = "拓撲沒有氫原子，無法判斷氫鍵（需要含氫的拓撲）。"
+            return {"status": "unavailable", "why": why, "count": [], "time_ns": [],
+                    "network": {"status": "insufficient", "n_frames": 0, "why": why}}
         per = md.wernet_nilsson(cplx)
         ctop = cplx.topology
         backbone = {"N", "O", "OXT", "H"}
