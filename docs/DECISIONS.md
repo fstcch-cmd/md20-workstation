@@ -6,6 +6,41 @@
 ---
 
 ## 2026-11-07
+### D-117　micromamba 只用一個釘選版本並驗 sha256（REVIEW #19 的 micromamba 部分；D-114 的姊妹項）
+- 查到的事實：`install.ps1` 與 `install.sh` 都從 `https://micro.mamba.pm/api/micromamba/<plat>/latest` 抓最新版，沒有版本、沒有雜湊；同一班學生在不同日子安裝會拿到不同的 micromamba（2.x 的求解器行為會變），下載內容也沒有驗證。
+- 決定：
+  - 釘選 **`mamba-org/micromamba-releases` tag `2.10.0-0`**（2026-11-07 `git ls-remote --tags` 排序後的最新 2.x tag），來源改為該 repo 的 GitHub release 資產 `micromamba-<platform>`。這些資產是**單一可執行檔**（不是 `.tar.bz2`；同名 `.tar.bz2` 是 conda 套件格式，內容為 `info/` 與 `bin/micromamba`，和舊 `latest` 的 tarball 不同，不用）。因此不再解壓，也不再需要 Windows 的 `tar` 與 `Library\bin\micromamba.exe` 複製步驟。
+  - 下載成 `<目的檔>.part` → 驗 sha256（PowerShell：`Get-FileHash -Algorithm SHA256`，5.1 可用；bash：`sha256sum` 或 `shasum -a 256`）→ 相符才改名（unix 另 `chmod +x`）。不符：刪除 `.part`、印中英錯誤（版本、預期、實際）並 `exit 4`；下載失敗 `exit 5`。**不會改抓 latest**。
+  - `MD20_MICROMAMBA_LATEST=1`：走原本 `micro.mamba.pm/.../latest` 路徑（tarball 解壓），印「未驗證 / UNVERIFIED」。唯一還出現 `/latest` 的地方就是這個分支。
+  - 已存在的 `micromamba.exe`／`bin/micromamba`（`Test-Path`／`-x`）照舊**不重抓、不替換**（和 D-114 對舊 Vina 執行檔同一原則：不在學生不知情時換掉工具）；舊安裝留下的版本不會被驗證。
+  - 版本與雜湊在兩個腳本各寫一份（ps1 一個 win-64、sh 五個平台），`tests/test_installer_pins.py` 檢查兩邊一致。
+  - 保留不動：D-38 長路徑 `CONDA_PKGS_DIRS` 處理、`"meeko~=0.5"`（cmd.exe 導向陷阱）、D-33/D-36/D-66 的程式複製與「不刪除」規則。
+- 證據（2026-11-07 從 `https://github.com/mamba-org/micromamba-releases/releases/download/2.10.0-0/<asset>` 下載，自行計算 sha256，`file` 確認格式；官方 `<asset>.sha256` 一併下載，**五個全部與自算值一致**）：
+
+  | 資產 | 大小（bytes） | 格式 | sha256 |
+  |---|---|---|---|
+  | `micromamba-win-64` | 11723264 | PE32+ console x86-64 | `f8b4284bd4eb1134122eaf93b3ea6c7be567e596de5829e1a6f478e34e41974a` |
+  | `micromamba-osx-64` | 17501440 | Mach-O x86_64 | `8421462a1ef1df9f7acd114f9e2a24c1332ce4f4e29f44465b4acb44e2755172` |
+  | `micromamba-osx-arm64` | 15635200 | Mach-O arm64 | `c547639f5caf742236641c362746abb4a3505774753ecd08fe341643670c4c01` |
+  | `micromamba-linux-64` | 19028608 | ELF x86-64（動態連結 glibc） | `701f39c06f8e6a670a0e186c8479b9e5c0502a2f0cda6cef65d83bdd2875e8bd` |
+  | `micromamba-linux-aarch64` | 23067984 | ELF aarch64 | `3bb56786e21b9b24024f599fe9185b4a59dc3f9f59937a42311ee583adbbb23c` |
+
+  - `micromamba-win-64.exe` 也存在且與 `micromamba-win-64` 內容相同（同一 sha256）；其他平台沒有 `.exe` 變體（404）。選不帶副檔名的名稱，五個平台命名一致。
+  - 容器內另以假 `curl` 跑 `fetch_micromamba`：內容錯誤 → 印不符訊息、刪 `.part`、exit 4；真實 linux-64 檔 → 通過並放到目的路徑。**沒有執行下載的 micromamba**。
+- 被否決：
+  - 繼續 `latest` 但事後記錄版本（學生仍可能拿到有問題的新版，且當天無法重現）。
+  - 用 `.tar.bz2`（conda 套件格式，需要另外找 `info/`／`bin` 結構，且沒有官方 `.sha256`）。
+  - 去 `micro.mamba.pm` 抓指定版本（無官方雜湊可對照；來源與 CI 其他處不一致）。
+  - 在腳本裡執行時再下載 `.sha256` 資產比對（雜湊與二進位來自同一處，無法防止來源被改；寫死在 repo 才能由使用者審查）。
+  - 驗證失敗後退回 latest（違反「寧可擋也不要猜」）。
+- 測試：`tests/test_installer_pins.py`（8 項：兩腳本版本一致且為 2.x 穩定 tag、五平台 64 位 hex 雜湊且各不相同、Windows 兩條路同一雜湊、預設路徑為 GitHub release 資產且 `/latest` 只在覆寫分支內、覆寫變數與「未驗證」字樣存在、先驗雜湊才改名且不符刪檔停止、`.part` 與下載失敗不退回 latest、PowerShell 5.1 相容（無 `?.`／`??`、有 `-UseBasicParsing`）、D-38 與 meeko 修法仍在）。`bash -n installer/install.sh` 通過。容器 796 passed、49 skipped。
+- **待 CI 驗證**（容器碰不到 Windows／macOS）：`installer-windows`（PowerShell 5.1：`Invoke-WebRequest -UseBasicParsing` 下載 11.7 MB、`Get-FileHash`、`Move-Item`、之後 `micromamba.exe create` 與 `md20.cmd` 啟動器）與 `installer-macos`（osx-arm64 的 `curl` 下載、`shasum -a 256`、`chmod +x`、`$ROOT/bin/micromamba`）。CI 未改動。linux-64／linux-aarch64／osx-64 沒有 CI 安裝程式 job，只有雜湊與格式檢查。
+- 未決：
+  - conda 環境檔仍為 `>=`（`docs/specs/supply_chain.md` §2 剩餘工作，本條不做）。
+  - 已存在的舊 micromamba 不驗證、不替換；是否要在 doctor 顯示 micromamba 版本與是否為釘選版？
+  - 2.10.0-0 是否為 GitHub 標記的「穩定」release（非 pre-release）：容器的 GitHub API 被擋，只確認 tag 名稱無 rc／beta 字樣且為 2.x 最新；請在 CI 綠燈後人工看一眼 release 頁面。
+  - 之後升級 micromamba：換版本號與五個雜湊（依 `supply_chain.md` 的步驟），並過 installer CI。
+
 ### D-115　膜 NaN 的剩餘原因：離子落在重疊的水上（D-102 只查水對水）；去碰撞改為也查離子對水
 - 觸發：28e87aa 的 openmm-stack ubuntu `test_peptide_above_popc_case_b` 在 D-102 去水碰撞之後仍 `Particle coordinate is NaN`（Windows、macOS 同一 run 通過）。
 - 重讀 D-102 的診斷資料（run 42355183065 四個 job 的 log；artifact 下載被代理擋住）：
