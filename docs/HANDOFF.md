@@ -5,6 +5,30 @@
 
 ## 0. 新 session 第一步
 
+> **2026-11-07 第五個 session（session_016gcJz8q8wadWxHb24EMCKt，Opus 5.5 主 session＋Sonnet 5.5 子代理）交接。**
+>
+> **⚠ 兩個 repo：** 產品 `fstcch-cmd/md20-workstation`（目前公開，使用者之後會轉私人）與**私人** `fstcch-cmd/md-digital-signature`（數位簽章／授權的簽發端，2026-11-07 使用者建立）。新 session 要兩個都 `add_repo`（push）並 clone。後者的角色、規則與進度見它自己的 `README.md`／`CLAUDE.md`，以及本 repo `docs/specs/licensing.md`（第 2 層合併後才有）與 D-124／D-125。
+>
+> **使用者的工作規則（11/07 新增，必守）：**
+> - 開發順序由開發者自行決定，不要拿順序問題問使用者（使用者一天只做少數決定）；需授權的仍要問（改協定／科學模型、計算預算、發版、推 tag、改 repo 可見性）。
+> - **push 不要太頻繁**：修正累積在本地，一輪 CI（約 1 小時）跑完後再一次推；文件改動也併入批次。
+> - 可以開多個子代理加速：主 session 當「大腦」分派、審查、整合；一般開發用 Sonnet（effort high）。worktree 隔離工具被禁用 → 主 session 自己 `git worktree add -b agent/<名> /home/claude/wt-<名> HEAD`，每個子代理只在自己的資料夾、自己的檔案範圍內工作、不 push；DECISIONS 編號由主 session 事先分配；合併時 DECISIONS 衝突用「兩邊條目都保留、新的在上」解決。
+>
+> **本 session 做了（D-111～D-126）：**
+> - CI 修紅：D-111（heavy 斷言讀錯 manifest）、D-112（頭基原子 256≠128）、D-121（無氫拓撲的蛋白氫鍵）。580cbff：openmm-stack Ubuntu／Windows、heavy workflow **全綠**；heavy-metal 鋅鍵長邊緣紅（已知 D-32／D-34）。
+> - 膜 NaN：D-102 的「重疊水是根因」被自己的資料推翻（每個建構都有），改判「離子落在重疊的水上」並修（D-115，D-102 加更正）；580cbff 膜診斷 32 次 0 NaN（對照組 3/32）。D-126：只檢查溶劑單價離子，不碰結構 Zn／Mg／Ca。另有一類「膜片水與加入水交界互擠」尚在觀察。
+> - 新功能：D-113 MBAR overlap 評估、D-114 Vina 釘選 v1.2.7＋sha256、D-116 SMD 路徑接觸釋放（F13）、D-117 micromamba 釘選 2.10.0-0＋sha256、D-118／D-123 約束策略建議（只建議）、D-119 補窗近重複提案、D-120 可比性矩陣（F05）、D-122 自動行動成本效益（F17）。D-103：開發者決定維持「關 GUI 不中斷計算」。
+> - **授權與數位簽章（使用者 21:50–22:11 討論）：**
+>   - 使用者需求：repo 因 CI 費用暫時公開，之後轉私人；**別人拿到程式必須由使用者核發簽章才能用，最怕被逆向破解**；之後可能做商業授權。
+>   - 決定：第 1 層 LICENSE 專有條款（D-124，已在 main，待法務審閱）；第 2 層簽章授權檔（D-125，子代理開發中，分支 `agent/license-gate`、資料夾 `/home/claude/wt-license`，**尚未合併、未推**——若本 session 已結束而分支不在 GitHub，就照 D-125／設計文件重做）；不做「加密核心放 repo」（使用者 22:03 選擇），改在**發行版**做保護：Cython 編譯核心＋AES-256-GCM 加密、金鑰只在綁機器的授權檔、簽章完整性檢查、撤銷清單、輸出蓋授權編號。
+>   - 設計文件（Claude Doc）：https://claude.ai/artifact/222jyPJRrE1Pzspv7shAS6 （金鑰架構圖、授權檔欄位與等級、防逆向分析、營運流程、商業授權模式、實作階段）。
+>   - 分工：md20 只放**驗證**（驗簽、匯入、狀態、信任公鑰）；`md-digital-signature` 放**簽發**（金鑰產生、簽發／批次、一鍵解鎖本機、撤銷清單、發行主金鑰、所有簽出授權的紀錄）。**任何 repo 都不得出現私鑰**（擁有者離線保管；與 `md20/util/owner_pub.pem` 成對）。
+>   - 誠實限制（已告知使用者）：持有有效授權又具專業逆向能力的人無法在技術上完全阻止；靠綁機器、輸出可追溯、可撤銷與合約。沒有授權檔者拿到安裝包只有密文（密碼學級）。
+> - **待使用者：** ① LICENSE 條文請法務／技轉中心審閱；② 確認持有 `owner_pub.pem` 的私鑰（找不到就用簽發工具新產一組，只把公鑰給開發者）；③ 第 4 層前產生發行主金鑰放 GitHub Secret（開發者看不到值）；④ 商業授權前確認智財歸屬。
+> - **下一步（開發者自行排序）：** 合併並審查 D-125 → 簽發端搬到 `md-digital-signature` → 第 3 層（等級、功能、席次、簽章撤銷清單、輸出蓋授權編號）→ 第 4 層（發行版編譯＋加密，需 Secret）；heavy-metal 鋅鍵長（需改參數＝科學模型，先問使用者）。
+>
+> ---
+>
 > **2026-11-07 第四個 session（session_016gcJz7pQmKkZzkUxg6SqVs）交接。本 session 以 Opus 5.5 開始，中途切換為 Opus 4.8；commit 屬名現在用 `Claude Opus 4.8`。**
 >
 > **⚠ 第一件事：有 CI 正在 GitHub VM 上跑，別急著 push。**

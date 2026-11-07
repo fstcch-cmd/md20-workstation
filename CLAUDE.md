@@ -46,3 +46,9 @@ Claude-Session: <本次 session 連結>
 WP5、WP9、WP13、金屬 policy/幾何鍵結模型已實作(真實驗證狀態見 `docs/STATUS.md`)。
 GUI 閘門一鍵決定(`md20/gui/actions.py`)、3D 互作/vdW 表面、金屬擬合參數(`md20/build/metal_params.py`:QM Hessian 內建轉換/MCPB.py 轉譯/JSON,附 QM 小模型輸入產生)已實作。
 還沒做:配體直接配位金屬的參數化(目前只有 D-53 距離約束後備)、受體長 loop 等選項的自動處理、漏斗約束 ΔG°(設計中)、D-72 筆電實測。細節見 `docs/HANDOFF.md` §6。
+
+## 授權與數位簽章（2026-11-07 起，必知）
+- 私人 repo **`fstcch-cmd/md-digital-signature`** 是簽發端（擁有者工具、簽出授權紀錄）；本 repo 只放驗證端。接手時兩個都要 add_repo＋clone。
+- **私鑰永遠不進任何 repo**（擁有者離線保管，與 `md20/util/owner_pub.pem` 成對）；驗證不得有任何環境變數／設定／參數後門。
+- 設計：`docs/specs/licensing.md`（D-125）、D-124 LICENSE、設計文件 https://claude.ai/artifact/222jyPJRrE1Pzspv7shAS6 。
+- 使用者規則：開發順序自己決定；**push 要批次**（一輪 CI 跑完再推）；可用 Sonnet 子代理平行開發（HANDOFF §0）。

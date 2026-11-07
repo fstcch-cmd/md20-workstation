@@ -9,6 +9,7 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **授權與數位簽章（第 2–4 層）**：D-124 LICENSE 已完成；D-125 簽章授權開發中（分支 agent/license-gate，未推）；簽發端移到私人 repo `md-digital-signature`；第 3、4 層待做 | 使用者 11/07 21:50–22:11 | session_016gcJz8q8wadWxHb24EMCKt | 2026-11-07 21:55 | 私鑰永不進 repo；第 4 層需使用者建 Secret |
 | **第五個 session（主 session＋Sonnet 子代理）：D-111～D-123 已整合並一次 push**（使用者：push 不要太頻繁，批次推送）；ac5fba5 CI 已跑完，紅燈全在已修範圍。28e87aa 已證實：膜 case B Windows／macOS PASSED（D-102），case C water overlaps 閘門＋bilayer→declashed（D-104）。下一項：micromamba／conda 鎖版（supply_chain §2） | 使用者 11/07（開發順序由開發者決定） | session_016gcJz8q8wadWxHb24EMCKt | 2026-11-07 19:06 | 勿動 md20/sampling/assessment.py 的 mbar_overlap、md20/docking/vina_cli.py |
 | **GUI 穩定性（D-103）：計算改獨立子程序、狀態與進度從檔案讀回、GUI 重開接回；補 D-102 漏掉的 water overlaps 四語說明**；D-103～D-110 全部已推（a20）：GUI 穩定性、建膜即時 3D、分析工具箱、系統比較、證據矩陣、CI 修紅、runner 移除、拒絕理由四語。**驗證點 ac5fba5**（勿再 push，讓 openmm-stack 三 OS／heavy 跑完）。待授權：P1A 自動補窗、A8 漏斗約束（屬協定變更）、藍圖第 2–4 階段（需工作站＋計算預算）。待筆電：D-72、URI 數值、D-103 關主控台存活 | 使用者 11/07 | session_016gcJz7pQmKkZzkUxg6SqVs | 2026-11-07 17:35 | 勿動 md20/gui/worker.py、md20/gui/logic.py 的 Runner/ProcessJob |
 | **接手 P0 收尾＋下一批：配體原子形式電荷寫入 build manifest（讓鹽橋能判配體）、A7 docking fallback reason code**：D-98～D-102 完成並 push（D-99/100 水盒、D-101 傘狀採樣、D-102 膜 NaN 修復）；a19 待使用者推 tag；新需求：GUI 穩定性、建膜即時 3D；a19 發行待使用者（a18 從未發行） | 使用者／HANDOFF 11/07 | session_016gcJzAV8UjRW4ixPZLxddG | 2026-11-07 10:50 | 勿動 md20/build/ 的 manifest 配體段、md20/docking/ 的 fallback 路徑 |

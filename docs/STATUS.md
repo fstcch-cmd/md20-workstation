@@ -3,6 +3,12 @@
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
+## 授權與數位簽章（2026-11-07 晚起）
+- (A) 第 1 層 LICENSE 專有條款已在 main（D-124），條文待法務審閱。
+- (B) 第 2 層簽章授權檔（D-125）開發中，尚未合併；簽發端將放私人 repo `fstcch-cmd/md-digital-signature`。
+- (C) 第 3 層（等級、功能、席次、撤銷清單、輸出授權編號）與第 4 層（發行版 Cython＋AES-256-GCM）未開始；第 4 層需使用者建立 GitHub Secret。設計文件：https://claude.ai/artifact/222jyPJRrE1Pzspv7shAS6 。
+- 580cbff：openmm-stack Ubuntu／Windows、heavy workflow 全綠；膜診斷含 D-115 32 次 0 NaN（對照 3/32）；heavy-metal 鋅鍵長邊緣紅（已知）。
+
 ## 本 session（2026-11-07 晚，session_016gcJz8q8wadWxHb24EMCKt；主 session 指派 Sonnet 子代理開發、審查後整合）：D-111～D-123（屬 a20）
 - **ac5fba5 CI 結果（真實引擎）**：(A) D-102 膜情境 B 在 Windows／macOS／Ubuntu 都通過（Windows 先前 12/36 NaN）；D-104 建膜即時 3D 階段 bilayer→declashed；D-105 工具箱與 D-106 共同基底真實 mdtraj 測試通過；D-107 讓 pure-python 六個與 heavy-metal 轉綠；paper-docking、installer 兩個綠。紅燈全是測試或無氫拓撲問題，已修：D-111（heavy 斷言位置）、D-112（頭基原子 256≠128）、D-121（無氫拓撲的蛋白氫鍵）。
 - **(C) 膜 NaN 尚未完全解決**：28e87aa 的 Ubuntu 情境 B 在 D-102 之後仍 NaN；重讀診斷資料，水重疊每個建構都有、不是區分因子；判斷為「離子落在重疊的水上」並修（D-115，D-102 加更正）。**這是與資料一致的判斷，尚待膜診斷直接證實。**
