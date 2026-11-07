@@ -4,7 +4,7 @@
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
 ## 進行中（已 push、未發行）：整合規格 P0（D-95、D-96、D-97，2026-11-07）
-已 push 到 main，HEAD **`ba4d7da`**。**未發行**（a18 仍是對外版本）。這批是科學正確性修正，不是新 phase。
+已 push 到 main，HEAD **`ba4d7da`**。**未發行**（對外版本是 **a17**——a18 實際上從未發行，見 DECISIONS 11/07 紀錄）。這批是科學正確性修正，不是新 phase。
 - **(A) 真實跑過並通過**：容器內 `pytest -o addopts="" -q` → **673 passed、48 skipped**。新增純 Python 測試：assessment 9、interactions/persistence 14、extended 接線 2、報告持續性 1、provenance 4、structure/multi-binding 多項。
 - **(B) CI 驗證狀態（2026-11-07）**：
   - **D-95 已由 CI 確認**：openmm-stack（ubuntu）的「Install md20」步驟在 `2979908` **success**——釘選 `openmmforcefields==0.15.1` 後安裝成功（原本撤回版找不到的錯誤消失）。
@@ -12,15 +12,15 @@
   - `2979908` 的 pure-python 六個 job 全紅＋openmm-stack 步驟 8 紅，原因是 `tests/test_interactions_report.py` 用了 `from tests.` 的 import（CI rootdir 無此 package），collection 失敗；**已於 `ba4d7da` 修正**（改 `from test_report_v2`，與 `test_report_subsystems` 同慣例），本地以 CI 方式（`pytest tests/<file>.py`）重驗通過。
   - **新 run `42330665732`（`ba4d7da`）進行中**：下一個 session 要確認 pure-python 六個轉綠、openmm-stack 三 OS 的真實 mdtraj 路徑（新 fingerprint／ligand_state／動態接觸／persistence／`run_binding` 寫入的 assessment）。查法見 HANDOFF §0。
 - **(C) 已知限制／未完成**：A7（docking fallback reason code）、A8（PMF 參考態／漏斗約束）、A11（跨系統 PCA 共同基底）仍待做；配體原子形式電荷未寫入 build manifest（在那之前配體不判鹽橋，只標「帶電接近，配體電荷未知」）；F19 MM/GBSA pilot 未開始。詳見 `docs/specs/master_iteration_2026-11-07.md` §5。
-- **a18 安裝程式需重新發行**：install.ps1/sh 已含 D-95 釘選，但已發行的 a18 zip 仍是舊的；學生新安裝要能成功需重新發行（待使用者授權）。
+- **需發行新版（a19）**：install.ps1/sh 已含 D-95 釘選，但對外的 a17 zip 仍是舊的（a18 從未發行）；學生新安裝要能成功需重新發行（待使用者授權）。
 
-## 目前版本：v0.1.0a18（2026-11-04 發行，新功能為初步）
+## v0.1.0a18（**未發行**：pyproject 已是 a18，但 release 流程沒有跑；更正見 DECISIONS 11/07。以下是 main 上 D-93/D-94 的內容）
 - 拉離路徑判定修正（貼著的鄰居不再算擋路）、「只做 MD」真的停下結合自由能、閘門加「只算單獨結合」與「指定 anchor 殘基」（D-93）。**測試過**：純 Python（5 項新測試）；以筆電 hsieh2024 的 topology.pdb 重算路徑：原方向淨空。**沒測過**：筆電上 URI 的實際 SMD／PMF；「連線丟失」是否消失（reconnect_timeout 180 秒）。
 - GUI「3D 檢視」分頁空白的修正（D-94，NiceGUI 3 清掉 iframe）。**測試過**：CI gui-preview e2e 點分頁並確認 iframe 內畫出 canvas（以該次 CI 為準）。報告內的 3D 一直正常（筆電報告實測）。
 - CI：46fdbdb 與 d879f2b 各有 1 項 CPU 整合測試隨機失敗（Windows 膜胜肽 NaN；macOS 長時間溫度看門狗），各自在另一輪通過，見 DECISIONS 11/07 CI 紀錄。
 - **D-94 的 commit `5561dd7` 第一輪 CI（run 42322469948）大量紅燈，但不是程式問題**：openmm-stack 三 OS／heavy／installer／paper-docking 全卡在安裝步驟 `pip install openmmforcefields`（CI 當下連不到 PyPI：「Could not find a version … from versions: none」），`md20` 沒裝成，之後 import 全部 `ModuleNotFoundError`；pure-python ubuntu 另因 runner 硬碟只剩 15.7 GB 卡在長時間模擬的磁碟檢查。**真正測到 D-94 的 gui-preview 工作是綠的。** 2026-11-07 09:34 已重跑失敗 job（rerun-failed-jobs），下一個 session 要確認重跑結果；若仍紅，先看是不是同一個 PyPI／磁碟 infra flake 再判斷。
 
-## v0.1.0a17（2026-11-04 發行，已被 a18 取代）
+## 目前對外版本：v0.1.0a17（2026-11-04 發行）
 - 多配體拉離路徑被擋住時自動改道（D-92）。**測試過**：純 Python 幾何測試。**沒測過**：筆電 hsieh2024 URI 改道後的實際 SMD。
 
 ## v0.1.0a16（2026-11-04 發行，已被 a17 取代）

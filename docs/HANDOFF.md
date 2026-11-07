@@ -5,6 +5,8 @@
 
 ## 0. 新 session 第一步
 
+> **2026-11-07 第三個 session（session_016gcJzAV8UjRW4ixPZLxddG）接手。** 查到：**a18 從未發行**（GitHub 最新 release 是 a17）；repo 11/07 改為私人（CI 計費、release 需登入）。下一版用 a19。進度見 `docs/WORKBOARD.md`。
+>
 > **2026-11-07 第二次交接（session_016gcJzASwmZ7ZUPX5BewTyo）。** 已 push 到 main，HEAD **`ba4d7da`**，決策到 **D-97**，**未發行**。本 session 做了整合規格（`MD20_Claude_Code_Master_Iteration_Prompt_EN.md`）的 P0 兩批：
 >
 > **接手第一件事：確認 `ba4d7da` 的 CI（run `42330665732`）。**

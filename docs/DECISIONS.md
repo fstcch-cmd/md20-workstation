@@ -6,6 +6,13 @@
 ---
 
 ## 2026-11-07
+### 11/07 紀錄（session_016gcJzAV8UjRW4ixPZLxddG）：a18 從未發行；repo 改為私人後的 CI 計費與下載影響
+- 查證（11/07 10:50）：`gh api repos/.../releases` 最新為 **v0.1.0a17**（2026-11-04 03:38 UTC），`releases/tags/v0.1.0a18` 回 404，tag 也只到 a17；`release-windows.yml` 最後一次執行是 run 41767824360（`8e2fc14`，D-92，產生 a17）。D-93（`d879f2b`）與 D-94（`5561dd7`）之後**沒有再跑發行流程**；`pyproject.toml` 已是 `0.1.0a18`，但沒有對應的 release。
+- 影響：學生現在能下載的是 a17；a17 的 `install.ps1` 同樣沒有 D-95 釘選，新安裝會在 `pip install openmmforcefields` 失敗。README 的 a18 連結與 `docs/students/*` 的 a18 檔名目前指向不存在的 release（發行下一版時一併更新，本次不改）。
+- repo 於 11/07 改為私人：(1) GitHub Actions 開始計費。以 `d879f2b`（run 41772202519）的 job 時間估，一輪完整 CI ≈ Linux 199、Windows 131、macOS 76 分鐘；若照 GitHub 一向的倍率（Windows ×2、macOS ×10，現行費率未確認），約 1,200 計費分鐘／輪。(2) 私人 repo 的 release 資產與 `archive/refs/heads/*.zip` 需要登入才能下載，`installer/MD20-SelfTest.cmd`、`MD20-DevCheck.cmd` 的未登入下載會失敗。
+- 處理：已告知使用者，建議開發與發行期間暫時公開；在使用者決定前不發行。下一版（若授權）版號用 **a19**，不補發 a18，避免同一版號對應兩份不同內容的說明。
+- 被否決：直接把現在的 main 標成 a18 發行（a18 的說明文件寫的是 D-93/D-94 內容，現在還多了 D-95–D-97，版號與內容會對不上）。
+
 
 ### D-97　整合規格 P0 第二批：互作化學統一（A5）、完整動態接觸（A6）、配體狀態不靠單一 RMSD（A4）、互作持續性與設限（F09）、取樣節奏契約（A12）、初始 vs 新接觸（F07）
 - 依據同 D-96。本批對應規格 §6.4.1（F09）、A4、A5、A6、A12、F07、F08、Tests 5/6/19/25/36。
@@ -61,6 +68,7 @@
 - 更正（針對 D-94 下方「CI 紀錄」與 STATUS／HANDOFF 11/07 的「infra flake」說法）：原文保留；實際原因是上游撤回版本，重跑不會自己變綠。
 
 ### D-94　GUI 的 3D 分頁是空的：NiceGUI 3 的 ui.html 會把 iframe 清掉，改用真正的 iframe 元素；瀏覽器自我測試加 3D 檢查；併入 v0.1.0a18
+- **更正（11/07 session_016gcJzAV8UjRW4ixPZLxddG）**：a18 實際上沒有發行（見本日最上方紀錄）；本條內容目前只在 main，學生版仍是 a17。
 - 使用者（11/07 09:03）：「3D 顯示是失敗的」。
 - 查證：
   1. 報告裡的 3D（離線 Canvas）正常：用筆電 `hsieh2024_rela_1vkx` 的 `workflow_report_en.html` 在 Chromium 開啟，畫出 docked_multi 軌跡，無 JS 錯誤；桌面上 11/06 列印的 PDF 第 51 頁也有畫面。
@@ -77,6 +85,7 @@
 ## 2026-11-04
 
 ### D-93　拉離路徑閘門：修正「每個方向都被擋」的誤判、「只做 MD」真的停下結合自由能、加「只算單獨結合」與「指定 anchor 殘基」兩個可按的選項；發行 v0.1.0a18
+- **更正（11/07 session_016gcJzAV8UjRW4ixPZLxddG）**：標題的「發行 v0.1.0a18」沒有發生，release 流程最後一次是 a17（見 11/07 最上方紀錄）。
 - 使用者（11/04，筆電）：「我現在還是不能做決定。只有略過和只做 MD 兩個；沒有先拉外側配體、只算單獨結合、指定 anchor 改變方向。按下『只做 MD』之後出現連線丟失，也沒辦法進入計算。」
 - 查證（筆電專案 `hsieh2024_rela_1vkx`，`binding/multi_URI/binding_manifest.json` 與 `decisions.jsonl`）：
   1. D-92 的改道回傳 `reroute: null`。擋路的 ALC、MAL 沿路徑只有 0.014、0.04 nm，就是貼在 URI 旁邊的鄰居；圓柱從 t > 0 起算，貼著的鄰居在每個方向都算「擋住」，所以 600 個方向全部排除。以該案 `topology.pdb` 重現：舊規則有 L01、L02、L03 三個擋路者、改道 None；新規則原方向就淨空，最佳出口離原方向 1.8°、路徑上 0 個蛋白重原子。
