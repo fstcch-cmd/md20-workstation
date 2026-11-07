@@ -230,7 +230,10 @@ def stability(out: Path) -> int:
             pg.screenshot(path=str(out / "stab_restart_home.png"), full_page=True)
             if wf_dir.name not in pg.content():
                 problems.append("after the GUI restart the home page does not show the running calculation")
-            pg.goto(base + "/" + wf_url.split("/", 3)[3].split("?")[0], wait_until="networkidle"); pg.wait_for_timeout(5000)
+            pg.goto(base + "/" + wf_url.split("/", 3)[3].split("?")[0], wait_until="networkidle")
+            # the progress line lives on the live-curves tab (third tab: gates, screening, live), in any language
+            pg.locator(".q-tab").nth(2).click()
+            pg.wait_for_timeout(5000)
             pg.screenshot(path=str(out / "stab_restart_wf.png"), full_page=True)
             if "fake" not in pg.content():
                 problems.append("after the GUI restart the progress line is empty (not read back from progress.jsonl)")

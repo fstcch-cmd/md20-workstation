@@ -315,7 +315,9 @@ def _fake_run(wf: Workflow, seconds: float, progress_cb) -> dict:
         st["beats"] = int(st.get("beats", 0)) + 1
         st["t"] = time.time()
         f.write_text(json.dumps(st), encoding="utf-8")
-        progress_cb({"stage": "fake", "case_id": "fake", "completed_local_steps": k + 1, "total_steps": n, "elapsed_s": float(k)})
+        # the same fields an MD chunk heartbeat carries, so the progress line and live curves are exercised (D-103)
+        progress_cb({"stage": "fake", "case_id": "fake", "completed_local_steps": k + 1, "total_steps": n, "elapsed_s": float(k),
+                     "absolute_step": k + 1, "temperature_k": 300.0, "potential_kj_mol": -1000.0})
         time.sleep(1.0)
     st["finished"] = True
     f.write_text(json.dumps(st), encoding="utf-8")
