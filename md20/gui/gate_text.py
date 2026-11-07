@@ -919,3 +919,19 @@ PREFIX.append(("只算 ", ("Compute it bound alone (extra MD with only this liga
                        "단독 결합만 계산(이 리간드만 있는 MD 추가)")))
 PREFIX.append(("指定 anchor 殘基", ("Choose anchor residues to change the pulling direction",
                                 "anchor 残基を指定して引き離す方向を変える", "anchor 잔기를 지정해 당김 방향 변경")))
+
+
+# D-102 water de-clash before System creation (md20/build/assemble.py remove_overlapping_waters)
+GATES.update({
+    "water overlaps": (
+        ("重疊的水", "Overlapping waters", "重なった水", "겹친 물"),
+        ("OpenMM 溶劑化偶爾會把兩個水放得幾乎重疊，最小化壓不開，MD 一開始就出現 NaN。建模時會刪掉其中一個多餘的水；"
+         "刪水修不好的重疊（水和溶質嵌在一起）會停下來請你檢查建模。",
+         "OpenMM solvation occasionally places two waters almost on top of each other. Minimisation cannot separate "
+         "them and the MD gives NaN in its first steps. The build removes the extra water. An overlap that removing "
+         "waters cannot fix (a water inside the solute) stops the build so you can check the model.",
+         "OpenMM の溶媒和では、まれに 2 つの水がほぼ重なって置かれます。最小化では離れず、MD の最初で NaN になります。"
+         "建模時に余分な水を 1 つ削除します。水を消しても直らない重なり（水が溶質にめり込んでいる）は止めて、モデルの確認を求めます。",
+         "OpenMM 용매화는 가끔 물 두 개를 거의 겹치게 놓습니다. 최소화로는 떼어 낼 수 없고 MD 시작 직후 NaN이 납니다. "
+         "모델링 단계에서 남는 물 하나를 지웁니다. 물을 지워도 풀리지 않는 겹침(물이 용질 안에 박힘)은 멈추고 모델 확인을 요청합니다.")),
+})

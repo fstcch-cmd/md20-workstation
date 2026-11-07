@@ -5,7 +5,9 @@ from ..util.timeutil import to_local
 import copy
 import queue
 import os
+import sys
 import threading
+import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -113,12 +115,104 @@ class Job:
         return {"status": self.status, "message": self.message, "report": self.report,
                 "steps": step_rows(self.wf.state()), "history": self.history}
 
+    def alive(self) -> bool:
+        return bool(self.thread and self.thread.is_alive())
+
+
+def _msg(m):
+    """job.json stores the (zh, en, ja, ko) message as a list; pick() wants the tuple."""
+    return tuple(m) if isinstance(m, list) and len(m) in (2, 4) and all(isinstance(v, str) for v in m) else (m or "")
+
+
+class ProcessJob:
+    """D-103: a calculation in its own process (md20.gui.worker).  Everything is read back from the workflow's
+    _gui_job/ files, so a GUI that reconnects or restarts shows the same status, progress line and live curves."""
+
+    def __init__(self, wf: Workflow, popen=None):
+        from .worker import job_dir, ProgressReader
+        self.wf, self.popen = wf, popen
+        self.dir = job_dir(wf.dir)
+        self.progress = ProgressReader(self.dir / "progress.jsonl")
+        self.thread = None                                   # API compatibility with Job
+        self.status, self.message, self.report = "RUNNING", "", ""
+        self.started_at = time.time()
+
+    def _info(self) -> dict:
+        from .worker import read_job
+        return read_job(self.wf.dir)
+
+    def alive(self) -> bool:
+        if self.popen is not None:
+            return self.popen.poll() is None
+        from .worker import heartbeat_fresh
+        return heartbeat_fresh(self._info())
+
+    def _log_tail(self, n: int = 1500) -> str:
+        try:
+            return (self.dir / "worker.log").read_text(encoding="utf-8", errors="replace")[-n:]
+        except OSError:
+            return ""
+
+    def refresh(self) -> None:
+        from .worker import heartbeat_fresh
+        info = self._info()
+        st = info.get("status")
+        if st:                     # start_process removed the previous run's job.json, so any job.json is this run's
+            self.status, self.message, self.report = st or self.status, _msg(info.get("message")), info.get("report") or ""
+        if self.status == "RUNNING" and not self.alive():
+            # the process ended without writing its result (killed, crashed, power loss): say so, never "running"
+            gone = self.popen is not None or not heartbeat_fresh(info)
+            if gone:
+                self.status = "ERROR"
+                self.message = ("計算程序已結束，但沒有寫下結果（可能被關閉或當掉）。按「開始或繼續」會從最後完成的 chunk 接著跑。\n"
+                                + self._log_tail(),
+                                "The calculation process ended without writing a result (closed or crashed). Press Start "
+                                "or continue to carry on from the last finished chunk.\n" + self._log_tail(),
+                                "計算プロセスが結果を書かずに終了しました（閉じられたかクラッシュ）。「開始または再開」で最後の chunk から続きます。\n"
+                                + self._log_tail(),
+                                "계산 프로세스가 결과를 쓰지 않고 끝났습니다(닫힘 또는 충돌). '시작 또는 계속'을 누르면 마지막 chunk부터 이어서 실행합니다.\n"
+                                + self._log_tail())
+
+    def snapshot(self) -> dict:
+        self.refresh()
+        return {"status": self.status, "message": self.message, "report": self.report,
+                "steps": step_rows(self.wf.state()), "history": self.progress.read()}
+
+
+def worker_argv(wf: Workflow) -> list[str]:
+    return [sys.executable, "-m", "md20.gui.worker", "--project", str(wf.project.dir), "--name", wf.name]
+
+
+def launch_worker(wf: Workflow, argv: list[str] | None = None):
+    """Start the calculation process detached from the GUI's console: closing or restarting the GUI does not stop it
+    (Pause does, at the next chunk boundary), and the GUI attaches to it again from the files."""
+    import subprocess
+    from .worker import job_dir
+    jd = job_dir(wf.dir)
+    jd.mkdir(parents=True, exist_ok=True)
+    log = open(jd / "worker.log", "w", encoding="utf-8")
+    kw = {}
+    if os.name == "nt":
+        kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        kw["start_new_session"] = True
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+    try:
+        return subprocess.Popen(argv or worker_argv(wf), stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                env=env, **kw)
+    finally:
+        log.close()
+
 
 class Runner:
-    """One background workflow per (project, name).  Pause = create the project PAUSE file."""
+    """One background workflow per (project, name).  Pause = create the project PAUSE file.
 
-    def __init__(self):
-        self.jobs: dict[str, Job] = {}
+    D-103: `start_process` (what the GUI uses) runs the workflow in md20.gui.worker; `start` keeps the in-process
+    thread for tests and callers that pass their own factory."""
+
+    def __init__(self, launcher=None):
+        self.jobs: dict[str, Job | ProcessJob] = {}
+        self.launcher = launcher or launch_worker
 
     def start(self, wf: Workflow, make_factory, platform, should_pause=None) -> Job:
         key = f"{wf.project.dir}::{wf.name}"
@@ -155,14 +249,54 @@ class Runner:
         job.thread.start()
         return job
 
-    def running(self) -> Job | None:
-        for j in self.jobs.values():
-            if j.thread and j.thread.is_alive():
-                return j
-        return None
+    def start_process(self, wf: Workflow) -> Job | ProcessJob:
+        key = f"{wf.project.dir}::{wf.name}"
+        busy = self.running(wf.project.dir.parent)
+        if busy is not None:                   # D-67: one calculation at a time, also across GUI restarts
+            return busy
+        from .worker import job_dir
+        (job_dir(wf.dir) / "job.json").unlink(missing_ok=True)      # the previous run's result is not this run's
+        job = ProcessJob(wf, popen=self.launcher(wf))
+        self.jobs[key] = job
+        return job
 
-    def get(self, wf: Workflow) -> Job | None:
-        return self.jobs.get(f"{wf.project.dir}::{wf.name}")
+    def _attach(self, project_dir: Path, name: str) -> ProcessJob | None:
+        try:
+            from ..project import Project
+            wf = Workflow.open(Project(Path(project_dir)), name)
+        except (FileNotFoundError, OSError, ValueError):
+            return None
+        job = ProcessJob(wf)
+        self.jobs[f"{wf.project.dir}::{wf.name}"] = job
+        return job
+
+    def running(self, root=None) -> Job | ProcessJob | None:
+        for j in self.jobs.values():
+            if j.alive():
+                return j
+        if root is None:
+            return None
+        # D-103: a worker started by an earlier GUI (or before a reconnect) is found from its pointer file
+        from .worker import pointer_path, read_json, read_job, heartbeat_fresh
+        p = read_json(pointer_path(root))
+        if not p.get("project") or not p.get("name"):
+            return None
+        wf_dir = Path(p["project"]) / "workflows" / safe_name(p["name"])
+        if not heartbeat_fresh(read_job(wf_dir)):
+            return None
+        key = f"{Path(p['project'])}::{p['name']}"
+        return self.jobs.get(key) or self._attach(Path(p["project"]), p["name"])
+
+    def get(self, wf: Workflow) -> Job | ProcessJob | None:
+        key = f"{wf.project.dir}::{wf.name}"
+        if key in self.jobs:
+            return self.jobs[key]
+        from .worker import job_dir
+        if (job_dir(wf.dir) / "job.json").is_file():   # D-103: the last run's status and progress survive a GUI restart
+            job = ProcessJob(wf)
+            self.jobs[key] = job
+            return job
+        return None
 
 
 def _fake_run(wf: Workflow, seconds: float, progress_cb) -> dict:

@@ -6,6 +6,29 @@
 ---
 
 ## 2026-11-07
+### D-103　GUI 斷線的根因：計算和 GUI 共用一個 Python 程序 → 計算改成獨立子程序，狀態與進度一律從檔案讀回
+- 使用者需求（11/07，見下方「新功能需求」）：「使用 UI 介面時很容易斷線，需要增強穩定性」。
+- **調查（讀程式，session_016gcJz7pQmKkZzkUxg6SqVs）**，找到三個原因：
+  1. **計算在 GUI 程序裡的 thread 跑**（`gui/logic.py` `Runner.start` 的 `threading.Thread`）。載入大型 OpenMM XML、WHAM/MBAR bootstrap、報告圖這類工作長時間持有 GIL，NiceGUI 事件迴圈回不了瀏覽器 WebSocket 的心跳，畫面就出現「連線丟失」。D-93 的 `reconnect_timeout=180` 只延長伺服器保留連線狀態的時間，**沒有移除阻塞**。另外第一次按開始時，`_platform()` 在 UI 事件迴圈裡 import OpenMM 並建 Context 探測平台。
+  2. **「重新整理報告」在事件迴圈同步建報告**（`app.py` `rebuild()` → `ACT.refresh_report`），報告完成前整頁卡住。
+  3. **進度只在記憶體 queue**（`Job.events`）：重新連線或 GUI 重開後，進度列、即時曲線、傘狀採樣斷點提示全部消失，狀態變回「閒置」。
+- **決定**：
+  - 計算改由 `python -m md20.gui.worker --project … --name …` 子程序執行（`gui/worker.py`，不 import NiceGUI）。子程序自己探測平台、建 `PausePolicy`（PAUSE 檔／電池／資源守門，設定與舊 `_start` 相同）、每個 case 重讀資源模式（D-68 行為不變）。
+  - 子程序寫：`<workflow>/_gui_job/job.json`（pid、狀態、訊息、報告、每 5 秒心跳）、`progress.jsonl`（`wf.run` 給 progress_cb 的同一份事件，一行一筆）、`worker.log`；以及專案根目錄的 `_gui_running.json`（目前在跑哪個 workflow）。
+  - GUI 端 `ProcessJob` 只讀檔：`ProgressReader` 增量讀整行（寫到一半的行不讀）；`Runner.running(root)` 從指標檔找回別的 GUI（或重開前）啟動的計算；`Runner.get(wf)` 在 GUI 重開後也能讀回上次的結果。D-67「一次只跑一個」改成跨程序也成立。
+  - 判定子程序已不在：GUI 持有程序 handle 時看 `poll()`（立即）；重開後只能看心跳，**180 秒沒有心跳**才判定（子程序在長 C 呼叫中可能漏掉心跳，太短會誤判）。判定不在時狀態顯示 ERROR 並附 worker.log 末段，**絕不顯示「執行中」**；按「開始或繼續」從最後完成的 chunk 續跑（引擎本來就可續跑）。
+  - 子程序與 GUI 的主控台分離（Windows `CREATE_NO_WINDOW|CREATE_NEW_PROCESS_GROUP`，POSIX `start_new_session`）：**關掉或重開 GUI 不會中斷計算**；要停請按「暫停」（chunk 邊界停）。
+  - `rebuild()` 改 `await run.io_bound(...)`。
+- **被否決的做法**：
+  - 只調大 `reconnect_timeout` 或 socket.io ping 逾時：阻塞仍在，只是斷線晚一點出現；進度仍會丟。
+  - `multiprocessing`（spawn）：Windows 上要能 pickle 工廠函式（目前是 lambda），且子程序隨父程序結束，做不到 GUI 重開後接回。
+  - 用 `os.kill(pid, 0)` 檢查 pid：**在 Windows 上 `os.kill` 對非 Ctrl 訊號會呼叫 TerminateProcess，會把計算殺掉**；改用心跳檔。
+- **行為改變（請使用者確認）**：以前關掉 GUI 主控台，計算（daemon thread）會跟著死；現在計算繼續跑，重開 GUI 會在頁首看到「計算進行中」並接回。若希望「關 GUI＝暫停」，可改成 GUI 結束時自動放 PAUSE 檔（未做）。
+- **順手修**：D-102 新增的閘門「water overlaps」沒有四語說明，`tests/test_gate_text.py::test_every_gate_name_in_the_code_is_covered` 在 `f61f305` 是紅的（pure-python 六個 job 會失敗）；補上 `gate_text.py` 條目。
+- **證據／測試**：`tests/test_gui_worker.py`（7 項：整行增量讀與截斷重讀、心跳判定、worker 寫狀態／進度／指標並在結束時移除、NEEDS_HUMAN 與錯誤、死掉的 worker 不顯示執行中、新 Runner 從指標檔接回且不重複啟動、**真實子程序**跑 fake run 後由另一個 Runner 讀回 COMPLETE 與進度）。`tools/gui_preview.py` 穩定性檢查（CI gui-preview，真瀏覽器）加上：計算中**關掉 GUI → 確認計算仍在跑 → 重開 GUI → 首頁顯示計算中、流程頁進度列從檔案回來、再按開始不會重啟**。容器全套 743 passed、49 skipped。NiceGUI 頁面本身（`app.py`）容器無法 import，交 CI gui-preview。
+- **未決**：建膜即時 3D（需求 b）未開始；定時更新（每 2 秒重讀 state.json／決策紀錄）尚未改成「檔案有變才讀」，目前在事件迴圈上只是小量 I/O，先不動，筆電若仍卡再處理。
+- 規格：`docs/specs/gui_stability.md`。檔案：`md20/gui/worker.py`（新）、`md20/gui/logic.py`、`md20/gui/app.py`、`md20/gui/gate_text.py`、`tools/gui_preview.py`、`tests/test_gui_worker.py`。
+
 ### D-102　膜 NaN 根因找到並修復：OpenMM 溶劑化放出重疊的水 → 建模階段去碰撞（不是平台問題）
 - 診斷結論（run 42351281001 第一輪、42355183065 第二輪）：
   - **不是 Windows 專屬**：第二輪 Linux 也出現 NaN（build3，3/16），第一輪 Linux 0/12 只是沒抽到壞建構。**依建構而定、平台無關**。

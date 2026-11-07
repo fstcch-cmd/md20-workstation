@@ -128,6 +128,19 @@ def _fake_state(wf_dir: Path) -> dict:
     return json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
 
 
+def _stop_worker(root: Path) -> None:
+    """The fake calculation process outlives the GUI by design (D-103); end it when the check is over."""
+    import json
+    import signal
+    for f in root.glob("*/workflows/*/_gui_job/job.json"):
+        try:
+            pid = int(json.loads(f.read_text(encoding="utf-8")).get("pid") or 0)
+            if pid and json.loads(f.read_text(encoding="utf-8")).get("status") == "RUNNING":
+                os.kill(pid, signal.SIGTERM)
+        except (OSError, ValueError):
+            pass
+
+
 def stability(out: Path) -> int:
     """D-74: switching the interface language while a calculation runs must not stop, restart or duplicate it.
 
@@ -196,9 +209,42 @@ def stability(out: Path) -> int:
             n = len(list((root / "Teaching" / "workflows").glob("*/config.json")))
             if n != 1:
                 problems.append(f"{n} teaching workflows after the language switches (expected 1)")
+            # D-103: the calculation runs in its own process.  Stop the GUI (as a crash or a closed window would),
+            # check the calculation keeps going, start the GUI again and check it attaches to the same run: the
+            # banner and the progress line come back from the files, and the start button does not start it twice.
+            proc.terminate()
+            proc.wait(30)
+            a = _fake_state(wf_dir); time.sleep(4); b = _fake_state(wf_dir)
+            if not b.get("beats", 0) > a.get("beats", 0) or b.get("finished"):
+                problems.append(f"GUI stopped: the calculation stopped too ({a.get('beats')} -> {b.get('beats')})")
+            port = _free_port()
+            base = f"http://127.0.0.1:{port}"
+            proc = subprocess.Popen([sys.executable, "-m", "md20", "--dir", str(root), "gui", "--port", str(port), "--no-browser"],
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+            for _ in range(240):
+                try:
+                    urllib.request.urlopen(base + "/", timeout=2); break
+                except Exception:  # noqa: BLE001
+                    time.sleep(0.5)
+            pg.goto(base + "/", wait_until="networkidle"); pg.wait_for_timeout(3000)
+            pg.screenshot(path=str(out / "stab_restart_home.png"), full_page=True)
+            if wf_dir.name not in pg.content():
+                problems.append("after the GUI restart the home page does not show the running calculation")
+            pg.goto(base + "/" + wf_url.split("/", 3)[3].split("?")[0], wait_until="networkidle"); pg.wait_for_timeout(5000)
+            pg.screenshot(path=str(out / "stab_restart_wf.png"), full_page=True)
+            if "fake" not in pg.content():
+                problems.append("after the GUI restart the progress line is empty (not read back from progress.jsonl)")
+            pg.goto(base + "/teach/hsieh2025", wait_until="networkidle"); pg.wait_for_timeout(1000)
+            pg.get_by_test_id("start-lesson").click()
+            pg.wait_for_url("**/wf/**", timeout=60000); pg.wait_for_timeout(2000)
+            c = _fake_state(wf_dir)
+            if c.get("starts") != 1:
+                problems.append(f"after the GUI restart the run was started again ({c.get('starts')} starts)")
+            print("stability restart", c)
             br.close()
     finally:
         proc.terminate()
+        _stop_worker(root)
     print("STABILITY", "OK" if not problems else "FAILED")
     for m in problems:
         print(" -", m)

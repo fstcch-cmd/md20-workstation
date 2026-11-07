@@ -3,6 +3,11 @@
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
+## 本 session（2026-11-07，session_016gcJz7pQmKkZzkUxg6SqVs）：D-103 GUI 穩定性（屬 a20）
+- 計算改成獨立子程序（`md20/gui/worker.py`）；GUI 的狀態、進度列、即時曲線從 `_gui_job/` 檔案讀回；GUI 斷線或重開後接回同一個計算，不重複啟動。關 GUI 不再中斷計算（按「暫停」才停）。
+- **(A)** 容器 743 passed、49 skipped（含真實子程序測試）。**(B)** NiceGUI 頁面與「關 GUI→重開→接回」交 CI gui-preview。**(C)** 筆電上關主控台視窗時子程序是否存活未實測；建膜即時 3D 未開始。
+- 金鑰檢查（11/07）：工作樹與全部 git 歷史（含所有分支）沒有 token／私鑰；`owner_pub.pem` 是公鑰；兩個像 Google key 的字串是報告範本 PNG base64 裡的巧合。程式沒有呼叫付費 API。
+
 ## 本 session（2026-11-07，session_016gcJzAV8UjRW4ixPZLxddG）新增，已 push、未發行（屬 a20，不入 a19）
 - **D-99/D-100**：SMD 水盒事先依規則決定＋通則檢查；**padding 意義更正、預設全部 2.0 nm**。
 - **D-101**：傘狀採樣 SMD 力曲線預先規劃＋即時斷點提示＋覆蓋圖一定存在。

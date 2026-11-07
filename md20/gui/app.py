@@ -8,8 +8,6 @@ from pathlib import Path
 from nicegui import app, ui
 
 from ..env import run_doctor, choose_platform
-from ..engine import PausePolicy
-from ..engine.factory import make_backend_factory
 from ..project import Project
 from ..util import default_projects_dir, load_json, safe_name
 from ..workflow import Workflow
@@ -191,7 +189,7 @@ def _header():
                           "計算にこのパソコンの資源をどれだけ使うか", "계산에 이 컴퓨터 자원을 얼마나 쓸지"))
             ui.select(LANG_NAMES, value=L, on_change=change).props("dense dark borderless options-dense data-testid=lang-select").classes("w-28")
     # D-67: wherever the user goes (home, system page, another language), the running calculation is one click away
-    job = RUNNER.running()
+    job = RUNNER.running(STATE["projects_dir"])
     if job is not None:
         href = f"/wf/{job.wf.project.dir.name}/{job.wf.name}"
         with ui.row().classes("w-full items-center gap-3 px-4 py-2").style("background:#fff7e6;border-bottom:1px solid #f0d9a8"):
@@ -407,7 +405,7 @@ def _binding_panel(wf: Workflow, project: str, name: str):
 
         def busy() -> bool:
             job = RUNNER.get(wf)
-            if job and job.thread and job.thread.is_alive():
+            if job and job.alive():
                 ui.notify(t("busy", lang()), type="warning")
                 return True
             return False
@@ -443,11 +441,14 @@ def _binding_panel(wf: Workflow, project: str, name: str):
                       type="positive")
             refresh()
 
-        def rebuild():
+        async def rebuild():
             if busy():
                 return
             try:
-                ACT.refresh_report(wf, lang())
+                # D-103: building the report (figures, embedded 3D) took long enough on the event loop to drop
+                # the browser's connection; it now runs in a worker thread
+                from nicegui import run as nrun
+                await nrun.io_bound(ACT.refresh_report, wf, lang())
             except Exception as exc:  # noqa: BLE001
                 ui.notify(f"{type(exc).__name__}: {exc}", type="negative"); return
             ui.notify(_("報告已重新整理。", "The report has been rebuilt.", "レポートを作り直しました。", "보고서를 다시 만들었습니다."),
@@ -465,15 +466,12 @@ def _binding_panel(wf: Workflow, project: str, name: str):
 
 
 def _start(wf: Workflow):
-    platform = "FAKE" if os.environ.get("MD20_GUI_FAKE_RUN") else _platform()   # test stand-in (D-74)
-    policy = PausePolicy(pause_file=wf.project.dir / "PAUSE", pause_on_battery=True,
-                         power_probe=__import__("md20.env.hardware", fromlist=["_power_state"])._power_state,
-                         resource_guard=__import__("md20.env.resources", fromlist=["CachedGuard"]).CachedGuard())
+    """D-103: the calculation runs in its own process (md20.gui.worker): it never holds the GUI's GIL, and its
+    status and progress are files the GUI reads back after a reconnect or restart.  The worker probes the OpenMM
+    platform and builds the pause policy itself (same settings as before: PAUSE file, battery, resource guard)."""
     (wf.project.dir / "PAUSE").unlink(missing_ok=True)
-    mode = resource_mode()
-    os.environ["MD20_RESOURCE_MODE"] = mode
-    return RUNNER.start(wf, lambda case, proto: make_backend_factory(case, proto, platform=platform, resource_mode=resource_mode()),
-                        platform, should_pause=policy)
+    os.environ["MD20_RESOURCE_MODE"] = resource_mode()
+    return RUNNER.start_process(wf)
 
 
 def _gate_buttons(wf: Workflow, card: dict):
@@ -486,7 +484,7 @@ def _gate_buttons(wf: Workflow, card: dict):
 
             def do(a=a, note=note):
                 job = RUNNER.get(wf)
-                if job and job.thread and job.thread.is_alive():
+                if job and job.alive():
                     ui.notify(t("busy", lang()), type="warning"); return
                 try:
                     out = apply_gate_action(wf, a, note.value if note else "")
@@ -656,7 +654,7 @@ def workflow_page(project: str, name: str):
 
                 def proceed():
                     job = RUNNER.get(wf)
-                    if job and job.thread and job.thread.is_alive():
+                    if job and job.alive():
                         ui.notify(t("busy", lang()), type="warning"); return
                     if go:
                         apply_gate_action(wf, go)
@@ -699,7 +697,7 @@ def workflow_page(project: str, name: str):
             if isinstance(row.get("score"), str):          # placed from a predicted complex: there is no other pose to pick
                 return
             job = RUNNER.get(wf)
-            if job and job.thread and job.thread.is_alive():
+            if job and job.alive():
                 ui.notify(_("流程正在執行。請先暫停再改選姿勢，否則會和背景執行的流程互相覆寫狀態。",
                             "The workflow is running. Pause it before you change the pose, or the two would overwrite each other's state.",
                             "ワークフローは実行中です。ポーズを変える前に一時停止してください。そうしないと実行中の処理と状態を上書きし合います。",
@@ -769,7 +767,7 @@ def workflow_page(project: str, name: str):
 
                     def do_select(mode: str):
                         job = RUNNER.get(wf)
-                        if job and job.thread and job.thread.is_alive():
+                        if job and job.alive():
                             ui.notify(t("busy", L), type="warning"); return
                         names = [r["name"] for r in scr_tbl.selected]
                         try:
@@ -824,7 +822,7 @@ def workflow_page(project: str, name: str):
 
                     def do_resample():
                         job = RUNNER.get(wf)
-                        if job and job.thread and job.thread.is_alive():
+                        if job and job.alive():
                             ui.notify(t("busy", L), type="warning"); return
                         if not cov_pick.value or rs_lo.value is None or rs_hi.value is None:
                             ui.notify(_("請選擇結合目標並輸入範圍。", "Choose a binding target and enter a range.",
