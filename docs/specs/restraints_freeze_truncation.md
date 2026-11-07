@@ -1,6 +1,6 @@
 # 約束策略、凍結、口袋截斷模型與資源估算
 
-狀態：**§3.1 分組約束＋分階段釋放已實作（D-23，2026-11-01）；§3.1 智慧建議、§3.2–3.4 仍為 [設計中]**。使用者需求（2026-11-01）：約束要隨 minimization → NVT → NPT → production 分階段下降；提供凍結
+狀態：**§3.1 分組約束＋分階段釋放已實作（D-23，2026-11-01）；§3.1 智慧建議已實作・純 Python（D-118，2026-11-07，待 CI）；§3.2–3.4 仍為 [設計中]**。使用者需求（2026-11-01）：約束要隨 minimization → NVT → NPT → production 分階段下降；提供凍結
 （整條主鏈、指定殘基）；約束與凍結都要能智慧化建議，讓使用者直觀地降低運算資源；也允許整顆蛋白自由模擬。
 已加入的引擎掛鉤（D-23 起由 `make_protocol(restraints=…)` 使用）：`StageSpec.restraint_groups`（每組 [起, 迄] 倍率）、`StageSpec.freeze`，
 `chunks._apply_schedule` 會逐批設定 `msw_rs_<group>`；兩個新欄位在預設值時不進入 protocol 雜湊（進行中的 run 可續跑）。
@@ -46,10 +46,14 @@ OpenMM 以質量 0 凍結：積分器不移動它，但所有力（含凍結原�
 - 原設計（被會診修正，保留歷史）：standard NVT bb 1→0.5、sc 1→0.1、lig 1→0.5，NPT 全 →0；理由是 WP4 擔心約束＋barostat 偏壓體積——
   會診指出 Amber／Desmond 都在 NPT 中釋放、k ≤ 1000 時偏差可忽略，因此改為 NVT 只升溫。
 
-- **智慧建議**（`recommend_restraint_strategy`，寫 DecisionLog）：
+- **智慧建議**（`md20/engine/restraint_advice.py`，D-118 已實作，只建議、不改預設與 protocol；採用時才寫 DecisionLog）：
   - 解析度 > 2.5 Å、AlphaFold 模型或低 pLDDT、PDBFixer 補過 loop、對接 pose 有碰撞、胜肽配體、金屬鍵結模型 → gentle；
   - 短 production（< 1 ns）或截斷模型 → hold_backbone 選項提示；
   - 其餘 → standard。使用者可在 `md.restraints` 指定覆蓋。
+  - 實作對照（D-118）：輸出策略、`protocol_args`、各階段分組倍率（取自 `make_protocol`）、四語理由、與現行設定的差異、資料不足時的「無法建議」。
+    條件為解析度 > 2.5 Å、預測模型、低信心區（pLDDT < 70 的殘基 ≥ 10%）、補建或封端的斷鏈、對接姿勢有碰撞、胜肽配體、金屬鍵結模型（另含既有的多配體同時對接）。
+    hold_backbone 只作選項（MD 目標、production < 1 ns、非預測模型）；「截斷模型」尚未實作，故沒有對應提示。不建議為省時間而凍結。
+    約束只有三組，低信心區無法個別約束，只能整體放慢（理由裡直說）。
 
 ### 3.2 凍結選項（`md.freeze`）
 - `none`（預設）、`backbone`（蛋白主鏈重原子）、`residues: "A:10-50, A:200"`、`beyond: R`（離任何配體重原子 > R Å 的整個殘基）。

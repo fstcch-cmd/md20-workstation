@@ -11,7 +11,7 @@
 | 文件 | 範圍 | 狀態 |
 |---|---|---|
 | [umbrella_adaptive.md](umbrella_adaptive.md) | 傘狀採樣智慧補窗（由粗到細）、每 window 各自的 k、即時覆蓋圖、手動補採樣；PMF 涵蓋與持平（D-62、D-65） ；D-101 SMD 力曲線預先規劃、即時斷點提示 | 已驗證（heavy workflow，c868014；筆電實跑） |
-| [restraints_freeze_truncation.md](restraints_freeze_truncation.md) | 分階段約束策略、凍結選項、口袋截斷模型、資源估算 | 分組約束已驗證（81b72d9）；凍結／截斷**設計中** |
+| [restraints_freeze_truncation.md](restraints_freeze_truncation.md) | 分階段約束策略、凍結選項、口袋截斷模型、資源估算 | 分組約束已驗證（81b72d9）；智慧建議已實作・純 Python（D-118，待 CI）；凍結／截斷**設計中** |
 | [implicit_solvent.md](implicit_solvent.md) | 隱式溶劑 GBn2：組裝、protocol、閘門（金屬、結合計算擋下） | 已驗證（81b72d9 起） |
 | [metal_sites.md](metal_sites.md) | 金屬 policy、幾何鍵結模型（含金屬中心與經金屬的 1-3/1-4 修正）、擬合參數（QM Hessian／MCPB.py／JSON）、QM 小模型輸入 | 部分已驗證・鋅配位 heavy metal 自 c4b5de6 起綠，但平均鍵長在 0.3 Å 臨界（D-32／D-34） |
 | [gate_actions.md](gate_actions.md) | 三態閘門、GUI 一鍵決定、選項→設定修補、失效重跑 | 已驗證（GUI 伺服器測試）|
