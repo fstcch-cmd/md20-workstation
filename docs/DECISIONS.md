@@ -6,6 +6,23 @@
 ---
 
 ## 2026-11-07
+### D-113　PMF 評估加入 MBAR 估計器自己的 overlap matrix（原本算了但被丟掉）
+- 查到的事實：`_mdh_legacy.mbar_pmf_1d` 每次都呼叫 `mbar.compute_overlap()` 並回傳矩陣、scalar、特徵值，但 `pmf.pmf_from_windows` 沒把它放進 `quality`；D-96 評估的 `overlap_graph` 只能用直方圖重疊（`umbrella_quality.graph_connected` 或 `histogram_overlap_matrix`）。直方圖重疊看的是樣本分布，MBAR overlap 看的是**估計器能不能在窗口間轉移權重**——兩者在 k 不同（補窗加硬）或 f_k 解得差時會不一致。
+- 決定：
+  - `pmf_from_windows` 保留 `quality["mbar_overlap"]`（矩陣四位小數、centers、相鄰最小值、pymbar scalar）；MBAR 曲線被截斷改用 WHAM 時仍保留並註明矩陣來自 MBAR 解。
+  - `assess_pmf` 新診斷 `mbar_overlap`（global）：全窗口對的圖是否連通（與 D-43 相同，不只看中心相鄰——加硬的 window 會和非鄰居重疊），邊門檻 0.03（Klimovich, Shirts & Mobley 2015, J Comput Aided Mol Des 29:397 建議的 off-diagonal 下限；與既有直方圖邊門檻同值）。`THRESHOLDS_VERSION` → `2026-11-07.2`。
+  - 沒有矩陣（WHAM、D-113 以前的結果）→ unknown，**不擋**；有矩陣且不連通 → 擋 path-specific ΔPMF 與 ΔG°（屬「寧可擋也不要猜」）；直方圖圖連通但 MBAR 不連通 → 列為 conflict。
+  - 四語診斷名稱加入 `report/figure_text._DIAG_NAME`。
+- 這不是協定變更：不改取樣、不改 window、不改估計器，只把已算出的品質量度納入既有閘門。補窗（`adaptive`）仍用直方圖重疊。
+- 被否決：以 scalar（1−λ₂）設門檻（文獻沒有公認數值，只記錄）；只看相鄰元素（與 D-43 的全對規則矛盾，補窗後會誤擋）；把 `mbar_overlap` 列為一律必要（WHAM 結果會全被擋）。
+- 測試：`tests/test_assessment.py` 4 項（缺矩陣不擋、連通通過、直方圖看似正常但 MBAR 不連通 → 擋且有 conflict、非相鄰窗口橋接算連通）；`tests/test_mbar_bootstrap.py` 2 項（測試用 pymbar 替身改為照 MBAR 定義 O = WᵀW·N 計算 overlap，原本回傳單位矩陣；矩陣進入 quality 且列和為 1；0.5 nm 斷層被標為 fail）。容器 776 passed、49 skipped；真 pymbar 路徑交 CI openmm-stack 與 heavy workflow。
+- 回答 `docs/specs/umbrella_adaptive.md` §8 審查問題 1 的一部分。
+
+### D-103 補充：關掉 GUI 不中斷計算——維持現狀（開發者決定，使用者可推翻）
+- 使用者 11/07 19:15 授權開發者自行決定這類小事。決定**維持 D-103 的行為**：關 GUI／瀏覽器不中斷計算，按「暫停」才停（在 chunk 邊界）。
+- 理由：學生最常見的是不小心關掉瀏覽器分頁或筆電闔蓋後 GUI 斷線；把這當成「暫停」會讓長時間 MD 在使用者沒意識到的情況下停住（隔天回來才發現沒跑）。暫停是明確動作，且 chunk 引擎任何時刻都可續跑，所以沒有「關不掉」的風險；主控台視窗關掉後子程序是否存活仍待筆電實測（HANDOFF 待筆電項目）。
+- 被否決：「關 GUI＝暫停」（意外停機的代價遠大於多跑一段的代價）；關閉時跳確認框（瀏覽器關分頁不可靠地觸發 beforeunload，且學生會習慣性按確定）。
+
 ### D-112　28e87aa macOS openmm-stack `test_popc_bilayer_case_c`：D-104 斷言把「頭基原子」當成「脂質數」；中日文說明同樣易誤讀
 - 證據：run 42362077340 macOS job，`tests/test_membrane_integration.py:55` `assert 256 == 128`。同一測試前面的斷言都過：128 個 POPC（上下各 64）、總電荷 0、**water overlaps 閘門 PASS/AUTO_FIXED（D-102）**、即時 3D 階段 **bilayer → declashed（D-104）**。
 - 根因：`live3d.membrane_scene` 依設計（D-104：「脂質頭基（P、N、膽固醇 O3）全部畫」）把每個 POPC 的 P 與 N 都標為 `H`，128 個脂質 → 256 個頭基原子。程式行為正確；整合測試寫成 128。另外 GUI 說明的中文「脂質頭基（256 個）」、日文「頭部（256 個）」讀起來像 256 個脂質（英文、韓文本來就寫 head atoms）。

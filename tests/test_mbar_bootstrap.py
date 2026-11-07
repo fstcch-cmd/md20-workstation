@@ -38,6 +38,7 @@ def _fake_pymbar(calls, *, fallback_without_warm=False, reject=(), bad_fk=False)
             if fallback_without_warm and "initial_f_k" not in kw and kw.get("solver_protocol") is None:
                 print("Failed to reach a solution to within tolerance with hybr: trying next method")
             K = len(N_k)
+            self._u, self._N = np.asarray(u_kn, float), np.asarray(N_k, float)
             if bad_fk:
                 self.f_k = np.linspace(0.0, 4000.0, K)             # wildly wrong: far windows' weights underflow
                 return
@@ -57,9 +58,18 @@ def _fake_pymbar(calls, *, fallback_without_warm=False, reject=(), bad_fk=False)
                 f = f_new
             self.f_k = f
 
+            self._u, self._N = np.asarray(u_kn, float), np.asarray(N_k, float)
+
         def compute_overlap(self):
-            K = len(self.f_k)
-            return {"matrix": np.eye(K), "scalar": 0.5, "eigenvalues": np.ones(K)}
+            # D-113: the real MBAR definition, O_ij = sum_n W_ni W_nj N_j (W = per-sample weights in each state)
+            f, u, N = np.asarray(self.f_k, float), self._u, self._N
+            a = np.log(N)[:, None] + f[:, None] - u
+            m = a.max(0)
+            log_den = m + np.log(np.exp(a - m).sum(0))
+            W = np.exp(f[:, None] - u - log_den).T                      # (n_samples, K)
+            O = (W.T @ W) * N[None, :]
+            ev = np.sort(np.linalg.eigvals(O).real)[::-1]
+            return {"matrix": O, "scalar": float(1.0 - ev[1]), "eigenvalues": ev}
 
     mod = types.ModuleType("pymbar")
     mod.MBAR = MBAR
@@ -143,3 +153,27 @@ def test_timing_and_solver_info_reach_the_quality_report(monkeypatch):
     sol = res.quality["solver"]
     assert sol["bootstrap_warm_start"] is True and sol["bootstrap_success"] == 3
     assert set(sol["timing_s"]) == {"base_solve", "bootstrap_total", "per_replicate"}
+
+
+def test_mbar_overlap_matrix_reaches_the_quality_report(monkeypatch):
+    """D-113: the matrix mbar_pmf_1d computes is kept (it used to be dropped) and feeds the assessment."""
+    from md20.sampling.assessment import assess_pmf
+    monkeypatch.setitem(sys.modules, "pymbar", _fake_pymbar([]))
+    res = pmf_from_windows(_windows(lo=0.2, hi=0.6), force_constant_kj_mol_nm2=1000.0, temperature_k=300.0, n_bootstrap=0)
+    mo = res.quality["mbar_overlap"]
+    M = np.asarray(mo["matrix"])
+    assert M.shape == (len(mo["centers_nm"]),) * 2 and np.allclose(M.sum(1), 1.0, atol=1e-3)   # rows of O sum to 1
+    assert mo["min_adjacent"] > 0.03 and 0 < mo["scalar"] <= 1
+    a = assess_pmf({"method": res.method, "quality": res.quality})
+    assert next(d for d in a["diagnostics"] if d["id"] == "mbar_overlap")["status"] == "pass"
+
+
+def test_mbar_overlap_flags_a_gap_the_estimator_cannot_bridge(monkeypatch):
+    from md20.sampling.assessment import assess_pmf
+    monkeypatch.setitem(sys.modules, "pymbar", _fake_pymbar([]))
+    w = _windows(lo=0.2, hi=0.6)
+    gap = {c: (x + 0.5 if c > 0.41 else x) for c, x in w.items()}      # the upper half shifted 0.5 nm away: no overlap
+    res = pmf_from_windows(gap, force_constant_kj_mol_nm2=1000.0, temperature_k=300.0, n_bootstrap=0)
+    assert res.quality["mbar_overlap"]["min_adjacent"] < 0.03
+    a = assess_pmf({"method": res.method, "quality": res.quality})
+    assert next(d for d in a["diagnostics"] if d["id"] == "mbar_overlap")["status"] == "fail"

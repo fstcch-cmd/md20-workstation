@@ -22,7 +22,7 @@
 | A4 | `analysis/traj.py:145,178`（`stays_bound` = 末 20% RMSD < 3 Å，參考為第一個 production 幀）；`figure_text.py:248` `classify_rmsd`（apo/holo 差 0.3 Å →「配體讓蛋白更穩定」；< 2 Å 平台→「已平衡」） | 單一 RMSD 門檻同時決定「仍結合」、「穩定」、「平衡」 | **確認缺陷** | 過度解讀 | **部分修**：新增 `ligand_state`（姿勢保留／姿勢改變但留在口袋／有離開證據／未知；結合接觸與 COM），寫明 RMSD 參考是第一個 production 幀；apo/holo 與「已平衡」的圖說改為描述性。`stays_bound` 欄位保留（相容）但報告不再用它下結論。約束實際出力的時間比例**未做**（需要 production 期間的力紀錄） |
 | A5 | `report/chem.py:66–85` `pose_contacts`；`analysis/extended.py:283–316` fingerprint、`:318–333` water bridges | 配體任何 N/O 靠近帶電殘基原子＝ionic（不看配體官能基電荷）；靜態 N/O ≤ 3.5 Å＝hbond；指紋只保留一個「最強」類別（ionic > polar > hydrophobic）；沒有水時 water bridge 輸出全 0 | **確認缺陷** | 同號電荷被叫鹽橋；距離被叫氫鍵；並存互作被蓋掉；缺資料變成「0 個水橋」 | **已修**（分析層）：`analysis/interactions.py` 統一的化學判定（殘基質子化狀態決定蛋白電荷、配體電荷只接受原子層級的正負號，不知道就是 unknown）；鹽橋／同號接近／帶電接近（配體電荷未知）分開；距離只叫「極性接近」；多標籤；水資料缺→`unavailable`。`pose_contacts` 改用同一規則。**未做**：建模時把配體每個原子的形式電荷寫進 manifest（需 RDKit，交 CI 驗證）——在那之前配體電荷一律 unknown，所以不會出現任何配體鹽橋結論 |
 | A6 | `analysis/traj.py:148–155`；`analysis/extended.py:293–295` | 只保留第一幀 1.2 nm 內的原子對 | **確認缺陷** | 後來形成的接觸永遠看不到，會假裝成接觸流失 | **已修**：`interactions.dynamic_pairs` 每個區塊（chunk）重新做完整鄰居搜尋（含三斜盒的最小映像），候選集合是所有幀的聯集；殘基鍵含 chain、resSeq、插入碼。`traj.compute_metrics` 與 fingerprint 改用它 |
-| A7 | `docking/poses.py:129–146`；`workflow.py:828–840`、`:903` `_least_risk_joint_pose` | 無推薦時用最低風險 fallback；拒絕理由是自由文字，沒有區分「可修幾何」與「假設改變」 | **確認缺陷**（設計層） | fallback 可能繞過共同佔據假設的拒絕理由 | **未修**（本輪延後）：需要結構化 reason code 與原始拒絕理由保留，牽涉 D-60/D-92 流程；列入下一輪 |
+| A7 | `docking/poses.py:129–146`；`workflow.py:828–840`、`:903` `_least_risk_joint_pose` | 無推薦時用最低風險 fallback；拒絕理由是自由文字，沒有區分「可修幾何」與「假設改變」 | **確認缺陷**（設計層） | fallback 可能繞過共同佔據假設的拒絕理由 | **已修（D-98）**：結構化 reason code（見 §5 第 1 項）；原文「未修（本輪延後）」保留於 git 歷史 |
 | A8 | `sampling/binding.py::radial_pmf`；`sampling/multi.py::cooperativity` | 全域最小值即結合態；共同佔據系統裡拉不同配體的結果可互相排名；ΔPMF 差與循環閉合被當協同證據 | **方法限制＋確認缺陷** | 把路徑／anchor／旁觀配體相依的量當內在親和力 | **部分修**：multi 情境只輸出「特定共同佔據條件下的拉離結果」，不排名；共同佔據位移與協同性需雙方都通過評估，用語改為「條件差異，不是協同證據」；每個結果帶條件簽章（CV、anchor 來源、骨架約束、旁觀配體與保持限制、溫度），簽章不同不比較。結合／未結合盆地的事前定義、bulk 無接觸檢查、標準態校正**未做**（漏斗約束規格仍是設計中） |
 | A9 | `workflow.py:1660` `md_runs[i % len(md_runs)]`；`multi.py:295` 文字固定寫「MD 起點都不同」 | SMD replica 數 > MD replica 數時循環重用同一個 MD 終點，但文字仍宣稱獨立起點；research tier 的「≥ 3 replica」也用 SMD 數 | **確認缺陷** | 三個 SMD 種子被當三個獨立平衡起點 | **已修**：每個 replica 記錄 `md_run_id`、seed、起點檔；彙總分開「共用起點的隨機拉離次數」與「獨立 MD 起點數」；文字依實際情況；tier 規則改看獨立起點數 |
 | A10 | `report/workflow_report.py:1385–1389`（`key[:10]`）、`:1389–1390`（decisions 只用 stage 前綴過濾）；`util/decisions.py`（無 workflow 欄位） | 同一專案多個流程的決策混在一起；重點摘要截前 10 條 | **確認缺陷** | 出處污染；後來的嚴重 PMF 問題可能被截掉 | **已修**：DecisionLog 寫入帶 `workflow`；報告只取本流程，舊紀錄（無歸屬）另列「歸屬不明」而不猜；摘要去重後 caution 全部保留，其他依序補到 10 條 |
@@ -72,6 +72,7 @@ A5/A6/F07/F08/F09/A4/A12 已實作（純 Python，容器可測；真實 mdtraj �
   - `histogram_coverage`（池化直方圖連續；local）
   - `adjacent_overlap_min`（相鄰窗口最小重疊；local，**不**決定連通性）
   - `overlap_graph`（全部窗口對的重疊圖是否連通；global；優先用 MBAR 品質報告的 `graph_connected`，否則用直方圖重疊矩陣）
+  - `mbar_overlap`（D-113；MBAR 估計器 overlap matrix 的全窗口對連通性，邊 ≥ 0.03；WHAM 估計沒有矩陣 → unknown 但**不擋**；有矩陣且不連通 → 擋 path-specific 與 ΔG°；與 `overlap_graph` 結論不同時列為 conflict）
   - `window_ess`（每窗口時間相關有效樣本數最小值；與 MBAR 權重 ESS 不同，名稱寫明）
   - `solver`（MBAR／WHAM 是否收斂）
   - `half_split`（前後半 ΔPMF 差）
@@ -80,7 +81,7 @@ A5/A6/F07/F08/F09/A4/A12 已實作（純 Python，容器可測；真實 mdtraj �
   - `range_coverage`（PMF 是否涵蓋取樣範圍）
 - 缺欄位一律 `unknown`，**不視為通過**。
 - 資格：`delta_pmf_curve`（診斷曲線永遠可顯示）、`delta_pmf_path_specific`（所有必要診斷 pass）、`dG_standard`（再加上 ΔG° 沒被撤回）、`affinity_ranking`（只有 ΔG° 合格才可能）。
-- 門檻集中在 `THRESHOLDS`（帶版本 `2026-11-07.1` 與每項來源說明），可由 config 覆寫；不是普遍定律。
+- 門檻集中在 `THRESHOLDS`（帶版本 `2026-11-07.2`（D-113 新增 `mbar_overlap_edge_min`；原為 `2026-11-07.1`） 與每項來源說明），可由 config 覆寫；不是普遍定律。
 
 ### 3.2 比較（`sampling/multi.py`）
 - `compare_binding`：只用 `assessment.eligibility` 合格者；舊結果沒有 assessment →「待重新分析」；單獨情境：ΔG° 全部合格才做 ΔΔG°，否則 ΔPMF 只在路徑特定合格且條件簽章一致時列順序，用語「沿各自拉離路徑的井深較深／較淺，不是內在親和力」，不出現「最強」；multi 情境一律 `DESCRIPTIVE`（列值，不排名）。

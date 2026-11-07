@@ -85,6 +85,16 @@ def pmf_from_windows(samples_by_center: dict[float, np.ndarray], *, force_consta
     # underflow to zero, so the PMF is NaN past them and the curve silently stops (laptop 3PTB: sampled to 1.72 nm,
     # PMF ended at 0.50 nm, "ΔPMF" was the edge value).  Then WHAM on the same samples is used if it covers the range.
     need_lo, need_hi = pmf_span_needed(eq_lists)
+    # D-113: keep the MBAR estimator's own overlap matrix (computed by mbar_pmf_1d, previously dropped here).  It is a
+    # property of the samples + f_k, so it is kept even when WHAM later replaces a truncated MBAR curve (noted).
+    ovm = base.get("overlap_matrix")
+    if ovm is not None and str(base.get("method", "")).startswith("PyMBAR"):
+        M = np.asarray(ovm, dtype=float)
+        adj = [float(M[i, i + 1]) for i in range(M.shape[0] - 1)] if M.ndim == 2 and M.shape[0] > 1 else []
+        quality["mbar_overlap"] = {"matrix": np.round(M, 4).tolist(), "centers_nm": [float(c) for c in centers],
+                                   "min_adjacent": (round(min(adj), 4) if adj else None),
+                                   "scalar": (float(base["mbar_overlap_scalar"]) if base.get("mbar_overlap_scalar") is not None
+                                              else None)}
     cov = pmf_coverage(base, need_lo, need_hi)
     if not cov["ok"] and str(base.get("method", "")).startswith("PyMBAR"):
         wb = mdh.bootstrap_pmf_1d(eq_lists, centers, k, temperature_k, bins=bins,
@@ -95,6 +105,8 @@ def pmf_from_windows(samples_by_center: dict[float, np.ndarray], *, force_consta
                                     "replaced_by": "WHAM" if wcov["ok"] else None, "wham_finite_nm": wcov["finite_nm"]}
         if wcov["ok"]:
             base = wb
+            if "mbar_overlap" in quality:
+                quality["mbar_overlap"]["note"] = "PMF from WHAM (MBAR curve truncated); matrix is from the MBAR solve"
     grid = np.asarray(base["grid_nm"], dtype=float)
     pmf = np.asarray(base["pmf_kj_mol"], dtype=float)
     lo, hi = np.asarray(base.get("ci95_low_kj_mol"), dtype=float), np.asarray(base.get("ci95_high_kj_mol"), dtype=float)

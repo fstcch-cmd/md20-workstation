@@ -93,3 +93,42 @@ def test_graph_connected_helper():
     assert graph_connected([[1, 0.1, 0], [0.1, 1, 0.1], [0, 0.1, 1]], 0.05) is True
     assert graph_connected([[1, 0.0], [0.0, 1]], 0.05) is False
     assert graph_connected([[1]], 0.05) is None
+
+
+# ---------------------------------------------------------------- D-113: MBAR overlap matrix
+def _mbar(n=5, weak=None):
+    M = [[0.6 if i == j else (0.2 if abs(i - j) == 1 else 0.0) for j in range(n)] for i in range(n)]
+    if weak is not None:
+        M[weak][weak + 1] = M[weak + 1][weak] = 0.005
+    return {"matrix": M, "min_adjacent": min(M[i][i + 1] for i in range(n - 1)), "scalar": 0.1}
+
+
+def test_mbar_overlap_absent_is_unknown_and_does_not_block():
+    a = assess_pmf(_good())                       # WHAM-like: no MBAR matrix stored
+    assert _st(a, "mbar_overlap") == "unknown" and a["eligibility"]["delta_pmf_path_specific"]
+    assert "mbar_overlap" in a["unknown"]
+
+
+def test_mbar_overlap_connected_passes():
+    p = _good()
+    p["quality"]["mbar_overlap"] = _mbar()
+    a = assess_pmf(p)
+    assert _st(a, "mbar_overlap") == "pass" and a["eligibility"]["dG_standard"]
+
+
+def test_mbar_overlap_disconnected_blocks_even_when_histograms_look_fine():
+    p = _good()
+    p["quality"]["mbar_overlap"] = _mbar(weak=2)
+    a = assess_pmf(p)
+    assert _st(a, "overlap_graph") == "pass" and _st(a, "mbar_overlap") == "fail"
+    assert not a["eligibility"]["delta_pmf_path_specific"] and not a["eligibility"]["affinity_ranking"]
+    assert any("MBAR overlap" in c for c in a["conflicts"]) and "mbar_overlap: fail" in a["reasons"]
+
+
+def test_mbar_overlap_bridged_by_non_adjacent_pair_is_connected():
+    """D-43 rule: refined/stiff windows can overlap with a non-neighbour; connectivity uses every pair."""
+    p = _good()
+    m = _mbar(weak=1)
+    m["matrix"][1][3] = m["matrix"][3][1] = 0.05
+    p["quality"]["mbar_overlap"] = m
+    assert _st(assess_pmf(p), "mbar_overlap") == "pass"

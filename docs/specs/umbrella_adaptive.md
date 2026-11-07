@@ -87,6 +87,7 @@ WHAM 與 MBAR 改為接受**每個 window 各自的 k**（`_mdh_legacy._k_column
 
 ## 8. 想請審查者回答
 1. 目標重疊 0.2、斷點門檻「中位數 10%」是否合理？有沒有更好的連續性判準（例如以 MBAR 的 overlap matrix 特徵值）？
+   - **部分回答（D-113，2026-11-07）**：PMF 品質評估加入 MBAR 估計器自己的 overlap matrix（`quality["mbar_overlap"]`：矩陣、相鄰最小值、pymbar overlap scalar＝1−λ₂）。連通判準用全窗口對、邊門檻 0.03（Klimovich、Shirts、Mobley 2015）；有矩陣而不連通 → 擋 path-specific ΔPMF 與 ΔG°。補窗本身（目標 0.2、斷點門檻）仍用直方圖重疊，未改。特徵值只記錄、不設門檻（無公認數值）。
 2. k 的選擇規則 k ≥ slope²/(4kT)（漂移 ≤ 2σ）是否有更好的理論依據？是否應改成依 F″ 估計（需要三個以上 window）？
 3. 中心預偏移：自動 ≤1σ、手動 ≤3σ 的上限是經驗值；有沒有更穩的作法（例如以前一輪的 μ(c) 關係做局部線性反解）？
 4. 延長 window 時是否應重新做 equilibration detection？

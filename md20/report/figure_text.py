@@ -1279,6 +1279,7 @@ _DIAG_NAME = {
     "histogram_coverage": ("直方圖涵蓋", "histogram coverage", "ヒストグラムの範囲", "히스토그램 범위"),
     "adjacent_overlap_min": ("相鄰窗口重疊", "adjacent-window overlap", "隣接ウィンドウの重なり", "이웃 윈도우 겹침"),
     "overlap_graph": ("全窗口重疊圖連通", "full overlap-graph connectivity", "全ウィンドウ重なりグラフの連結", "전체 겹침 그래프 연결"),
+    "mbar_overlap": ("MBAR 重疊矩陣連通", "MBAR overlap-matrix connectivity", "MBAR 重なり行列の連結", "MBAR 겹침 행렬 연결"),
     "window_ess": ("每窗口有效樣本數", "per-window effective samples", "ウィンドウごとの有効サンプル数", "윈도우별 유효 표본 수"),
     "solver": ("求解收斂", "solver convergence", "ソルバーの収束", "솔버 수렴"),
     "half_split": ("前後半一致", "half-split agreement", "前半後半の一致", "전후반 일치"),

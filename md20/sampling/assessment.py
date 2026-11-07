@@ -21,10 +21,12 @@ from typing import Iterable
 import numpy as np
 
 SCHEMA = "md20.assessment.pmf/1"
-THRESHOLDS_VERSION = "2026-11-07.1"
+THRESHOLDS_VERSION = "2026-11-07.2"
 THRESHOLDS = {
     "overlap_edge_min": (0.03, "edge of the window-overlap graph when only the histogram matrix is stored; same order "
                                "as the MBAR quality report's minimum_overlap (D-43); empirical"),
+    "mbar_overlap_edge_min": (0.03, "edge of the MBAR overlap-matrix graph (every window pair, D-43); off-diagonal "
+                                    "≥ 0.03 as recommended by Klimovich, Shirts & Mobley 2015 (J Comput Aided Mol Des 29:397)"),
     "window_ess_min": (100.0, "umbrella_quality(min_effective_samples=100) default (D-43); time-correlation ESS, not "
                               "MBAR weight ESS"),
     "half_split_max_kj": (2.0, "D-58 half-split rule (≈ 0.8 kT at 300 K); empirical"),
@@ -125,6 +127,17 @@ def assess_pmf(pmf: dict | None, *, dG_withheld: str | None = None, has_dG: bool
         method = "overlap graph over every window pair (histogram overlap matrix)"
     diags.append(_diag("overlap_graph", method, "global", UNKNOWN if gc is None else (PASS if gc else FAIL), value=gc,
                        threshold=_thr(thresholds, "overlap_edge_min"), source=_src(thresholds, "overlap_edge_min")))
+    # D-113: the MBAR estimator's own overlap matrix (stored from D-113 on).  WHAM has none → unknown, which does NOT
+    # block (otherwise every WHAM PMF would be blocked); a stored matrix whose graph is disconnected DOES block.
+    mo = q.get("mbar_overlap") if isinstance(q.get("mbar_overlap"), dict) else None
+    mgc = graph_connected(mo["matrix"], _thr(thresholds, "mbar_overlap_edge_min")) if mo and mo.get("matrix") is not None else None
+    diags.append(_diag("mbar_overlap", "MBAR overlap matrix: graph over every window pair connected", "global",
+                       UNKNOWN if mgc is None else (PASS if mgc else FAIL),
+                       value=None if mo is None else {"connected": mgc, "min_adjacent": mo.get("min_adjacent"),
+                                                      "scalar": mo.get("scalar")},
+                       threshold=_thr(thresholds, "mbar_overlap_edge_min"), source=_src(thresholds, "mbar_overlap_edge_min"),
+                       note=("no MBAR matrix (WHAM estimate or result written before D-113); not required"
+                             if mo is None else mo.get("note"))))
     ess = _window_ess(q)
     diags.append(_diag("window_ess", "smallest per-window effective sample count (statistical inefficiency, after "
                                      "equilibration detection)", "global",
@@ -168,6 +181,8 @@ def assess_pmf(pmf: dict | None, *, dG_withheld: str | None = None, has_dG: bool
     failed = [d["id"] for d in diags if d["status"] == FAIL]
     unknown = [d["id"] for d in diags if d["status"] == UNKNOWN]
     req_bad = [i for i in REQUIRED_PATH if by[i]["status"] != PASS]
+    if by["mbar_overlap"]["status"] == FAIL:          # D-113: required when the matrix exists
+        req_bad.append("mbar_overlap")
     adequate = None if (not failed and any(i in unknown for i in REQUIRED_PATH)) else (not req_bad)
     conflicts = []
     for loc in ("histogram_coverage", "adjacent_overlap_min"):
@@ -175,6 +190,9 @@ def assess_pmf(pmf: dict | None, *, dG_withheld: str | None = None, has_dG: bool
             conflicts.append(f"{loc} passes locally but the full overlap graph is disconnected")
     if by["adjacent_overlap_min"]["status"] == FAIL and by["overlap_graph"]["status"] == PASS:
         conflicts.append("adjacent_overlap_min fails locally but other windows bridge the gap: the full graph is connected")
+    if by["overlap_graph"]["status"] == PASS and by["mbar_overlap"]["status"] == FAIL:
+        conflicts.append("histogram overlap graph is connected but the MBAR overlap matrix is not: the estimator cannot "
+                         "transfer weight between some windows")
     if by["half_split"]["status"] == PASS and by["cumulative_drift"]["status"] == FAIL:
         conflicts.append("half_split passes but the cumulative estimates are still drifting")
     if by["cumulative_drift"]["status"] == PASS and by["half_split"]["status"] == FAIL:
