@@ -145,7 +145,7 @@ def plan_refinement(samples: dict[float, np.ndarray], ks: dict[float, float] | f
                     target_overlap: float = 0.2, min_effective_samples: float = 100.0, k_max: float = 5000.0,
                     max_new_per_round: int = 12, max_total_windows: int = 60, discard_fraction: float = 0.1,
                     cv_range: tuple[float, float] | None = None, extensions_done: dict[float, int] | None = None,
-                    max_extensions: int = 2) -> RefinePlan:
+                    max_extensions: int = 2, recorder=None) -> RefinePlan:
     """One refinement round.  `samples`: {centre: CV samples (nm)}; `ks`: {centre: k} or one k (kJ/mol/nm²).
     `extensions_done`: {centre: times already extended}; after `max_extensions` a window with few effective samples
     is reported in `notes` (a wider error bar) instead of being extended for ever — otherwise correlated CVs kept
@@ -334,6 +334,11 @@ def plan_refinement(samples: dict[float, np.ndarray], ks: dict[float, float] | f
     plan.redundant = sorted(set(plan.redundant))
     if plan.redundant:
         plan.notes.append(f"{len(plan.redundant)} 個 window 的取樣與鄰居幾乎重合（多餘）；該段之後以提高 k 取代加 window。")
+    if recorder is not None:
+        try:
+            recorder(plan)
+        except Exception:  # noqa: BLE001  (a side-record must never change or break planning)
+            pass
     return plan
 
 
