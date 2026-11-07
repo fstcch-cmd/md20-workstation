@@ -18,6 +18,7 @@ T = {
     "compare": ("系統之間的比較", "Comparison between systems", "系どうしの比較", "계 사이 비교"),
     "kinetics": ("慢運動與馬可夫模型", "Slow motions and Markov model", "遅い運動とマルコフモデル", "느린 운동과 마르코프 모델"),
     "binding": ("結合自由能", "Binding free energy", "結合自由エネルギー", "결합 자유 에너지"),
+    "auto": ("自動補窗", "Automatic window refinement", "自動補窓", "자동 윈도우 보충"),
 }
 R = {
     "not_recorded": ("沒有紀錄", "not recorded", "記録なし", "기록 없음"),
@@ -34,6 +35,10 @@ R = {
                        "가장 느린 과정이 계산의 3분의 1보다 김"),
     "msm_exploratory": ("單一軌跡，只能探索", "one trajectory: exploratory only", "1 本のトラジェクトリ：探索的", "궤적 하나: 탐색적"),
     "dg_withheld": ("ΔG° 不輸出", "ΔG° withheld", "ΔG° は出力しない", "ΔG° 출력 안 함"),
+    "auto_unsamplable": ("補不起來，k 已到上限，見斷點", "could not be filled, k at its limit, see the breaks",
+                         "埋められない：k が上限、途切れを参照", "채울 수 없음: k가 상한, 끊김 참조"),
+    "auto_open": ("補窗後仍有斷點", "breaks remain after refinement", "補窓の後も途切れが残る", "보충 후에도 끊김이 남음"),
+    "auto_incomplete": ("補窗尚未完成", "refinement not finished", "補窓が未完了", "보충이 끝나지 않음"),
     "not_selected": ("沒有選出姿勢", "no pose selected", "ポーズが選ばれていない", "포즈가 선택되지 않음"),
 }
 
@@ -109,6 +114,10 @@ def evidence_rows(wf) -> list[dict]:
             rows[-1]["detail"] = r.get("dG_withheld")
         else:
             rows.append(_row("binding", t, True, True, "supported"))
+        if r.get("status") == "PASS":          # D-122 (F17): what the automatic refinement did, from the run's own files
+            from . import auto_actions as AA
+            st_, why_, done_ = AA.evidence_status(AA.summarize(AA.result_dir(r)))
+            rows.append(_row("auto", t, True, done_, st_, why_))
     return rows
 
 

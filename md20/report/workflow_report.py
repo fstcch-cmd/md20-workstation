@@ -1256,7 +1256,28 @@ def _binding_figures(doc: Doc, name: str, r: dict) -> str:
                                 FT.classify_pmf(g, W, err, name) + FT.classify_assessment(name, asm), name)
     elif figs.get("pmf"):
         out += doc.figure_block(figs["pmf"]["png"], "pmf", [], name)
+    out += _auto_actions_html(doc, name, r)
     return out
+
+
+def _auto_actions_html(doc: Doc, name: str, r: dict) -> str:
+    """D-122 (F17): the automatic window refinement of one binding calculation — a table (action, cost, effect per round),
+    one summary sentence, and the proposals it dropped.  Read from the run's own files; a missing record is said so."""
+    from . import auto_actions as AA
+    L = doc.lang
+    s = AA.summarize(AA.result_dir(r))
+    out = f"<h4>{_esc(name)}{colon(L)}{_esc(tx(AA.HEAD['title'], L))}</h4>"
+    out += f"<p>{_esc(AA.summary_sentence(s, L))}</p>"
+    if s["outcome"] == "no_record":
+        return out
+    t = AA.table(s, L)
+    body = [[_esc(rd), "<br>".join(_esc(x) for x in act), _esc(cost), "<br>".join(_esc(x) for x in eff)] for rd, act, cost, eff in t["rows"]]
+    if body:
+        out += doc.table(t["headers"], body, AA.HEAD["caption"], {2})
+    sk = AA.skipped_lines(s, L)
+    if sk:
+        out += f"<p><b>{_esc(tx(AA.HEAD['skipped_title'], L))}</b></p><ul>" + "".join(f"<li>{_esc(x)}</li>" for x in sk) + "</ul>"
+    return out + f"<p class=muted>{_esc(tx(AA.HEAD['note'], L))}</p>"
 
 
 def _smd_contacts_for(r: dict, bdir) -> dict:
