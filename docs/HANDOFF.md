@@ -5,7 +5,16 @@
 
 ## 0. 新 session 第一步
 
-> **2026-11-07 第二次交接（session_016gcJzASwmZ7ZUPX5BewTyo）。** 本地 HEAD **`99c233f`**，決策到 **D-97**，**未 push、未發行**（依使用者指示）。本 session 做了整合規格（`MD20_Claude_Code_Master_Iteration_Prompt_EN.md`）的 P0 兩批：
+> **2026-11-07 第二次交接（session_016gcJzASwmZ7ZUPX5BewTyo）。** 已 push 到 main，HEAD **`ba4d7da`**，決策到 **D-97**，**未發行**。本 session 做了整合規格（`MD20_Claude_Code_Master_Iteration_Prompt_EN.md`）的 P0 兩批：
+>
+> **接手第一件事：確認 `ba4d7da` 的 CI（run `42330665732`）。**
+> - `gh api "repos/fstcch-cmd/md20-workstation/actions/runs/42330665732/jobs?per_page=60" --jq '.jobs[]|[.name,.status,(.conclusion//"-")]|@tsv'`
+> - 期待：pure-python 六個綠（前一輪 `2979908` 因 `from tests.` import bug 全紅，已於 `ba4d7da` 修正）；openmm-stack 三 OS 的真實 mdtraj 路徑（新 fingerprint／ligand_state／動態接觸／persistence／`run_binding` assessment）。**D-95 的安裝步驟已在 `2979908` 確認成功**（「Install md20」step success），不必再擔心 openmmforcefields 撤回。
+> - 若 openmm-stack 紅，先用單次 `gh api .../jobs/<id>/logs` 看是真實數值問題還是環境問題，別跑輪詢。
+>
+> **待使用者授權（下次開機可問）：** ① a18 安裝程式重新發行（install.ps1/sh 已含 D-95 釘選，但已上架的 a18 zip 是舊的，學生新安裝才會成功）；② 下一批要先做哪個（A7/A8/A11、P1A 自動行動迴圈、或 F19 MM/GBSA pilot——F19 需計算預算授權）。
+>
+> **本 session 做的（P0 兩批）：**
 > - **D-95**：發現 `5561dd7` CI 紅燈真正原因是 **openmmforcefields 0.15.1 在 PyPI 被上游撤回**（唯一版本，理由「Missing deps」），不是前次判斷的 infra flake。CI 三處＋安裝程式兩處改成 `==0.15.1`。**a18 安裝程式新安裝也會壞**，修好需重新發行。
 > - **D-96**：A1/A2（執行狀態／科學評估／比較資格分開，`sampling/assessment.py`）、A9（replica 起點語意）、A3（結構限制不算修正）、A10（決策依流程分開、摘要不截斷）。
 > - **D-97**：A5（互作化學統一，`analysis/interactions.py`）、A6（完整動態接觸）、A4（配體狀態不靠單一 RMSD）、F09/A12（互作持續性與節奏契約，`analysis/persistence.py`）、F07（初始 vs 新接觸）。

@@ -3,12 +3,16 @@
 本檔誠實分成三級:**(A) 真實跑過並通過** /（B）**寫好、靠 CI 驗證** /（C）**已知限制與未完成**。
 原則:寧可標「未驗證」，不誇大。每次 push 後，CI 會把各 OS 的測試結果貼到該 commit 的留言。
 
-## 進行中（未發行）：整合規格 P0（D-95、D-96、D-97，2026-11-07）
-本地 HEAD `99c233f`，**尚未 push、未發行**（依使用者指示）。這批是科學正確性修正，不是新 phase。
-- **(A) 真實跑過並通過**：容器內 `pytest -o addopts="" -q` → **673 passed、48 skipped**（skip 為缺 OpenMM/RDKit/mdtraj 的整合測試）。新增純 Python 測試：assessment 9、interactions 14、persistence（含在 interactions）、extended 接線 2、報告持續性 1、provenance 4、structure 1、multi-binding 6。
-- **(B) 寫好、靠 CI 驗證**：真實 mdtraj 下的新 fingerprint／ligand_state／動態接觸、`run_binding` 寫入的 assessment——只有 CI openmm-stack heavy workflow 能驗；本批未 push，CI 尚未跑。
+## 進行中（已 push、未發行）：整合規格 P0（D-95、D-96、D-97，2026-11-07）
+已 push 到 main，HEAD **`ba4d7da`**。**未發行**（a18 仍是對外版本）。這批是科學正確性修正，不是新 phase。
+- **(A) 真實跑過並通過**：容器內 `pytest -o addopts="" -q` → **673 passed、48 skipped**。新增純 Python 測試：assessment 9、interactions/persistence 14、extended 接線 2、報告持續性 1、provenance 4、structure/multi-binding 多項。
+- **(B) CI 驗證狀態（2026-11-07）**：
+  - **D-95 已由 CI 確認**：openmm-stack（ubuntu）的「Install md20」步驟在 `2979908` **success**——釘選 `openmmforcefields==0.15.1` 後安裝成功（原本撤回版找不到的錯誤消失）。
+  - **Report template、GUI preview 在 `2979908` 綠**（D-96 合成評估資料、D-94 3D 分頁正常）。
+  - `2979908` 的 pure-python 六個 job 全紅＋openmm-stack 步驟 8 紅，原因是 `tests/test_interactions_report.py` 用了 `from tests.` 的 import（CI rootdir 無此 package），collection 失敗；**已於 `ba4d7da` 修正**（改 `from test_report_v2`，與 `test_report_subsystems` 同慣例），本地以 CI 方式（`pytest tests/<file>.py`）重驗通過。
+  - **新 run `42330665732`（`ba4d7da`）進行中**：下一個 session 要確認 pure-python 六個轉綠、openmm-stack 三 OS 的真實 mdtraj 路徑（新 fingerprint／ligand_state／動態接觸／persistence／`run_binding` 寫入的 assessment）。查法見 HANDOFF §0。
 - **(C) 已知限制／未完成**：A7（docking fallback reason code）、A8（PMF 參考態／漏斗約束）、A11（跨系統 PCA 共同基底）仍待做；配體原子形式電荷未寫入 build manifest（在那之前配體不判鹽橋，只標「帶電接近，配體電荷未知」）；F19 MM/GBSA pilot 未開始。詳見 `docs/specs/master_iteration_2026-11-07.md` §5。
-- **D-95 的 CI/安裝程式修正尚未驗證**：需使用者授權 push 才能讓 CI 確認 `openmmforcefields==0.15.1` 的釘選。
+- **a18 安裝程式需重新發行**：install.ps1/sh 已含 D-95 釘選，但已發行的 a18 zip 仍是舊的；學生新安裝要能成功需重新發行（待使用者授權）。
 
 ## 目前版本：v0.1.0a18（2026-11-04 發行，新功能為初步）
 - 拉離路徑判定修正（貼著的鄰居不再算擋路）、「只做 MD」真的停下結合自由能、閘門加「只算單獨結合」與「指定 anchor 殘基」（D-93）。**測試過**：純 Python（5 項新測試）；以筆電 hsieh2024 的 topology.pdb 重算路徑：原方向淨空。**沒測過**：筆電上 URI 的實際 SMD／PMF；「連線丟失」是否消失（reconnect_timeout 180 秒）。
