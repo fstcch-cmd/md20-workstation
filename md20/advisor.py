@@ -19,6 +19,8 @@ import math
 from dataclasses import dataclass, field, asdict
 
 from .engine.protocol import TIERS
+from .engine.restraint_advice import (RestraintInputs, advise as _advise_restraints, rough_reasons as _rough_reasons,
+                                      resolution_from_pdb, plddt_low_fraction_from_pdb)
 
 METALS = {"ZN", "MG", "CA", "MN", "FE", "FE2", "CU", "CU1", "CO", "NI", "CD", "HG"}
 from .i18n import LANGS, pick as tx   # noqa: E402,F401  (D-74: zh, en, ja, ko)
@@ -62,6 +64,13 @@ class CaseFeatures:
     bench_atoms: int = 24000
     bench_dt_fs: float = 4.0
     gpu: bool | None = None
+    # restraint advice inputs (D-118); None = not known
+    has_ligand: bool = True                # False = apo run
+    membrane: bool = False
+    resolution_a: float | None = None      # crystal resolution, from the PDB header
+    plddt_low_fraction: float | None = None   # share of residues with pLDDT < 70 (predicted models)
+    n_rebuilt_residues: int | None = None  # residues added by a loop rebuild (build manifest)
+    n_pose_clashes: int | None = None      # clashes in the docked pose (docking result)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -214,6 +223,8 @@ def features_from_config(cfg: dict, *, receptor_text: str | None = None, doctor:
     pol = cfg.get("metal_policy") or {}
     f.bonded_metals = sorted(k for k, v in pol.items() if str(v).lower() == "bonded") if isinstance(pol, dict) else []
     b = cfg.get("box") or {}
+    f.has_ligand = bool(ligs)
+    f.membrane = bool((cfg.get("md") or {}).get("membrane"))
     f.box_from_site = bool(b.get("from_residue") or b.get("site_residues"))
     f.box_size = list(b["size"]) if b.get("size") else None
     rec = cfg.get("receptor") or {}
@@ -224,6 +235,8 @@ def features_from_config(cfg: dict, *, receptor_text: str | None = None, doctor:
         f.n_residues = n or None
         f.metals = sorted(set(f.metals) | (set(metals) & keep))
         f.has_gaps = gaps
+        f.resolution_a = resolution_from_pdb(receptor_text) if f.structure_source == "crystal" else None
+        f.plddt_low_fraction = plddt_low_fraction_from_pdb(receptor_text) if f.structure_source == "model" else None
     doctor = doctor or {}
     bench = doctor.get("benchmark") or {}
     if bench.get("ns_per_day"):
@@ -238,6 +251,27 @@ def features_from_config(cfg: dict, *, receptor_text: str | None = None, doctor:
 
 
 # ----------------------------------------------------------------------------------- recommendations
+def restraint_inputs(f: CaseFeatures, goal: str = "teaching", values: dict | None = None) -> RestraintInputs:
+    """Case features, goal and the values in the form -> the inputs of the restraint advice (D-118)."""
+    values = values or {}
+    return RestraintInputs(has_ligand=f.has_ligand, ligand_kind=f.ligand_kind,
+                           simultaneous_ligands=f.n_ligands > 1 and f.docking_mode == "simultaneous",
+                           membrane=f.membrane, metals=list(f.metals), bonded_metals=list(f.bonded_metals),
+                           structure_source=f.structure_source, resolution_a=f.resolution_a,
+                           plddt_low_fraction=f.plddt_low_fraction, has_gaps=f.has_gaps,
+                           n_rebuilt_residues=f.n_rebuilt_residues, n_pose_clashes=f.n_pose_clashes,
+                           target="smd" if (goal == "binding" or f.binding) else "md",
+                           tier=values.get("tier") or {"teaching": "classroom", "screening": "teaching", "binding": "teaching",
+                                                       "publication": "research"}.get(goal, "teaching"),
+                           production_ns=values.get("production_ns"), current=values.get("restraints"))
+
+
+def restraint_advice(f: CaseFeatures, goal: str = "teaching", values: dict | None = None, lang: str = "en") -> dict:
+    """Advice on the restraint release (D-118, spec restraints_freeze_truncation 3.1).  Advice only: nothing in the config
+    or the protocol changes until the user adopts `protocol_args["restraints"]` (then it is the ordinary `md.restraints`)."""
+    return _advise_restraints(restraint_inputs(f, goal, values), lang)
+
+
 def _r(value, zh: str, en: str, ja: str, ko: str) -> dict:
     return {"value": value, "why": (zh, en, ja, ko)}
 
@@ -246,15 +280,7 @@ def _recommend_raw(f: CaseFeatures, goal: str) -> dict[str, dict]:
     goal = goal if goal in GOALS else "teaching"
     pep = f.ligand_kind in ("peptide", "mixed")
     multi_sim = f.n_ligands > 1 and f.docking_mode == "simultaneous"
-    rough_reasons = [r for r, c in ((("含金屬鍵結模型", "a bonded metal site", "結合モデルの金属部位", "결합 모델 금속 부위"),
-                                     bool(f.bonded_metals)),
-                                    (("受體是預測模型", "a predicted receptor model", "受容体が予測モデル", "예측 모델 수용체"),
-                                     f.structure_source == "model"),
-                                    (("受體有補建或封端的斷鏈", "rebuilt or capped chain breaks",
-                                      "補完またはキャップした鎖の切れ目", "보완하거나 캡을 씌운 사슬 끊김"), f.has_gaps),
-                                    (("配體是胜肽", "a peptide ligand", "ペプチドのリガンド", "펩타이드 리간드"), pep),
-                                    (("多配體同時對接", "simultaneous multi-ligand docking", "複数リガンドの同時ドッキング",
-                                      "다중 리간드 동시 도킹"), multi_sim)) if c]
+    rough_reasons = [short for _, short in _rough_reasons(restraint_inputs(f, goal))]   # one source with restraint_advice
     tier = {"teaching": "classroom", "screening": "teaching", "binding": "teaching", "publication": "research"}[goal]
     t = TIERS[tier]
     o: dict[str, dict] = {}
@@ -755,6 +781,15 @@ def check(values: dict, f: CaseFeatures, *, goal: str = "teaching", budget_hours
                       "them as restrained values.",
                       "本計算でも主鎖の拘束が残ります。RMSD と RMSF は小さく出るため、レポートでは拘束下の値として表示します。",
                       "본 계산에서도 주사슬 구속이 남습니다. RMSD와 RMSF가 낮게 나오므로 보고서에는 구속된 값으로 표시합니다."))
+    adv = restraint_advice(f, goal, v, lang)                     # D-118: advice beyond what the rules above cover
+    if adv["status"] == "advice":
+        order = ("zh", "en", "ja", "ko")
+        if adv["strategy"] != v["restraints"] and v["restraints"] in ("standard", "gentle") \
+                and not any(i["key"] == "restraints" for i in out):
+            out.append(_i("info", "restraints", *[adv["summary_all"][k] for k in order], adv["strategy"]))
+        for it in adv["items"]:
+            if it["role"] == "caution":
+                out.append(_i("warning", "restraints", *[it["text_all"][k] for k in order], adv["strategy"]))
     prod = float(v["production_ns"])
     if prod < 1:
         out.append(_i("warning", "production_ns", f"正式模擬 {prod:g} ns 只能檢查流程能不能跑，不足以判斷複合物穩定性。",

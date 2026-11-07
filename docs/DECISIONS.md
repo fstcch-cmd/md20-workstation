@@ -6,6 +6,49 @@
 ---
 
 ## 2026-11-07
+### D-118　約束策略智慧建議（`recommend_restraint_strategy`）：只建議，不改預設，不改任何實際 protocol
+- 做什麼：新純 Python 模組 `md20/engine/restraint_advice.py`（`advise(RestraintInputs, lang)`），依系統特徵回傳
+  - `strategy`（standard 或 gentle）與 `protocol_args = {"restraints": …}`，可直接交給 `make_protocol`；
+  - 各階段（nvt、npt、production）的主倍率、分組倍率 `[起, 迄]` 與長度，**直接用 `make_protocol`（膜系統再套 `membrane_protocol`）算出**，不另存一份表，所以不會和引擎分歧；
+  - 每一項理由四語（zh、en、ja、ko，欄位 `text_all`），`role` 分 reason（觸發原因）、note、caution；
+  - 與目前 `md.restraints` 的差異（逐階段逐組的 現況 → 建議，以及 NPT 長度；沒設定時視為預設 standard，並標 `current_is_default`）；
+  - 資料不足回 `status = "unavailable"` 並列出缺什麼（有無配體、受體來源、目標、tier；SMD 但沒有配體也算），不猜；
+  - `applied` 永遠是 False。`decision_entry(advice)` 只組出 DecisionLog 的參數（中文 `why`），採用時才寫，本次不接線。
+- 規則（規格 §3.1）：解析度 > 2.5 Å（剛好 2.5 不算）、預測模型、低信心區、補建或封端的斷鏈、對接姿勢有碰撞、胜肽配體、金屬鍵結模型 → gentle；其餘 standard。
+  為了和既有顧問行為一致，「多配體同時對接」也算 gentle 條件（原本就在顧問裡）。
+  - 低信心區：模型中 pLDDT < 70 的殘基比例 ≥ 10% 才算（10% 是教學用的經驗門檻，不是文獻值）。只對預測模型生效，晶體 B 因子不是 pLDDT。
+    因為約束只有主鏈、側鏈、配體三組，不能只約束某幾個殘基，所以低信心區的處理是整體放慢，並在理由裡直說。
+  - hold_backbone 只當**選項**：目標是 MD 且 production < 1 ns（沒指定長度時用 tier 預設長度）且不是預測模型或低信心區，才標 `suggested`；
+    其餘情況寫明為什麼不建議（SMD 之後主鏈約束讓口袋無法重排；預測主鏈的誤差會被固定；夠長的 production 不該靠約束壓低 RMSD）。
+    現行設定已是 hold_backbone 卻遇到 SMD 或預測模型 → warning。
+  - 膜系統：groups 會多 `lipid_head`（來自 `membrane_protocol`），加註「由膜流程自動加入，不屬於本建議」。apo：註明配體組沒有作用對象。
+  - 永遠附一則說明：不建議為省時間而凍結（OpenMM 對凍結原子照算力，規格 §2），口袋截斷是科學模型變更，不提供。
+  - 可選資料沒給時不猜，列在 `not_considered`（晶體沒有解析度、模型沒有 pLDDT、尚未有對接姿勢）。
+- 接進顧問（`md20/advisor.py`）：
+  - `CaseFeatures` 加選填欄位 `has_ligand`（預設 True）、`membrane`、`resolution_a`、`plddt_low_fraction`、`n_rebuilt_residues`、`n_pose_clashes`；
+    `features_from_config` 從設定與受體 PDB 文字填入有的（REMARK 2 解析度、預測模型的 CA B 因子）。
+  - 新函式 `restraint_inputs`、`restraint_advice(f, goal, values, lang)`。
+  - **`_recommend_raw` 的 `restraints` 推薦改由同一份 `rough_reasons` 產生**（原本在顧問裡手寫一份條件），所以「推薦值」與「建議」不會分歧；
+    既有特徵（預設、胜肽、金屬、模型、斷鏈、多配體）的推薦值與文字不變，測試涵蓋。
+  - `check()`：建議與表單目前的值不同時，加一則 info（`suggestion` 為建議的策略，使用者在 GUI 一鍵採用才會寫入 `md.restraints`）；
+    舊規則已對 `restraints` 發出警告時不重複；現行 hold_backbone 的 caution 轉為 warning。
+  - GUI 沒有改（沿用 `check()` 既有的顯示與一鍵採用）。差異表與逐階段倍率還沒有專屬畫面，`restraint_advice` 的回傳已備好。
+- 被否決：
+  - 把建議做成自動套用或改預設（規格要求只建議；且改預設會改 protocol 雜湊，進行中的 run 會重跑）；
+  - 把 hold_backbone 當主要建議（低 RMSD 誤導，D-23 已否決當預設）；
+  - 針對低信心殘基個別約束（目前引擎只有三組，新增選取式約束屬引擎變更，不在本項範圍）；
+  - 建議凍結以省時間、建議口袋截斷（規格 §2、§3.3，科學模型變更）；
+  - 資料不足時用預設值補上並給 standard（違反「寧可擋也不要猜」）。
+- 證據／測試：`tests/test_restraint_advice.py`（29 項）。涵蓋每種特徵與邊界、與目前設定的差異、各階段倍率等於 `make_protocol` 的輸出、
+  膜系統的 `lipid_head`、資料不足與矛盾輸入、四語齊全且互不相同、建議不改任何輸入或設定、標頭讀取、顧問推薦值與建議一致、`check()` 的建議與去重。
+  容器全套 818 passed、49 skipped（原 788；本項新增 29 項，另有 1 項為顧問測試擴充）。無 OpenMM，不需要 CI 引擎路徑。
+- 檔案：`md20/engine/restraint_advice.py`（新）、`md20/advisor.py`、`tests/test_restraint_advice.py`（新）、`docs/specs/restraints_freeze_truncation.md`、`docs/specs/README.md`。
+- 未決：
+  - `n_rebuilt_residues` 和 `n_pose_clashes` 要從建模 manifest 與對接結果取得，這個接線還沒做（目前只有手動給或 `has_gaps` 的結構檢查）；沒給時列在 `not_considered`。
+  - pLDDT 門檻 10% 與 70 的合理性需要真實 AlphaFold 結構的資料確認。
+  - 專屬的 GUI 畫面（差異表、逐階段倍率）。採用時寫 DecisionLog（`decision_entry`）還沒接進 workflow。
+  - gentle 是否真的比 standard 更少在升溫時出問題，沒有對照實驗；規則來自規格與 D-23 的設計理由，不是新的實測結論。
+
 ### D-115　膜 NaN 的剩餘原因：離子落在重疊的水上（D-102 只查水對水）；去碰撞改為也查離子對水
 - 觸發：28e87aa 的 openmm-stack ubuntu `test_peptide_above_popc_case_b` 在 D-102 去水碰撞之後仍 `Particle coordinate is NaN`（Windows、macOS 同一 run 通過）。
 - 重讀 D-102 的診斷資料（run 42355183065 四個 job 的 log；artifact 下載被代理擋住）：
