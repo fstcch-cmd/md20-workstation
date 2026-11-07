@@ -40,7 +40,7 @@ def parse_ligand_table(text: str) -> list[dict]:
 
 def config_from_form(*, name: str, pdb_id: str = "", receptor_file: str = "", ligands_text: str = "", box_residue: str = "",
                      box_center: str = "", box_size: str = "22,22,22", mode: str = "independent", exhaustiveness: int = 16,
-                     systems: list[str] | None = None, tier: str = "teaching", replicas: int = 1, binding: bool = True,
+                     systems: list[str] | None = None, tier: str = "teaching", replicas: int = 3, binding: bool = True,
                      ph: float = 7.4, keep_hetero: str = "") -> dict:
     cfg = example_config()
     cfg["name"] = safe_name(name or "pipeline")

@@ -625,3 +625,24 @@ def coverage_summary(cov: dict, *, lang: str = "zh") -> str:
                                f"k の上限でもサンプリングできない区間：{bad}。",
                                f"k 상한에서도 샘플링되지 않은 구간: {bad}."), lang))
     return ("" if cjk(lang) else " ").join(parts)
+
+
+# ------------------------------------------------------------------------------------------- replica plan card (D-131)
+REPLICA_TITLE = ("重複計畫", "Replica plan", "反復の計画", "반복 계획")
+
+
+def replica_card(wf, *, lang: str = "zh", benchmark: dict | None = None) -> dict:
+    """What the replica-plan card shows before a start: the plan, the time, one-click options.  `show` is False when
+    the MD is finished with all the replicas the config asks for.  The options carry the number to write
+    (`replicas`); the GUI calls `actions.set_replicas`.  No dialog: the card is part of the page."""
+    from ..engine.replica_plan import card_lines
+    plan = wf.replica_plan(benchmark=benchmark)
+    st = wf.state()["steps"]
+    finished = ((st.get("report") or {}).get("status") == "PASS" and not plan["topup_runs"]
+                and not plan["topup_to_required"] and not plan["below_required"])
+    opts = [{"id": o["id"], "label": pick(o["label"], lang), "note": pick(o["note"], lang), "replicas": o["replicas"]}
+            for o in plan["options"]]
+    if not plan["applicable"]:
+        opts = []                                       # coarse-grained: nothing to choose yet
+    return {"show": not finished, "title": pick(REPLICA_TITLE, lang), "plan": plan, "lines": card_lines(plan, lang),
+            "options": opts, "current": plan["configured"], "level": "warning" if plan["below_required"] or plan["topup_runs"] else "info"}

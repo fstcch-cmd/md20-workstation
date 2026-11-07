@@ -93,11 +93,14 @@ def cmd_run(a):
     if not a.fake:                      # --fake is the synthetic backend of `demo`: no chemistry, no licence needed
         _need_license("run")
     from .engine import make_protocol, run_protocol, NeedsHuman
+    from .engine.replica_plan import single_command_text
+    from .i18n import pick
+    _p(pick(single_command_text(), "zh"))          # D-131: said at the start, never stops
     proj = _open_project(a)
     case = proj.case(a.case)
     run = case.active_run() if a.resume else None
     if run is None:
-        protocol = make_protocol(a.tier, production_ns=a.ns)
+        protocol = make_protocol(a.tier, production_ns=a.ns, replicas=1)       # this command runs one trajectory
         run = case.new_run(protocol.to_dict(), reason="cli")
     else:
         from .engine import Protocol
@@ -194,6 +197,9 @@ def cmd_pipeline(a):
     wf = Workflow(proj, cfg)
     platform = choose_platform()
     _p(f"平台：{platform.name}；workflow 目錄：{wf.dir}")
+    from .engine.replica_plan import lines as replica_lines
+    for line in replica_lines(wf.replica_plan(), "zh"):          # D-131: the replica plan, said at the start, never stops
+        _p(line)
     hours = tuple(int(x) for x in a.hours.split("-")) if a.hours else None
     policy = PausePolicy(pause_file=proj.dir / "PAUSE", pause_on_battery=not a.ignore_battery, allowed_hours=hours,
                          power_probe=_power_state, resource_guard=_guard())
@@ -573,7 +579,7 @@ def cmd_demo(a):
     root = Path(a.dir) if a.dir else Path(tempfile.mkdtemp(prefix="md20_demo_"))
     proj = Project.create(root, "demo_project")
     case = proj.new_case("demo_case")
-    proto = make_protocol("classroom")
+    proto = make_protocol("classroom", replicas=1)       # the demo is one synthetic trajectory
     for s in proto.stages:
         if s.ensemble != "MIN":
             s.length_ps = 40.0; s.checkpoint_interval_ps = 10.0; s.report_interval_ps = 0.2
@@ -624,7 +630,7 @@ def main(argv=None) -> int:
     r.set_defaults(fn=cmd_run)
     s = sub.add_parser("status"); s.add_argument("--project", required=True); s.set_defaults(fn=cmd_status)
     qp = sub.add_parser("queue"); qp.add_argument("action", choices=["add", "list", "run"]); qp.add_argument("--project", required=True)
-    qp.add_argument("--case"); qp.add_argument("--tier", default="teaching"); qp.add_argument("--replicas", type=int, default=1)
+    qp.add_argument("--case"); qp.add_argument("--tier", default="teaching"); qp.add_argument("--replicas", type=int, default=None, help="獨立重複條數（預設 3）")
     qp.add_argument("--ns", type=float); qp.add_argument("--hours", help="允許時段，如 22-7"); qp.add_argument("--ignore-battery", action="store_true")
     qp.add_argument("--fake", action="store_true"); qp.set_defaults(fn=cmd_queue)
     pl = sub.add_parser("pipeline", help="docking → MD → binding 全流程")

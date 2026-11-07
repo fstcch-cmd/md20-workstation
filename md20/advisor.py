@@ -18,6 +18,7 @@ import copy
 import math
 from dataclasses import dataclass, field, asdict, replace as _replace
 
+from .engine.replica_plan import DEFAULT_REPLICAS, required_replicas
 from .engine.protocol import TIERS
 from .engine.restraint_advice import (RestraintInputs, advise as _advise_restraints, rough_reasons as _rough_reasons,
                                       resolution_from_pdb, plddt_low_fraction_from_pdb, features_from_records,
@@ -561,15 +562,21 @@ def _recommend_raw(f: CaseFeatures, goal: str) -> dict[str, dict]:
                             "ポケットに複数のリガンドがあるため、どれかが離れるかを見るには長めの計算が必要です。",
                             "포켓에 여러 리간드가 함께 있으므로 그중 하나가 떠나는지 보려면 더 긴 계산이 필요합니다.")
     o["production_ns"] = _r(prod, *pwhy)
-    reps = 3 if goal == "publication" else 1
-    o["replicas"] = _r(reps, *(("發表等級至少要用不同初速做 3 次獨立重複，才能報告標準差。",
-                               "Publication grade needs at least three independent replicas with different initial velocities.",
-                               "論文発表レベルでは、初速度を変えた独立な繰り返しを少なくとも 3 回行い、標準偏差を報告します。",
-                               "논문 발표 수준에서는 초기 속도를 달리한 독립 반복을 최소 3회 해야 표준편차를 보고할 수 있습니다.")
-                              if reps == 3 else ("跑一次可以看趨勢，要下結論請增加到 3 次。",
-                                                 "One run shows a trend. Use three for a conclusion.",
-                                                 "1 回の計算で傾向はわかります。結論を出すには 3 回にしてください。",
-                                                 "한 번 계산하면 경향은 볼 수 있습니다. 결론을 내려면 3회로 늘리십시오.")))
+    reps = DEFAULT_REPLICAS                                  # D-131: the largest need of any analysis, for every goal
+    o["replicas"] = _r(reps, *((f"每個系統跑 {reps} 條獨立重複（不同初速），計算時間約為 1 條的 {reps} 倍，下方的預估時間已包含。"
+                                "RMSD、RMSF、接觸頻率等分析需要重複才能算標準差。發表等級至少要這麼多。" if goal == "publication" else
+                                f"每個系統跑 {reps} 條獨立重複（不同初速），計算時間約為 1 條的 {reps} 倍，下方的預估時間已包含。"
+                                "RMSD、RMSF、接觸頻率等分析需要重複才能算標準差。改成 1 條較快，但報告每一處會標「單一軌跡，無法估計不確定性」。"),
+                               f"Every system runs {reps} independent replicas with different initial velocities, about {reps} times the "
+                               "time of one, and the time estimate below includes it. RMSD, RMSF and contact frequencies need replicas "
+                               "for a standard deviation." + (" Publication grade needs at least this many." if goal == "publication" else
+                               " One replica is faster, but the report then marks every place \"single trajectory, uncertainty cannot be estimated\"."),
+                               f"各系で初速度を変えた独立な反復を {reps} 回行います。時間は 1 回の約 {reps} 倍で、下の見積もりに含まれています。"
+                               "RMSD、RMSF、接触頻度などは、反復があって初めて標準偏差を出せます。" + ("論文発表レベルでは少なくともこの回数が必要です。" if goal == "publication" else
+                               "1 回にすると速くなりますが、レポートの各所に「単一軌跡、不確かさは推定できません」と表示されます。"),
+                               f"계마다 초기 속도를 달리한 독립 반복을 {reps}회 실행합니다. 시간은 1회의 약 {reps}배이며 아래 예상 시간에 포함되어 있습니다. "
+                               "RMSD, RMSF, 접촉 빈도 등은 반복이 있어야 표준편차를 낼 수 있습니다." + (" 논문 발표 수준에서는 최소 이만큼 필요합니다." if goal == "publication" else
+                               " 1회로 하면 빠르지만 보고서 곳곳에 '단일 궤적, 불확도를 추정할 수 없음'이라고 표시됩니다.")))
     o["trajectory_interval_ps"] = _r(20.0 if prod < 50 else 50.0,
                                      "每 20 到 50 ps 存一幀，夠做 RMSD、RMSF 與接觸頻率分析，檔案也不會太大。",
                                      "One frame every 20 to 50 ps is enough for RMSD, RMSF and contact frequencies, and the "
@@ -853,11 +860,24 @@ def check(values: dict, f: CaseFeatures, *, goal: str = "teaching", budget_hours
         else:
             out.append(_i("info", "production_ns", f"長時間模擬。{line[0]}", f"Long simulation. {line[1]}",
                           f"長時間シミュレーションです。{line[2]}", f"장시간 시뮬레이션입니다. {line[3]}"))
-    if goal == "publication" and int(v["replicas"]) < 3:
-        out.append(_i("warning", "replicas", "只跑一次無法報告標準差。發表等級建議至少 3 次獨立重複。",
-                      "A single run gives no standard deviation. Publication grade needs at least three replicas.",
-                      "1 回だけでは標準偏差を報告できません。論文発表レベルでは独立した繰り返しを少なくとも 3 回行ってください。",
-                      "한 번만 계산하면 표준편차를 보고할 수 없습니다. 논문 발표 수준에서는 최소 3회 독립 반복을 권합니다.", 3))
+    need = required_replicas()
+    if int(v["replicas"]) < need:
+        n_ = int(v["replicas"])
+        pub = goal == "publication"
+        out.append(_i("warning" if pub else "info", "replicas",
+                      (f"只有 {n_} 條，無法估計不確定性。發表等級建議至少 {need} 次獨立重複。" if pub and n_ == 1 else
+                       f"只有 {n_} 條，少於需要的 {need} 條。報告會逐處標註實際條數，結論降級為描述。" if n_ > 1 else
+                       f"只跑 1 條，報告每一處會標「單一軌跡，無法估計不確定性」，比較結論降級為描述。需要 {need} 條才能算標準差。"),
+                      (f"With {n_} replica(s) no uncertainty can be estimated. Publication grade needs at least {need} independent replicas." if pub and n_ == 1 else
+                       f"Only {n_} replicas, fewer than the {need} needed. The report states the real number everywhere and conclusions are descriptions." if n_ > 1 else
+                       f"One replica only: the report marks every place \"single trajectory, uncertainty cannot be estimated\" and comparisons are descriptions. {need} are needed for a standard deviation."),
+                      (f"{n_} 回では不確かさを推定できません。論文発表レベルでは独立した反復を少なくとも {need} 回行ってください。" if pub and n_ == 1 else
+                       f"反復は {n_} 回で、必要な {need} 回より少ないです。レポートは実際の回数を各所に明記し、結論は記述にとどめます。" if n_ > 1 else
+                       f"1 回だけなので、レポートの各所に「単一軌跡、不確かさは推定できません」と表示し、比較は記述にとどめます。標準偏差には {need} 回必要です。"),
+                      (f"{n_}회로는 불확도를 추정할 수 없습니다. 논문 발표 수준에서는 독립 반복을 최소 {need}회 권합니다." if pub and n_ == 1 else
+                       f"반복이 {n_}회로 필요한 {need}회보다 적습니다. 보고서가 실제 횟수를 곳곳에 밝히고 결론은 서술에 그칩니다." if n_ > 1 else
+                       f"1회만 하므로 보고서 곳곳에 '단일 궤적, 불확도를 추정할 수 없음'이라고 표시하고 비교는 서술에 그칩니다. 표준편차에는 {need}회가 필요합니다."),
+                      need))
     fr = float(v["friction_per_ps"])
     if fr < 0.1 or fr > 10:
         out.append(_i("warning", "friction_per_ps", f"摩擦係數 {fr:g} ps⁻¹ 不在常用範圍（0.1 到 5）內，會扭曲擴散與構形動態。",

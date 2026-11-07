@@ -15,6 +15,7 @@ from typing import Callable
 
 from ..project import Project
 from ..util import atomic_write_json, load_json, now_iso, FileLock
+from .replica_plan import DEFAULT_REPLICAS
 
 
 @dataclass
@@ -61,10 +62,10 @@ class JobQueue:
     def _save(self, data: dict) -> None:
         atomic_write_json(data, self.path)
 
-    def add(self, case_id: str, tier: str = "teaching", replicas: int = 1, production_ns: float | None = None) -> dict:
+    def add(self, case_id: str, tier: str = "teaching", replicas: int | None = None, production_ns: float | None = None) -> dict:
         with FileLock(self.path.with_suffix(".lock")):
             data = self._load()
-            job = {"id": f"job_{len(data['jobs']) + 1:04d}", "case_id": case_id, "tier": tier, "replicas": int(replicas),
+            job = {"id": f"job_{len(data['jobs']) + 1:04d}", "case_id": case_id, "tier": tier, "replicas": int(DEFAULT_REPLICAS if replicas is None else replicas),
                    "production_ns": production_ns, "status": "QUEUED", "created_at": now_iso()}
             data["jobs"].append(job)
             self._save(data)

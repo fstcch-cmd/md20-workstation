@@ -184,7 +184,7 @@ def test_workflow_blocks_over_one_microsecond_then_applies_plan(tmp_path):
     from md20.workflow import WorkflowBlocked, DECISION_KEYS
     assert ("md", "long_run_confirmed") in DECISION_KEYS and ("md", "long_run") in DECISION_KEYS
     wf, case = _wf_case(tmp_path, {"production_ns": 2000, "ns_per_day": 330})
-    proto = make_protocol("teaching", production_ns=2000)
+    proto = make_protocol("teaching", production_ns=2000, replicas=1)       # the disk figures below are for one replica
     with pytest.raises(WorkflowBlocked, match="1 µs"):
         wf._plan_long_run("docked_single", case, proto, {})
     gate = wf.state()["steps"]["md_runs"]["gates"][0]

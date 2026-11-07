@@ -84,6 +84,7 @@ def test_metal_params_none_means_geometric_model(tmp_path):
 
 def test_run_md_does_not_reuse_runs_of_another_case(tmp_path, monkeypatch):
     cfg = example_config()
+    cfg["md"]["replicas"] = 1                 # the stub below returns one run; the default is 3 (D-131)
     wf = Workflow(Project.create(tmp_path, "P"), cfg)
     wf._mark("md_runs", runs={"docked_BEN": {"case_id": "old_case", "status": "COMPLETE", "run_ids": ["r1"]}})
     called = []

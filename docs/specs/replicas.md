@@ -1,6 +1,6 @@
 # 獨立重複（replicas）：哪些分析需要、需要幾條、報告怎麼呈現不確定性
 
-狀態：**[規格・D-129，2026-11-07]** 使用者 22:51 授權：「根據每一個分析思考哪些需要重複、哪些不需要；需要重複的取最大值，在一開始模擬時就告訴使用者會多花時間，確保報告完整。」
+狀態：**§3–§5（重複計畫與開始前告知）已實作（D-131，待 CI）；§2 的分析彙總與報告由另一個代理同時實作。** 規格 D-129，2026-11-07。 使用者 22:51 授權：「根據每一個分析思考哪些需要重複、哪些不需要；需要重複的取最大值，在一開始模擬時就告訴使用者會多花時間，確保報告完整。」
 
 ## 1. 缺口（查到的事實）
 - `Workflow.analyse()` 只讀 `r["run_ids"][0]`：RMSD、RMSF、接觸、指紋、持續性、PCA／地形、DCCM、tICA／MSM、水合、膜指標、系統比較（D-106 共同基底、ΔRMSF）全部只看**第一條**軌跡；其餘重複跑了卻沒有進報告。
@@ -46,3 +46,18 @@
 ## 5. 每條重複的獨立性
 - 不同速度 seed，從同一個平衡後結構開始，或各自重新平衡（沿用既有 `run_replicas` 的做法，報告寫明是哪一種）。
 - 只有完成且通過平衡驗收的重複才進彙總；少於 3 條時照實降級。
+
+## 6. 實作（D-131）：重複計畫與開始前告知
+- 純函式模組 `md20/engine/replica_plan.py`：`required_replicas()`（§2 表各列最少條數的最大值 = 3）、`DEFAULT_REPLICAS`（= 3，`make_protocol` 所有 tier、`example_config`、顧問建議值、論文驗證案例、`queue add`、GUI 表單預設都用它）、
+  `configured_replicas(cfg)`（設定有寫 `md.replicas` 就照用，沒寫就 3；回傳是否明確設定）、`plan_replicas(cfg, benchmark=, n_atoms=, done=)`（所需條數、目前條數、倍數、ETA、seed、已完成條數、缺的條數、選項）、
+  四語文字 `summary_text`／`line_text`／`independence_text`／`topup_text`、`lines()`（CLI）、`card_lines()`（GUI）。
+- **時間**：有效能測試才給小時數（`md.ns_per_day` > 依原子數換算的 doctor benchmark > 不換算的 benchmark，後者註明「以測試系統大小計算」）；沒有就只給倍數，說「不猜時間」。只算分子動力學部分（SMD／傘狀採樣不隨重複數變）。
+- **告知位置（都是既有位置，不停下）**：
+  - CLI：`pipeline run` 在印出平台之後；`md.replicas` 沒寫 → 完整計畫（說明、seed、三個選項），有寫 → 一行。`run` 一開始印一行：該指令只跑 1 條，要 3 條請用 `pipeline run` 或 `queue add --replicas 3`（`run` 存的 protocol 也寫 `replicas=1`）。
+  - GUI 流程頁：「開始或繼續」按鈕上方的「重複計畫」卡片（`gui/views.py::replica_card`）；一鍵按鈕：照建議／改為 1 條／（舊專案）補跑到 3 條，另有自訂條數輸入加「套用」。沒有 alert 或 confirm 對話框，只有 `ui.notify`。MD 確認卡片（`confirm_before_md`）多印一行目前的計畫。
+  - 顧問：`replicas` 的建議值（3）與四語理由；`check()` 在條數少於 3 時給 info（發表等級為 warning）與一鍵套用的建議值 3。
+  - 新建流程表單：既有的參數列與預估時間（`estimate_hours` 本來就乘上重複數）。
+- **選擇的紀錄**：`Workflow.run_md` 開始時 `record_replica_plan()` 寫 DecisionLog（`workflow.replicas`，同一個選擇只寫一次；設定指定為 human、採預設為 auto）與 `state["replica_plan"]`；GUI 的選擇由 `gui/actions.py::set_replicas` 寫 `md.replicas` 並記 `gui.replicas`（human，含 patch）。`("md", "replicas")` 已加入 `workflow.DECISION_KEYS`。
+- **補跑**：`run_md` 發現某系統已 COMPLETE 但條數少於 `md.replicas`，就沿用同一個 `replica_group` 呼叫 `run_replicas`，它從檔案判斷哪幾條 COMPLETE 並跳過，只新建缺的 `replica_index`；`set_replicas` 只丟掉 `analysis` 與 `report` 兩步，不動 `md_runs`、`binding`。測試：已有 1 條 → 補到 3 條，原本那條的 `run.json` 未被改動。
+- **每條的獨立性（照 `run_replicas` 現況）**：第 i 條的 seed = 基礎 seed 2026 + 1000×i；每條從同一個建好的系統開始，各自做最小化、加熱與平衡，初速由自己的 seed 產生（不是從同一個平衡後結構分出去）。
+- **限制**：粗粒化（`md.resolution: cg`）目前每個系統只跑 1 條，計畫卡片只告知這點，沒有選項；GUI 卡片在 NiceGUI 上的渲染要等 CI／筆電。
