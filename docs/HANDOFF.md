@@ -9,7 +9,9 @@
 >
 > **所有已審查成果已 push：md20 main `650bc65`（origin 同步）、私人 repo `md-digital-signature` `3a68598`。** 觸發的 CI run 42384880862。
 >
-> **⚠ 進行中但未落地（session 關閉時三個子代理仍在跑、分支無 commit → 實作已遺失，但規格都在 main，照規格重做）：**
+> **狀態更新（本 session 收尾）：D-128、D-131 已合併並 push（md20 58d81bc、私人 repo 2268646，1063 passed）。仍待做：D-130 重複分析彙總（子代理未落地，照 `docs/specs/replicas.md` 重做；連帶把 report/workflow_report.py 與 evidence.py 的 `md.get("replicas",1)` 改讀實際重複數）。**
+>
+> **⚠ 以下規格項目尚未落地：**
 > - **D-128 授權第 3 層**（等級 tier／功能 features／席次 seats／max_version／簽章撤銷清單 revoked.json／評估版浮水印／輸出蓋授權編號）：規格散見 D-125、設計文件 https://claude.ai/artifact/222jyPJRrE1Pzspv7shAS6 ；同時改 md20（驗證）與私人 repo（簽發），格式升 v2、v1 仍可驗、測試向量兩邊逐位元組相同。
 > - **D-130 重複分析彙總＋報告不確定性**、**D-131 重複計畫＋開始前告知**：完整規格在 **`docs/specs/replicas.md`（D-129，已 push）**。核心缺口：`Workflow.analyse` 只讀 `run_ids[0]`，重複跑了卻只用第一條。
 >

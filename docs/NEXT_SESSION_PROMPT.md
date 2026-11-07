@@ -19,9 +19,13 @@
 - **改鋅鍵結模型參數**（R5）：依證據調 `md20/build/metal.py` 的 Zn–N 參數並補驗證測試，**不是放寬 `tests/test_metal_integration.py` 的 0.03 nm 門檻**。鋅測試紅：HIS119:ND1≈0.236 nm vs r0 0.202，GLU106 羧基在 3 Å 內把 Zn 拉走（metal.py:363 已註明鍵會被拉長）。先重現、查原子對應/質子化/鍵結項/排除/競爭非鍵/參數來源，分辨程式缺陷與模型不足。
 - push 回到「累積到一輪 CI 空檔再批次推」。
 
-**進行中、實作未落地（上個 session 關閉時三個子代理分支無 commit → 照規格重做）：**
-- **D-128 授權第 3 層**：tier/features/seats/max_version/簽章撤銷清單/評估版浮水印/輸出蓋授權編號；同時改 md20（驗證）與私人 repo（簽發），格式升 v2、v1 仍可驗、測試向量兩邊逐位元組相同。設計文件 https://claude.ai/artifact/222jyPJRrE1Pzspv7shAS6 。
-- **D-130/D-131 重複分析**：完整規格 `docs/specs/replicas.md`（D-129）。核心＝`Workflow.analyse` 只讀 `run_ids[0]`，需逐條分析、跨重複彙總、報告呈現不確定性、開始前告知使用者會多花時間（預設 3 條）。
+**已完成並 push（md20 58d81bc、私人 repo 2268646）：**
+- **D-128 授權第 3 層**：tier/features/seats/max_version/簽章撤銷清單（domain `md20-revocations-v1`，與授權 v1/v2 前綴各異）/評估版浮水印/輸出蓋授權編號。格式 v2，v1 仍可驗，測試向量兩邊逐位元組相同（SHA e05050cd…）。1063 passed。
+- **D-131 重複計畫＋開始前告知**：預設 replicas=3（所有 tier），CLI/GUI/顧問在開始前顯示計畫與時間倍數，可一鍵改 1/3 或自訂、舊專案補跑。
+
+**仍待做（D-130，上個 session 關閉時子代理未落地 commit → 照規格 `docs/specs/replicas.md` 重做這半）：**
+- **D-130 重複分析彙總＋報告不確定性**：`Workflow.analyse` 仍只讀 `run_ids[0]`，需逐條分析每個合格重複、跨重複彙總（mean±SD、t 分布 CI、k/n、不串接重複邊界）、報告疊圖/色帶/誤差、n=1 標「單一軌跡無法估計不確定性」。
+- **連帶小修（D-131 指出）**：`report/workflow_report.py`（~321、~1641）與 `report/evidence.py`（~64）仍讀 `md.get("replicas",1)`，但預設已跑 3 條 → 改讀 `engine.replica_plan.configured_replicas(cfg)[0]` 或 `state["replica_plan"]`，否則報告低估重複數。此屬 D-130 範圍，一併處理。
 
 **本地未修的真缺口（可安全做，不碰科學模型）：**
 - **R2**：`md20/report/evidence.py` 以執行狀態（COMPLETE／PASS+非空ΔG）標 supported，和 `md20/sampling/assessment.py` 的 `assess_pmf` 嚴格資格不一致 → 全部路徑走同一套版本化評估；缺證據一律 unknown，不得轉 supported。
