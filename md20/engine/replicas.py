@@ -84,7 +84,7 @@ def aggregate_replicas(case: Case, group_id: str, *, out_dir: Path | None = None
         if per:
             def ms(key):
                 v = np.array([p[key] for p in per if p[key] is not None], dtype=float)
-                return {"mean": float(v.mean()), "sd": float(v.std(ddof=1)) if len(v) > 1 else 0.0, "n": int(len(v))} if len(v) else None
+                return {"mean": float(v.mean()), "sd": float(v.std(ddof=1)) if len(v) > 1 else None, "n": int(len(v)), **({} if len(v) > 1 else {"sd_unavailable": "單一軌跡無法估計重複間不確定性"})} if len(v) else None
             agg["stages"][stage] = {"per_replica": per, "temperature_k": ms("temperature_k"), "density_g_ml": ms("density_g_ml"),
                                     "potential_kj_mol": ms("potential_kj_mol"), "all_accepted": all(p["accepted"] for p in per)}
     if "production" in frames:

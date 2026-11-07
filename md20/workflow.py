@@ -1708,20 +1708,40 @@ class Workflow:
         atomic_write_json(st, self.state_path)
 
     # ------------------------------------------------------------------ analysis of every replica (D-130 redo, docs/specs/replicas.md §2)
-    def _reuse_analysis_manifest(self, run_dir: Path) -> dict | None:
-        """The ONE place that decides whether a stored per-run analysis can be reused (today: a PASS manifest exists).
-        A cache fingerprint check belongs here and nowhere else."""
+    def _reuse_analysis_manifest(self, run_dir: Path, fp: dict | None = None, label: str = "") -> tuple[dict | None, dict | None]:
+        """The ONE place that decides whether a stored per-run analysis can be reused.
+        With a fingerprint (D-135, R4): only when every input, selection, protocol, schema and threshold is unchanged
+        and the referenced files are present; a legacy manifest (no fingerprint) is recomputed — never the MD.
+        Without one (membrane-only analysis, which writes no fingerprint): the pre-D-135 rule, a PASS manifest."""
         man = load_json(run_dir / "analysis" / "analysis_manifest.json", {})
-        return man if man.get("status") == "PASS" else None
+        if fp is None:
+            return (man if man.get("status") == "PASS" else None), None
+        from .analysis.fingerprint import reuse_decision
+        dec = reuse_decision(run_dir, fp)
+        if dec["reuse"]:
+            return load_json(run_dir / "analysis" / "analysis_manifest.json", {}), dec
+        if dec["reason"] != "no_manifest":
+            what = "、".join(dec.get("changed") or []) or "—"
+            gone = "、".join(dec.get("missing") or dec.get("modified") or []) or "—"
+            self.dec.record("analysis.cache", label or run_dir.name, dec["reason"],
+                            f"既有分析不能沿用（{dec['reason']}；改變的項目：{what}；缺少或被改的檔案：{gone}）。"
+                            "只重新計算分析，不重跑分子動力學；舊結果備份在 analysis/prev/。", kind="auto")
+        return None, dec
 
     def _analyse_one_run(self, key: str, case, run_dir: Path, label: str, advisory_key: str) -> dict:
         """Analysis of one replica (reuse, or the usual / membrane-only analysis) -> its analysis manifest."""
         from .analysis.traj import analyse_run
         top = load_json(case.build_dir / "build_manifest.json", {}).get("topology_pdb")
         membrane = bool((self.cfg.get("md") or {}).get("membrane"))
-        man = self._reuse_analysis_manifest(run_dir)
+        bm = load_json(case.build_dir / "build_manifest.json", {})
+        fp = None
+        if not self.membrane_only_type():
+            from .analysis.fingerprint import analysis_fingerprint
+            g0 = {l["name"]: l["heavy_atom_indices"] for l in manifest_ligands(bm) if l.get("heavy_atom_indices")}
+            fp = analysis_fingerprint(run_dir, top, ligand_groups=g0 or None, metal_indices=metal_indices_from_manifest(bm),
+                                      ligand_charges=manifest_ligand_charges(bm), membrane=membrane)
+        man, cache = self._reuse_analysis_manifest(run_dir, fp, label)
         if man is None:
-            bm = load_json(case.build_dir / "build_manifest.json", {})
             if self.membrane_only_type():
                 # cases B and C have no receptor: membrane analysis only (analysis/membrane_run.py)
                 from .analysis.membrane_run import membrane_only_analysis
@@ -1729,7 +1749,8 @@ class Workflow:
             else:
                 groups = {l["name"]: l["heavy_atom_indices"] for l in manifest_ligands(bm) if l.get("heavy_atom_indices")}
                 man = analyse_run(run_dir, top, label=label, ligand_groups=groups or None, metal_indices=metal_indices_from_manifest(bm),
-                                  decisions=self.dec, ligand_charges=manifest_ligand_charges(bm))
+                                  decisions=self.dec, ligand_charges=manifest_ligand_charges(bm), fingerprint=fp,
+                                  provenance={"reason": (cache or {}).get("reason"), "changed": (cache or {}).get("changed")})
                 if membrane:            # case A: membrane metrics and the equilibration acceptance next to the usual ones
                     from .analysis.membrane_run import analyse_membrane_run
                     try:
@@ -1899,7 +1920,8 @@ class Workflow:
                 if not lab.get("labels") or not (adir / "ca_xyz.npy").is_file():
                     continue
                 name = self._replica_label(key, rid, len(rids))
-                systems[name] = {"labels": lab["labels"], "time_ns": lab.get("time_ns"), "xyz": np.load(adir / "ca_xyz.npy")}
+                systems[name] = {"labels": lab["labels"], "time_ns": lab.get("time_ns"), "xyz": np.load(adir / "ca_xyz.npy"),
+                                 "sampling": lab.get("sampling")}          # D-135: subsampling stated, never hidden
                 labels[name] = {"system": key, "run_id": rid}
         if len({v["system"] for v in labels.values()}) < 2:
             return None

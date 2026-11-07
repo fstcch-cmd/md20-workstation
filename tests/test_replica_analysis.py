@@ -175,6 +175,8 @@ def _workflow(tmp_path, monkeypatch, level_by_run, *, systems=("complex",), temp
         np.save(run_dir / "analysis" / "ca_xyz.npy", rng.normal(size=(30, n, 3)) * lv)
         man = {"status": "PASS", "metrics_file": str(run_dir / "analysis" / "metrics.json"), "n_frames": 40,
                "rmsd_backbone_mean_A": lv, "ligands": {}, "restrained_production": [], "figures": {}}
+        if kw.get("fingerprint"):                       # as the real analyse_run does (D-135)
+            man["fingerprint"] = kw["fingerprint"]
         atomic_write_json(man, run_dir / "analysis" / "analysis_manifest.json")
         return man
     monkeypatch.setattr("md20.analysis.traj.analyse_run", fake)
@@ -201,7 +203,19 @@ def test_workflow_analyse_reuses_stored_manifests_per_run(tmp_path, monkeypatch)
     wf.analyse(runs)
     calls.clear()
     wf.analyse(runs)
-    assert calls == []                                                          # every replica's PASS manifest is reused
+    assert calls == []                                    # every replica's manifest with an unchanged fingerprint is reused
+
+
+def test_workflow_analyse_recomputes_legacy_manifest_without_rerunning_md(tmp_path, monkeypatch):
+    """R4 (D-135 wiring): a PASS manifest without a fingerprint (written before D-135) is recomputed, per replica"""
+    wf, runs, calls = _workflow(tmp_path, monkeypatch, {"complex": {"r1": 2.0, "r2": 4.0}})
+    wf.analyse(runs)
+    case = wf.project.case(runs["complex"]["case_id"])
+    mp = case.dir / "runs" / "r2" / "analysis" / "analysis_manifest.json"
+    m = load_json(mp, {}); m.pop("fingerprint"); atomic_write_json(m, mp)
+    calls.clear()
+    wf.analyse(runs)
+    assert calls == ["r2"]
 
 
 def test_workflow_one_failing_replica_is_kept_with_reason_and_does_not_hide_the_others(tmp_path, monkeypatch):
