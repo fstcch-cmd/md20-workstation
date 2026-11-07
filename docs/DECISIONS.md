@@ -10,7 +10,8 @@
 - 事實：Windows CPU 平台，膜系統（POPC＋胜肽，`Modeller.addMembrane`）最小化 10 kJ/mol 後直接 200 步 NPT（2 fs、MonteCarloMembraneBarostat）→ `Particle coordinate is NaN`。同一測試在 `d879f2b` Windows 通過（201 秒）；`5a3fa37` 的 Linux、macOS 也通過。OpenMM 8.6.1、numpy 2.4.6、openff-toolkit 0.18.0 兩次相同；`d879f2b..HEAD` 沒有改到膜、引擎或環境檔（只有 D-95 的安裝釘選，版本本來就相同）。
 - 判斷：偶發（多執行緒 CPU 加總順序、或膜組裝的隨機性），第一次出現。另外兩項 openmm-stack 失敗（三 OS 共有）是 `test_validation_papers`，已在 `460d9d1` 修正。
 - 不做：不放寬測試（加暖機步、縮短 dt）——這條測試走的是沒有平衡、沒有 NaN 自癒（watchdog）的直接路徑，偶發 NaN 是膜功能（標為初步）該被看見的訊號。
-- 下一步：`e0a0f77` 若 Windows 通過，照發行決定發 a19，STATUS 的膜項目註明「CI 曾偶發 NaN 一次」；若再出現，先查根因（固定 seed／單執行緒重現、組裝後最小能量與最大力），並請使用者決定 a19 的膜功能是否標為不建議使用。
+- **更新（11/07 15:25，使用者：「你要解決這問題，請全力思考，找出解決之道」）**：不等第二次出現，直接查根因。新增 `tools/diag_membrane_nan.py`（照測試路徑；每 10 步記錄能量、最大力、最大速度，NaN 前最熱的原子與其最近非鍵鄰居；分開「建構隨機性（多次建構座標雜湊）」「動力學隨機性（多個速度 seed）」「最小化不足（500 vs 5000 次）」）與手動工作流程 `.github/workflows/diag-membrane.yml`（Windows ×3、Windows 單執行緒、Linux）。結果記在本條下方。
+- 原下一步：`e0a0f77` 若 Windows 通過，照發行決定發 a19，STATUS 的膜項目註明「CI 曾偶發 NaN 一次」；若再出現，先查根因（固定 seed／單執行緒重現、組裝後最小能量與最大力），並請使用者決定 a19 的膜功能是否標為不建議使用。
 
 ### 11/07 安裝程式：Windows 上 `"meeko>=0.5"` 被 cmd.exe 當成輸出導向（pip 輸出與錯誤消失、版本下限失效）
 - 證據：筆電沙盒資料夾出現檔名 `0.5` 的檔案，內容是 pip 的完整輸出；其中 `Collecting meeko` 沒有版本條件，裝到 meeko 0.8.0。原因：`install.ps1` 以 `& $Mamba run ... "meeko>=0.5"` 呼叫，Windows 的 `micromamba run` 經 cmd.exe 執行，`>` 成為導向。學生安裝時，安裝紀錄裡看不到 pip 的錯誤（D-95 那類失敗會被藏起來），解壓資料夾多一個 `0.5` 檔。

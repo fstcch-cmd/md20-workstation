@@ -1,0 +1,48 @@
+name: Diagnose membrane NaN (manual)
+
+# Manual only: reproduces and characterises the intermittent NaN in
+# tests/test_membrane_integration.py::test_peptide_above_popc_case_b (docs/DECISIONS.md, 11/07).
+on:
+  workflow_dispatch:
+    inputs:
+      builds: { description: "independent builds per job", default: "3" }
+      seeds: { description: "velocity seeds per build", default: "1,2,3" }
+      steps: { description: "MD steps per run", default: "200" }
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, gpu_yml: environment/windows-opencl.yml, cuda: "12.4", threads: "", tag: win-a }
+          - { os: windows-latest, gpu_yml: environment/windows-opencl.yml, cuda: "12.4", threads: "", tag: win-b }
+          - { os: windows-latest, gpu_yml: environment/windows-opencl.yml, cuda: "12.4", threads: "", tag: win-c }
+          - { os: windows-latest, gpu_yml: environment/windows-opencl.yml, cuda: "12.4", threads: "1", tag: win-1thread }
+          - { os: ubuntu-latest, gpu_yml: environment/linux-cuda.yml, cuda: "12.4", threads: "", tag: linux }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with: { init-shell: bash, cache-downloads: true }
+      - name: Create environment
+        shell: bash -el {0}
+        env: { CONDA_OVERRIDE_CUDA: "${{ matrix.cuda }}" }
+        run: '"$MAMBA_EXE" create -y -n md20 -f environment/base.yml -f ${{ matrix.gpu_yml }} > env.log 2>&1 || (tail -50 env.log; exit 1)'
+      - name: Install md20
+        shell: bash -el {0}
+        run: '"$MAMBA_EXE" run -n md20 python -m pip install --no-cache-dir "openmmforcefields==0.15.1" "meeko~=0.5" gemmi -e .'
+      - name: Diagnose
+        shell: bash -el {0}
+        timeout-minutes: 130
+        env: { OPENMM_CPU_THREADS: "${{ matrix.threads }}" }
+        run: |
+          if [ -z "$OPENMM_CPU_THREADS" ]; then unset OPENMM_CPU_THREADS; fi
+          "$MAMBA_EXE" run -n md20 python tools/diag_membrane_nan.py diag_out --builds ${{ inputs.builds }} --seeds ${{ inputs.seeds }} --steps ${{ inputs.steps }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: "diag-${{ matrix.tag }}", path: diag_out/diag.json, if-no-files-found: ignore }
