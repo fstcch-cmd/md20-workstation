@@ -111,3 +111,16 @@ def test_openmmforcefields_is_pinned_exactly_everywhere():
         specs += re.findall(r'"openmmforcefields([^"]*)"', f.read_text(encoding="utf-8-sig"))
     assert specs, "no openmmforcefields install command found"
     assert set(specs) == {"==0.15.1"}, specs
+
+
+def test_mamba_run_arguments_have_no_cmd_metacharacters():
+    """D-98 note: on Windows `micromamba run` goes through cmd.exe, so "meeko>=0.5" became a redirection — pip's output
+    (errors included) went to a file named 0.5 in the current folder and the version floor was dropped (laptop
+    11/07: "Collecting meeko" without a specifier).  Arguments of `$Mamba run` in install.ps1 must not contain < > | & ^."""
+    import re
+    from pathlib import Path
+    for ln, line in enumerate((Path(__file__).parents[1] / "installer" / "install.ps1").read_text(encoding="utf-8").splitlines(), 1):
+        if re.search(r"\$Mamba run\b", line):
+            args = line.split("$Mamba run", 1)[1].split("|")[0]
+            for q in re.findall(r'"([^"]*)"', args):
+                assert not re.search(r"[<>|&^]", q), (ln, q)

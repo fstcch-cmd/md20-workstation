@@ -6,6 +6,12 @@
 ---
 
 ## 2026-11-07
+### 11/07 安裝程式：Windows 上 `"meeko>=0.5"` 被 cmd.exe 當成輸出導向（pip 輸出與錯誤消失、版本下限失效）
+- 證據：筆電沙盒資料夾出現檔名 `0.5` 的檔案，內容是 pip 的完整輸出；其中 `Collecting meeko` 沒有版本條件，裝到 meeko 0.8.0。原因：`install.ps1` 以 `& $Mamba run ... "meeko>=0.5"` 呼叫，Windows 的 `micromamba run` 經 cmd.exe 執行，`>` 成為導向。學生安裝時，安裝紀錄裡看不到 pip 的錯誤（D-95 那類失敗會被藏起來），解壓資料夾多一個 `0.5` 檔。
+- 決定：`install.ps1`、`install.sh`、`ci.yml` 改用 `"meeko~=0.5"`（≥0.5 且 <1.0；目前最新 0.8.0 仍符合，不改變實際版本），不含 cmd 特殊字元。新增 `tests/test_installer_paths.py::test_mamba_run_arguments_have_no_cmd_metacharacters`。
+- 被否決：用 `^>` 跳脫（PowerShell → micromamba → cmd 的跳脫層數不固定，不可靠）；拿掉版本條件（失去下限）。
+- 發行：a19 候選改為本 commit（取代 `460d9d1`），仍須 CI 全綠。
+
 ### 11/07 CI（`5a3fa37`，a19 候選）與筆電 DevCheck-P0 結果；兩個測試期望過時、DevCheck 漏設 MD20_HEAVY
 - 筆電（MSI，RTX 4060 Laptop 8 GB，驅動 566.14，Windows PS 5.1）：沙盒資料夾全新安裝 3.8 分鐘成功；doctor 正常；**P0 測試 96 項全過**（含 RDKit 共振判定 `test_rdkit_acetate_and_neutral_molecule`，真實 Windows 環境）。3PTB 完整流程被 skip：DevCheck 沒有設 `MD20_HEAVY=1`（我的錯），本 commit 補上；安裝步驟標籤改成實際路徑。
 - CI `5a3fa37`：**heavy workflow（3PTB 完整流程，含 D-98 新斷言：指紋配體電荷已知、`atom_charge_signs` 與拓撲一致）綠，38 分鐘**；heavy metal、paper-docking、installer-windows／macOS 綠；openmm-stack 三 OS 跑到本 commit 時仍在進行。

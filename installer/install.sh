@@ -57,7 +57,7 @@ if [ "$IS_WIN" = 1 ]; then
   else
     echo "[2/4] 建立環境 ($GPU) ..."; "$MAMBA" create -y -p "$W_PREFIX" -f "$W_BASE" -f "$W_GPU"
   fi
-  echo "[3/4] 安裝 md20 ..."; "$MAMBA" run -p "$W_PREFIX" pip install --no-cache-dir "openmmforcefields==0.15.1" "meeko>=0.5" gemmi -e "$W_PKG"
+  echo "[3/4] 安裝 md20 ..."; "$MAMBA" run -p "$W_PREFIX" pip install --no-cache-dir "openmmforcefields==0.15.1" "meeko~=0.5" gemmi -e "$W_PKG"
   "$MAMBA" run -p "$W_PREFIX" md20 setup-vina || echo "!! Vina 執行檔下載失敗；docking 前請重跑 md20 setup-vina"
   echo "[4/4] Doctor ..."; "$MAMBA" run -p "$W_PREFIX" md20 doctor
   echo; echo "完成。之後執行：  \"$MAMBA\" run -p \"$W_PREFIX\" md20 <command>"
@@ -113,7 +113,7 @@ else
   echo "[2/4] 建立環境 / creating the environment ($GPU) ..."; "$MAMBA" create -y -p "$PREFIX" -f "$SRC/environment/base.yml" -f "$GPUYML"
 fi
 echo "[3/4] 安裝 md20 / installing md20 ..."
-"$MAMBA" run -p "$PREFIX" python -m pip install --no-cache-dir "openmmforcefields==0.15.1" "meeko>=0.5" gemmi -e "$SRC"
+"$MAMBA" run -p "$PREFIX" python -m pip install --no-cache-dir "openmmforcefields==0.15.1" "meeko~=0.5" gemmi -e "$SRC"
 "$MAMBA" run -p "$PREFIX" md20 setup-vina || echo "!! Vina 下載失敗 / Vina download failed：稍後執行 run later: $ROOT/md20 setup-vina"
 # launchers
 cat > "$ROOT/md20" <<EOS

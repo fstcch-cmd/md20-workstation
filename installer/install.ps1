@@ -85,7 +85,7 @@ if (Test-Path (Join-Path $Prefix "conda-meta")) {
   Write-Host "[2/4] 建立環境 ($Gpu) ..."; & $Mamba create -y -p $Prefix -f $Base -f $GpuYml; Assert-Ok "建立環境"
 }
 Write-Host "[3/4] 安裝 md20 ..."
-& $Mamba run -p $Prefix pip install --no-cache-dir "openmmforcefields==0.15.1" "meeko>=0.5" gemmi -e $Src
+& $Mamba run -p $Prefix pip install --no-cache-dir "openmmforcefields==0.15.1" "meeko~=0.5" gemmi -e $Src
 Assert-Ok "安裝 md20"
 & $Mamba run -p $Prefix md20 setup-vina
 if ($LASTEXITCODE -ne 0) { Write-Host "!! Vina 下載失敗（多半是 GitHub 限流）；稍後執行 md20.cmd setup-vina 即可，其餘安裝繼續。" }
