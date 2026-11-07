@@ -217,10 +217,24 @@ def build_e2e(root: Path) -> tuple[str, str]:
     cfg["binding"] = {"enabled": True, "ligands": ["PGA"], "multi": True, "config": {}}
     proj = Project.create(root, "multi")
     wf = Workflow(proj, cfg)
+    case = proj.new_case("docked_multi")             # D-94: a built case with a small topology, for the 3D tab
+    lines, i = [], 0
+    for rs, (x, y) in enumerate(((0.0, 0.0), (3.8, 0.0), (7.6, 0.0), (11.4, 0.0)), start=1):
+        for nm, el, dx in (("N", "N", -1.2), ("CA", "C", 0.0), ("C", "C", 1.2)):
+            i += 1
+            lines.append(f"ATOM  {i:5d}  {nm:<3s} ALA A{rs:4d}    {x + dx:8.3f}{y:8.3f}{0.0:8.3f}  1.00  0.00          {el:>2s}")
+    lig0 = i
+    for k, (nm, el) in enumerate((("C1", "C"), ("O1", "O"), ("C2", "C"))):
+        i += 1
+        lines.append(f"HETATM{i:5d}  {nm:<3s} PGA B   1    {5.0 + 1.4 * k:8.3f}{3.5:8.3f}{0.0:8.3f}  1.00  0.00          {el:>2s}")
+    top = case.build_dir / "topology.pdb"
+    top.write_text("\n".join(lines) + "\nEND\n", encoding="utf-8")
+    atomic_write_json({"topology_pdb": str(top), "assembly": {"ligands": [{"name": "PGA", "heavy_atom_indices": [lig0, lig0 + 1, lig0 + 2]}]}},
+                      case.build_dir / "build_manifest.json")
     st = wf.state()
-    st["steps"]["md_cases"] = {"status": "PASS", "cases": {"docked_multi": {"case_id": "c1", "mode": "docked_multi",
+    st["steps"]["md_cases"] = {"status": "PASS", "cases": {"docked_multi": {"case_id": case.case_id, "mode": "docked_multi",
                                                                             "ligands": ["PGA", "CAR", "GLU"]}}}
-    st["steps"]["md_runs"] = {"status": "PASS", "runs": {"docked_multi": {"status": "COMPLETE", "case_id": "c1", "run_ids": []}}}
+    st["steps"]["md_runs"] = {"status": "PASS", "runs": {"docked_multi": {"status": "COMPLETE", "case_id": case.case_id, "run_ids": []}}}
     st["steps"]["binding"] = {"status": "PASS", "results": {"multi:PGA": {
         "status": "PASS", "ligand": "PGA", "context": "multi:docked_multi", "co_ligands": ["CAR", "GLU"], "replicas": 1,
         "delta_pmf_kj_mol": 18.0, "delta_pmf_err_kj_mol": 1.5, "dG_standard_kj_mol": -9.5, "dG_err_kj_mol": 1.6,
@@ -300,6 +314,20 @@ def e2e(out: Path) -> int:
             rep.close()
             st = json.loads((wf_dir / "state.json").read_text(encoding="utf-8"))
             check(Path((st["steps"].get("report") or {}).get("path", "")).is_file(), "the rebuilt report is on disk")
+            # 3D tab (D-94): the viewer iframe is really in the page and draws the molecule
+            pg.goto(f"{base}/wf/{project}/{name}", wait_until="networkidle", timeout=60000)
+            pg.get_by_role("tab", name="3D").first.click()
+            pg.wait_for_timeout(2500)
+            fr = pg.get_by_test_id("viewer-frame")
+            check(fr.count() == 1 and "/viewer?" in (fr.first.get_attribute("src") or ""), "the 3D tab has the viewer frame")
+            inner = pg.frame_locator('[data-testid="viewer-frame"]')
+            try:
+                inner.locator("canvas").first.wait_for(timeout=20000)
+                ok = True
+            except Exception:  # noqa: BLE001
+                ok = False
+            check(ok, "the 3D viewer draws on a canvas inside the tab")
+            pg.screenshot(path=str(out / "e2e_3d.png"), full_page=True)
             # projects folder: open another folder (one project, one workflow → straight to it)
             pg.goto(base + "/", wait_until="networkidle")
             check(str(root) in pg.get_by_test_id("folder-now").inner_text(), "home shows the current projects folder")

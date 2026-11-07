@@ -114,3 +114,8 @@
 - 被否決：瀏覽器的檔案選擇器（網頁拿不到本機完整路徑）；把設定存在專案資料夾（換資料夾後找不到）。
 - 自我驗證：`tools/gui_preview.py::e2e` 在 CI（gui-preview）用真的瀏覽器點擊：結合自由能面板列出三個配體、加做 CAR、PGA 再做一次、重新整理報告並確認檔案；打開另一個專案資料夾直接進到流程；切到一個還不存在的資料夾並確認設定已存。任何一項失敗或伺服器印出 Traceback，該 CI 工作就失敗。純 Python：`tests/test_gui_folders.py`。
 
+## D-94　3D 分頁（2026-11-07）
+- 流程頁「3D 檢視」分頁＝結構選單＋一個 `ui.element("iframe")`（`data-testid="viewer-frame"`），`src=/viewer?project=…&name=…&i=…`；換選項時只改 `src`。
+- 不可用 `ui.html()` 放 iframe 或 script：NiceGUI 3 預設以 DOMPurify 清理，會整段移除。
+- 自我測試：gui-preview e2e 點分頁並等 iframe 內出現 canvas。
+

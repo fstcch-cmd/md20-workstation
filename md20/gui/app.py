@@ -858,11 +858,13 @@ def workflow_page(project: str, name: str):
                                "계 구축이 끝나면 3D 구조를 볼 수 있습니다. 본 계산이 끝나면 궤적을 재생할 수 있습니다.")).classes("text-gray-500")
                 else:
                     pick3d = ui.select({i: t["label"] for i, t in enumerate(targets)}, value=0, label=_("結構", "Structure", "構造", "구조")).classes("w-96")
-                    frame = ui.html("").classes("w-full")
+                    # D-94: a real <iframe> element.  ui.html() sanitises with DOMPurify since NiceGUI 3.0 and
+                    # dropped the iframe, so the 3D tab was empty (laptop 11/07).
+                    frame = ui.element("iframe").style("width:100%;height:560px;border:0").props('data-testid="viewer-frame"')
 
                     def show3d():
-                        frame.set_content(f'<iframe src="/viewer?project={project}&name={name}&i={pick3d.value}" '
-                                          'style="width:100%;height:560px;border:0"></iframe>')
+                        frame._props["src"] = f"/viewer?project={project}&name={name}&i={pick3d.value}"
+                        frame.update()
                     pick3d.on_value_change(lambda _: show3d())
                     show3d()
         cards_sig = {"v": None}

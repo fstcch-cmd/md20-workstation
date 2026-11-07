@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-11-07
+
+### D-94　GUI 的 3D 分頁是空的：NiceGUI 3 的 ui.html 會把 iframe 清掉，改用真正的 iframe 元素；瀏覽器自我測試加 3D 檢查；併入 v0.1.0a18
+- 使用者（11/07 09:03）：「3D 顯示是失敗的」。
+- 查證：
+  1. 報告裡的 3D（離線 Canvas）正常：用筆電 `hsieh2024_rela_1vkx` 的 `workflow_report_en.html` 在 Chromium 開啟，畫出 docked_multi 軌跡，無 JS 錯誤；桌面上 11/06 列印的 PDF 第 51 頁也有畫面。
+  2. GUI 流程頁的「3D 檢視」分頁用 `ui.html('<iframe src="/viewer?...">')`。NiceGUI 3.0 起 `ui.html` 預設以 DOMPurify 清理內容（`sanitize=True`），iframe 被移除，所以分頁一片空白；CI 與安裝程式裝的是 NiceGUI 3.19。`/viewer` 頁本身正常（gui-preview 的 08_viewer 截圖），所以先前的檢查沒抓到。
+- 決定：分頁改用 `ui.element("iframe")`，以 `src` 屬性載入 `/viewer`，不經過 HTML 清理；不用 `sanitize=False`（舊版 NiceGUI 沒有這個參數，而且這裡不需要任意 HTML）。
+- 驗證：`tools/gui_preview.py` 的 e2e 建一個有小拓撲的 case，點「3D 檢視」分頁，檢查 iframe 存在且裡面畫出 canvas，失敗即紅；截圖 `e2e_3d.png`。
+- 被否決：把 viewer 的 HTML 直接塞進 `ui.html`（同樣會被清掉 script）；鎖定 NiceGUI < 3（放棄安全性修正與相容性）。
+
+### CI 紀錄（11/04 的兩輪，寫在這裡備查）
+- 46fdbdb（run 41762074053）：14/15 通過；openmm-stack Windows 1 項失敗：`test_membrane_integration.py::test_peptide_above_popc_case_b` 粒子座標 NaN。d879f2b 的 Windows 同一項通過。
+- d879f2b（run 41772202519，D-93）：14/15 通過；openmm-stack macOS 1 項失敗：`test_longrun_integration.py::test_solute_only_dcd_and_pruned_chunks` 溫度看門狗 380 K（容許 ±75 K）。46fdbdb 的 macOS 同一項通過。
+- 判斷：兩項都是 CPU 上短時間整合測試的隨機數值不穩定，各自在另一輪通過，與 D-91–D-93 的改動無關。未決：兩項各需要一次固定亂數種子的重現，確認是測試系統太小或時間步太大，而不是程式問題。
+
 ## 2026-11-04
 
 ### D-93　拉離路徑閘門：修正「每個方向都被擋」的誤判、「只做 MD」真的停下結合自由能、加「只算單獨結合」與「指定 anchor 殘基」兩個可按的選項；發行 v0.1.0a18

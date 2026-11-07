@@ -9,6 +9,7 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **D-94 GUI 3D 分頁空白（NiceGUI 3 清掉 iframe）修正＋e2e 3D 檢查，併入 v0.1.0a18**（使用者 11/07 09:03）：完成 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-07 09:05 | 見 DECISIONS D-94 |
 | **D-93 拉離路徑誤判修正、「只做 MD」真的停下、加「只算單獨結合」「指定 anchor 殘基」，發行 v0.1.0a18**（使用者 11/04）：完成，待筆電確認 URI 實際 SMD 與連線丟失 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-04 12:30 | 見 docs/specs/multi_ligand.md 第十二節 |
 | **D-89 折線圖重新規劃（時間軸、圖例在外、命名、顏色、小圖），發行 v0.1.0a15**（使用者 11/04 09:50）：完成 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-04 09:55 | 見 docs/specs/figures.md |
 | **D-88 專案資料夾指定、開啟任何專案；GUI 瀏覽器自我驗證**（使用者 11/04 09:08）：完成，併入 v0.1.0a14 | 使用者 | session_016gcJz9hwPAMieHsNEctkzL | 2026-11-04 09:10 | 見 DECISIONS D-88 |
