@@ -35,6 +35,13 @@ import numpy as np
 
 KB_KJ_MOL_K = 0.00831446261815324
 
+# D-119: minimum spacing between window centres (fraction of the narrower σ; floor in nm) and the k ratio at which a
+# window at nearly the same centre counts as a different distribution.  0.1σ blocks only clear duplicates (hole/break fills); endpoints use 0.3σ.
+MIN_SEP_SIGMA = 0.1
+MIN_SEP_SIGMA_ENDPOINT = 0.3      # an endpoint window beside an existing one adds no coverage: use the 'redundant' 0.3σ
+MIN_SEP_FLOOR_NM = 2e-3
+STIFFER_RATIO = 1.5
+
 
 def _phi(x: float) -> float:
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
@@ -86,6 +93,7 @@ class RefinePlan:
     done: bool = False
     budget_exhausted: bool = False
     unsamplable: list = field(default_factory=list)        # breaks still open at k_max
+    skipped: list[dict] = field(default_factory=list)      # D-119: proposals dropped as near-duplicates, each with its reason
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -232,7 +240,7 @@ def plan_refinement(samples: dict[float, np.ndarray], ks: dict[float, float] | f
         first, last = st[0], st[-1]
         for edge, w, sign in ((cv_range[0], first, -1), (cv_range[1], last, +1)):
             if sign * (edge - (w.mu + sign * w.sd)) > 0.5 * w.sd:
-                proposals.append({"center": round(float(edge), 4), "k": round(w.k, 1), "gap": abs(edge - w.mu),
+                proposals.append({"center": round(float(edge), 4), "k": round(w.k, 1), "gap": abs(edge - w.mu), "kind": "endpoint",
                                   "why": f"CV 範圍端點 {edge:.3f} nm 沒被取樣（最近的 window 只到 {w.mu + sign * w.sd:.3f} nm）；補端點 window。"})
     # --- the pooled histogram is the ground truth: pairwise overlap can look fine while nothing sits on a barrier top
     #     (a window there with k < |F''| slides off to both sides and overlaps both neighbours)
@@ -271,27 +279,54 @@ def plan_refinement(samples: dict[float, np.ndarray], ks: dict[float, float] | f
     proposals.sort(key=lambda p: -p["gap"])
     room = max(0, max_total_windows - len(samples))
     take = min(max_new_per_round, room)
-    existing = np.array(sorted(samples))
-    taken: list[float] = []
+    # D-119 (REVIEW #18): a proposal is a near-duplicate when its centre is within MIN_SEP_SIGMA·σ of an existing or
+    # already-taken centre and is not materially stiffer (k ≥ STIFFER_RATIO × that window's k).  Same-k windows that
+    # close sample the same distribution; the old code stepped 2 pm aside up to 10 times, "added" a window that
+    # sampled nothing new, and the same endpoint proposal came back every round until `rounds` ran out.  Near-
+    # duplicates are dropped with a reason (plan.skipped + notes), never silently.  A materially stiffer window at
+    # nearly the same centre IS a different distribution (the break logic raises k there on purpose): it keeps its
+    # centre nudged to a free key (a key can hold one window).
+    occupied: list[tuple[float, float]] = [(float(c), float(ks[c])) for c in samples]
     for p in proposals:
         if len(plan.insert) >= take:
             break
-        # never reuse an existing centre key (a reused key would silently "add" a window that already exists and
-        # sample nothing); step away from every existing/taken centre, give up on this proposal after 1 σ-ish
-        c, moved = float(p["center"]), 0
-        while (existing.size and np.min(np.abs(existing - c)) < 1e-3) or any(abs(t - c) < 1e-3 for t in taken):
+        c0, kp = float(p["center"]), float(p["k"])
+        sig_p = math.sqrt(kT / kp)
+        clash = None
+        for (oc, ok) in occupied:
+            frac = MIN_SEP_SIGMA_ENDPOINT if p.get("kind") == "endpoint" else MIN_SEP_SIGMA
+            sep = max(MIN_SEP_FLOOR_NM, frac * min(sig_p, math.sqrt(kT / ok)))
+            if abs(oc - c0) < sep and kp < STIFFER_RATIO * ok:
+                clash = (oc, ok, sep)
+                break
+        if clash is not None:
+            oc, ok, sep = clash
+            reason = (f"提案 {c0:.3f} nm（k {kp:.0f}）與已有 window {oc:.3f} nm（k {ok:.0f}）距離 {abs(oc - c0):.4f} nm "
+                      f"< 最小間距 {sep:.4f} nm（{frac}σ），且 k 沒有明顯更硬（< {STIFFER_RATIO}×）：兩者會取樣同一段分佈，"
+                      "放棄此提案而不是挪 2 pm 假新增；該處若仍取樣不足，請提高 k 或手動補採樣。")
+            plan.skipped.append({"center": c0, "k": kp, "near": oc, "near_k": ok, "min_sep_nm": round(sep, 5),
+                                 "reason": reason})
+            plan.notes.append(reason)
+            continue
+        c, moved = c0, 0
+        while any(abs(oc - c) < 1e-3 for oc, _ in occupied):
             c, moved = round(c + 2e-3, 4), moved + 1
             if moved > 10:
                 break
         if moved > 10:
-            plan.notes.append(f"{p['center']:.3f} nm 附近已有 window，提案被跳過（該處樣本仍不足時請提高 k 或手動補採樣）。")
+            reason = f"{c0:.3f} nm 附近連續 10 個 key 都被占用，提案被放棄。"
+            plan.skipped.append({"center": c0, "k": kp, "near": None, "near_k": None, "min_sep_nm": None, "reason": reason})
+            plan.notes.append(reason)
             continue
+        if moved:
+            plan.notes.append(f"{c0:.3f} nm 的 window 比附近已有的硬（k {kp:.0f}），中心挪到空著的 key {c:.4f} nm。")
         p["center"] = c
-        taken.append(c)
-        plan.insert.append({k: v for k, v in p.items() if k != "gap"})
-    if len(proposals) > len(plan.insert):
+        occupied.append((c, kp))
+        plan.insert.append({k: v for k, v in p.items() if k not in ("gap", "kind")})
+    n_unfilled = len(proposals) - len(plan.insert) - len(plan.skipped)
+    if n_unfilled > 0:
         plan.budget_exhausted = True
-        plan.notes.append(f"還有 {len(proposals) - len(plan.insert)} 個缺口未補（每輪上限 {max_new_per_round}、總上限 {max_total_windows}）。")
+        plan.notes.append(f"還有 {n_unfilled} 個缺口未補（每輪上限 {max_new_per_round}、總上限 {max_total_windows}）。")
     pair_ok = all(p["overlap"] >= target_overlap or p.get("histogram_continuous") for p in plan.pairs)
     plan.continuous = (pair_ok and cont["continuous"] and not plan.unsamplable
                        and not any("端點" in p["why"] for p in proposals))
