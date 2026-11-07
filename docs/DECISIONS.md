@@ -6,6 +6,34 @@
 ---
 
 ## 2026-11-07
+### D-137　R8 有界自主行動帳本：評估→提案→授權→執行→重新評估→停止／升級；預設只提建議，不自動啟動任何模擬
+- 範圍：新套件 `md20/autonomy/`（控制器、政策、append-only 帳本、規則、乾跑、既有補窗的記錄掛勾）。**沒有**接進工作流程執行路徑；`binding.py`、`workflow.py`、GUI Runner／ProcessJob 都沒動。不新增 phase／step。`report/auto_actions.py` 維持只報告。規格 `docs/specs/autonomy.md`（R8 = `evidence_driven_repair_prompt.md` §3 R8；對應 P1A）。
+- **決定**：
+  - **預設是只提建議**：沒有使用者核准的政策（核准者＋時間＋至少一項正預算＋允許的行動類別），或沒有注入執行器，控制器只把提案與授權決定寫進帳本，不呼叫任何執行器。**使用者目前沒有授權任何計算預算**，所以現況下什麼都不會自動跑。政策檔 `<workflow>/autonomy/autonomy_policy.json` 無效或不存在＝沒有政策，不會退化成寬鬆預設；套件內沒有任何程式會自己寫它。
+  - **四種第一批行動**：`reanalysis`、`extend_approved_run`、`add_independent_replica`、`refine_approved_umbrella_windows`；各自有先決條件與「對比較的後果」（見規格 §2.1）。規則只讀現有評估物件（`md20.assessment.pmf/1`）與規劃器的 `RefinePlan` 的診斷狀態，**不讀 ΔG 數值**。
+  - **授權分三類**：`routine_within_policy`、`needs_approval`、`forbidden`。凡 `protocol_changes` 非空（力場、化學身分、質子化、約束、參考態、科學模型、付費後端、對外傳送資料，或任何不認得的標籤）或行動類型不支援＝forbidden，**有預算、有政策、有人核准都不執行**。類別與 idempotency key 在授權時由內容重算，自稱或被改過一律 denied。
+  - **冪等**：key = sha256(行動、scope、target、inputs)。唯一能讓執行器被呼叫的是 `Ledger.claim()`：在 `md20.util.FileLock`（Windows msvcrt／POSIX flock／鎖目錄後備）下重讀帳本，檢查已在跑、已成功、已取消、重試用完、scope 已停止、授權與預算（含進行中的保留量）後，才追加 `exec_start`。重複提案、第二個 worker（執行緒與 spawn 行程都有測）、GUI 重連都只會看到第一個人的紀錄。進行中但 worker 不見了：視為可能還在跑，不自動重啟；只有探測確定已死才關閉該次嘗試。
+  - **有界**：技術性重試上限＝min(提案, 政策)，每次重試都重新過 `claim()` 並計成本，`ExecutionRequest` 每次相同（不能改協定）；非技術性失敗不重試。停止條件：預算用完、連續 N 次已執行行動沒有改善、評估不可解讀、證據不足、模型無效；停止寫進帳本，之後需人 `resume`。檢查點無效（含沒有指紋）→ 升級、不執行。取消會記錄，取消後不自動重啟。
+  - **成本與模擬時間分開記**：`exec_end.resources`（牆鐘、GPU／核心小時、儲存＝實際使用）vs `simulated_ps`；失敗、取消、重試全部計入營運成本；執行器沒回報的維度以估計值計費並標明。既有流程記錄的動作另列（`observed`），不計任何政策預算。
+  - **既有補窗掛勾**：`plan_refinement(..., recorder=None)`，預設不變，例外一律吞掉；給 `make_refine_recorder(...)` 才會把規劃結果以 observed 記進帳本（同一輪續跑不重複）。
+- **理由**：R8 要求有界自主而不是不受控地改協定；使用者尚未授權計算預算，且「寧可擋也不要猜」。把「能不能啟動」集中在一個鎖內的 `claim()`，比在各呼叫端各自檢查更不會出現重複啟動。帳本 append-only 才能事後稽核「誰在什麼證據下花了多少」。
+- **被否決**：
+  - 預設給一個小預算讓它「先跑看看」：使用者沒有授權；違反預設只提建議。
+  - 把控制器直接接進 `binding.py` 的補窗迴圈或 GUI Runner：會改變現行行為，且 Runner／ProcessJob 是別人負責的路徑；先提供控制器＋帳本＋乾跑，整合另案。
+  - 用單一 `state.json` 當真相並以 atomic replace 更新：兩個行程各自讀改寫會互相覆蓋；改用 append-only JSONL＋鎖，`state.json` 只做衍生快取。
+  - 只靠 `fcntl`／pid 檔：Windows 優先，且 pid 在 GUI 重連／重開機後不可靠；用既有 `FileLock`，worker 存活判斷由呼叫端注入。
+  - 讓核准能解除 forbidden：核准是針對「例行範圍內的個案」；改協定是新的科學決定，不是這個控制器的權限。
+  - 以 ΔG 是否「變好」作為停止或繼續的依據：會變成追到好看的結果為止；改以診斷（證據）是否改善。
+  - 估計未知時當 0：會讓未知成本通過預算；改為「需要核准」。
+- **證據**：`tests/test_autonomy.py`（重複提案只寫一次且只跑一次；兩個競爭 worker 的執行緒與 spawn 行程各只啟動一次、seq 無遺失；GUI 重連（進行中、完成後）不重複啟動；崩潰 worker 不被盲目重啟、確定已死才回收並受重試上限約束；檢查點內容被換／不存在／無指紋 → 升級不執行、修好後可跑；技術性失敗重試受上限、請求相同、成本含重試；非技術性失敗不重試；執行中與啟動前取消；預算用完（含跨行動累計）；連續無改善停止；評估不可解讀 → 不執行並停止；無政策／政策無預算／無執行器 → 只提建議；八種禁止變更即使預算極大、即使人核准也不執行；被竄改的提案 denied；文字注入當資料；torn tail 修復、中間壞行阻擋；規劃器掛勾不改變計畫、例外被吞、續跑不重複記錄）。全套 pytest 結果見 commit 訊息。
+- **未驗證**：沒有接真實 Runner／ProcessJob，沒有真實模擬被這個模組啟動；Windows 上的 `FileLock`（msvcrt）路徑沿用既有實作，本模組未在 Windows 實測（CI 的 Windows 矩陣會跑這份測試，含 spawn 行程）；成本與效益全是啟發式估計。
+- **未決**：
+  - **需使用者授權計算預算（政策：核准者、允許的行動、ns／GPU 小時／核心小時／儲存上限）才可啟用自動執行**；在此之前一律只提建議。
+  - 授權入口：GUI／CLI 要怎麼讓使用者寫政策（目前只有 `save_policy` 與手放 JSON 檔）；以及政策是每個工作流程一份還是專案層級。
+  - 整合：`binding.py` 的 `plan_refinement` 呼叫處傳 `recorder=`；GUI Runner／ProcessJob 包成 executor 並回報實際資源；核准執行時記錄檢查點指紋（現在沒有，所以 extend 會因「無指紋」被擋）。
+  - 「沒有改善」的定義與預設 `max_attempts=2`、`no_improvement_stop=2` 待審查；worker 存活探測（Windows 沒有 pid 檔／heartbeat 慣例）。
+  - 估計的速度／儲存資料來源（`ns_per_day`、`gb_per_ns`）尚未接到 doctor benchmark。
+- **相關檔案**：`md20/autonomy/__init__.py`、`model.py`、`ledger.py`、`rules.py`、`controller.py`、`integration.py`（皆新）、`md20/sampling/adaptive.py`（`plan_refinement` 加可選 `recorder`）、`tests/test_autonomy.py`（新）、`docs/specs/autonomy.md`（新）、`docs/specs/README.md`。
 ### D-131　重複計畫與開始前告知：預設 3 條、時間倍數與 ETA、一鍵改條數、舊專案補跑（D-129 §3–§5）
 - 範圍：只做「需要幾條、花多少時間、使用者怎麼選」。分析與報告的跨重複彙總（`workflow.analyse`、`md20/analysis/`、`md20/report/`）是另一個代理同時做的，這裡沒動。不新增 phase／step。
 - **決定**：
