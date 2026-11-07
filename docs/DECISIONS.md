@@ -7,6 +7,18 @@
 
 ## 2026-11-07
 
+### D-95　CI 紅燈的真正原因：openmmforcefields 在 PyPI 唯一的版本被撤回（yanked），不是網路 flake；所有安裝指令改成 `==0.15.1` 精確釘選
+- 起因：`5561dd7` 的 CI 第一輪（attempt 1）與 09:34 重跑（attempt 2）都在同一步失敗：`pip install "openmmforcefields>=0.14"` → 「Could not find a version … (from versions: none)」。
+- 查證（11/07 09:45）：
+  1. 錯誤訊息前一行是「Ignored the following yanked versions: 0.15.1」，代表 runner 連得到 PyPI，只是唯一的版本被跳過。前一次交接把它判為「CI 連不到 PyPI 的 infra flake」，**判斷錯誤**（見下方更正）。
+  2. PyPI 頁面 `openmmforcefields/0.15.1`：已撤回，理由「Missing deps in pyproject.toml」（套件內容沒壞，是相依宣告不完整；我們本來就用 conda 裝 openmm／openff／lxml，base.yml 第 22 行已註明）。
+  3. pip 26 `resolution/resolvelib/factory.py` 第 322–339 行：只有在所有候選都被撤回**且**合併後的 specifier 含 `==` 精確版本時才接受撤回版；`-e .` 帶進來的 `>=0.12` 與 `==0.15.1` 合併後仍算釘選。
+- 影響：不只 CI。**已發行的 a18 安裝程式（`install.ps1` 第 88 行）新安裝也會在同一步失敗**；已裝好的筆電不受影響。
+- 決定：CI 三處、`install.ps1`、`install.sh` 兩處改成 `"openmmforcefields==0.15.1"`（與先前 CI 綠燈時實際裝到的是同一個檔案）；`pyproject.toml` 維持 `>=0.12`（給 conda 安裝的使用者）。新增 `tests/test_installer_paths.py::test_openmmforcefields_is_pinned_exactly_everywhere`，防止改回範圍寫法。
+- 被否決：從 GitHub tag 原始碼安裝（`git+https://…@0.15.1`，Windows 學生機要有 git，且 versioneer 從 tarball 取版號不穩）；改用 conda-forge 版（相依 ambertools，win-64 沒有，D-36 已知）；改用 `acellera-openmmforcefields`（不同維護者的重新打包，來源不同）。
+- 未決：上游若發 0.15.2 修好相依宣告，可改回範圍寫法；a18 安裝程式要修好需要重新發行（**未經使用者授權不發行**）。本 commit 未 push，CI 尚未驗證。
+- 更正（針對 D-94 下方「CI 紀錄」與 STATUS／HANDOFF 11/07 的「infra flake」說法）：原文保留；實際原因是上游撤回版本，重跑不會自己變綠。
+
 ### D-94　GUI 的 3D 分頁是空的：NiceGUI 3 的 ui.html 會把 iframe 清掉，改用真正的 iframe 元素；瀏覽器自我測試加 3D 檢查；併入 v0.1.0a18
 - 使用者（11/07 09:03）：「3D 顯示是失敗的」。
 - 查證：

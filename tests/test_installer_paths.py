@@ -100,3 +100,14 @@ def test_windows_launchers_start_from_a_short_path():   # D-77
     from pathlib import Path
     s = (Path(__file__).resolve().parents[1] / "installer" / "install.ps1").read_text(encoding="utf-8-sig")
     assert s.count('set `"PATH=%SystemRoot%\\system32;') == 2      # md20.cmd and MD20-GUI.cmd
+
+
+def test_openmmforcefields_is_pinned_exactly_everywhere():
+    """D-95: PyPI yanked openmmforcefields 0.15.1 ("Missing deps in pyproject.toml") and it is the only
+    PyPI release, so a range spec finds no version.  pip accepts a yanked release only for an exact `==` pin."""
+    files = [ROOT / ".github" / "workflows" / "ci.yml", ROOT / "installer" / "install.ps1", ROOT / "installer" / "install.sh"]
+    specs = []
+    for f in files:
+        specs += re.findall(r'"openmmforcefields([^"]*)"', f.read_text(encoding="utf-8-sig"))
+    assert specs, "no openmmforcefields install command found"
+    assert set(specs) == {"==0.15.1"}, specs
