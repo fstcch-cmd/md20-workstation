@@ -46,7 +46,7 @@ Run 'download source' {
   Expand-Archive -Path $zip -DestinationPath $src -Force
   Get-ChildItem $src | Select-Object -First 1 | ForEach-Object { $script:srcdir = $_.FullName; Write-Host "source: $($_.FullName)" }
 }
-Run 'install into C:\MD20dev' { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $script:srcdir 'installer\install.ps1') -Root $root }
+Run "install into $root" { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $script:srcdir 'installer\install.ps1') -Root $root }
 $md20 = Join-Path $root 'md20.cmd'
 $mamba = Join-Path $root 'micromamba.exe'
 $env:MAMBA_ROOT_PREFIX = $root
@@ -60,6 +60,7 @@ Run 'integration-spec P0 checks (D-96, D-97, D-98)' {
     tests/test_provenance.py tests/test_multi_binding.py tests/test_structure_gate.py tests/test_workflow_gates.py
 }
 Run 'full workflow 3PTB on this GPU (docking, MD, analysis, SMD/umbrella, report)' {
+  $env:MD20_HEAVY = '1'
   & $mamba run -p "$root\envs\md20" python -m pytest -q -rxs tests/test_workflow_integration.py -k full_workflow
 }
 Pop-Location

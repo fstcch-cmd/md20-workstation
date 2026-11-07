@@ -89,8 +89,11 @@ def test_pose_md_screen_3ptb(pdb_3ptb, tmp_path):
     platform = choose_platform(probe_steps=20)
     try:
         out = wf.run(lambda case, proto: make_backend_factory(case, proto, platform=platform), platform)
-    except WorkflowBlocked as exc:          # all poses genuinely unstable is a legitimate gate outcome, not a crash
-        assert "都不穩定" in str(exc), str(exc)
+    except WorkflowBlocked as exc:
+        # legitimate gate outcomes, not crashes: all poses genuinely unstable, or the short screening MD did not pass its
+        # own acceptance (stochastic short CPU NPT, seen at f558059 and 5a3fa37) and the pose is not replaced (D-98 note)
+        msg = str(exc)
+        assert "都不穩定" in msg or ("短 MD 篩選失敗" in msg and "未通過驗收" in msg and "不以其他 pose 代替" in msg), msg
         out = None
     cache = json.loads((wf.dir / "pose_screen.json").read_text(encoding="utf-8"))["BEN"]
     assert cache, "screen produced no verdicts"

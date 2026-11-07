@@ -152,8 +152,10 @@ def test_structure_gates_on_paper_structures(rcsb):
         rep = structure_confidence(rcsb(pid).read_text(errors="ignore"), pocket_center=center)
         out[pid] = rep.to_dict()
     _save("paper_structure_gates", out)
-    # 1VKX is 2.9 Å: a resolution warning is expected, not a block
-    assert any(g["name"] == "resolution" and g["status"] == "AUTO_FIXED" for g in out["1VKX"]["gates"]), out["1VKX"]
+    # 1VKX is 2.9 Å: an accepted limitation is expected — PASS + limitation, not a block and not a repair (D-96, A3)
+    res = [g for g in out["1VKX"]["gates"] if g["name"] == "resolution"]
+    assert res and res[0]["status"] == "PASS" and (res[0].get("limitation") or {}).get("repaired") is False, out["1VKX"]
+    assert not res[0].get("diff"), res[0]
 
 
 # ------------------------------------------------------------------ heavy: reproduce the docking
