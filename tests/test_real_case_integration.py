@@ -22,7 +22,7 @@ def test_3ptb_build_and_short_md(pdb_3ptb, tmp_path):
     proj = Project.create(tmp_path, "ci")
     case = proj.new_case("trypsin_benzamidine")
     s = build_case(case, receptor=pdb_3ptb, ligand_references=["NC(=[NH2+])c1ccccc1"], cocrystal_resnames=["BEN"],
-                   keep_hetero=set(), padding_nm=0.8, run_smoke_test=True)
+                   keep_hetero=set(), padding_nm=1.0, run_smoke_test=True)
     assert s["status"] == "PASS", (s.get("blocking"), s.get("blocking_detail"))
     lig = s["ligands"][0]
     assert lig["mapping"] in {"substructure", "connectivity"} and lig["formal_charge"] == 1
@@ -80,7 +80,7 @@ def test_3ptb_with_peptide_on_own_chain(pdb_3ptb, tmp_path):
     sdf = tmp_path / "pep.sdf"; w = Chem.SDWriter(str(sdf)); w.write(m); w.close()
     proj = Project.create(tmp_path, "pep")
     case = proj.new_case("trypsin_peptide")
-    s = build_case(case, receptor=pdb_3ptb, ligand_references=[], keep_hetero=set(), padding_nm=0.8, extra_ligand_resnames={"BEN"},
+    s = build_case(case, receptor=pdb_3ptb, ligand_references=[], keep_hetero=set(), padding_nm=1.0, extra_ligand_resnames={"BEN"},
                    peptides=[{"name": "P01", "sequence": "GAK", "pose": str(sdf), "target_location": "extracellular"}])
     assert s["status"] == "PASS", (s.get("blocking"), s.get("blocking_detail"))
     pep = s["ligands"][0]

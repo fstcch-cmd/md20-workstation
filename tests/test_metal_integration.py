@@ -17,7 +17,7 @@ def test_bonded_zinc_ca2(pdb_ca2, tmp_path):
     from openmm import app, unit, XmlSerializer
     rman = prepare_receptor(pdb_ca2, tmp_path / "rec", keep_hetero={"ZN"}, human_choices={"hetero groups": "移除"})
     assert rman["status"] != "NEEDS_HUMAN", rman.get("gates")
-    res = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys", padding_nm=0.8, metal_policy={"ZN": "bonded"})
+    res = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys", padding_nm=1.0, metal_policy={"ZN": "bonded"})
     assert res.status != "NEEDS_HUMAN", res.gates
     plans = res.restraints["metals"]["plans"]
     zn = [p for p in plans if p["key"].startswith("ZN")]
@@ -88,7 +88,7 @@ def test_fitted_zinc_params_json_ca2(pdb_ca2, tmp_path):
     good = tmp_path / "zn.json"
     good.write_text(json.dumps({"bonds": {"N": {"k_kcal_A2": 80.0}}, "angles": {"default": {"k_kcal_rad2": 35.0}},
                                 "charges": {"metal": 2.0}}))
-    res = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys", padding_nm=0.8, metal_policy={"ZN": "bonded"},
+    res = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys", padding_nm=1.0, metal_policy={"ZN": "bonded"},
                           metal_params={"ZN": {"source": "json", "file": str(good)}})
     assert res.status != "NEEDS_HUMAN", res.gates
     p = next(p for p in res.restraints["metals"]["plans"] if p["key"].startswith("ZN"))
@@ -102,7 +102,7 @@ def test_fitted_zinc_params_json_ca2(pdb_ca2, tmp_path):
     # r0 far from the crystal → the build stops instead of using it
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps({"bonds": {"N": {"k_kcal_A2": 80.0, "r0_A": 2.6}}, "angles": {"default": {"k_kcal_rad2": 35.0}}}))
-    res2 = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys2", padding_nm=0.8, metal_policy={"ZN": "bonded"},
+    res2 = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys2", padding_nm=1.0, metal_policy={"ZN": "bonded"},
                            metal_params={"ZN": {"source": "json", "file": str(bad)}})
     assert res2.status == "NEEDS_HUMAN"
     g = next(g for g in res2.gates["gates"] if g["name"].startswith("metal ZN"))

@@ -217,6 +217,43 @@ def resolve_ions(ions: dict | None, ionic_strength_molar: float = 0.15) -> tuple
     return spec, None
 
 
+def _pairs_numpy(O: np.ndarray, oh_xyz, box, o_o_min_nm: float, oh_min_nm: float, block: int = 2048):
+    """SciPy-free twin of the cKDTree search in declash_waters (same pair records, same O-H-first ordering)."""
+    n = len(O)
+    pairs, oh_min = [], None
+
+    def disp(a, b):
+        d = a[:, None, :] - b[None, :, :]
+        if box is not None:
+            d -= np.round(d / box) * box
+        return np.sqrt((d ** 2).sum(-1))
+    for s0 in range(0, n, block):
+        D = disp(O[s0:s0 + block], O)
+        ii, jj = np.where(D < o_o_min_nm)
+        for a, j in zip(ii, jj):
+            i = s0 + int(a)
+            if i < j:
+                pairs.append((float(D[a, j]), i, int(j)))
+    if oh_xyz is not None and len(oh_xyz):
+        arr = np.asarray(oh_xyz, float)
+        k = arr.shape[1]
+        H = arr.reshape(-1, 3)
+        keep = np.all(H < 9e5, axis=1)
+        for s0 in range(0, n, block):
+            D = disp(O[s0:s0 + block], H)
+            ii, hh = np.where(D < oh_min_nm)
+            for a, hj in zip(ii, hh):
+                i, j = s0 + int(a), int(hj) // k
+                if not keep[hj] or i == j:
+                    continue
+                oh_min = min(oh_min or 9.9, float(D[a, hj]))
+                dij = O[i] - O[j]
+                if box is not None:
+                    dij -= np.round(dij / box) * box
+                pairs.append((float(np.linalg.norm(dij)) - 999.0, min(i, j), max(i, j)))
+    return pairs, oh_min
+
+
 def declash_waters(o_xyz: np.ndarray, oh_xyz, box: np.ndarray | None, *, o_o_min_nm: float = 0.21,
                    oh_min_nm: float = 0.14, hard_floor_nm: float = 0.14) -> dict:
     """Which waters to delete so no two overlap (pure, D-102).  OpenMM's addSolvent/addMembrane occasionally places a
@@ -262,12 +299,11 @@ def declash_waters(o_xyz: np.ndarray, oh_xyz, box: np.ndarray | None, *, o_o_min
                 if i != j:
                     out["min_oh_inter_nm"] = min(out["min_oh_inter_nm"] or 9.9, float(rec[2]))
                     pairs.append((mind(o_xyz[i], o_xyz[j]) - 999.0, min(i, j), max(i, j)))   # O-H clashes first
-    except Exception:  # noqa: BLE001 — no scipy (container has it; belt and braces)
-        for i in range(n):
-            for j in range(i + 1, n):
-                d = mind(o_xyz[i], o_xyz[j])
-                if d < o_o_min_nm:
-                    pairs.append((d, i, j))
+    except ImportError:
+        # no SciPy (the pure-python CI jobs, some minimal installs): the same O-O and O-H checks with numpy, in blocks
+        pairs, oh_min = _pairs_numpy(np.asarray(o_xyz, float), oh_xyz, box, o_o_min_nm, oh_min_nm)
+        if oh_min is not None:
+            out["min_oh_inter_nm"] = oh_min
     if not pairs:
         return out
     oo = [p for p in pairs if p[0] > -900]

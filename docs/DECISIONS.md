@@ -6,6 +6,14 @@
 ---
 
 ## 2026-11-07
+### D-107　D-99／D-102 第一次真正跑 CI（28e87aa）抓到的兩個問題：沒有 SciPy 時漏查 O–H 重疊；整合測試的 padding 低於截斷
+- 背景：D-99～D-102 的 commit 在 CI 一直被後來的 push 取代（GitHub 同群組只留一個排隊 run），28e87aa 是第一次真的跑。
+- **問題 1（程式缺陷，D-102）**：`declash_waters` 在沒有 SciPy 時退回只查 O–O 的雙迴圈，**分子間 O–H 重疊完全不查**。pure-python CI 沒裝 SciPy，`test_inter_molecular_oh_overlap_is_caught` 六個 job 全紅；開發容器有 SciPy 所以沒發現。學生環境有 SciPy（OpenMM 相依），但程式不應依賴這個巧合。
+  - 修正：`_pairs_numpy` 用 numpy 分塊做與 cKDTree 相同的 O–O 與 O–H 搜尋（同樣的配對紀錄與 O–H 優先順序），只在 `ImportError` 時使用（原本的 `except Exception` 會把真正的錯誤也吞掉）。
+  - 測試：`test_same_result_without_scipy` 擋掉 scipy import，比對有／無 SciPy 的結果相同（含週期邊界）。
+- **問題 2（測試資料，不是程式）**：金屬整合測試與 real-case 測試用 `padding_nm=0.8`，D-99 的閘門正確地擋下（padding 小於 1.0 nm 截斷時蛋白會與自己的影像作用）。測試改用 1.0 nm（閘門允許的最小值）；**閘門本身不改**。
+- 檔案：`md20/build/assemble.py`、`tests/test_declash_waters.py`、`tests/test_metal_integration.py`、`tests/test_real_case_integration.py`。
+
 ### D-106　系統之間的比較：先確認條件相同，再放在同一組主成分軸上（A11、F12、F10）
 - 依據：`docs/specs/master_iteration_2026-11-07.md` A11（各系統各自 PCA，跨系統不可比；短軌跡的投影密度被叫作自由能地形）、F12（共同基底與代表結構）、F10（apo–holo 配對條件未檢查）。
 - **原本的問題**：①每個系統各自做 PCA，「apo 兩個低谷、複合物一個」是在不同軸上畫的圖，不能比；②投影密度沒有任何收斂檢查就叫自由能地形；③apo–holo ΔRMSF 用**索引位置**配對殘基（缺一個殘基就整串錯位），也不檢查兩次模擬條件是否相同。

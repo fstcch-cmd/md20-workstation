@@ -64,3 +64,24 @@ def test_removes_a_realistic_fraction_and_clears_the_minimum():
     d = np.linalg.norm(kept[:, None] - kept[None], axis=2)
     np.fill_diagonal(d, 9)
     assert d.min() >= 0.21 - 1e-6                                 # no clash left among the survivors
+
+
+def test_same_result_without_scipy(monkeypatch):
+    """The pure-python CI has no SciPy: the numpy fallback must find the same O-O and O-H overlaps (red at f61f305)."""
+    import builtins
+    real = builtins.__import__
+
+    def no_scipy(name, *a, **k):
+        if name.startswith("scipy"):
+            raise ImportError("no scipy")
+        return real(name, *a, **k)
+    o = np.array([[0, 0, 0], [0.26, 0, 0]], float)
+    oh = np.array([[[0.096, 0, 0], [-0.03, 0.09, 0]], [[0.13, 0, 0], [0.29, 0.09, 0]]])
+    box = np.array([2.0, 2.0, 2.0])
+    o2 = np.array([[0.05, 1.0, 1.0], [1.97, 1.0, 1.0], [1.0, 1.0, 1.0]], float)
+    with_scipy = (declash_waters(o, oh, None, o_o_min_nm=0.21, oh_min_nm=0.14), declash_waters(o2, None, box, o_o_min_nm=0.21))
+    monkeypatch.setattr(builtins, "__import__", no_scipy)
+    without = (declash_waters(o, oh, None, o_o_min_nm=0.21, oh_min_nm=0.14), declash_waters(o2, None, box, o_o_min_nm=0.21))
+    assert without[0]["remove"] == [1] and without[1]["remove"] == [1]
+    for a, b in zip(with_scipy, without):
+        assert a["remove"] == b["remove"] and a["min_oo_nm"] == b["min_oo_nm"]
