@@ -860,7 +860,7 @@ def workflow_page(project: str, name: str):
                 # D-94: a real <iframe> element.  ui.html() sanitises with DOMPurify since NiceGUI 3.0 and
                 # dropped the iframe, so the 3D tab was empty (laptop 11/07).
                 frame = ui.element("iframe").style("width:100%;height:560px;border:0").props('data-testid="viewer-frame"')
-                v3 = {"targets": [], "src": None}
+                v3 = {"targets": [], "src": None, "user": False, "busy": False}
 
                 def show3d():
                     tg = v3["targets"]
@@ -882,17 +882,25 @@ def workflow_page(project: str, name: str):
                     sel = None
                     if prev is not None:
                         sel = next((i for i, t3 in enumerate(tg) if (t3["mode"], t3["key"]) == (prev["mode"], prev["key"])), None)
-                    if (prev is None or prev["mode"] == "live") and tg and tg[0]["mode"] == "live":
-                        sel = 0                                   # follow the build while it is being watched
+                    if not v3["user"] and tg and tg[0]["mode"] == "live":
+                        sel = 0                    # follow the build unless the student picked a structure themselves
                     if sel is None and tg:
                         sel = 0
                     if opts != pick3d.options or sel != pick3d.value:
-                        pick3d.set_options(opts, value=sel)
+                        v3["busy"] = True          # a programmatic change is not the student's choice
+                        try:
+                            pick3d.set_options(opts, value=sel)
+                        finally:
+                            v3["busy"] = False
                     empty3d.set_visibility(not tg)
                     pick3d.set_visibility(bool(tg))
                     frame.set_visibility(bool(tg))
                     show3d()
-                pick3d.on_value_change(lambda _: show3d())
+                def picked(_):
+                    if not v3["busy"]:
+                        v3["user"] = True
+                    show3d()
+                pick3d.on_value_change(picked)
                 refresh3d()
                 ui.timer(3.0, refresh3d)
         cards_sig = {"v": None}

@@ -48,6 +48,7 @@
   - 每步寫 PDB：有水時檔案數十 MB、瀏覽器解析慢；改寫已經抽樣好的 JSON 場景（數百 KB）。
 - **證據／測試**：`tests/test_live3d.py`（8 項：水與氫不畫、頭基／尾鏈／離子分類、尾鏈抽樣上限、大蛋白變骨架、索引順序與重建取代、OpenMM topology 介面、快照失敗不中斷、GUI 目標與說明文字）。`tests/test_membrane_integration.py`（CI 真實 OpenMM）：情境 C 的階段為 bilayer→declashed 且 128 個頭基都畫出；情境 B 為 solute→bilayer→declashed 且第一張有兩個目標平面。`tools/gui_preview.py`（CI 真瀏覽器）：已開啟的 3D 分頁在寫入建膜場景後**不重新整理頁面**就顯示、canvas 有畫、下一階段寫入後重畫。容器 752 passed。
 - **未決**：MD 平衡階段（膜 NPT）的即時軌跡尚未接（目前正式模擬完成後才能播放）；膜的厚度／每脂質面積即時曲線可接 `analysis/membrane.py`，下一步。
+- **更正（同日，gui-preview 5da9e5d）**：瀏覽器檢查發現「建膜中（即時）」出現在清單裡，但分頁仍停在原本預設選取的結構——規則寫成「之前就在看即時畫面才跟」，預設選取（不是學生自己選的）也被當成「選了別的」。改為：**除非學生自己在下拉選單選過，否則一律跟著建模走**；程式設定選項時不算學生選擇。
 - 檔案：`md20/build/live3d.py`（新）、`md20/build/membrane.py`、`md20/build/assemble.py`、`md20/workflow.py`、`md20/gui/views.py`、`md20/gui/app.py`、`md20/gui/static/md20view.js`、`tools/gui_preview.py`、測試兩檔。規格：`docs/specs/membrane.md` §即時 3D。
 
 ### D-103　GUI 斷線的根因：計算和 GUI 共用一個 Python 程序 → 計算改成獨立子程序，狀態與進度一律從檔案讀回
