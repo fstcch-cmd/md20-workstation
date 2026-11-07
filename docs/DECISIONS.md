@@ -6,6 +6,13 @@
 ---
 
 ## 2026-11-07
+### D-111　28e87aa 的 heavy (full_workflow) 紅燈：測試讀錯 manifest 位置（程式沒錯）
+- 證據：run 42362077340 job `heavy (workflow …full_workflow)` 在 `tests/test_workflow_integration.py:61` 失敗，`gb == []`；流程本身 COMPLETE（docking、apo/docked_BEN MD、PBC 檢查、D-98 原子電荷指紋斷言都過）。
+- 根因：`build/pipeline.build_case` 寫 `build_manifest.json` 時，組裝閘門放在 `assembly.gates.gates`（`BuildResult.to_dict()`），頂層沒有 `gates` 鍵；D-99 新增的斷言讀頂層，所以不論閘門有沒有跑都是空的。`tests/test_real_case_integration.py`、GUI（`gui/views.py`、`gui/tables.py`）都讀 `assembly.gates`，程式端一致。
+- 決定：只改測試讀取路徑；閘門與 SMD 水盒規則不動。D-107 沒涵蓋這一項（ac5fba5 仍會以同一原因紅），本修正在 ac5fba5 的 CI 跑完後才 push，避免取代它。
+- 被否決：在頂層 manifest 複製一份 `gates`（兩份資料源，會分歧）。
+- 測試：本條即測試修正；真實路徑交 CI heavy workflow。
+
 ### D-110　docking 拒絕理由四語化（STATUS (C)）：理由帶語言中立的 params，報告依語言渲染
 - 問題：`classify_rejections` 的 `text` 只有中文，報告「選用姿勢的原始拒絕理由」對英／日／韓使用者仍是中文。
 - **決定**：每個拒絕 dict 加 `params`（數值，如距離、接觸數、分數差），`text`（中文）保留給既有讀取者；報告 `_reject_sentence(rule, params)` 用四語模板渲染，舊 manifest（無 params）退回 `text`。拒絕分類碼（可修幾何／模型限制／假設不成立）本來就四語。
