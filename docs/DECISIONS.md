@@ -6,6 +6,31 @@
 ---
 
 ## 2026-11-07
+### D-122　F17「自動行動效益與資源」：每個結合計算的自動補窗，每一輪做了什麼、多花多少模擬時間、前後指標怎麼變、最後有沒有連續
+- 依據：`docs/specs/master_iteration_2026-11-07.md` F17（有 `refine_log.json`，但報告只有「補窗 N 輪」一個數字，學生看不到每輪的動作、成本與效果）。**只做報告與分析，不改任何自動行動的行為或門檻**（P1A 自動行動迴圈需使用者授權，不做）。
+- **決定**：
+  - 新純函式模組 `md20/report/auto_actions.py`：`summarize(bdir)` 讀 `refine_log.json`、`coverage.json`、`binding_manifest.json`（`config` 與 PMF 階段存的 `coverage`）、`smd.json`（`informed_plan`），`summarize_data(...)` 是同一邏輯的純 dict 版本。輸出每輪的插入／延長／放棄、成本、前後指標，以及 `outcome`：`continuous`、`no_action_needed`、`unsamplable`（k 已上限補不起來）、`open`（補窗後仍有斷點）、`incomplete`、`unknown`、`no_record`。
+  - **成本（ps，模擬時間）只從已記錄的設定推**：新窗口 = `window_equil_ps` + `window_prod_ps`；延長 = `window_prod_ps`（`extend_window` 不重新平衡）；第一批 = 窗口數 × 同樣的值。設定缺少 → 該輪成本 `None`，報告寫「無紀錄」，整體成本也是未知，不補預設值。不計 NaN 重試（同樣的模擬時間，最多跑兩次）與等待時間。未完成的輪次成本標「計畫值」。
+  - **前後指標用規劃器自己的視角**：某輪「之前」= 該輪規劃那一刻（`holes` 的最小重疊、`notes` 裡印出的斷點數、`continuous`）；「之後」= 下一輪規劃時的同一組值。最後一個動作之後規劃器不會再跑，所以「之後」只剩 `coverage` 的連續與斷點，重疊最小值寫「無紀錄」。不拿 MBAR／直方圖重疊矩陣代替，因為那是不同定義的數字，前後混用會得到假的變化。
+  - **「重疊最小值」的準確意義**：`holes` 只列低於目標的相鄰對，所以它是「缺口處的最小重疊」；沒有缺口時顯示「無缺口」，不寫一個 ≥ 目標的數字。被規劃器判定「中間已有窗口且直方圖連續」而略過的低重疊對，不在 `holes` 裡，所以這個值對那種對偏高估。表下註解與 `HEAD["note"]` 寫明。
+  - **放棄的提案（D-119）**：優先讀 `entry["skipped"]`（有結構欄位就用四語句型組出「提案 c（k）與既有窗口 n 只差 d，小於最小間距 s，放棄」）；**`binding.py` 目前沒有把 `skipped` 寫進 `refine_log.json`**（本項不動 `sampling/`），所以實際只有 `notes` 裡的中文原文（以「放棄此提案」「提案被放棄」辨認），報告原樣顯示並標「記錄原文，中文」。
+  - 結果句（四語）：補窗 N 輪、新增 a、延長 e、多花 X ps（約為第一批的 P%）、重疊最小值從 a 到 b、取樣已連續；或「k 已到上限，區段 … 補不起來，見斷點」；或「補窗後仍有斷點 …」（預算用盡時加註）；或「沒有補窗紀錄」。
+  - 報告：結合計算每個配體的段落末（SMD／PMF 圖與 D-116 接觸釋放之後）新增小節「自動補窗的效益與資源」：一句總結、一張表（輪次、動作、多花 ps、前後效果；第一列是第一批窗口的成本）、放棄的提案清單。**用表不用圖**，所以沒有新圖種，`report_language.md` 不動。
+  - D-108 證據矩陣新增「自動補窗」列（每個 PASS 的結合目標一列）：連續或不需要補窗 → 有證據；補不起來、補後仍有斷點、未完成 → 有限制；沒有紀錄或最後是否連續未知 → 有限制（原因「沒有紀錄」），不預設為有證據。
+- **被否決**：
+  - 把成本寫成牆鐘時間（紀錄沒有每個窗口的實際耗時，只能猜）。
+  - 補不到設定時用預設 10／50 ps 估算（不同教學層級的預設值不同，會算出看起來精確的錯數字）。
+  - 用 MBAR 重疊矩陣補上最後一輪「之後」的重疊（定義不同）。
+  - 改 `binding.py` 讓 `refine_log` 多記每輪的重疊與 `skipped`（讓資料更完整，但在 `sampling/` 內，本項範圍外；列為未決）。
+  - 把輪次數畫成圖：表已能呈現動作、成本、效果三欄，免新增圖種與範本。
+- **證據**：`tests/test_auto_actions.py`（多輪彙整與成本、前後指標、成本未知、設定只有 `window_prod_ps` 時延長仍可算、k 上限補不起來、補後仍有斷點與預算、`skipped` 結構化與從 notes 取出、無紀錄、不需要補窗、未完成、損壞的 notes 不崩潰、檔案讀取、四語報告渲染、證據列）。
+- **未驗證**：真實 `run_binding` 產生的 `refine_log.json` 接進這個報告小節，要等 CI heavy workflow 或筆電報告（合成紀錄的欄位依 `binding.py` 寫入處照抄）。
+- **未決**：
+  - `refine_log` 沒有每輪「之後」的重疊與 `skipped` 結構欄位，要在 `binding.py` 的 entry 補（`skipped: rp.skipped`，以及規劃後各對的最小重疊），屬 `sampling/`，請在下一輪授權。
+  - 手動補採樣（`extra_windows`）的成本沒有計入「自動」行動，也沒有單獨列出。
+  - 嘗試次數、牆鐘時間仍不在紀錄裡。
+- 檔案：`md20/report/auto_actions.py`（新）、`md20/report/workflow_report.py`（`_auto_actions_html`）、`md20/report/evidence.py`（`auto` 列）、`tests/test_auto_actions.py`（新）、`docs/specs/master_iteration_2026-11-07.md`（F17 列）。
+
 ### D-121　ac5fba5 openmm-stack ubuntu `test_extended_metrics_on_synthetic_trajectory`：蛋白氫鍵在無氫拓撲上失敗、錯誤被 guard 收走
 - 證據：run 42364949922 ubuntu job，`tests/test_extended_analysis.py:97` `KeyError: 'hbonds_protein'`——`extended_metrics` 的 `guard` 把例外收進 `errors`，該鍵不存在；斷言在取鍵時就失敗，所以 CI 沒印出 `errors` 內容（原因是推斷，不是讀到的）。
 - 判斷：合成軌跡的蛋白只有重原子；`md.wernet_nilsson` 找氫鍵需要 H，無 H 時在空的供體–氫–受體陣列上出錯。D-105 之前同一段也會失敗，只是沒有斷言它存在。真實拓撲（OpenMM 建模）都含 H，不受影響。
