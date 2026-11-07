@@ -6,6 +6,34 @@
 ---
 
 ## 2026-11-07
+### D-123　補 D-118 的接線缺口：從建模 manifest 與對接結果萃取約束建議的輸入；學生採用建議時寫 DecisionLog
+- 範圍：只補輸入與記錄。`restraint_advice.py` 的判斷規則、門檻、所有 protocol 預設與 `make_protocol` 都沒動；不新增 phase/step。
+- **輸入萃取**（純函式，`md20/engine/restraint_advice.py` 新增 `rebuilt_residues_from_manifest`、`capped_breaks_from_manifest`、`pose_clashes_from_selection`、`features_from_records`；`md20/advisor.py` 新增 `features_with_records`）。讀的是程式實際寫入的鍵，不是推測的：
+  - `n_rebuilt_residues` ← `build_manifest.json["receptor"]["missing_residues_added"]`（`prepare_receptor` 寫入，格式 `{"(chain索引, 位置)": [殘基名…]}`，PDBFixer 實際補建的內部缺口；末端不補、長 loop 未選補建也不在內）。總和＝補建殘基數。`receptor_manifest.json`（docking 用受體，`workflow.dir/docking_receptor/`）有同一個鍵，也讀。
+  - 封端的斷鏈 ← 同處 `capped_breaks`（list）。長度 > 0 → `CaseFeatures.has_gaps = True`（事實由 manifest 給，只往 True 升級，不往下改）。
+  - `n_pose_clashes` ← pose_selection 步驟的 `selection["ligands"][名]["docking_rejections"]`（D-98 A7 保留的、被使用的那個 pose 的對接拒絕碼）。同一 `entry` 有多個配體 ＝ 聯合 pose；有 `rule == "ligand_clash"` 的 entry 計 1。
+  - **讀不到一律保持未知（None），不當 0**：manifest 缺鍵（受體在補建前就被閘門擋下、或舊紀錄）、值型別不對、沒有 pose_selection、沒有聯合 pose、舊紀錄沒有 `docking_rejections`。未知會列在建議的 `not_considered`（D-118 既有行為）。只有 manifest 明寫 `{}`／`[]` 時才是 0。
+  - 多個 case（apo、docked_single…）通常共用一個受體，策略是整個 workflow 一個，所以取各 manifest 的**最大值**（任何一個 case 需要 gentle，整體就 gentle）。
+- **採用紀錄**（`advisor.adopted_restraint_entry`、`Workflow._record_restraint_adoption`）：GUI 一鍵採用與手改設定最後都是 `cfg["md"]["restraints"]`，唯一讀取點是 `Workflow._restraint_strategy()`，所以接在那裡，不新增決定鍵（`md.restraints` 已在設定裡；`DECISION_KEYS` 是「重跑 pipeline 時要沿用的人工決定」，`md.restraints` 是一般設定值，由使用者的 config 帶入，不需要加；沒有新增 `DECISION_KEYS`）。
+  - 「採用」＝ `md.restraints` **有被設定**，且等於**此刻**建議的策略（standard 或 gentle）。用 D-118 的 `decision_entry()` 寫入（`stage = md.restraints`、`kind = human`、中文 `why`），evidence 另加 `inputs`（`n_rebuilt_residues`、`n_pose_clashes`、`has_gaps`），讓日誌看得出建議當時依據的輸入。
+  - 沒設定（用預設）、設成與建議不同的值、設成 hold_backbone（建議只把它當選項）→ **不寫**。
+  - 同一 workflow 同一 choice 與 evidence 只寫一次（`run_md` 逐 case 呼叫、重跑也不重複）；輸入改變（例如重新建模後補建殘基數不同）會再寫一筆。
+  - 建議計算出錯時寫一筆 `skipped`（含例外），不擋下 MD（建議是輔助，不是閘門）。
+  - 讀取特徵時用 `md.tier`（沒設時用 run_md 的預設 teaching），不用 goal 對應的 tier，避免日誌裡的建議與實際跑的 protocol 不一致。
+- 被否決：
+  - 把 `n_pose_clashes` 估成 0 或用 Vina 分數推測受體碰撞：對接層只量配體–配體距離，受體–配體碰撞數沒有任何地方存（寧可擋也不要猜）。
+  - 新增「受體–配體碰撞」檢查來填這個輸入：屬新功能與規則，不在本條授權內。
+  - 在 `decision_entry()` 裡加 inputs：那是 `restraint_advice.py` 的輸出格式，本條只補輸入與記錄，改在呼叫端加 evidence。
+  - 明寫 `standard` 且建議也是 standard 時不寫：保留字面定義（設定值等於建議）；這條只會多一筆記錄，沒有副作用。
+- **已知限制（誠實）**：
+  - 單一配體（獨立對接）的 pose 沒有任何碰撞檢查資料，`n_pose_clashes` 對它永遠是未知，建議會一直列「尚未檢查對接姿勢的碰撞」。只有聯合（simultaneous）對接才有數字，而且只是配體–配體碰撞。
+  - 若 `selection` 是用 `least risk` 備援選的 pose（D-78），它的 `docking_rejections` 會含 `ligand_clash`，這裡計為 1，建議 gentle，符合 D-118 對「姿勢有碰撞」的定義。
+  - `missing_residues_added` 的值是 PDBFixer 的 `missingResidues` 內容；若將來 PDBFixer 改格式，型別檢查會讓它回到未知，不會算錯。
+  - 真實 `prepare_receptor` 產出的 manifest 要有 PDBFixer，容器沒有；本條用依程式碼結構寫的合成 manifest 測試，**沒有用真實建模的 manifest 驗證**，要等 CI 的建模整合或筆電實測。
+- 證據：`tests/test_restraint_advice.py` 新增 9 項（鍵名讀取與各種讀不到的情況、`{}` 為 0、多 manifest 取最大、補建殘基使建議由 standard 變 gentle 且理由帶數字、封端斷鏈、聯合 pose 碰撞、輸入讀不到時特徵不變、採用／未採用／設成別的值／hold_backbone 的紀錄、Workflow 實際寫入一筆且重複呼叫與重跑不重複、未採用不寫）。
+- 檔案：`md20/engine/restraint_advice.py`（只新增萃取函式）、`md20/advisor.py`、`md20/workflow.py`（`_restraint_strategy` 接線）、`tests/test_restraint_advice.py`、`docs/specs/restraints_freeze_truncation.md`。
+- 未決：D-118 其餘未決（pLDDT 門檻、GUI 專屬畫面、gentle 的對照實驗）不變；受體–配體碰撞數若要納入，需要使用者授權新增檢查。
+
 ### D-122　F17「自動行動效益與資源」：每個結合計算的自動補窗，每一輪做了什麼、多花多少模擬時間、前後指標怎麼變、最後有沒有連續
 - 依據：`docs/specs/master_iteration_2026-11-07.md` F17（有 `refine_log.json`，但報告只有「補窗 N 輪」一個數字，學生看不到每輪的動作、成本與效果）。**只做報告與分析，不改任何自動行動的行為或門檻**（P1A 自動行動迴圈需使用者授權，不做）。
 - **決定**：
@@ -99,6 +127,7 @@
   - pLDDT 門檻 10% 與 70 的合理性需要真實 AlphaFold 結構的資料確認。
   - 專屬的 GUI 畫面（差異表、逐階段倍率）。採用時寫 DecisionLog（`decision_entry`）還沒接進 workflow。
   - gentle 是否真的比 standard 更少在升溫時出問題，沒有對照實驗；規則來自規格與 D-23 的設計理由，不是新的實測結論。
+- **後續：D-123**（2026-11-07）：上面第一項（`n_rebuilt_residues`、`n_pose_clashes` 的接線）與最後的「採用時寫 DecisionLog」已接上，讀取的鍵名與限制見 D-123。`n_pose_clashes` 只有聯合對接的配體–配體碰撞有資料，單一配體仍是未知。其餘未決不變。
 ### D-116　F13「SMD 路徑與接觸釋放」：拉離期間稀疏存溶質座標，分析每個配體–殘基接觸在哪個距離斷開、是否在力峰值時斷開
 - 依據：`docs/specs/master_iteration_2026-11-07.md` F13（只有力與功曲線，看不到「拉力峰值那一刻斷了哪些接觸」）。使用者要求學生看得到接觸釋放，不只是力曲線。
 - 決定：

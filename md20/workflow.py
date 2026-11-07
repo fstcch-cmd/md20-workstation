@@ -1479,7 +1479,51 @@ class Workflow:
             self.dec.record("workflow.md", "restraints", name,
                             "production 全程保留主鏈 5% 約束（50 kJ/mol/nm²）：主鏈 RMSD／RMSF 會被約束壓低，報告標註「受約束」，"
                             "不能當作結構穩定的證據。", kind="auto")
+        self._record_restraint_adoption(name)
         return name
+
+    def _restraint_features(self):
+        """CaseFeatures for the restraint advice: the config and the receptor file, plus what the build manifests and the
+        pose selection record (D-123).  Whatever cannot be read stays unknown."""
+        from . import advisor
+        raw = (self._done("receptor_input") or {}).get("path")
+        text = Path(raw).read_text(encoding="utf-8", errors="ignore") if raw and Path(raw).is_file() else None
+        f = advisor.features_from_config(self.cfg, receptor_text=text)
+        manifests = []
+        for c in ((self._done("md_cases") or {}).get("cases") or {}).values():
+            try:
+                bm = load_json(self.project.case(c["case_id"]).build_dir / "build_manifest.json", {})
+            except (FileNotFoundError, KeyError):
+                continue
+            if bm:
+                manifests.append(bm)
+        rm = load_json(self.dir / "docking_receptor" / "receptor_manifest.json", {})
+        if rm:
+            manifests.append(rm)
+        return advisor.features_with_records(f, manifests=manifests, pose_selection=(self._done("pose_selection") or {}).get("selection"))
+
+    def _record_restraint_adoption(self, name: str) -> None:
+        """D-123: when md.restraints is set (one click in the advisor, or by hand) to the strategy the restraint advice
+        (D-118) names, write the advice's decision entry.  Not set, or set to something else: nothing is written.
+        The advice itself never changes the config; this only records that the user took it.  Advisory: a failure here
+        is logged and never blocks the run."""
+        if (self.cfg.get("md") or {}).get("restraints") is None:
+            return
+        try:
+            from . import advisor
+            values = advisor.values_from_config(self.cfg)
+            values["tier"] = (self.cfg.get("md") or {}).get("tier", "teaching")     # what run_md builds, not the goal's default
+            goal = self.cfg.get("goal") or ("binding" if (self.cfg.get("binding") or {}).get("enabled") else "teaching")
+            e = advisor.adopted_restraint_entry(self._restraint_features(), goal, values)
+            if e is None:
+                return
+            for row in self.dec.by_stage(e["stage"]):                    # one row per (choice, evidence); this is called per case
+                if row.get("what") == e["what"] and row.get("choice") == e["choice"] and row.get("evidence") == e["evidence"]:
+                    return
+            self.dec.record(e["stage"], e["what"], e["choice"], e["why"], kind=e["kind"], **e["evidence"])
+        except Exception as exc:  # noqa: BLE001  (advisory record must never break the run)
+            outcome = "skipped"
+            self.dec.record("md.restraints", "約束策略建議", outcome, f"採用建議的紀錄未寫入：{type(exc).__name__}: {exc}")
 
     def run_md(self, built: dict, make_factory: Callable, *, should_pause=None, progress_cb=None) -> dict:
         from .engine import make_protocol, run_replicas

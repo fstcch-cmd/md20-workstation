@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import copy
 import math
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace as _replace
 
 from .engine.protocol import TIERS
 from .engine.restraint_advice import (RestraintInputs, advise as _advise_restraints, rough_reasons as _rough_reasons,
-                                      resolution_from_pdb, plddt_low_fraction_from_pdb)
+                                      resolution_from_pdb, plddt_low_fraction_from_pdb, features_from_records,
+                                      decision_entry as _restraint_decision_entry)
 
 METALS = {"ZN", "MG", "CA", "MN", "FE", "FE2", "CU", "CU1", "CO", "NI", "CD", "HG"}
 from .i18n import LANGS, pick as tx   # noqa: E402,F401  (D-74: zh, en, ja, ko)
@@ -270,6 +271,39 @@ def restraint_advice(f: CaseFeatures, goal: str = "teaching", values: dict | Non
     """Advice on the restraint release (D-118, spec restraints_freeze_truncation 3.1).  Advice only: nothing in the config
     or the protocol changes until the user adopts `protocol_args["restraints"]` (then it is the ordinary `md.restraints`)."""
     return _advise_restraints(restraint_inputs(f, goal, values), lang)
+
+
+def features_with_records(f: CaseFeatures, *, manifests=(), pose_selection=None) -> CaseFeatures:
+    """A copy of `f` with the inputs that live in build and docking records filled in (D-123): `n_rebuilt_residues` and
+    capped chain breaks (-> `has_gaps`) from the build/receptor manifests, `n_pose_clashes` from the pose selection.
+    A value that cannot be read stays as `f` had it (None = unknown); nothing is guessed."""
+    r = features_from_records(manifests=manifests, pose_selection=pose_selection)
+    out = _replace(f)
+    if r["n_rebuilt_residues"] is not None:
+        out.n_rebuilt_residues = r["n_rebuilt_residues"]
+    if r["n_pose_clashes"] is not None:
+        out.n_pose_clashes = r["n_pose_clashes"]
+    if (r["n_capped_breaks"] or 0) > 0:
+        out.has_gaps = True
+    return out
+
+
+def adopted_restraint_entry(f: CaseFeatures, goal: str = "teaching", values: dict | None = None) -> dict | None:
+    """The DecisionLog arguments (D-118 `decision_entry`, Chinese reason) when the user has adopted the restraint advice,
+    else None.  Adopted = `md.restraints` is set in the config (by the one-click button or by hand) and equals the
+    strategy the advice names now.  Not set, or set to something else (including hold_backbone, which is only an option
+    in the advice), is not adoption, so nothing is written.  The inputs that came from records are added to the evidence."""
+    values = values or {}
+    chosen = values.get("restraints")
+    if chosen is None:
+        return None
+    adv = restraint_advice(f, goal, values, "zh")
+    if adv["status"] != "advice" or adv["strategy"] != chosen:
+        return None
+    e = _restraint_decision_entry(adv)
+    e["evidence"] = {**e["evidence"], "inputs": {"n_rebuilt_residues": f.n_rebuilt_residues, "n_pose_clashes": f.n_pose_clashes,
+                                                 "has_gaps": f.has_gaps}}
+    return e
 
 
 def _r(value, zh: str, en: str, ja: str, ko: str) -> dict:

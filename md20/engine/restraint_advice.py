@@ -87,6 +87,77 @@ def plddt_low_fraction_from_pdb(text: str) -> float | None:
     return sum(v < PLDDT_LOW for v in vals) / len(vals) if vals else None
 
 
+# ----------------------------------------------------------------------------------------------- reading build and docking records
+def _receptor_record(m) -> dict | None:
+    """The receptor part of a manifest: `build_manifest.json` keeps it under "receptor" (build_case), a receptor manifest
+    (`receptor_manifest.json`) is that part itself.  Anything else is not readable."""
+    if not isinstance(m, dict):
+        return None
+    r = m.get("receptor")
+    return r if isinstance(r, dict) else m
+
+
+def rebuilt_residues_from_manifest(m) -> int | None:
+    """Residues PDBFixer added to the receptor, from `missing_residues_added` ({"(chain, index)": [resnames]}).
+    None when the key is missing (the receptor was blocked before the repair, or the record is older) or malformed:
+    a count of 0 is only reported when the manifest says so."""
+    r = _receptor_record(m)
+    added = r.get("missing_residues_added") if r else None
+    if not isinstance(added, dict) or not all(isinstance(v, (list, tuple)) for v in added.values()):
+        return None
+    return sum(len(v) for v in added.values())
+
+
+def capped_breaks_from_manifest(m) -> int | None:
+    """Chain breaks closed with ACE/NME caps (`capped_breaks`); None when the key is missing or malformed."""
+    r = _receptor_record(m)
+    capped = r.get("capped_breaks") if r else None
+    return len(capped) if isinstance(capped, (list, tuple)) else None
+
+
+def pose_clashes_from_selection(sel) -> int | None:
+    """Joint docked poses (several ligands in one pose) whose used pose the docking layer rejected for a ligand-ligand
+    clash (rule `ligand_clash` in `docking_rejections`, kept by `choose_poses`).  None when it cannot be told: no selection,
+    no joint pose (docking only measures ligand-ligand distance, so a single-ligand pose was never checked for clashes),
+    or a record from before `docking_rejections` was kept.  Receptor-ligand clashes are not stored anywhere."""
+    ligs = sel.get("ligands") if isinstance(sel, dict) else None
+    if not isinstance(ligs, dict) or not ligs:
+        return None
+    groups: dict = {}
+    for name, rec in ligs.items():
+        if not isinstance(rec, dict):
+            return None
+        groups.setdefault(rec.get("entry", name), []).append(rec)
+    joint = [g for g in groups.values() if len(g) > 1]
+    if not joint:
+        return None
+    n = 0
+    for g in joint:
+        rej = g[0].get("docking_rejections")
+        if not isinstance(rej, list):
+            return None
+        n += any(isinstance(x, dict) and x.get("rule") == "ligand_clash" for x in rej)
+    return n
+
+
+def features_from_records(*, manifests=(), pose_selection=None) -> dict:
+    """The D-118 inputs that live in build and docking records (D-123).  `manifests` = every build manifest (or receptor
+    manifest) available; several cases usually share one receptor, and the strategy is chosen for the whole workflow, so
+    the largest count wins (any case that calls for the gentle release makes it gentle).  A value that cannot be read
+    is None, never 0: the advice then lists it under `not_considered`.
+
+    Returns {"n_rebuilt_residues", "n_capped_breaks", "n_pose_clashes", "sources"}; `sources` says which record each
+    number came from, for the decision log."""
+    reb = [v for v in (rebuilt_residues_from_manifest(m) for m in manifests) if v is not None]
+    cap = [v for v in (capped_breaks_from_manifest(m) for m in manifests) if v is not None]
+    clash = pose_clashes_from_selection(pose_selection)
+    return {"n_rebuilt_residues": max(reb) if reb else None, "n_capped_breaks": max(cap) if cap else None,
+            "n_pose_clashes": clash,
+            "sources": {"n_rebuilt_residues": f"{len(reb)} manifest(s): missing_residues_added" if reb else None,
+                        "n_capped_breaks": f"{len(cap)} manifest(s): capped_breaks" if cap else None,
+                        "n_pose_clashes": "pose_selection.ligands[].docking_rejections" if clash is not None else None}}
+
+
 # ----------------------------------------------------------------------------------------------- reasons
 def _low_conf(i: RestraintInputs) -> bool:
     return bool(i.structure_source == "model" and i.plddt_low_fraction is not None
