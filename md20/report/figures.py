@@ -231,6 +231,53 @@ def smd(pos, force, work, path: Path) -> str | None:
     return _save(fig, path)
 
 
+def smd_contacts_map(sc: dict, path: Path, max_rows: int = 30) -> str | None:
+    """D-116 (F13): one row per ligand-residue contact along the pull (x = ligand-pocket distance d), bars where the
+    contact exists, a marker at its last position, the force peak +/- window as a grey band.  Rows with a release at the
+    peak are always kept; the rest follow in release order."""
+    cons = list(sc.get("contacts") or [])
+    d = np.asarray((sc.get("frames") or {}).get("d_nm") or [], float)
+    if sc.get("status") not in ("ok", "limited") or not cons or len(d) < 2:
+        return None
+    plt = _plt()
+    keep = [c for c in cons if c.get("category") == "at_peak"]
+    for c in cons:
+        if len(keep) >= max_rows:
+            break
+        if c not in keep:
+            keep.append(c)
+    keep = [c for c in cons if c in keep]
+    step = float(sc.get("frame_step_nm") or 0.01)
+    fig, ax = plt.subplots(figsize=(6.8, 0.2 * len(keep) + 1.5))
+    pk, win = sc.get("peak") or {}, float(sc.get("peak_window_nm") or 0.05)
+    if pk.get("resolved"):
+        ax.axvspan(pk["d_nm"] - win, pk["d_nm"] + win, color="#7b8794", alpha=0.25, lw=0, label=f"Force peak ± {win:g} nm")
+        ax.axvline(pk["d_nm"], color="#52514e", lw=0.8, ls="--")
+    c_init, c_new, c_peak = PALETTE[0], PALETTE[2], PALETTE[1]
+    for row, c in enumerate(keep):
+        col = c_init if c.get("initial") else c_new
+        for a, b in c.get("runs") or []:
+            lo, hi = float(d[a:b + 1].min()) - step / 2, float(d[a:b + 1].max()) + step / 2
+            ax.barh(row, hi - lo, left=lo, height=0.7, color=col, lw=0)
+        if c.get("released"):
+            at = c.get("category") == "at_peak"
+            if not at:      # white underlay so the tick stays visible on the coloured bar
+                ax.plot([c["release_d_nm"]], [row], marker="|", ms=9, color="white", mew=3.2, ls="none")
+            ax.plot([c["release_d_nm"]], [row], marker="D" if at else "|", ms=5 if at else 8, color=c_peak if at else "#1f2933",
+                    mec="#1f2933" if at else None, mew=0.6 if at else 1.2, ls="none")
+    ax.set_ylim(len(keep) - 0.5, -0.5)
+    ax.set_xlim(float(d.min()) - step, float(d.max()) + step)
+    ax.set_yticks(range(len(keep)), [("* " if c.get("category") == "at_peak" else "") + c.get("label", c["residue"]) for c in keep], fontsize=7)
+    ax.set_xlabel("Ligand–pocket distance d (nm)")
+    ax.set_ylabel("Ligand–residue contacts" + (f" ({len(keep)} of {len(cons)} shown)" if len(keep) < len(cons) else ""))
+    ax.plot([], [], "s", color=c_init, label="Present at the start")
+    ax.plot([], [], "s", color=c_new, label="Formed during the pull")
+    ax.plot([], [], "|", color="#1f2933", ms=8, mew=1.2, label="Last position of a contact")
+    ax.plot([], [], "D", color=c_peak, mec="#1f2933", mew=0.6, ms=5, label="Last position at the force peak (*)")
+    ax.legend(fontsize=7, frameon=False, loc="upper left", bbox_to_anchor=(1.0, 1.0))
+    return _save(fig, path)
+
+
 def pmf(grid, W, err, path: Path) -> str | None:
     if grid is None or len(grid) < 3:
         return None

@@ -224,6 +224,8 @@ class BindingResult:
     # D-96: scientific assessment (sampling/assessment.py) — execution status above, eligibility here
     assessment: dict = field(default_factory=dict)
     condition: dict = field(default_factory=dict)
+    # D-116 (F13): contact release along the pulling path (analysis/smd_contacts.py); {} = not computed (legacy result)
+    smd_contacts: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -598,6 +600,8 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         r0 = d0
         saved = {}
         picker = WindowStartPicker(plan.centers_nm)
+        path_rec = _SmdPathRecorder.setup(top, xyz, box, anchor, ligand, masses, cfg, n_rows=int(math.ceil(n_steps / rec_every)),
+                                          decisions=decisions)
         for s in range(0, n_steps, rec_every):
             nstep = min(rec_every, n_steps - s)
             dr = cfg.pull_velocity_nm_per_ps * dt_ps * nstep
@@ -605,6 +609,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             d = cv_distance(xyz, box, anchor, ligand, masses)
             force = cfg.k_pull * (r0 - d)
             work += force * dr
+            path_rec.offer(len(rows), s * dt_ps, d, r0, xyz, box)
             rows.append((s * dt_ps, r0, d, force, work))
             for w, rec in picker.offer(d, r0, lambda: XmlSerializer.serialize(ctx.getState(getPositions=True, getVelocities=True))):
                 path = wdir / f"w{w:03d}_start.xml"
@@ -621,6 +626,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             saved[w] = {"path": str(path), **rec}
         # windows the ligand never reached (lags behind the spring): seed from the last frame
         xyz, box = _state_xyz_box(ctx)
+        path_rec.finish(out, n_steps * dt_ps, cv_distance(xyz, box, anchor, ligand, masses), r0, xyz, box, decisions=decisions)
         for w in range(len(plan.centers_nm)):
             if w in saved:
                 continue
@@ -636,6 +642,9 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                "plan": plan.to_dict(), "sealed_at": now_iso()}
         atomic_write_json(smd, smd_file)
     del ctx, integ
+    # D-116: which contacts are lost where the force peaks.  Derived from smd_path.npz + smd.tsv, so a resumed run gets
+    # the same answer; a pull without the path file is "unavailable" (never guessed).  Analysis failure never stops the run.
+    smd_contacts = _smd_contacts_stage(out, decisions)
     # ------------------------------------------------------------------ umbrella windows (adaptive, coarse → fine)
     from .adaptive import plan_refinement, coverage_view, continuity_report, gap_alerts, plan_from_smd
     eq_steps = int(cfg.window_equil_ps * 1000 / cfg.timestep_fs)
@@ -945,6 +954,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                "jacobian_corrected": True, "half_split": half, "convergence": conv, "overlap_matrix": overlap,
                "err_kj_mol": (np.asarray(err).tolist() if err is not None else None),
                "grid_nm": g.tolist(), "pmf_radial_kj_mol": Wv.tolist(), "pmf_raw_kj_mol": rp["W_raw"].tolist()}
+    res.smd_contacts = smd_contacts
     res.figures = dict(pres.figures)
     from ..analysis.plots import plot_pmf
     res.figures["pmf"] = plot_pmf(g, Wv, err, out / "pmf")
@@ -1050,6 +1060,112 @@ def _np_default(o):
     if isinstance(o, np.ndarray):
         return o.tolist()
     return str(o)
+
+
+class _SmdPathRecorder:
+    """D-116: sparse solute coordinates during the pull (ligand heavy atoms + protein residues near the pocket and the
+    exit path, no water, at most ~200 frames) for the contact-release analysis.  Recording is read-only: it never
+    changes the pulling protocol, and a failure to set it up only means "no path file" (reported as unavailable)."""
+
+    def __init__(self):
+        self.ok = False
+        self.frames: list = []
+
+    @classmethod
+    def setup(cls, top, xyz, box, anchor, ligand, masses, cfg, *, n_rows: int, decisions=None):
+        self = cls()
+        try:
+            from ..analysis import smd_contacts as SC
+            from ..analysis.interactions import residue_key
+            atoms = list(top.atoms())
+            lig_set = {int(i) for i in ligand}
+            lig_res = {atoms[i].residue.index for i in lig_set}
+            heavy = lambda a: a.element is not None and a.element.symbol != "H"      # noqa: E731
+            env = np.array([a.index for a in atoms if heavy(a) and a.residue.name not in _SOLVENT_RESNAMES
+                            and a.residue.index not in lig_res and a.index not in lig_set], dtype=int)
+            env_res = np.array([atoms[i].residue.index for i in env], dtype=int)
+            lig_heavy = np.array([i for i in sorted(lig_set) if heavy(atoms[i])], dtype=int)
+            dvec = min_image(group_com(xyz, ligand, masses) - group_com(xyz, anchor, masses), box)
+            cap = SC.select_capture(xyz, box, lig_heavy, env, env_res, pull_nm=cfg.pull_distance_nm, direction=dvec)
+            sel = cap["atoms"]
+            if not len(lig_heavy) or not len(sel):
+                raise ValueError("empty capture set")
+            res_ids = sorted({atoms[i].residue.index for i in sel})
+            res_pos = {r: k for k, r in enumerate(res_ids)}
+            residues = list(top.residues())
+            labels = []
+            for r in res_ids:
+                res = residues[r]
+                ch = res.chain.id or str(res.chain.index)
+                labels.append(residue_key(ch, res.name, res.id))
+            self.idx = np.concatenate([lig_heavy, sel])
+            self.is_lig = np.r_[np.ones(len(lig_heavy), bool), np.zeros(len(sel), bool)]
+            self.atom_res = np.r_[np.full(len(lig_heavy), -1, int), [res_pos[atoms[i].residue.index] for i in sel]]
+            self.atom_name = [atoms[i].name for i in self.idx]
+            self.res_labels = labels
+            self.stride = SC.path_stride(n_rows)
+            self.meta = {"stride_records": int(self.stride), "near_nm": SC.NEAR_NM, "path_margin_nm": SC.PATH_MARGIN_NM,
+                         "n_residues": len(res_ids), "n_residues_near_start": cap["n_near"], "n_residues_on_exit_path": cap["n_path"],
+                         "n_ligand_atoms": int(len(lig_heavy)), "pull_nm": float(cfg.pull_distance_nm),
+                         "ligand_radius_nm": round(cap["ligand_radius_nm"], 3)}
+            self.ok = True
+        except Exception as exc:  # noqa: BLE001
+            if decisions:
+                decisions.record("binding.smd_path", "path coordinates", "not recorded",
+                                 f"無法設定沿拉離路徑的座標記錄（{type(exc).__name__}: {exc}）；拉離照常進行，接觸釋放分析會標為無法進行。")
+        return self
+
+    def offer(self, i: int, t_ps: float, d: float, r0: float, xyz, box) -> None:
+        if self.ok and i % self.stride == 0:
+            self._add(t_ps, d, r0, xyz, box)
+
+    def _add(self, t_ps, d, r0, xyz, box) -> None:
+        self.frames.append((float(t_ps), float(d), float(r0), np.asarray(xyz)[self.idx].astype(np.float32),
+                            np.asarray(box, float).astype(np.float32)))
+
+    def finish(self, out: Path, t_ps: float, d: float, r0: float, xyz, box, decisions=None) -> None:
+        if not self.ok:
+            return
+        try:
+            from ..analysis import smd_contacts as SC
+            self._add(t_ps, d, r0, xyz, box)
+            SC.save_path(out, time_ps=[f[0] for f in self.frames], d_nm=[f[1] for f in self.frames],
+                         r0_nm=[f[2] for f in self.frames], xyz_nm=np.stack([f[3] for f in self.frames]),
+                         box_nm=np.stack([f[4] for f in self.frames]), atom_index=self.idx, atom_res=self.atom_res,
+                         atom_name=self.atom_name, is_ligand=self.is_lig, res_labels=self.res_labels, meta=self.meta)
+            if decisions:
+                decisions.record("binding.smd_path", "path coordinates", f"{len(self.frames)} frames",
+                                 f"拉離期間每 {self.stride} 筆紀錄存一幀溶質座標（配體 {self.meta['n_ligand_atoms']} 個重原子、"
+                                 f"{self.meta['n_residues']} 個口袋與出口路徑殘基，不含水），供分析斷開的接觸；不改變拉離協定。")
+        except Exception as exc:  # noqa: BLE001
+            if decisions:
+                decisions.record("binding.smd_path", "path coordinates", "not recorded",
+                                 f"寫入沿路徑座標檔失敗（{type(exc).__name__}: {exc}）；拉離照常進行，接觸釋放分析會標為無法進行。")
+
+
+def _smd_contacts_stage(out: Path, decisions=None) -> dict:
+    """Run the contact-release analysis from the files in `out` and store it (smd_contacts.json).  Never raises."""
+    try:
+        from ..analysis import smd_contacts as SC
+        sc = SC.from_files(out)
+    except Exception as exc:  # noqa: BLE001
+        sc = {"schema": "md20.smd_contacts/1", "status": "unavailable", "reason_code": "bad_path_file",
+              "why": f"接觸釋放分析失敗（{type(exc).__name__}: {exc}），所以無法分析。", "contacts": [], "at_peak": []}
+    try:
+        atomic_write_json(json.loads(json.dumps(sc, default=_np_default)), out / "smd_contacts.json")
+    except Exception:  # noqa: BLE001
+        pass
+    if decisions:
+        if sc.get("status") == "unavailable":
+            decisions.record("binding.smd_contacts", "contact release", "unavailable", sc.get("why", ""))
+        else:
+            pk = sc.get("peak") or {}
+            decisions.record("binding.smd_contacts", "contact release", f"{sc.get('n_contacts')} contacts",
+                             f"沿拉離路徑追蹤 {sc.get('n_contacts')} 個配體–殘基接觸（重原子 < {sc.get('cutoff_nm')} nm），"
+                             f"其中起始存在 {sc.get('n_initial')} 個、已斷開 {sc.get('n_initial_released')} 個；"
+                             f"力峰值在距離 {pk.get('d_nm', float('nan')):.2f} nm，峰值 ±{sc.get('peak_window_nm')} nm 內斷開 "
+                             f"{len(sc.get('at_peak') or [])} 個。只描述這一次拉離，力與功不是自由能。")
+    return json.loads(json.dumps(sc, default=_np_default))
 
 
 def _plot_smd(tsv: Path, out_base: Path) -> dict:

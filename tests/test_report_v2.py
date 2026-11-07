@@ -87,12 +87,18 @@ def make_wf(tmp_path, lang="en"):
     force = 600 * np.exp(-((pos - 0.7) / 0.12) ** 2) + rng.normal(0, 30, pos.size)
     work = np.cumsum(force) * (pos[1] - pos[0])
     np.savetxt(bdir / "smd.tsv", np.c_[pos * 100, pos, pos, force, work], delimiter="\t")
+    # D-116: the path the pull stored (synthetic): contacts released before, at and after the force peak (0.7 nm)
+    from smd_synth import synth_path, save as save_smd_path
+    from md20.analysis.smd_contacts import from_files as smd_contacts_from_files
+    save_smd_path(bdir, synth_path({"A:ASP189": 0.30, "A:SER190": 0.15, "A:TRP215": 0.90, "A:GLY219": 1.40, "A:LYS60": 2.60},
+                                   d0=0.4, d1=1.9, n_frames=120))
+    smd_contacts = smd_contacts_from_files(bdir)
     g = np.linspace(0.4, 1.9, 60)
     W = -24.3 * np.exp(-((g - 0.45) / 0.35) ** 2)
     win = {round(c, 3): rng.normal(c, 0.04, 400) for c in np.arange(0.45, 1.9, 0.08)}
     conv = {f"{fr:.2f}": {"grid_nm": g.tolist(), "pmf_kj_mol": ((W - W.min()) * (0.9 + 0.1 * fr)).tolist(), "delta_pmf": 24.3 * (0.9 + 0.1 * fr)}
             for fr in (0.25, 0.5, 0.75, 1.0)}
-    atomic_write_json({"result": {"pmf": {"grid_nm": g.tolist(), "pmf_radial_kj_mol": (W - W.min()).tolist(),
+    atomic_write_json({"result": {"smd_contacts": smd_contacts, "pmf": {"grid_nm": g.tolist(), "pmf_radial_kj_mol": (W - W.min()).tolist(),
                                           "coverage": {"continuous": True, "breaks": [], "n_windows": 24},
                                           "overlap_matrix": histogram_overlap_matrix(win), "convergence": conv}}}, bdir / "binding_manifest.json")
     sums = {"apo": {"rmsd_backbone_mean_A": 1.45, "metrics_file": str(wf.dir / "m_apo.json"), "extended_file": str(wf.dir / "x_apo.json"), "ligands": {}},
