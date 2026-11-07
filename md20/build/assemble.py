@@ -330,6 +330,7 @@ def declash_waters(o_xyz: np.ndarray, oh_xyz, box: np.ndarray | None, *, o_o_min
 ION_O_MIN_NM = {"Li": 0.16, "Na": 0.19, "K": 0.22, "Rb": 0.23, "Cs": 0.25, "Mg": 0.17, "Ca": 0.19, "Zn": 0.17,
                 "F": 0.22, "Cl": 0.26, "Br": 0.27, "I": 0.29}
 ANIONS = {"F", "Cl", "Br", "I"}
+SOLVENT_ION_ELEMENTS = {"Li", "Na", "K", "Rb", "Cs", "F", "Cl", "Br", "I"}   # ions solvation can add (D-126)
 ION_ION_MIN_NM = 0.22            # below a contact ion pair (Na–Cl ≈ 0.28): cannot be fixed by removing water
 
 
@@ -412,7 +413,7 @@ def remove_overlapping_waters(modeller, report, decisions=None, *, o_o_min_nm: f
     plan = declash_waters(xyz[o_idx], oh, box, o_o_min_nm=o_o_min_nm)
     # D-115: ions placed on a water (single-atom residues of a known ion element)
     ions = [r for r in top.residues() if len(list(r.atoms())) == 1 and next(iter(r.atoms())).element is not None
-            and next(iter(r.atoms())).element.symbol in ION_O_MIN_NM]
+            and next(iter(r.atoms())).element.symbol in SOLVENT_ION_ELEMENTS]   # D-126: not structural Zn/Mg/Ca
     ion_idx = [next(iter(r.atoms())).index for r in ions]
     ion_el = [next(iter(r.atoms())).element.symbol for r in ions]
     ic = ion_water_clashes(xyz[ion_idx] if ion_idx else np.zeros((0, 3)), ion_el, xyz[o_idx], oh, box,

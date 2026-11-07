@@ -62,3 +62,9 @@ def test_thresholds_are_below_every_first_shell_peak():
             "F": 0.27, "Cl": 0.32, "Br": 0.34, "I": 0.36}
     assert set(peak) == set(ION_O_MIN_NM)
     assert all(0.7 * peak[e] <= ION_O_MIN_NM[e] <= 0.85 * peak[e] for e in peak)
+
+
+def test_structural_metals_are_not_treated_as_solvent_ions():
+    """D-126: a protein Zn/Mg/Ca keeps its own metal-site model; only ions solvation adds are checked."""
+    from md20.build.assemble import SOLVENT_ION_ELEMENTS
+    assert {"Na", "K", "Cl"} <= SOLVENT_ION_ELEMENTS and not ({"Zn", "Mg", "Ca"} & SOLVENT_ION_ELEMENTS)
