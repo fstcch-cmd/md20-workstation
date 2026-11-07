@@ -6,6 +6,49 @@
 ---
 
 ## 2026-11-07
+### D-128　第 3 層授權：格式 v2（等級、功能、席次、最高版本）、功能閘門、評估版浮水印、輸出授權編號、簽章撤銷清單
+- 背景（使用者 11/07，設計文件第「授權檔內容」「程式端保護」節）：D-125／D-127 只有「有沒有授權」。第 3 層要能分等級（教學／研究／評估／商業／站點）、限制功能、限制可綁機器數與可用版本（維護年費）、
+  在輸出蓋授權編號、評估版加警語、並能撤銷授權。簽發端在私人 repo `md-digital-signature`，本條兩邊同時改，格式與測試向量對齊。
+- **決定**：
+  - **格式 v2**：schema `md20-license-v2`，簽章前綴 `b"md20-license-v2\n"`（v1 維持 `md20-license-v1\n`）。驗證端依 payload 自己的 `schema` 選前綴，v1、v2 都接受；簽發端預設簽 v2（`--v1` 簽舊格式）。
+    選填欄位 `tier`、`features`、`org`、`seats`、`max_version`、`issuer_key`；**缺少時依 v1 行為**（全部功能、不限席次與版本），所以舊授權與不帶選填欄位的 v2 授權照樣完整有效。
+    `features` 含 `all` 或缺少＝全部，空清單＝無；`seats` 限制 `machines` 長度；`tier: site` 要有 `org` 且不綁機器；`max_version` 用 PEP 440 比較（`packaging`，matplotlib 已硬性相依它；無法解析時擋，不猜）；
+    `issuer_key` 必須等於實際驗過簽章的金鑰指紋。簽章有效但欄位格式錯誤一律拒絕；v1 payload 帶 v2 欄位不生效。
+  - **功能閘門**：`license.require(what, feature=…)`，授權不含時丟 `FeatureNotLicensed`（`LicenseRequired` 子類別）；CLI 結束碼 13（與沒有授權相同）、四語「你的授權不含 X」並列出等級與已含功能；GUI 被擋的啟動顯示 `feature-card`。
+    需要哪些功能由設定檔決定（`workflow.required_features(cfg)`）：結合自由能（`binding.enabled`／`binding.added`／`binding.alone`）→ `binding`；`md.membrane` → `membrane`；`screen` → `hts`；`md.resolution: cg` → `cg`
+    （粗粒化不計算結合自由能，所以不要求 `binding`）。檢查點：`Workflow.run`、`pipeline run`（建立專案之前）、`resume`（缺功能的略過、其餘照跑、最後 13）、GUI `Runner.start_process` 與 worker。**不改任何科學邏輯**。
+  - **評估版**（`tier: evaluation`）：四語「評估版，不得用於決策」加在 HTML 報告頁尾（`stamp.html_footer`，報告與 plotly 頁都經過它）、圖 metadata（PNG `Disclaimer`、SVG `dc:title`、PDF `Title`）、
+    圖上淡色斜向浮水印（`stamp.watermark_figure`，只畫英文，預設字型沒有 CJK 字形）、PDB REMARK（純 ASCII 英文）與 JSON 戳記。目前沒有 PDF 報告產生器，「PDF」指圖的 PDF 輸出。
+  - **輸出授權編號**：JSON 戳記早就有 `lic {id, who}`；補上 HTML 頁尾（`Licence ID: … (姓名，已 HTML 跳脫)`）、PDB／PDBQT `REMARK 999 LICENCE ID`／`LICENSEE`（7-bit，姓名非 ASCII 字元換成 `?`）、
+    圖 metadata（PNG `md20:lic`、SVG `dc:identifier`、PDF keywords）、zip 註解。`report/figures.py` 的圖原本完全沒有 metadata，現在也帶。`md20 stamp verify FILE` 列出「授權編號」與「評估版標記」。
+  - **簽章撤銷清單**：`{payload: {schema: "md20-revocations-v1", issued_at, ids}, sig}`，前綴 `b"md20-revocations-v1\n"`（與授權不同，互不能冒充；測試向量有負例）。
+    驗證端讀 `<app data>/license/revoked.json` 與 `md20/util/licenses/revoked.json`，只採簽章有效且格式正確者，取較新的 `issued_at`（相同時合併）；被列入的授權狀態 `revoked`（四語說明，v1、v2 皆適用，`install` 也不收）。
+    `md20 license update-revocations FILE`：簽章有效且 `issued_at` **嚴格較新**才寫入（防降版）。簽發端 `python -m md20sign revoke --key K ID…` 累積更新 `revocations/revoked.json` 並在 `licenses/registry.csv` 標撤銷時間。**不做線上更新**。
+  - **測試向量 v2**：簽發端 `test_vectors/v2.json` → `tests/data/license_vector_v2.json`（逐位元組相同，SHA-256 `e05050cd2bd2849e4dabbba096451a8d1438beb8335b1d18533df8c11817efff`，兩邊測試都釘住）：七份 v2 授權（涵蓋五個等級、功能、席次、`max_version`、站點、中文）、
+    兩份撤銷清單、五個跨前綴負例。只含測試公鑰，與 v1 向量用不同的拋棄式金鑰，不在 `TRUSTED_KEYS`。
+- **理由／取捨**：
+  - v2 用**另一個簽章前綴**而不是只改 schema：前綴在簽章內，一份 v2 簽章永遠不是 v1 授權（反之亦然），不必靠「v1 驗證端忽略多餘欄位」的巧合；代價是驗證端多一個分支。
+  - 功能由設定檔決定、只在入口擋：不動科學邏輯，也不需要每個函式帶授權參數；代價是直接呼叫函式庫的人不受限（與 D-125 一致，誠實限制）。
+  - 缺 `features`＝全部：讓所有既有授權與簽發習慣不變；要限制功能必須明確寫出。
+  - 撤銷取「較新的一份」而非聯集：清單是累積的，較新者必為超集；聯集反而讓一份舊的壞清單永遠有效。同一秒才合併。
+  - `issuer_key` 由簽發端自動填、驗證端核對：把簽章綁定到「是哪把金鑰簽的」，換鑰期（雙鑰並存）時授權檔自證來源。
+- **被否決**：
+  - 在計算函式內逐一加授權參數、或用環境變數／旗標讓 CI 略過功能檢查：前者侵入科學邏輯，後者是公開的後門。
+  - 線上撤銷／線上更新清單：學生常離線，維運成本高；本次只做離線匯入，網路功能留待之後。
+  - 撤銷清單用另一把金鑰簽：金鑰管理負擔大於收益（與 D-125 同一理由），以前綴分離代替。
+  - 只用 schema 字串區分 v1／v2、共用前綴：見上，簽章不分前綴會留下互換空間。
+  - 在圖上用四語畫浮水印：預設字型沒有 CJK 字形，會變方塊；四語放在 metadata 與 HTML 頁尾。
+- **證據**：md20 新增 `tests/test_license_v2.py`（v2 欄位、PEP 440、站點、`issuer_key`、前綴不互通、功能閘門四種功能的入口、CLI 13、resume、GUI／worker、評估版浮水印與各輸出的授權編號、撤銷全流程、無環境變數後門）與
+  `tests/test_license_vector_v2.py`（9 項）；`tests/_license_testkit.py` 加 v2／撤銷簽章 helper。私人 repo：`tests/test_v2.py`、`tests/test_revoke.py`、`tests/test_vectors.py`（v2）。
+  md20 全部測試 1040 passed、50 skipped（原 966／50）；私人 repo 74 passed（原 45）。**未在真 NiceGUI 上渲染**（容器裝不了）：`feature-card` 只有原始碼層級的測試；PNG／SVG／PDF metadata 用 matplotlib Agg 實際存檔檢查。
+- **相關檔案**：`md20/util/license.py`、`md20/util/stamp.py`、`md20/workflow.py`（`required_features`、`run`）、`md20/cli.py`、`md20/gui/logic.py`、`md20/gui/worker.py`、`md20/gui/app.py`、`md20/analysis/plots.py`、`md20/report/figures.py`、
+  `docs/specs/licensing.md`（§9–§12）、`tests/data/license_vector_v2.json`；私人 repo `md20sign/format.py`、`revoke.py`、`issue.py`、`registry.py`、`cli.py`、`docs/FORMAT.md`、`README.md`、`tools/make_test_vectors_v2.py`。分支 `agent/license-l3`（未推）。
+- **未決／未驗證**：
+  - `tier` 除 `evaluation`、`site` 外目前沒有行為差異（`teaching` 是否預設限制功能由擁有者決定）。
+  - 一鍵工具（`tools/owner/*.cmd|.command`）還沒有加 `--tier`／`--features`／`--seats`／`--max-version`／`revoke` 的選項。
+  - `packaging` 未列入 `pyproject.toml` 相依（由 matplotlib 帶入）；若之後移除 matplotlib 需補上。
+  - 擁有者要先確認持有與 `owner_pub.pem` 成對的私鑰（D-127 未決）；發行時要把 `revoked.json` 放進 `md20/util/licenses/`（現在沒有，等於沒有撤銷）。
+  - 刪掉 app data 的 `revoked.json` 會退回套件內那份；離線時撤銷要等新清單送達（誠實限制，已寫進 `docs/specs/licensing.md` §7、§11）。
 ### D-132　R7：對外版本據實對齊（pyproject／README 原本寫 a19，實際從未發行）
 - 使用者上傳規格「MD20: Evidence-Driven Repair」第 R7 項：package 版本、README、發行說明、安裝程式內容、實際 tag 要一致。
 - 查到的事實（本地 0379df3）：`pyproject.toml` version 寫 `0.1.0a19`、README 寫「最新版本 v0.1.0a19」，但 GitHub 實際最新 release 是 **a17**（`gh api releases`：a1–a17，無 a18、a19）。a18、a19 從未發行。

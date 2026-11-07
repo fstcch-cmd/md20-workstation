@@ -124,6 +124,30 @@ class WorkflowBlocked(RuntimeError):
     """A step needs a human decision; message explains which and why."""
 
 
+def required_features(cfg: dict) -> list[str]:
+    """D-128: the licence features a workflow config needs (md20.util.license.FEATURES), decided from the config alone so the
+    check can sit at the entrance and change nothing in the science:
+    binding (SMD / umbrella sampling: `binding.enabled`, targets added later, or `binding.alone`), membrane (`md.membrane`),
+    hts (`screen`), cg (`md.resolution: cg`).  A coarse-grained run never computes a binding free energy, so it needs `cg`
+    (and `membrane` when it has a membrane) but not `binding`."""
+    cfg = cfg or {}
+    md = cfg.get("md") or {}
+    b = cfg.get("binding") or {}
+    cg = md.get("resolution") == "cg"
+    alone = b.get("alone") or {}
+    alone_on = any(alone.values()) if isinstance(alone, dict) else bool(alone)
+    need = set()
+    if cg:
+        need.add("cg")
+    elif b.get("enabled") or b.get("added") or alone_on:
+        need.add("binding")
+    if md.get("membrane"):
+        need.add("membrane")
+    if cfg.get("screen"):
+        need.add("hts")
+    return sorted(need)
+
+
 def example_config(screen: bool = False) -> dict:
     if screen:
         return {
@@ -1958,6 +1982,8 @@ class Workflow:
         chunks resume from platform-independent State XML, so a run started on CUDA can finish on OpenCL/CPU."""
         from .util.license import require
         require("workflow")            # D-125: real calculations need a signed licence (raises LicenseRequired)
+        for feature in required_features(self.cfg):
+            require("workflow", feature=feature)       # D-128: the licence must include the feature (raises FeatureNotLicensed)
         from .util.locks import OwnerLock
         lock = OwnerLock(self.dir / "running.json")
         try:

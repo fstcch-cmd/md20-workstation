@@ -168,11 +168,30 @@ def _platform():
     return STATE["platform"]
 
 
+def _feature_card():
+    """D-128: the licence is valid but a calculation needed a feature it does not include (binding, membrane, hts, cg).
+    The message of the blocked start stays on this card until it is dismissed or a start succeeds."""
+    texts = STATE.get("feature_block")
+    if not texts:
+        return
+    L = lang()
+    with ui.card().classes("w-full max-w-5xl mx-auto md20-card").style("border-left: 4px solid #b5651d").props("data-testid=feature-card"):
+        ui.label(_("你的授權不含此功能", "Your licence does not include this feature", "お持ちのライセンスにはこの機能が含まれていません",
+                   "귀하의 라이선스에는 이 기능이 포함되어 있지 않습니다")).classes("md20-section")
+        ui.label(pick(texts, L)).classes("text-sm")
+
+        def dismiss():
+            STATE["feature_block"] = None
+            ui.navigate.reload()
+        ui.button(_("關閉", "Dismiss", "閉じる", "닫기"), on_click=dismiss).props("flat dense color=blue-grey-7")
+
+
 def _license_card():
     """D-125: when no valid licence is installed, a card on every page says so, shows this computer's machine code and
     offers an import button (an upload, not a browser dialog).  Browsing, reports and diagnostics stay open."""
     st = LIC.status()
     if st.ok:
+        _feature_card()
         return
     L = lang()
     with ui.card().classes("w-full max-w-5xl mx-auto md20-card").style("border-left: 4px solid #b5651d").props("data-testid=license-card"):
@@ -528,9 +547,15 @@ def _start(wf: Workflow):
     platform and builds the pause policy itself (same settings as before: PAUSE file, battery, resource guard)."""
     (wf.project.dir / "PAUSE").unlink(missing_ok=True)
     os.environ["MD20_RESOURCE_MODE"] = resource_mode()
-    from ..util.license import LicenseRequired
+    from ..util.license import FeatureNotLicensed, LicenseRequired
     try:
-        return RUNNER.start_process(wf)
+        job = RUNNER.start_process(wf)
+        STATE["feature_block"] = None
+        return job
+    except FeatureNotLicensed as exc:                # D-128: "your licence does not include X", shown on the feature card
+        STATE["feature_block"] = exc.texts()
+        ui.notify(pick(exc.texts(), lang()), type="negative", close_button=True, multi_line=True)
+        return _Blocked(wf)
     except LicenseRequired:
         ui.notify(pick(LIC.BLOCKED_SHORT, lang()), type="negative", close_button=True)
         return _Blocked(wf)

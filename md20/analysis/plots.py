@@ -68,8 +68,9 @@ def _save(fig, out_base: Path) -> dict:
     legend_outside(fig)
     out_base.parent.mkdir(parents=True, exist_ok=True)
     png, svg = out_base.with_suffix(".png"), out_base.with_suffix(".svg")
-    from ..util.stamp import figure_metadata, OWNER_SHORT
+    from ..util.stamp import figure_metadata, watermark_figure, OWNER_SHORT
     fig.text(0.995, 0.003, f"© {OWNER_SHORT} · MD20", ha="right", va="bottom", fontsize=5, color="#b8b7b2", alpha=0.8)
+    watermark_figure(fig)                      # D-128: evaluation-tier licence only
     fig.savefig(png, bbox_inches="tight", metadata=figure_metadata("png"))
     fig.savefig(svg, bbox_inches="tight", metadata=figure_metadata("svg"))
     import matplotlib.pyplot as plt

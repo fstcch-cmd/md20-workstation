@@ -5,8 +5,13 @@ This module only VERIFIES.  Issuing licences (key generation, signing, the regis
 
 A licence file ``*.md20license`` is JSON::
 
-    {"payload": {"schema", "id", "licensee", "issued_at", "expires", "machines", "scope", "note", "issuer"},
+    {"payload": {"schema", "id", "licensee", "issued_at", "expires", "machines", "scope", "note", "issuer"
+                 [, "tier", "features", "org", "seats", "max_version", "issuer_key"  -- schema md20-license-v2 only, all optional]},
      "sig": base64 RSA-PSS (SHA-256, MGF1-SHA256, maximum salt) over  DOMAIN + canonical JSON of the payload}
+
+Format v1 (``md20-license/1``, domain ``md20-license-v1``) and v2 (``md20-license-v2``, domain ``md20-license-v2``) are both
+accepted (D-128).  A missing v2 field behaves like v1: every feature, any tier, no seat or version limit.  The owner can also
+sign a revocation list (``revoked.json``, domain ``md20-revocations-v1``) that makes listed licence ids invalid.
 
 The program verifies it with the owner public key shipped in the package (``owner_pub.pem``, the same key pair the
 provenance stamp uses; see D-125 for why one RSA key serves OAEP encryption and PSS signing).
@@ -37,11 +42,20 @@ from pathlib import Path
 from ..i18n import LANGS, pick
 from .paths import app_data_dir
 
-SCHEMA = "md20-license/1"
+SCHEMA = "md20-license/1"                    # format v1
+SCHEMA_V2 = "md20-license-v2"                # format v2 (D-128): optional tier, features, org, seats, max_version, issuer_key
+SCHEMAS = (SCHEMA, SCHEMA_V2)
 EXT = ".md20license"
 DOMAIN = b"md20-license-v1\n"                 # domain separation: a signature over anything else never verifies as a licence
+DOMAIN_V2 = b"md20-license-v2\n"              # v2 licences are signed under their own prefix (a v1 signature never makes a v2 licence)
+REV_SCHEMA = "md20-revocations-v1"
+REV_DOMAIN = b"md20-revocations-v1\n"         # a revocation list is never a licence and a licence is never a revocation list
+REV_NAME = "revoked.json"
 SCOPES = ("use", "all")
+TIERS = ("teaching", "research", "evaluation", "commercial", "site")
+FEATURES = ("binding", "membrane", "hts", "cg")      # gateable features; a licence without `features` (or with "all") has all of them
 MAX_FILE_BYTES = 64 * 1024
+MAX_REV_BYTES = 1024 * 1024
 CONTACT = "HCC Lab, NKUST"
 
 _PUB = Path(__file__).with_name("owner_pub.pem")
@@ -54,7 +68,9 @@ TRUSTED_KEYS: list[bytes] = [_PUB.read_bytes()] if _PUB.is_file() else []
 BUNDLED_DIR = Path(__file__).with_name("licenses")
 
 VALID, EXPIRED, WRONG_MACHINE, BAD_SIGNATURE, NONE = "valid", "expired", "wrong_machine", "bad_signature", "none"
-_RANK = {VALID: 0, EXPIRED: 1, WRONG_MACHINE: 2, BAD_SIGNATURE: 3, NONE: 4}        # which file to report when none is valid
+REVOKED, VERSION_LIMIT = "revoked", "version_limit"                                  # D-128
+# which file to report when none is valid
+_RANK = {VALID: 0, EXPIRED: 1, VERSION_LIMIT: 2, WRONG_MACHINE: 3, REVOKED: 4, BAD_SIGNATURE: 5, NONE: 6}
 
 LANG_ORDER = ("zh", "en", "ja", "ko")
 
@@ -77,6 +93,14 @@ TEXT = {
                     "The signature of the licence file is not valid (the file was changed or damaged, or HCC Lab did not issue it).",
                     "ライセンスファイルの署名が正しくありません（改変・破損、または HCC Lab が発行したものではありません）。",
                     "라이선스 파일의 서명이 올바르지 않습니다(파일이 바뀌었거나 손상되었거나 HCC Lab이 발급한 것이 아닙니다)."),
+    REVOKED: ("這份授權已被 HCC Lab 撤銷，不能再使用。如有疑問請聯絡 HCC Lab。",
+              "This licence has been revoked by HCC Lab and can no longer be used. Contact HCC Lab if you have questions.",
+              "このライセンスは HCC Lab により失効させられており、使用できません。ご不明な点は HCC Lab にお問い合わせください。",
+              "이 라이선스는 HCC Lab이 철회하여 더 이상 사용할 수 없습니다. 문의 사항은 HCC Lab에 연락하십시오."),
+    VERSION_LIMIT: ("這份授權只涵蓋 MD20 {max_version} 以前的版本，目前版本是 {version}。請向 HCC Lab 更新維護授權，或改用較舊的版本。",
+                    "This licence covers MD20 versions up to {max_version}; this is version {version}. Ask HCC Lab to renew maintenance, or use an older version.",
+                    "このライセンスは MD20 {max_version} までのバージョンが対象です。現在のバージョンは {version} です。HCC Lab に保守の更新を依頼するか、古いバージョンをお使いください。",
+                    "이 라이선스는 MD20 {max_version} 이하 버전만 적용됩니다. 현재 버전은 {version}입니다. HCC Lab에 유지보수 갱신을 요청하거나 이전 버전을 사용하십시오."),
     NONE: ("這台電腦還沒有 MD20 授權，所以不能做真正的計算。",
            "This computer has no MD20 licence yet, so real calculations are blocked.",
            "このパソコンにはまだ MD20 のライセンスがないため、実際の計算はできません。",
@@ -110,6 +134,32 @@ BLOCKED_SHORT = ("需要 MD20 授權才能做真正的計算。開啟「授權�
                  "실제 계산에는 MD20 라이선스가 필요합니다. 라이선스 안내를 열고 라이선스 파일을 가져오십시오.")
 
 
+FEATURE_NAMES = {
+    "binding": ("結合自由能（SMD／傘狀採樣）", "binding free energy (SMD / umbrella sampling)", "結合自由エネルギー（SMD／アンブレラサンプリング）",
+                "결합 자유 에너지(SMD/엄브렐라 샘플링)"),
+    "membrane": ("膜系統", "membrane systems", "膜系", "막 시스템"),
+    "hts": ("HTS 篩選", "HTS screening", "HTS スクリーニング", "HTS 스크리닝"),
+    "cg": ("粗粒化模擬", "coarse-grained simulation", "粗視化シミュレーション", "조립화(coarse-grained) 시뮬레이션"),
+}
+NO_FEATURE = ("你的授權不含「{name}」功能（{feature}）。目前授權等級：{tier}；包含的功能：{have}。如需此功能，請向 HCC Lab 申請升級授權。",
+              "Your licence does not include {name} ({feature}). Licence tier: {tier}; features included: {have}. To use it, ask HCC Lab for an upgraded licence.",
+              "お持ちのライセンスには「{name}」（{feature}）が含まれていません。ライセンスの区分：{tier}、含まれる機能：{have}。ご利用には HCC Lab にアップグレードを申請してください。",
+              "귀하의 라이선스에는 '{name}'({feature}) 기능이 포함되어 있지 않습니다. 라이선스 등급: {tier}, 포함된 기능: {have}. 사용하려면 HCC Lab에 업그레이드를 신청하십시오.")
+ALL_FEATURES = ("全部功能", "all features", "すべての機能", "모든 기능")
+REV_INSTALLED = ("撤銷清單已更新（{issued_at}，共 {n} 個授權編號）。",
+                 "Revocation list updated ({issued_at}, {n} licence ids).",
+                 "失効リストを更新しました（{issued_at}、ライセンス ID {n} 件）。",
+                 "철회 목록을 갱신했습니다({issued_at}, 라이선스 ID {n}개).")
+REV_NOT_NEWER = ("這份撤銷清單不比目前使用的新（目前 {current}，這份 {new}），沒有更新。為了防止退回舊清單，只接受較新的。",
+                 "This revocation list is not newer than the one in use (current {current}, this one {new}); nothing changed. Only newer lists are accepted so that an old list cannot be put back.",
+                 "この失効リストは現在使用中のものより新しくありません（現在 {current}、このファイル {new}）。変更しませんでした。古いリストに戻されないよう、新しいものだけを受け付けます。",
+                 "이 철회 목록은 현재 사용 중인 것보다 새롭지 않습니다(현재 {current}, 이 파일 {new}). 변경하지 않았습니다. 오래된 목록으로 되돌리는 것을 막기 위해 더 새로운 것만 받습니다.")
+REV_BAD = ("這不是有效的撤銷清單（簽章不正確、格式不對，或不是 HCC Lab 簽發）。",
+           "This is not a valid revocation list (bad signature or format, or HCC Lab did not issue it).",
+           "有効な失効リストではありません（署名・形式が正しくない、または HCC Lab が発行したものではありません）。",
+           "유효한 철회 목록이 아닙니다(서명이나 형식이 올바르지 않거나 HCC Lab이 발급한 것이 아닙니다).")
+
+
 class LicenseError(Exception):
     """A licence file could not be read, signed or installed.  ``texts`` holds the (zh, en, ja, ko) message."""
 
@@ -128,6 +178,18 @@ class LicenseRequired(RuntimeError):
 
     def texts(self) -> tuple:
         return tuple(self.status.message(l, with_howto=True) for l in LANG_ORDER)
+
+
+class FeatureNotLicensed(LicenseRequired):
+    """D-128: the licence is valid but does not include the feature this calculation needs.  The CLI ends with the same
+    exit code as a missing licence (13); the GUI shows the message on a card.  ``texts()`` is (zh, en, ja, ko)."""
+
+    def __init__(self, status: "LicenseStatus", feature: str):
+        self.status, self.feature = status, feature
+        RuntimeError.__init__(self, pick(self.texts(), "en"))
+
+    def texts(self) -> tuple:
+        return feature_denied_texts(self.status, self.feature)
 
 
 # ---------------------------------------------------------------------------------------------- machine code
@@ -193,14 +255,42 @@ def _verify_with(pub_pem: bytes, message: bytes, sig: bytes) -> bool:
         return False
 
 
-def signature_ok(doc: dict) -> bool:
-    """True when ``doc['sig']`` is a valid signature of ``doc['payload']`` by one of TRUSTED_KEYS."""
+def key_fingerprint(pub_pem: bytes) -> str:
+    """SHA-256 of the DER SubjectPublicKeyInfo, 64 lowercase hex characters ('' when the PEM cannot be read)."""
     try:
-        message = DOMAIN + canonical(doc["payload"])
+        from cryptography.hazmat.primitives import serialization
+        key = serialization.load_pem_public_key(pub_pem)
+        return hashlib.sha256(key.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)).hexdigest()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _domain_for(payload: object) -> bytes:
+    """The signing prefix that belongs to the payload's own schema: a v2 payload only verifies under the v2 prefix and a v1
+    payload only under the v1 prefix, so neither can be passed off as the other."""
+    return DOMAIN_V2 if isinstance(payload, dict) and payload.get("schema") == SCHEMA_V2 else DOMAIN
+
+
+def _signer(message: bytes, sig: bytes) -> bytes | None:
+    for k in list(TRUSTED_KEYS):
+        if _verify_with(k, message, sig):
+            return k
+    return None
+
+
+def signing_key(doc: dict) -> bytes | None:
+    """The trusted public key (PEM) whose signature ``doc['sig']`` is over ``doc['payload']``, else None."""
+    try:
+        message = _domain_for(doc["payload"]) + canonical(doc["payload"])
         sig = base64.b64decode(doc["sig"], validate=True)
     except Exception:  # noqa: BLE001
-        return False
-    return any(_verify_with(k, message, sig) for k in list(TRUSTED_KEYS))
+        return None
+    return _signer(message, sig)
+
+
+def signature_ok(doc: dict) -> bool:
+    """True when ``doc['sig']`` is a valid signature of ``doc['payload']`` by one of TRUSTED_KEYS."""
+    return signing_key(doc) is not None
 
 
 def _today() -> dt.date:
@@ -219,15 +309,26 @@ class LicenseStatus:
     path: str = ""
     machine_code: str = ""
     detail: str = ""
+    # D-128 (format v2); all empty / None for a v1 licence, which behaves as "every feature, no limits"
+    schema: str = ""
+    tier: str = ""
+    features: list | None = None          # None = every feature
+    org: str = ""
+    seats: int | None = None
+    max_version: str | None = None
 
     @property
     def ok(self) -> bool:
         return self.state == VALID
 
+    def allows(self, feature: str) -> bool:
+        return self.features is None or feature in self.features
+
     def message(self, lang: str = "en", *, with_howto: bool = False) -> str:
         """The state in one language; with ``with_howto`` the request instructions and the machine code follow."""
         exp = pick(NO_EXPIRY, lang) if not self.expires else self.expires
-        text = pick(TEXT[self.state], lang).format(licensee=self.licensee, expires=exp)
+        text = pick(TEXT[self.state], lang).format(licensee=self.licensee, expires=exp, max_version=self.max_version or "-",
+                                                   version=_app_version())
         if with_howto and not self.ok:
             text += "\n" + pick(HOWTO, lang) + "\n" + pick(MACHINE_LABEL, lang) + ": " + self.machine_code
         return text
@@ -237,7 +338,27 @@ class LicenseStatus:
 
     def summary(self) -> dict:
         return {"state": self.state, "licensee": self.licensee, "id": self.license_id, "expires": self.expires,
-                "scope": self.scope, "machine_code": self.machine_code}
+                "scope": self.scope, "machine_code": self.machine_code, "schema": self.schema, "tier": self.tier,
+                "features": "all" if self.features is None else list(self.features), "org": self.org, "seats": self.seats,
+                "max_version": self.max_version}
+
+
+def feature_denied_texts(st: "LicenseStatus", feature: str) -> tuple:
+    """(zh, en, ja, ko) 'your licence does not include X'."""
+    out = []
+    for i, l in enumerate(LANG_ORDER):
+        have = pick(ALL_FEATURES, l) if st.features is None else (", ".join(st.features) or "-")
+        out.append(pick(NO_FEATURE, l).format(name=pick(FEATURE_NAMES[feature], l) if feature in FEATURE_NAMES else feature,
+                                              feature=feature, tier=st.tier or "-", have=have))
+    return tuple(out)
+
+
+def _app_version() -> str:
+    try:
+        from .. import __version__
+        return str(__version__)
+    except Exception:  # noqa: BLE001
+        return "?"
 
 
 def license_dir() -> Path:
@@ -248,27 +369,184 @@ def search_dirs() -> list[Path]:
     return [license_dir(), BUNDLED_DIR]
 
 
-def evaluate(doc: object, *, source: str = "") -> LicenseStatus:
-    """Judge one parsed licence document for THIS computer and today."""
+# ---------------------------------------------------------------------------------------------- revocation list (D-128)
+@dataclass
+class Revocations:
+    issued_at: str
+    ids: frozenset
+    source: str = ""
+
+
+_ISSUED_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+_ID_RE = re.compile(r"[0-9a-f]{16}")
+
+
+def parse_revocations(doc: object, *, source: str = "") -> Revocations:
+    """Check a revocation document and return it.  Raises ValueError unless the owner's signature (domain
+    ``md20-revocations-v1``) verifies and the payload is well formed."""
+    if not isinstance(doc, dict) or not isinstance(doc.get("payload"), dict) or not isinstance(doc.get("sig"), str):
+        raise ValueError("not a revocation document")
+    p = doc["payload"]
+    try:
+        sig = base64.b64decode(doc["sig"], validate=True)
+        message = REV_DOMAIN + canonical(p)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("signature not decodable") from exc
+    if _signer(message, sig) is None:
+        raise ValueError("signature does not verify")
+    issued, ids = p.get("issued_at"), p.get("ids")
+    if p.get("schema") != REV_SCHEMA or not isinstance(issued, str) or not _ISSUED_RE.fullmatch(issued):
+        raise ValueError("schema or issued_at")
+    try:
+        time.strptime(issued, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise ValueError("issued_at is not a date") from exc
+    if not isinstance(ids, list) or not all(isinstance(i, str) and _ID_RE.fullmatch(i) for i in ids):
+        raise ValueError("ids")
+    return Revocations(issued, frozenset(ids), source)
+
+
+def revocation_paths() -> list[Path]:
+    """The app-data copy (installed with ``md20 license update-revocations``) and the one shipped in the package."""
+    return [license_dir() / REV_NAME, BUNDLED_DIR / REV_NAME]
+
+
+def _read_revocation_file(path: Path) -> Revocations | None:
+    try:
+        if not path.is_file() or path.stat().st_size > MAX_REV_BYTES:
+            return None
+        return parse_revocations(json.loads(path.read_text(encoding="utf-8-sig")), source=str(path))
+    except (OSError, ValueError):
+        return None
+
+
+def revocations() -> Revocations | None:
+    """The newest valid revocation list among the two places (a list with a bad signature is ignored; an older list never
+    overrides a newer one).  Lists issued at the same second are merged.  None when there is no valid list."""
+    found = [r for r in (_read_revocation_file(p) for p in revocation_paths()) if r is not None]
+    if not found:
+        return None
+    newest = max(r.issued_at for r in found)
+    top = [r for r in found if r.issued_at == newest]
+    return Revocations(newest, frozenset().union(*(r.ids for r in top)), top[0].source)
+
+
+def update_revocations(path) -> Revocations:
+    """Import a revocation list into the per-user licence folder.  Accepted only when the owner's signature verifies and
+    ``issued_at`` is newer than the list in use (so an old list cannot be put back).  Raises LicenseError."""
+    p = Path(path)
+    try:
+        if p.stat().st_size > MAX_REV_BYTES:
+            raise ValueError("too large")
+        doc = json.loads(p.read_text(encoding="utf-8-sig"))
+        new = parse_revocations(doc, source=str(p))
+    except OSError as exc:
+        raise LicenseError((f"讀不到檔案：{p}（{exc.__class__.__name__}）", f"Cannot read the file: {p} ({exc.__class__.__name__})",
+                            f"ファイルを読めません：{p}（{exc.__class__.__name__}）", f"파일을 읽을 수 없습니다: {p} ({exc.__class__.__name__})")) from exc
+    except ValueError:
+        raise LicenseError(REV_BAD) from None
+    cur = revocations()
+    if cur is not None and new.issued_at <= cur.issued_at:
+        raise LicenseError(tuple(pick(REV_NOT_NEWER, l).format(current=cur.issued_at, new=new.issued_at) for l in LANG_ORDER))
+    d = license_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    dest = d / REV_NAME
+    tmp = dest.with_name(dest.name + ".tmp")
+    tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, dest)
+    new.source = str(dest)
+    _reset_cache()
+    return new
+
+
+def revocations_message(r: Revocations) -> str:
+    return "\n\n".join(pick(REV_INSTALLED, l).format(issued_at=r.issued_at, n=len(r.ids)) for l in LANG_ORDER)
+
+
+# ---------------------------------------------------------------------------------------------- v2 payload
+def _version_obj(text: str):
+    from packaging.version import Version          # PEP 440 (packaging is a hard dependency of matplotlib)
+    return Version(text)
+
+
+def _parse_v2(p: dict, signer: bytes, machines: list) -> dict:
+    """The optional v2 fields, validated.  Raises ValueError.  A missing field means 'no restriction' (= v1 behaviour)."""
+    tier = p.get("tier")
+    if tier is not None and tier not in TIERS:
+        raise ValueError(f"tier {tier!r}")
+    features = p.get("features")
+    if features is not None:
+        if not isinstance(features, list) or not all(isinstance(f, str) and f.strip() for f in features):
+            raise ValueError("features")
+        norm = sorted({f.strip().lower() for f in features})
+        features = None if "all" in norm else norm
+    org = p.get("org")
+    if org is not None and not isinstance(org, str):
+        raise ValueError("org")
+    seats = p.get("seats")
+    if seats is not None and (isinstance(seats, bool) or not isinstance(seats, int) or seats < 1):
+        raise ValueError("seats")
+    if seats is not None and len(machines) > seats:
+        raise ValueError("more machines than seats")
+    max_version = p.get("max_version")
+    if max_version is not None:
+        if not isinstance(max_version, str):
+            raise ValueError("max_version")
+        _version_obj(max_version)
+    issuer_key = p.get("issuer_key")
+    if issuer_key is not None:
+        if not isinstance(issuer_key, str) or not re.fullmatch(r"[0-9a-f]{64}", issuer_key):
+            raise ValueError("issuer_key")
+        if issuer_key != key_fingerprint(signer):
+            raise ValueError("issuer_key does not match the signing key")
+    if tier == "site":                     # a site licence is bound to the organisation, not to computers
+        if not (org or "").strip():
+            raise ValueError("site licence needs org")
+        if machines:
+            raise ValueError("site licence must not list machines")
+    return {"tier": tier or "", "features": features, "org": (org or "").strip(), "seats": seats, "max_version": max_version}
+
+
+def _too_new(max_version: str | None) -> bool:
+    """True when this MD20 is newer than the licence's ``max_version`` (PEP 440).  An unreadable version blocks."""
+    if not max_version:
+        return False
+    try:
+        return _version_obj(_app_version()) > _version_obj(max_version)
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def evaluate(doc: object, *, source: str = "", revoked: "Revocations | None | bool" = False) -> LicenseStatus:
+    """Judge one parsed licence document for THIS computer and today.  ``revoked`` is the revocation list to apply; the default
+    (False) reads it from disk."""
     mc = machine_code()
     if not isinstance(doc, dict) or not isinstance(doc.get("payload"), dict) or not isinstance(doc.get("sig"), str):
         return LicenseStatus(BAD_SIGNATURE, path=source, machine_code=mc, detail="not a licence document")
     p = doc["payload"]
-    if not signature_ok(doc):
+    signer = signing_key(doc)
+    if signer is None:
         return LicenseStatus(BAD_SIGNATURE, path=source, machine_code=mc, detail="signature does not verify")
     # the signature is genuine: from here on the payload is trusted, but a malformed one is still rejected
     try:
-        if p.get("schema") != SCHEMA or p.get("scope") not in SCOPES:
+        if p.get("schema") not in SCHEMAS or p.get("scope") not in SCOPES:
             raise ValueError("schema or scope")
         lic, lid = str(p["licensee"]), str(p["id"])
         exp = p.get("expires")
         exp_date = dt.date.fromisoformat(exp) if exp else None
         machines = [normalize_machine(m) for m in (p.get("machines") or [])]
+        extra = _parse_v2(p, signer, machines) if p["schema"] == SCHEMA_V2 else {}
     except Exception as exc:  # noqa: BLE001
         return LicenseStatus(BAD_SIGNATURE, path=source, machine_code=mc, detail=f"payload malformed: {exc}")
-    st = LicenseStatus(VALID, licensee=lic, license_id=lid, expires=exp, scope=p["scope"], machines=machines, path=source, machine_code=mc)
-    if exp_date is not None and _today() > exp_date:
+    st = LicenseStatus(VALID, licensee=lic, license_id=lid, expires=exp, scope=p["scope"], machines=machines, path=source,
+                       machine_code=mc, schema=p["schema"], **extra)
+    rev = revocations() if revoked is False else revoked
+    if rev is not None and lid in rev.ids:
+        st.state = REVOKED
+    elif exp_date is not None and _today() > exp_date:
         st.state = EXPIRED
+    elif _too_new(st.max_version):
+        st.state = VERSION_LIMIT
     elif p["scope"] != "all" and machines and mc not in machines:
         st.state = WRONG_MACHINE
     return st
@@ -308,6 +586,7 @@ def _reset_cache() -> None:
     _cache["key"] = _cache["status"] = None
     _stamp_cache["t"] = 0.0
     _stamp_cache["v"] = None
+    _stamp_cache["tier"] = ""
 
 
 def _files() -> list[Path]:
@@ -330,13 +609,20 @@ def status() -> LicenseStatus:
             sig.append((str(f), s.st_mtime_ns, s.st_size))
         except OSError:
             continue
-    key = (tuple(sig), tuple(TRUSTED_KEYS), _today(), machine_code())
+    for rp in revocation_paths():
+        try:
+            rs = rp.stat()
+            sig.append((str(rp), rs.st_mtime_ns, rs.st_size))
+        except OSError:
+            continue
+    key = (tuple(sig), tuple(TRUSTED_KEYS), _today(), machine_code(), _app_version())
     if _cache["key"] == key and _cache["status"] is not None:
         return _cache["status"]
     best = LicenseStatus(NONE, machine_code=machine_code())
+    rev = revocations()
     for f in files:
         try:
-            st = evaluate(read_file(f), source=str(f))
+            st = evaluate(read_file(f), source=str(f), revoked=rev)
         except LicenseError:
             st = LicenseStatus(BAD_SIGNATURE, path=str(f), machine_code=machine_code(), detail="unreadable")
         if _RANK[st.state] < _RANK[best.state]:
@@ -347,11 +633,25 @@ def status() -> LicenseStatus:
     return best
 
 
-def require(what: str = "") -> LicenseStatus:
-    """Call at the start of every real calculation.  ``what`` is only for readability at the call site."""
+def require(what: str = "", *, feature: str | None = None) -> LicenseStatus:
+    """Call at the start of every real calculation.  ``what`` is only for readability at the call site.  With ``feature``
+    (one of FEATURES) the licence must include that feature too, else FeatureNotLicensed (a LicenseRequired) is raised."""
     st = status()
     if not st.ok:
         raise LicenseRequired(st)
+    if feature is not None:
+        if feature not in FEATURES:
+            raise ValueError(f"unknown feature {feature!r}")
+        if not st.allows(feature):
+            raise FeatureNotLicensed(st, feature)
+    return st
+
+
+def require_features(what: str, features) -> LicenseStatus:
+    """``require`` for a set of features: the first one the licence does not include raises FeatureNotLicensed."""
+    st = require(what)
+    for f in sorted(set(features or ())):
+        require(what, feature=f)
     return st
 
 
@@ -397,5 +697,11 @@ def stamp_info() -> dict | None:
     except Exception:  # noqa: BLE001  (the stamp must never break a write)
         return None
     v = {"id": st.license_id, "who": st.licensee} if st.ok else {}
-    _stamp_cache.update(t=now, v=v, k=tuple(TRUSTED_KEYS))
+    _stamp_cache.update(t=now, v=v, k=tuple(TRUSTED_KEYS), tier=st.tier if st.ok else "")
     return v or None
+
+
+def stamp_tier() -> str:
+    """Tier of the valid licence in use ('' for none or a v1 licence); same cache as ``stamp_info``."""
+    stamp_info()
+    return _stamp_cache.get("tier", "") or ""

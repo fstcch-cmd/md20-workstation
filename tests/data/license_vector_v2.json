@@ -1,0 +1,384 @@
+{
+  "format": "md20-license-vector/2",
+  "warning": "TEST KEY ONLY. This public key must never be added to md20 TRUSTED_KEYS or public_keys/.",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAqXfp/i8Zi5TIuN0yMcLq\na3vbUijrY5IU3GnqqLMlQD3KEXERtW6HLB+PmnaSuUx4PInmCcS791yFdVJodNV+\nL+iPBMtNyPZ8LYIxm/Vt47reS8cWEWt8EohTz2Yj7FlaVsUeyu/e9Bz7c5qzE7BG\nD7rGS0oztd9TOwAsG0EDbkkfr1GrsgXNW6qF9hC0A33ckrntkl/YvUF8oYRZd5Ai\n7/c3zxaFYvKY7evkpzr8GPSJ7vrCkn3VK/6NFMN3s2i1wrTG4qLnEuQ8Dx1BYQae\n7HE+MUTP8e6RkSySohQ6Sci4NKZZnTu8GLnDOARogVv4nQ0HzPNimSs0+niQz+SP\neTr71CE4MfRNETfVXzcV+FzDPso3XgpYvivMW+7FrkQMJAOOmUbtJQvX0wb2tGjl\nbxO0+exkYQMrImMtV/pEuQFdJ2V2ztkcJKOs+fVnasMr/fQRJ829Sg3paw3GxxiT\nluaPh0tNtSPwz1BNye13HhmVoA6XbsQCEnjRUrIMWU3DAgMBAAE=\n-----END PUBLIC KEY-----\n",
+  "public_key_fingerprint": "ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26",
+  "domains": {
+    "licence_v1": "md20-license-v1\n",
+    "licence_v2": "md20-license-v2\n",
+    "revocations": "md20-revocations-v1\n"
+  },
+  "vectors": [
+    {
+      "name": "v2-minimal",
+      "payload": {
+        "schema": "md20-license-v2",
+        "issued_at": "2026-11-07T12:00:00Z",
+        "scope": "use",
+        "note": "no optional field: behaves like v1",
+        "issuer": "HCC Lab, NKUST",
+        "id": "2000000000000001",
+        "licensee": "Test Minimal",
+        "expires": "2099-12-31",
+        "machines": []
+      },
+      "message_utf8": "md20-license-v2\n{\"expires\":\"2099-12-31\",\"id\":\"2000000000000001\",\"issued_at\":\"2026-11-07T12:00:00Z\",\"issuer\":\"HCC Lab, NKUST\",\"licensee\":\"Test Minimal\",\"machines\":[],\"note\":\"no optional field: behaves like v1\",\"schema\":\"md20-license-v2\",\"scope\":\"use\"}",
+      "message_sha256": "6f8ebfeac7658594da3c454ad19d60c649e72ddcd8fd134627b3d64398f8999c",
+      "sig": "n3zC8TxpEDZiYzIgxeYy3Uo6xP4GImbQKj46bzO7VbAFbDgjfNlXHYr/yrPPKkIj71ftncFlFZCTaTgu07eX44jeiVja8ylTmbZSQhX471ylDSLWDSMnjkdiUjP7fwfWOmed4gSYLRpzjUzwPwOsKVbY8K3i0X3iWaf1OneLdiEp5xxQqEHrV9f8rVx1J3Oev9PiBj2xmvdqMHgnPJrTiiZ7XYgt3PBSwD2tFeufk1z7rkq8ooEaGiOGkO8Z5HyklK2ozd1ldKE8Ah1OvJNoj2tbc/J63tLvdDMsQRmkWVKTQ0zo0VV3Y0mpdOFUF7rlnFryAa6T4PQyztQK+scKC1IAUk8Fz8435tBifHPuwvLS10p2sdDgP9dpO9UTu0n1OGtf9MuUveXhTFG4/6rAbrmkD9Dk/g0WwDM8hIjCi5U4grCg+3bLOxK3AA3+VKxATbKLABi96E1qClhiHn3y8/po81lpyiCEZ2oXxfv4V7qEzpqKYtSWagybzPEZplXx",
+      "expect_signature": "valid",
+      "expect": {
+        "tier": "",
+        "features": "all",
+        "org": "",
+        "seats": null,
+        "max_version": null
+      }
+    },
+    {
+      "name": "v2-teaching",
+      "payload": {
+        "schema": "md20-license-v2",
+        "issued_at": "2026-11-07T12:00:00Z",
+        "scope": "use",
+        "note": "teaching, features not limited",
+        "issuer": "HCC Lab, NKUST",
+        "id": "2000000000000002",
+        "licensee": "Test Student",
+        "expires": "2099-12-31",
+        "machines": [],
+        "tier": "teaching",
+        "org": "Test University",
+        "issuer_key": "ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26"
+      },
+      "message_utf8": "md20-license-v2\n{\"expires\":\"2099-12-31\",\"id\":\"2000000000000002\",\"issued_at\":\"2026-11-07T12:00:00Z\",\"issuer\":\"HCC Lab, NKUST\",\"issuer_key\":\"ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26\",\"licensee\":\"Test Student\",\"machines\":[],\"note\":\"teaching, features not limited\",\"org\":\"Test University\",\"schema\":\"md20-license-v2\",\"scope\":\"use\",\"tier\":\"teaching\"}",
+      "message_sha256": "f7114a1e850ef51ef367c8837263cd86e1ee816a80be2eb0d4b22f989219a78d",
+      "sig": "D1VBll8o2NFmAiDkcmEme6ftSk1bvx621N4PF3JbsxfrCuJOtWik+znwIyQ8gfNOMajLVB2htEkrJC5ixklG69LJFmEEyHF9rhyYz93PvGZBLQFqtlTihbPqr3CqyPBd7wy6OymJd3Rrn+p5EW0yL06lmzMH2ylA8utgDkq7/D5pAC3qVDTWuqzMD1aNz9RE3rFkCWDMiLTnHUoG0qaONM/1TtmrI8DOZwRn9bT63mbdfMoTAYyir/9SYfwzWatZav9nrYOxzq80qoTmt4FmKWAExOhzRiIDKfVfju+6YHXAY/k+iDPAK/MkfiNr/IEnaIn0tHohrUXVHxbmXIMV++JqXQ2vPKKq2tWB5YraBsEBiLIw7VL21dbFOVUBetyaVYE1ryT23U8HVJumBhatlQ4C30OkQFzEbM37fgq2wivpEvtHmVsXE8SB0c7srwla7i+qLkCBJ8HuIIB4tScZfOgd18SQrOkQWFflB9aAR4SCriY+AXDIMXtHXNR2wgQw",
+      "expect_signature": "valid",
+      "expect": {
+        "tier": "teaching",
+        "features": "all",
+        "org": "Test University",
+        "seats": null,
+        "max_version": null
+      }
+    },
+    {
+      "name": "v2-research-features-seats",
+      "payload": {
+        "schema": "md20-license-v2",
+        "issued_at": "2026-11-07T12:00:00Z",
+        "scope": "use",
+        "note": "two seats, only binding and hts",
+        "issuer": "HCC Lab, NKUST",
+        "id": "2000000000000003",
+        "licensee": "Test Researcher",
+        "expires": "2099-12-31",
+        "machines": [
+          "1111-2222-3333-4444",
+          "AAAA-BBBB-CCCC-DDDD"
+        ],
+        "tier": "research",
+        "features": [
+          "hts",
+          "binding"
+        ],
+        "seats": 2,
+        "org": "Lab A",
+        "issuer_key": "ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26"
+      },
+      "message_utf8": "md20-license-v2\n{\"expires\":\"2099-12-31\",\"features\":[\"hts\",\"binding\"],\"id\":\"2000000000000003\",\"issued_at\":\"2026-11-07T12:00:00Z\",\"issuer\":\"HCC Lab, NKUST\",\"issuer_key\":\"ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26\",\"licensee\":\"Test Researcher\",\"machines\":[\"1111-2222-3333-4444\",\"AAAA-BBBB-CCCC-DDDD\"],\"note\":\"two seats, only binding and hts\",\"org\":\"Lab A\",\"schema\":\"md20-license-v2\",\"scope\":\"use\",\"seats\":2,\"tier\":\"research\"}",
+      "message_sha256": "044ea06b655da1d2877cc0651d7f57c5f6e3b47601e7c7b88e4f95cd2e10a8f5",
+      "sig": "e1P8B7IfZwNinEdpDwEFbJ1sdlEi0tjmmls31hJwRspma1ms4bJ45bqVHmUAaSVvMlYFcb+UwmvAjS3ussKP9KY/V7k1O4EGzA1V0/wfOKI2Oxtzd2QxeJiyby/h//rGTP9dIpF5hzrYDCKh6CujkZun4Z3Tn/2zHPC7ITXKcpxZvKLBG9d1b4+0jBxL5sLCtlQTPcoc613u2luf89X7atfDLqDr+0uW2KAZS26tF9KDowJON7BtAm7s8+nJ502HAy8CebODiMBJNjwhMt2YmXew7M0DiGFcETOMDfhEOXdTG+gN3cirGuDDTKv8Nkp0EoT011EA+ml/qtO02W2MbIiVEWMomg8ZtAkimBsYIPAUBAXkshLBo9eSFx12nwA1L5zNoEhYkGZL9whWG/whtTovScfkZGC0RvxJGUn1PeunukkK02Phm0cJped1NKKnPw9/Ehsfn3aoqPp/umge5TWVDC/C8Oqe+VEhhkHxcYhHC0wABtwbHJZgcr9R+ZK7",
+      "expect_signature": "valid",
+      "expect": {
+        "tier": "research",
+        "features": [
+          "binding",
+          "hts"
+        ],
+        "org": "Lab A",
+        "seats": 2,
+        "max_version": null
+      }
+    },
+    {
+      "name": "v2-evaluation",
+      "payload": {
+        "schema": "md20-license-v2",
+        "issued_at": "2026-11-07T12:00:00Z",
+        "scope": "use",
+        "note": "evaluation: outputs carry the notice; revoked by the revocation vectors",
+        "issuer": "HCC Lab, NKUST",
+        "id": "5555555555555555",
+        "licensee": "Test Evaluator",
+        "expires": "2099-12-31",
+        "machines": [],
+        "tier": "evaluation",
+        "features": [
+          "all"
+        ],
+        "issuer_key": "ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26"
+      },
+      "message_utf8": "md20-license-v2\n{\"expires\":\"2099-12-31\",\"features\":[\"all\"],\"id\":\"5555555555555555\",\"issued_at\":\"2026-11-07T12:00:00Z\",\"issuer\":\"HCC Lab, NKUST\",\"issuer_key\":\"ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26\",\"licensee\":\"Test Evaluator\",\"machines\":[],\"note\":\"evaluation: outputs carry the notice; revoked by the revocation vectors\",\"schema\":\"md20-license-v2\",\"scope\":\"use\",\"tier\":\"evaluation\"}",
+      "message_sha256": "e2b4e406459ae615036e3282d9aa1b80db4c5c5fb32f0eeab77e117c57dd9dfe",
+      "sig": "EKFUWarAWPYusP4YlIqd9WjadFXtRY/V6KaJyjeSvpJIXAkvNpKn6h++sYazEG5OWT3Ds7Kd1PMZvTiiMk7Z3XRHUxDoNXoWykmQZDwhIJUZin2sKTML/5q8tFEkZEYpb0YCitUncgwESyP4zfqNpP3IXSFCzUr3fyuw5P6KxNVfRVGyhVSiMApapWoOqW+fYAbVZWmUsxJlYotvRYgwV1V4SHgo4uVg3piCTINJkf2wNEt/b8E/y/bGyPCCK0LnAEqHOCsr667dRAiYoWeq/TtuewLzkAh3n7+g1stK/6821WCK4nKuJV6Wu02QMgixSc9IHIbsmqUcWaIZetEAytxUuN7Q/8hwaxG4vGnXOq4+JhLVgHvGcSJLTQUKEVJYYe/hnM9/xQbbuEntCKqRTe22ijcqgAwBW0falVRmBQIWoeqOXp4pe6QckddA6vJrMiLRZvuuY2c7ZCcwJ2QSi+DXP61EEVu0HSI5k3eiauqVHrB0TzXuawzGFzd7b/CN",
+      "expect_signature": "valid",
+      "expect": {
+        "tier": "evaluation",
+        "features": "all",
+        "org": "",
+        "seats": null,
+        "max_version": null
+      }
+    },
+    {
+      "name": "v2-commercial-maxversion",
+      "payload": {
+        "schema": "md20-license-v2",
+        "issued_at": "2026-11-07T12:00:00Z",
+        "scope": "use",
+        "note": "maintenance up to 0.1.0 (PEP 440)",
+        "issuer": "HCC Lab, NKUST",
+        "id": "2000000000000005",
+        "licensee": "Test Company",
+        "expires": "2099-12-31",
+        "machines": [
+          "1111-2222-3333-4444",
+          "AAAA-BBBB-CCCC-DDDD",
+          "0123-4567-89AB-CDEF"
+        ],
+        "tier": "commercial",
+        "features": [
+          "binding",
+          "membrane",
+          "hts",
+          "cg"
+        ],
+        "seats": 3,
+        "org": "Test Co.",
+        "max_version": "0.1.0",
+        "issuer_key": "ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26"
+      },
+      "message_utf8": "md20-license-v2\n{\"expires\":\"2099-12-31\",\"features\":[\"binding\",\"membrane\",\"hts\",\"cg\"],\"id\":\"2000000000000005\",\"issued_at\":\"2026-11-07T12:00:00Z\",\"issuer\":\"HCC Lab, NKUST\",\"issuer_key\":\"ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26\",\"licensee\":\"Test Company\",\"machines\":[\"1111-2222-3333-4444\",\"AAAA-BBBB-CCCC-DDDD\",\"0123-4567-89AB-CDEF\"],\"max_version\":\"0.1.0\",\"note\":\"maintenance up to 0.1.0 (PEP 440)\",\"org\":\"Test Co.\",\"schema\":\"md20-license-v2\",\"scope\":\"use\",\"seats\":3,\"tier\":\"commercial\"}",
+      "message_sha256": "6102c2a213c2dc454a53b1cb5bb67f04a7009dda4961ac315f3b565d17cf96a0",
+      "sig": "Y7NpQlezyrN2BEpININp9OAgAlKGhstJyF361rO9BujHWk5mQQ4Dw/7DWaERtBfQfvutnEG7Fb12uyJUZWEQQPNafU57SWKizosXZllYt4afEGajWsWtzJWTKO5z573aCTcOkh//4B34BM/kB2jKul7OdlbZM2urrzopl+7v4WVleKqwbG9Rn5wd+4H7gv/iW4x/PKrhmRNlIYKftOMZiijUcjpOvlRPIjGXVa7ylZ9iyqQ912sgk9LEYDBRufeTnLEh8xWeyOPwemn/FcaLjeak4Ak2/lFdsGZyagpEcH4SLIXXI7wBUAnIEaF4uB6pNTSo3iSwIhADp2VS/7hpx1vmq1+1OvsW8/nxWlF6+9vsdWwsFGASG69b3e/8mOJblK7qYJf6BbB841BrE/QYo+nATTlnE18zo6qx/8claUhJCjjc4poaKq6yG0QtEw3lhyKJs5m7nseBKJZaJYi0GH7wNeKxuLfurLW4ak9IWnmB5xj+NJ8gB131/9flHMdN",
+      "expect_signature": "valid",
+      "expect": {
+        "tier": "commercial",
+        "features": [
+          "binding",
+          "cg",
+          "hts",
+          "membrane"
+        ],
+        "org": "Test Co.",
+        "seats": 3,
+        "max_version": "0.1.0"
+      }
+    },
+    {
+      "name": "v2-site",
+      "payload": {
+        "schema": "md20-license-v2",
+        "issued_at": "2026-11-07T12:00:00Z",
+        "scope": "use",
+        "note": "site: bound to the organisation, not to machines; revoked by the second revocation list",
+        "issuer": "HCC Lab, NKUST",
+        "id": "7777777777777777",
+        "licensee": "Test 大學 計算中心",
+        "expires": "2099-12-31",
+        "machines": [],
+        "tier": "site",
+        "features": [
+          "binding",
+          "membrane",
+          "hts",
+          "cg"
+        ],
+        "org": "Test 大學",
+        "issuer_key": "ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26"
+      },
+      "message_utf8": "md20-license-v2\n{\"expires\":\"2099-12-31\",\"features\":[\"binding\",\"membrane\",\"hts\",\"cg\"],\"id\":\"7777777777777777\",\"issued_at\":\"2026-11-07T12:00:00Z\",\"issuer\":\"HCC Lab, NKUST\",\"issuer_key\":\"ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26\",\"licensee\":\"Test 大學 計算中心\",\"machines\":[],\"note\":\"site: bound to the organisation, not to machines; revoked by the second revocation list\",\"org\":\"Test 大學\",\"schema\":\"md20-license-v2\",\"scope\":\"use\",\"tier\":\"site\"}",
+      "message_sha256": "1048e3c6bccca37804b15f2558d29a7be26f6effe6ec10d52de2e1eb591dcf89",
+      "sig": "WyCRWStWhTRV0uzqcYvVv8solMd1+4pV8oCSrw9A+kKLhnqHWo4tVVGH3am+9ThoO6Lwnmv9y9ozBkW4/YSBb2c4RCNfsoqyd57ScM4qts4ZrdwA31jrkqXdc64DlcyxefIYnBt0WUvdprbSRvlIcfRSr0v+uKW1WbacQ85Dbh9F8j2N0QawdgzX9XrZU85nVlxg3taxwX5vEHzuS94ZnnXNK4K2/7dk+O38STWtTD01f05m48YY4N3+trR2cckIgBJyEbDfW12eeHOdAndLIUIvMHcgiBESj8Dzbkn/AFPeaYJrNHgUCGpS/CxAe9wVB+4d9VxrTIaEWkn2Ngg/bYeQcwNbdXJExOMJNkQjnPdxlsjDqAvx4GzUQxBpFGY1CaRdJt1jnaoaLDujeCZNtQd3PFxZ3x3NGfHlsPftcP1uDLJuAIOkAkRMIY4C4zs5+gX7hcH1elXk0G3pWdPXFaLyVCOMucJRdAsvX+yFEdfwTBHr9IbzpDB8WPSIZ3+E",
+      "expect_signature": "valid",
+      "expect": {
+        "tier": "site",
+        "features": [
+          "binding",
+          "cg",
+          "hts",
+          "membrane"
+        ],
+        "org": "Test 大學",
+        "seats": null,
+        "max_version": null
+      }
+    },
+    {
+      "name": "v2-unicode",
+      "payload": {
+        "schema": "md20-license-v2",
+        "issued_at": "2026-11-07T12:00:00Z",
+        "scope": "use",
+        "note": "備註: 中文、引號 \" 與反斜線 \\ / 斜線",
+        "issuer": "HCC Lab, NKUST",
+        "id": "2000000000000007",
+        "licensee": "王小明 \"Ming\" <測試>",
+        "expires": null,
+        "machines": [
+          "0123-4567-89AB-CDEF"
+        ],
+        "tier": "research",
+        "org": "高雄科技大學 食品系",
+        "seats": 1
+      },
+      "message_utf8": "md20-license-v2\n{\"expires\":null,\"id\":\"2000000000000007\",\"issued_at\":\"2026-11-07T12:00:00Z\",\"issuer\":\"HCC Lab, NKUST\",\"licensee\":\"王小明 \\\"Ming\\\" <測試>\",\"machines\":[\"0123-4567-89AB-CDEF\"],\"note\":\"備註: 中文、引號 \\\" 與反斜線 \\\\ / 斜線\",\"org\":\"高雄科技大學 食品系\",\"schema\":\"md20-license-v2\",\"scope\":\"use\",\"seats\":1,\"tier\":\"research\"}",
+      "message_sha256": "c2a5de79ae9b5843851d70f765a28550e4c538c464b233d33587dfa16c93d2fa",
+      "sig": "hp7YNofJ3IWkPzXeHKsVlwtkl9Lt/bbrqlUY/8JHDzswVCe2Gvf8nQDFXxkx83FWyVnlOotYTIXt4wyREqi7mC/6AL9n04YVmuTMLptIAmmEl8FeXgzb3pLNRFKQFgqF8K3hUbzw8wUrCPHKW3OVrUod3p9XmROVsqpterI6TXvIVLJgW/NbSRiTaL6o2ZhjfXVCoXxS8hhXOcZrC9iJXb4Rk7WTjoGXULT3SnjIPszkD6PyxVccE1WGZqoJ00Ij8ikjwIN2Rrcxekhg/+N4izoW5ir9TDAJ9V5PpP0Pc7QDVu7dFAzhhLunjS+txj7Zg1mFSRPqs5Vs3+4TkzpuqCKXgPLijKD7sudHzcfg9TYm9OSORGbtLMrCRYFeFeeyFwhbz/QD934/5mBoIXJXZYxpR7sXxm3WjcrrnS3iXd/6LPzysP5OYDHOmehAgnRDtzjOEOr/Dq34oQY/ppAU7AgIrzZE/zi7aRTcvV8ciomlMgWG372qdKv5JHqdqGyW",
+      "expect_signature": "valid",
+      "expect": {
+        "tier": "research",
+        "features": "all",
+        "org": "高雄科技大學 食品系",
+        "seats": 1,
+        "max_version": null
+      }
+    }
+  ],
+  "revocations": [
+    {
+      "name": "revocations-1",
+      "payload": {
+        "schema": "md20-revocations-v1",
+        "issued_at": "2026-11-07T12:30:00Z",
+        "ids": [
+          "5555555555555555",
+          "aaaaaaaaaaaaaaaa"
+        ]
+      },
+      "message_utf8": "md20-revocations-v1\n{\"ids\":[\"5555555555555555\",\"aaaaaaaaaaaaaaaa\"],\"issued_at\":\"2026-11-07T12:30:00Z\",\"schema\":\"md20-revocations-v1\"}",
+      "message_sha256": "1c30ba9d9455a5f12c88c6abaa7fd562b3d4ec9fcdf2c4eab015f09e376816b0",
+      "sig": "aH0V2ddqimTThhC7tHSMe9hYx61ywM6y0uv12J4TRfPU14jhKG2qHEBb7zD3bmFXpuEuQ2SmKbGd2epKdcLrWz4WuATd6yDUzUdAZpMUesjVnahIWydjF2FgY1759HXKlHOkG401xu9w0B8nqxVL0Nv+ESp5Mu1pQjL98+lJLB0+ZayvdItzuRTC2wAkiYJrCHBXx2a0fOOkqC1UM9AZn8TIx3Cqg4tzY9oKmLddoPqaSGnrP/KoDIRYFWNM13/+gf0mkNb0CvXpYIi0mPqucYDgSvvX5Btu1g90nzpoYL/xREU0QjrZUTakfTWkrJDh9SANxX7ZYRPHdJZxTdNh/5IFG92Q7Sf88KAu3Ahy7aWrh/YbVOkBY9ecF/ptMCxIDKmsiWszLpcu/eq7g5DvDa6Eq0kupRNCnd6KMTV2NVNM4hucP8Xj63qXuNjdfbIPmff0KLdz7yCg0dh6EVnpoJxFNjYUUiyZJ4LJ7rAWxt7qnl0/4YYe5lrqdJOzg/Du",
+      "expect_signature": "valid"
+    },
+    {
+      "name": "revocations-2-newer-and-cumulative",
+      "payload": {
+        "schema": "md20-revocations-v1",
+        "issued_at": "2026-11-08T08:00:00Z",
+        "ids": [
+          "5555555555555555",
+          "7777777777777777",
+          "aaaaaaaaaaaaaaaa"
+        ]
+      },
+      "message_utf8": "md20-revocations-v1\n{\"ids\":[\"5555555555555555\",\"7777777777777777\",\"aaaaaaaaaaaaaaaa\"],\"issued_at\":\"2026-11-08T08:00:00Z\",\"schema\":\"md20-revocations-v1\"}",
+      "message_sha256": "2b808af3bed4d04d1e2686bf7683a343aca54158cf748e3595151e569acd8a35",
+      "sig": "In2Kc+52NQEgsy65ZFmBkf2Wxw8VZOpUUaHDSvnmKY3WUBVjUTEkcdtUzzaHSuyIa8ZZvSXg5n/O6Ic/ypdRzPTk/b4CgUVtZpMUkV4dgSJO5+Vgp2HRwx4tLcSYz6PHBmVrR1jSRDJsHtP/ZSltT2eyPVEu4KG2F1VX3wd4RtgeJoBmWW/uiddDIdDcTg+Qzma4Qy0BsmuL1Gctz5ppbVc/m0lsHdnp1gVDBJys1Ty/PMa+62qZzKh609AXU9qBpnYOYdjo2o2iC+o9KOlSKJ76s/3yD1Ww95cAUQe7ALNZzY+LIMszcnBAuVqKu4p2pq7cWu2fRslSl0RxV4F5Ji7XR3B0Y0lAbqvFH8FTX1mAslGF1pxD9MPWFQIm6M0bMOhOIl+aMHmo5vK7ZoTRiGEl+x/H37IBmvs/p37aTPcV+GulKN1WXHsVNFsiTJGCmsDBegaO0zCVDBeYkGPt6u2dfSmC22Cu6nELJqIRnoPSL3LFEqH99p1DDyoHJI7H",
+      "expect_signature": "valid"
+    }
+  ],
+  "negative_vectors": [
+    {
+      "name": "licence-v2-signed-under-revocation-domain",
+      "payload": {
+        "schema": "md20-license-v2",
+        "issued_at": "2026-11-07T12:00:00Z",
+        "scope": "use",
+        "note": "teaching, features not limited",
+        "issuer": "HCC Lab, NKUST",
+        "id": "2000000000000002",
+        "licensee": "Test Student",
+        "expires": "2099-12-31",
+        "machines": [],
+        "tier": "teaching",
+        "org": "Test University",
+        "issuer_key": "ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26"
+      },
+      "message_utf8": "md20-revocations-v1\n{\"expires\":\"2099-12-31\",\"id\":\"2000000000000002\",\"issued_at\":\"2026-11-07T12:00:00Z\",\"issuer\":\"HCC Lab, NKUST\",\"issuer_key\":\"ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26\",\"licensee\":\"Test Student\",\"machines\":[],\"note\":\"teaching, features not limited\",\"org\":\"Test University\",\"schema\":\"md20-license-v2\",\"scope\":\"use\",\"tier\":\"teaching\"}",
+      "message_sha256": "7bfd06e11b52538edb8351d013dfba11c7128a06113fa1f458cb222995cbfb0c",
+      "sig": "fY02Cdyp/yj2Qptal2Wir8qbowUYMqm2yPYUYiBZbAVM3CkMllwrhpGNq/Ei5Ab0hjoHEaZM2Wmik6aH7Au22/+kSRALjAQQoeVHntnJGWP54glIEa+frtDncYPmI8A2l2y3jjh6YGsM4ZeayK5w13/0WoFrhg434qLsQWe+fvrAOO+MUwq7ytfCTySnS+34SrxqeAEgbvhbkZHTPI5SRcjBK/KG6+XU4cgfZM755KJIhsgvNFZU+mw7Ad81DtyBBiOyVe3hTozSlUAuEB3jeu7kknDgQqllOtH8G7akKSc/zc1qDZ1+iPatXy89Wo+8Qxg6u3VU2R2oVhYsNElQ48B9akSXHRuvILW9MxAA8FLEsMCQyFdQrotyA1x9zCPxD2vvUM+zyQF61Mkg7W68sAms6sLkixTHCBZHfUO+xgE7XnFZWWb6yluHC2pnZZNzxWK1SE4OGVTm5Q9wnQ7/C0oYQxN1uHgkkPdhbt9IzESa69XxbeD7Dvn6DK/7r3jf",
+      "expect_signature": "invalid",
+      "kind": "licence",
+      "why": "a signature over a licence payload under the revocation prefix must never make a licence"
+    },
+    {
+      "name": "licence-v2-signed-under-v1-domain",
+      "payload": {
+        "schema": "md20-license-v2",
+        "issued_at": "2026-11-07T12:00:00Z",
+        "scope": "use",
+        "note": "teaching, features not limited",
+        "issuer": "HCC Lab, NKUST",
+        "id": "2000000000000002",
+        "licensee": "Test Student",
+        "expires": "2099-12-31",
+        "machines": [],
+        "tier": "teaching",
+        "org": "Test University",
+        "issuer_key": "ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26"
+      },
+      "message_utf8": "md20-license-v1\n{\"expires\":\"2099-12-31\",\"id\":\"2000000000000002\",\"issued_at\":\"2026-11-07T12:00:00Z\",\"issuer\":\"HCC Lab, NKUST\",\"issuer_key\":\"ef798ce1e4e5584d9b7613922487d2d242af95cc78c5915719032eadb8bf3c26\",\"licensee\":\"Test Student\",\"machines\":[],\"note\":\"teaching, features not limited\",\"org\":\"Test University\",\"schema\":\"md20-license-v2\",\"scope\":\"use\",\"tier\":\"teaching\"}",
+      "message_sha256": "d45978f888a070070717d478e08be0c652fbf22feb153c3128a22ff03c9fe385",
+      "sig": "cm1/IA+tJHWP1rVb/A+eSGQFHavvoxlGJ/L04ZLF1Jd3qJ1d9qQ4GEwkDTCxcWgmFzsP41qn/7b5NFRJ2G1i1DB7mCMIbx6qW6kE+U6MnqGF45DUUIgPmgY9Oz+tKRJ7sbkcArEeVpm8NuTlyJI3/KVP1agkzETuz0C3EMdqmY7Pq+25OFO+e7LmxoVHJ9a0VV/+kwEqAE26TwCOWyZR1My7sNZsoQCjB8W7sskkllp7k33ubqmdlsT8Ga7ymc38dGCVQ+66K7pSrV80djGcbBTxlFh51/g8PoTGJTFrCrY/OZBM8acLHP4SYamQmKJRoJiwBJwTl37vn58qQJUtlzLjklNPXEHnn9CjzfpVDqHq6wRDTarYpftW9Th1UVFldfHLGR0qbUKGhMSjcJu6m8sYvO/2wWz7gBe/+KFKTTUEdxNPDV+6pWzNPm6am1TMOJFEYovyTHybAuy8FBpeb8Vo1+/lk8fSYbmo5IMhYy24Elvk22cJM4wria82aZvW",
+      "expect_signature": "invalid",
+      "kind": "licence",
+      "why": "a v2 payload only verifies under the v2 prefix"
+    },
+    {
+      "name": "licence-v1-signed-under-v2-domain",
+      "payload": {
+        "schema": "md20-license/1",
+        "id": "1000000000000001",
+        "licensee": "Test V1",
+        "issued_at": "2026-11-07T12:00:00Z",
+        "expires": "2099-12-31",
+        "machines": [],
+        "scope": "use",
+        "note": "",
+        "issuer": "HCC Lab, NKUST"
+      },
+      "message_utf8": "md20-license-v2\n{\"expires\":\"2099-12-31\",\"id\":\"1000000000000001\",\"issued_at\":\"2026-11-07T12:00:00Z\",\"issuer\":\"HCC Lab, NKUST\",\"licensee\":\"Test V1\",\"machines\":[],\"note\":\"\",\"schema\":\"md20-license/1\",\"scope\":\"use\"}",
+      "message_sha256": "97f5678f6a6c6cb0872f76a66d7c86d9832c4d4402febbcff90805924b5c8a91",
+      "sig": "DvXRqZvZiwo0kb5hz8dT0fuTekQta8x2OVdhMmTGmYjb1KTe2gs8+DVLmJAh8/9bvYbY3YJn2EHBnrVEIzYilAfTDaaYCwwzih9phC0VDZCm8gQL5+Gwn39A5y1lRcSTqfdEf5Mhy7215wj8290qB5znpDX/5guoDPv7FGD+PZd+j4mpfOLbWPsWZr8mUyf+m0UhGuwfkQWSxKBjoFgWhmTNyDoyY4J52xQ8LTNJ5SDh+iIERZP13eng8xdh9baOVt4LQ3iJELnfogQ0XZbI8IlhOrlBNpbE51MhmIdQ1RUHJ85sGKwVSf0pdWo9bfo4N7DGVkOTN9Kl+QO26HNldtP9zZezP/ot3Zg3gsqtYRzXJyQg5cDvVTNZ5NxHcIW4v5HYldanYvC2x8WRVsJ6Di4NFH/1FdaTJFEXEiwk+SPukehBrO/+qPJsJeGZKip3DSYF/zxTg8a514c+KvRxFJBkMB7SHnD3s0NV69LMmkaMyULizLxHXIsQgK4hnmmG",
+      "expect_signature": "invalid",
+      "kind": "licence",
+      "why": "a v1 payload only verifies under the v1 prefix"
+    },
+    {
+      "name": "revocations-signed-under-licence-domain",
+      "payload": {
+        "schema": "md20-revocations-v1",
+        "issued_at": "2026-11-07T12:30:00Z",
+        "ids": [
+          "5555555555555555",
+          "aaaaaaaaaaaaaaaa"
+        ]
+      },
+      "message_utf8": "md20-license-v2\n{\"ids\":[\"5555555555555555\",\"aaaaaaaaaaaaaaaa\"],\"issued_at\":\"2026-11-07T12:30:00Z\",\"schema\":\"md20-revocations-v1\"}",
+      "message_sha256": "9c45ef0ccb35754c7d200d851210e7ef52758f10a2c693ab0ce8f12372d2c78d",
+      "sig": "PrlV/RUUus/mhAqzmgu8LNh2eKKM9S4aqbOe3VPgtbUthPVFFV3mp7kpfHLlbKb57xHDLXLTX1hAaswoUWROg+oyCMQ5PTOqbvLjqH3UxDRcIV6RCSDKIbAhS8iGIhT4J8s/neUx2R/ZBrpFqyivAEdRJ+BBB6DMzh1w3PBdP5kZplkRrbgxgUIYyBXcPHxOVCGRpgQEYRCSbjzWzWtSG7jmzO5tn9nG2O9U2cccc5RpSL8Zw1AbokDSEUV2Hv9PCDACSLr4krgL27BHTsbU1Doj716lKlf9RvHGGNTyMQurCEW9Rf/udooHLWV17jyVUVh1ybPh0U64Zo4I0/nA0bmBlEs3RnN/ED6LOCHiFpxoBdMqZ+uXKXNb2p2VSeQ8hpNMiZg+rmk8MsI5XU0FoBY85EEM9Lg4sHDv+ykOi6BO4KMWILEFhB44XGKxkIApc6KGBHClmniEob3C50+U1gZoeyNzkpXDOzuKAnY6jVjAQIgSO81ZZvUiXlJR5ic0",
+      "expect_signature": "invalid",
+      "kind": "revocation",
+      "why": "a signature under the licence prefix must never make a revocation list"
+    },
+    {
+      "name": "revocations-signed-under-v1-licence-domain",
+      "payload": {
+        "schema": "md20-revocations-v1",
+        "issued_at": "2026-11-07T12:30:00Z",
+        "ids": [
+          "5555555555555555",
+          "aaaaaaaaaaaaaaaa"
+        ]
+      },
+      "message_utf8": "md20-license-v1\n{\"ids\":[\"5555555555555555\",\"aaaaaaaaaaaaaaaa\"],\"issued_at\":\"2026-11-07T12:30:00Z\",\"schema\":\"md20-revocations-v1\"}",
+      "message_sha256": "8e69c1539808f4c28a16b387f3197ec047fcefa8bb07b18f0125dd102a395456",
+      "sig": "p0vnUI8GUbDYTEFpt0nlkBmhKpRa4Ih6PqWRP6yOnt0yE+pu2rxMb+FNOjnGEED1GkNtmIExb65CzPk0LOG4Ml0skZQj6IaXTCSN3QyYl+ohF0hx8lidbl46aVHCaTMmFOwTpMe8VxJNTEri5s8jrgDECJ14mX/d9Dp+6jTyOflg+CNZpDE7lMhN94h9BSVtzzecUTxqHweivKJFY1R+Xlh/HeLA1lkGtgosy4tH96g5n+vhUdjvTdgxm77rMFL14vq3hIwjoEWzMAf4Wj6UFc++cIb4cTWmQ2YHf4RwkMuWo9jiC06iSVj3DWieoeE8NPWut1zw/B9uafdWl81AESO5pAw5UZ/AuJJuXM0V8ENI2NdOku4MW3ScxsjwJjvEy6U5VlAYg53TtScRIg/n1WpnaZPwnFAgsEJOxg0HqSdREUdYbg4SbpgLVf7GV4EouNriTvmpXD0HZqw/TgmWXn/49EO+wenYPTWpKow523Qa3oK1gAkjadK/QI6zQOdl",
+      "expect_signature": "invalid",
+      "kind": "revocation",
+      "why": "a signature under the v1 licence prefix must never make a revocation list"
+    }
+  ]
+}

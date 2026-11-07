@@ -191,8 +191,11 @@ def _real_run(wf, root: Path, sink) -> dict:
     if fake:
         from .logic import _fake_run
         return _fake_run(wf, float(fake), sink)
-    from ..util.license import require
-    require("gui-worker")                 # D-125: the stand-in above does no chemistry; everything below does
+    from ..util.license import require_features
+    from ..workflow import required_features
+    # D-125: the stand-in above does no chemistry; everything below does.  D-128: and the licence must include the features
+    # this workflow needs (binding, membrane, hts, cg), before the platform probe and the pause policy are built
+    require_features("gui-worker", required_features(getattr(wf, "cfg", None) or {}))
     from ..engine import PausePolicy
     from ..engine.factory import make_backend_factory
     from ..env import choose_platform
