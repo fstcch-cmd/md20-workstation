@@ -6,6 +6,13 @@
 ---
 
 ## 2026-11-07
+### D-124　第 1 層：明文專有授權（repo 公開只為 CI，公開不等於授權）
+- 使用者 11/07 21:50：repo 因 CI 費用必須公開，但不允許他人任意使用；要求「別人取得也不能用」的方法，且不影響開發。21:52 決定做第 1、2 層（授權條款＋簽章授權檔），第 3 層（核心搬到私人 repo／改私人＋自架 runner）不做；解鎖方式為擁有者發授權檔給學生。
+- 誠實前提（已告知使用者）：原始碼公開時，沒有技術手段能保證「拿了也不能用」；有效的只有法律條款、不公開關鍵部分、只有擁有者持有的東西（私鑰）。
+- 決定：新增 `LICENSE`（MD20 專有授權 v1.0，中英對照，以中文本為準）：只允許在 GitHub 上檢視與 GitHub 條款要求的 fork；安裝、執行、修改、散布、規避授權檢查與戳記、用於訓練機器學習模型，皆需 HCC Lab 書面授權；簽章授權檔在其範圍與期限內視為書面授權（銜接 D-125）；以有效授權產生的結果可用於本人課業與發表；第三方元件適用各自授權；不提供保證；違反即終止。README 開頭改為中英聲明並連到 LICENSE；`pyproject.toml` 加 `license = {file}` 與 `Private :: Do Not Upload` 分類（PyPI 會拒絕上傳）。
+- 先前狀態：repo 沒有任何授權檔（依法即保留所有權利，但未明文；GitHub 條款仍允許檢視與 fork，這點無法排除）。
+- 未決：條文請學校法務或技轉單位審閱（開發者不是律師）；公開期間已被 clone 的副本無法收回。
+
 ### D-123　補 D-118 的接線缺口：從建模 manifest 與對接結果萃取約束建議的輸入；學生採用建議時寫 DecisionLog
 - 範圍：只補輸入與記錄。`restraint_advice.py` 的判斷規則、門檻、所有 protocol 預設與 `make_protocol` 都沒動；不新增 phase/step。
 - **輸入萃取**（純函式，`md20/engine/restraint_advice.py` 新增 `rebuilt_residues_from_manifest`、`capped_breaks_from_manifest`、`pose_clashes_from_selection`、`features_from_records`；`md20/advisor.py` 新增 `features_with_records`）。讀的是程式實際寫入的鍵，不是推測的：

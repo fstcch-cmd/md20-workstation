@@ -9,6 +9,8 @@ description = "MD20 teaching workstation: docking → MD → enhanced sampling o
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "HCC Lab, NKUST" }]
+license = { file = "LICENSE" }
+classifiers = ["License :: Other/Proprietary License", "Private :: Do Not Upload"]
 dependencies = [
     "numpy>=1.26",
     "pandas>=2.0",

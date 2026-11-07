@@ -3,7 +3,8 @@
 [![CI](https://github.com/fstcch-cmd/md20-workstation/actions/workflows/ci.yml/badge.svg)](https://github.com/fstcch-cmd/md20-workstation/actions/workflows/ci.yml)
 
 > © HCC Lab, National Kaohsiung University of Science and Technology. All rights reserved.
-> 本 repo 暫時公開，只供持續整合（CI）測試使用。沒有附授權，請勿重製、散布或用於其他用途。
+> 本 repo 公開只是為了執行持續整合（CI）測試，**公開不等於授權**。未取得 HCC Lab 簽發的授權檔，不得安裝、執行、修改或散布（見 [LICENSE](LICENSE)）。
+> This repository is public only so its CI can run. Public is not a licence: without a licence file signed by HCC Lab you may not install, run, modify or distribute it ([LICENSE](LICENSE)).
 
 **最新版本 [v0.1.0a19](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a19)**（2026-11-07，教學預覽版，Windows 與 macOS）
 

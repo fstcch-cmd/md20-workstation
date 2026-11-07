@@ -1,0 +1,98 @@
+MD20 Proprietary License (Source Available for Viewing Only)
+MD20 專有授權（原始碼僅供檢視）
+
+Version 1.0, 2026-11-07
+Copyright (c) 2026 HCC Lab, National Kaohsiung University of Science and Technology (NKUST).
+All rights reserved.
+版權所有 (c) 2026 國立高雄科技大學 HCC Lab。保留一切權利。
+
+------------------------------------------------------------------------------
+English
+------------------------------------------------------------------------------
+
+1. Why the source is visible. This repository is public only so that its
+   continuous-integration tests can run. Public visibility is not a licence.
+   No right to use the software is granted by this repository being public,
+   by downloading it, or by forking it on GitHub.
+
+2. What is allowed without a licence. You may view the source code on
+   GitHub, and GitHub may display and let you fork it as its Terms of Service
+   require. Nothing else.
+
+3. What requires written permission. Without a written licence from HCC Lab
+   (a signed MD20 licence file issued by HCC Lab counts as one, within its
+   stated scope and expiry), you may not:
+   (a) install, run or otherwise use the software or any part of it, for any
+       purpose, including teaching, research, evaluation and benchmarking;
+   (b) copy, modify, translate, adapt or create derivative works;
+   (c) distribute, publish, sublicense, sell, rent or lend it, or make it
+       available as a service;
+   (d) remove, disable or work around the licence check, the provenance
+       stamps or any copyright notice;
+   (e) use the software, its output, or its source code to train or evaluate
+       machine-learning models.
+
+4. Licence files. A licence file is valid only if it carries a valid
+   signature made with HCC Lab's private key, is used within its expiry date
+   and on the machines it names (if any), and is used by the person it names.
+   Licence files are personal and may not be shared.
+
+5. Output. Results you produce with a valid licence may be used in your own
+   coursework, theses and publications, with the provenance stamps left in
+   place and MD20 acknowledged.
+
+6. Third-party components. Third-party software that MD20 downloads or calls
+   (for example OpenMM, AutoDock Vina, RDKit, micromamba) remains under its
+   own licence. This licence covers HCC Lab's own code, documentation, data
+   and designs in this repository.
+
+7. No warranty. The software is provided "as is", without warranty of any
+   kind. HCC Lab is not liable for any damage arising from its use.
+
+8. Termination. Any breach ends every permission immediately. Licence files
+   may be revoked.
+
+9. Contact for licences: HCC Lab, National Kaohsiung University of Science and
+   Technology, through the repository owner on GitHub (fstcch-cmd).
+
+------------------------------------------------------------------------------
+繁體中文
+------------------------------------------------------------------------------
+
+1. 為什麼看得到原始碼：本 repo 公開，只是為了執行持續整合（CI）測試。公開
+   不等於授權；本 repo 公開、被下載或在 GitHub 上被 fork，都不授予任何使用權。
+
+2. 未經授權可以做的事：在 GitHub 上檢視原始碼，以及 GitHub 服務條款要求的
+   顯示與 fork。除此之外都不行。
+
+3. 需要書面授權的事：未取得 HCC Lab 的書面授權（HCC Lab 簽發的 MD20 授權檔
+   在其載明的範圍與期限內視為書面授權），不得：
+   (a) 安裝、執行或以其他方式使用本軟體或其任何部分，用途不限，包括教學、
+       研究、評估與效能比較；
+   (b) 複製、修改、翻譯、改編或製作衍生著作；
+   (c) 散布、公開、再授權、販售、出租、出借，或以服務形式提供；
+   (d) 移除、停用或規避授權檢查、來源戳記或任何著作權標示；
+   (e) 以本軟體、其輸出或原始碼訓練或評估機器學習模型。
+
+4. 授權檔：授權檔須帶有以 HCC Lab 私鑰所做的有效簽章，並在期限內、在其載明
+   的電腦上（若有載明）、由其載明的本人使用，才有效。授權檔屬個人所有，不得
+   分享。
+
+5. 輸出結果：以有效授權產生的結果，可用於本人的課程作業、學位論文與發表，
+   須保留來源戳記並註明使用 MD20。
+
+6. 第三方元件：MD20 下載或呼叫的第三方軟體（例如 OpenMM、AutoDock Vina、
+   RDKit、micromamba）仍適用其各自的授權。本授權涵蓋本 repo 中 HCC Lab 自有的
+   程式碼、文件、資料與設計。
+
+7. 不提供保證：本軟體依「現狀」提供，不附任何保證。HCC Lab 不對使用本軟體
+   造成的任何損害負責。
+
+8. 終止：違反任何條款，所有許可立即失效。授權檔可被撤銷。
+
+9. 授權聯絡：國立高雄科技大學 HCC Lab，經由 GitHub 上的 repo 擁有者
+   （fstcch-cmd）聯絡。
+
+------------------------------------------------------------------------------
+If the English and Chinese texts differ, the Chinese text prevails.
+中英文本如有不一致，以中文本為準。
