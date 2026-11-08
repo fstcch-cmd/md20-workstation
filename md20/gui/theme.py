@@ -81,7 +81,7 @@ body { font-size: 14.5px; line-height: 1.55; -webkit-font-smoothing: antialiased
 .q-tab { text-transform: none !important; font-weight: 600; color: var(--md20-ink-muted); }
 .q-tab--active { color: var(--md20-primary); }
 .q-uploader { border: 1px dashed var(--md20-line-strong); border-radius: var(--md20-r-section); box-shadow: none; }
-.q-uploader__header { background: var(--md20-primary-soft) !important; color: var(--md20-primary) !important; }
+.q-uploader__header { box-shadow: none; }   /* colour comes from the element's color=primary prop (D-146) */
 
 .q-table__container { border: 1px solid var(--md20-line); border-radius: var(--md20-r-section); box-shadow: none !important; }
 .q-table th { font-weight: 600; color: var(--md20-ink-muted); font-size: 12.5px; background: #F7FAFA; }

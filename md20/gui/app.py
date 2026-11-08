@@ -174,7 +174,7 @@ def _feature_card():
         def dismiss():
             STATE["feature_block"] = None
             ui.navigate.reload()
-        ui.button(_("關閉", "Dismiss", "閉じる", "닫기"), on_click=dismiss).props("flat dense color=blue-grey-7")
+        ui.button(_("關閉", "Dismiss", "閉じる", "닫기"), on_click=dismiss).props("flat dense color=primary")
 
 
 def _license_card():
@@ -215,7 +215,7 @@ def _license_card():
         ui.upload(on_upload=got, auto_upload=True, label=_("匯入授權檔 (.md20license)", "Import licence file (.md20license)",
                                                            "ライセンスファイル (.md20license) を取り込む",
                                                            "라이선스 파일(.md20license) 가져오기")
-                  ).props("accept=.md20license,.json flat bordered color=blue-grey-7 data-testid=license-upload").classes("w-full")
+                  ).props("accept=.md20license,.json flat bordered color=primary data-testid=license-upload").classes("w-full")
 
 
 def _header():
@@ -636,7 +636,7 @@ def _manual_upload_panel(wf: Workflow):
                 st["steps"].pop(k, None)
             from ..util import atomic_write_json
             atomic_write_json(st, wf.state_path)
-        ui.upload(on_upload=got, multiple=True, auto_upload=True, label=_("選擇 .sdf 檔", "Choose .sdf files", ".sdf ファイルを選ぶ", ".sdf 파일 선택")).props("accept=.sdf flat bordered color=blue-grey-7").classes("w-full")
+        ui.upload(on_upload=got, multiple=True, auto_upload=True, label=_("選擇 .sdf 檔", "Choose .sdf files", ".sdf ファイルを選ぶ", ".sdf 파일 선택")).props("accept=.sdf flat bordered color=primary").classes("w-full")
 
 
 def _figure_gallery(wf: Workflow):

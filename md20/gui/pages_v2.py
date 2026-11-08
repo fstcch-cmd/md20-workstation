@@ -361,7 +361,7 @@ def _form(mode: str, expand_all: bool = False):
                 state["receptor_text"] = data.decode("utf-8", errors="ignore") if dst.suffix in (".pdb", ".ent") else None
                 rec_info.set_text(_("已上傳：", "Uploaded: ", "アップロード済み：", "업로드됨: ") + fname)
                 refresh()
-            ui.upload(on_upload=got_receptor, auto_upload=True, max_files=1, label=t("or_upload", L)).props("accept=.pdb,.ent,.cif,.mmcif flat bordered color=blue-grey-7").classes("w-full")
+            ui.upload(on_upload=got_receptor, auto_upload=True, max_files=1, label=t("or_upload", L)).props("accept=.pdb,.ent,.cif,.mmcif flat bordered color=primary").classes("w-full")
         with ui.card().classes("w-full md20-card p-4"):
             ui.label(t("ligands", L)).classes("md20-section")
             ui.label(t("ligand_help", L)).classes("md20-why")
@@ -408,7 +408,7 @@ def _form(mode: str, expand_all: bool = False):
                     lib_info.set_text(_(f"已上傳 {fname}，共 {ne} 個化合物", f"Uploaded {fname} with {ne} compounds",
                                         f"{fname} をアップロードしました（化合物 {ne} 個）", f"{fname} 업로드됨, 화합물 {ne}개")
                                       + (_(f"，{nw} 則提醒", f", {nw} notes", f"、注意 {nw} 件", f", 알림 {nw}건") if warns else ""))
-                ui.upload(on_upload=got_library, auto_upload=True, max_files=1, label=t("hts_upload", L)).props("accept=.xlsx,.xls,.csv flat bordered color=blue-grey-7")
+                ui.upload(on_upload=got_library, auto_upload=True, max_files=1, label=t("hts_upload", L)).props("accept=.xlsx,.xls,.csv flat bordered color=primary")
 
         # ------------------------------------------------------------------ parameters
         ui.label(t("parameters", L)).classes("md20-section")
@@ -550,7 +550,7 @@ def _form(mode: str, expand_all: bool = False):
                     up_info.set_text(_("已上傳：", "Uploaded: ", "アップロード済み：", "업로드됨: ") + fname)
                     refresh()
                 ui.upload(on_upload=got_fold, auto_upload=True, max_files=1, label=A.tx("fold_upload", L)).props(
-                    "accept=.pdb,.cif,.mmcif flat bordered color=blue-grey-7").classes("w-full")
+                    "accept=.pdb,.cif,.mmcif flat bordered color=primary").classes("w-full")
 
     def render_quick_fold(parsed):
         """Quick mode: one "fold this peptide" checkbox next to each peptide ligand."""
