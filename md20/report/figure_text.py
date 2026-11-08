@@ -1286,7 +1286,35 @@ _DIAG_NAME = {
     "cumulative_drift": ("累積估計漂移", "cumulative-estimate drift", "累積推定値のドリフト", "누적 추정값 드리프트"),
     "endpoint_plateau": ("末端持平", "endpoint plateau", "終端の平坦性", "끝부분 평탄"),
     "range_coverage": ("PMF 涵蓋取樣範圍", "PMF covers the sampled range", "PMF がサンプル範囲を覆う", "PMF의 샘플 범위 포함"),
+    # D-140 (funnel result only)
+    "funnel_bound_state": ("結合態未被漏斗壓住", "bound state not squeezed by the funnel", "結合状態がファンネルに押されていない",
+                           "결합 상태가 깔때기에 눌리지 않음"),
+    "funnel_solvation": ("圓柱段配體已溶劑化", "ligand solvated in the cylinder", "円柱部でリガンドが溶媒和されている",
+                         "원통 구간에서 리간드가 용매화됨"),
+    "funnel_bulk_cylinder": ("PMF 末端平台在圓柱段", "PMF bulk plateau inside the cylinder", "PMF 末端の平坦部が円柱部にある",
+                             "PMF 말단 평탄부가 원통 구간 안에 있음"),
 }
+
+
+def classify_standard_state(name: str, a: dict | None) -> list[dict]:
+    """D-140 (A8): which ΔG° statement the reference state allows.  Funnel + analytic correction = may rank; a 1 M radial
+    ΔG° = approximate, not for ranking.  Nothing is said when no ΔG° qualified (the assessment sentence covers that)."""
+    el = (a or {}).get("eligibility") or {}
+    if el.get("affinity_ranking"):
+        return [S("good",
+                  f"{name}：ΔG° 以漏斗約束加解析標準態校正計算，可用於比較配體的親和力（限相同漏斗條件）。",
+                  f"{name}: the ΔG° uses the funnel restraint with the analytic standard-state correction and may be used to compare "
+                  "ligand affinities (identical funnel conditions only).",
+                  f"{name}：ΔG° はファンネル拘束と解析的な標準状態補正で計算されており、リガンドの親和性の比較に使えます（同じファンネル条件に限る）。",
+                  f"{name}: ΔG°는 깔때기 구속과 해석적 표준 상태 보정으로 계산되어 리간드 친화도 비교에 쓸 수 있습니다(같은 깔때기 조건에 한함).")]
+    if el.get("dG_standard"):
+        return [S("note",
+                  f"{name}：ΔG° 是 1 M 徑向積分的近似值，沒有漏斗約束與解析標準態校正，不用於親和力排序。",
+                  f"{name}: the ΔG° is a 1 M radial-integral approximation without a funnel restraint or analytic standard-state "
+                  "correction and is not used for affinity ranking.",
+                  f"{name}：ΔG° は 1 M 動径積分による近似値で、ファンネル拘束も解析的な標準状態補正もないため、親和性の順位づけには使いません。",
+                  f"{name}: ΔG°는 깔때기 구속과 해석적 표준 상태 보정이 없는 1 M 방사 적분 근사값이므로 친화도 순위에 쓰지 않습니다.")]
+    return []
 
 
 def classify_assessment(name: str, a: dict | None) -> list[dict]:
@@ -1324,6 +1352,8 @@ def classify_assessment(name: str, a: dict | None) -> list[dict]:
                      "プロファイルは診断曲線としてだけ扱い、比較や順位づけはしません。",
                      f"{name}: 샘플링 평가를 통과하지 못했습니다(미통과: {pick(failed, 3) or '—'}; 기록 없음: "
                      f"{pick([u for u in unknown if u not in failed], 3) or '—'}). 프로파일은 진단 곡선으로만 쓰며 비교하거나 순위를 매기지 않습니다."))
+    if el.get("delta_pmf_path_specific"):
+        out += classify_standard_state(name, a)
     for c in a.get("conflicts") or []:
         out.append(S("note", f"{name}：診斷之間不一致：{c}。", f"{name}: diagnostics disagree: {c}.",
                      f"{name}：診断どうしが一致しません：{c}。", f"{name}: 진단끼리 일치하지 않습니다: {c}."))

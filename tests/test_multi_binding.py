@@ -23,11 +23,12 @@ def test_path_blocker_detects_ligand_on_exit_path():
 def _ok(dG):
     """A qualified D-96 assessment (every required diagnostic passed)."""
     return {"eligibility": {"delta_pmf_curve": True, "delta_pmf_path_specific": True, "dG_standard": dG is not None,
-                            "affinity_ranking": dG is not None}, "reasons": []}
+                            "affinity_ranking": dG is not None}, "reference_state": dict(REF), "reasons": []}
 
 
-COND = {"cv": "com_distance_radial", "temperature_k": 300.0, "backbone_restraint_kj_mol_nm2": 100.0, "spectators": [],
-        "anchor": "automatic"}
+COND = {"cv": "axial_projection_z", "temperature_k": 300.0, "backbone_restraint_kj_mol_nm2": 100.0, "spectators": [],
+        "anchor": "automatic", "funnel_restraint": True, "standard_state": "funnel_cylinder_analytic"}
+REF = {"cv": "axial_projection_z", "standard_state": "funnel_cylinder_analytic", "funnel": True}   # D-140: ranking needs the funnel
 
 
 def _r(dpmf, err=None, dG=None, ligand=None, status="PASS", qualified=True):

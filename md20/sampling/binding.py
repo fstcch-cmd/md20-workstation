@@ -2,6 +2,9 @@
 
 Collective variable: distance between the centre of mass of an *anchor* group (pocket Cα atoms
 within 8 Å of the ligand) and the ligand heavy atoms, with periodic boundary conditions.
+D-140: with `restraint = "funnel"` the CV is instead the projection z of that vector on the bound-state axis, a funnel
+restraint (cone + cylinder) keeps the ligand near the axis, and ΔG° uses the analytic cylinder standard-state correction
+(sampling/funnel.py; docs/specs/binding_funnel_restraints.md).  Only that treatment may be used to rank affinities.
 
 Teaching-level caveats written into every result:
 * a 1-D COM-distance PMF does not include orientational/conformational restraint corrections, so
@@ -23,8 +26,8 @@ from ..util import atomic_write_json, load_json, now_iso, DecisionLog
 from ..analysis.plots import PALETTE, _mpl, _save
 from .windows import plan_windows, KB_KJ_MOL_K
 from .pmf import pmf_from_windows
-
-V0_NM3 = 1.66053906660  # standard-state volume per molecule (1 M) in nm³
+from . import funnel as FN
+from .funnel import V0_NM3  # standard-state volume per molecule (1 M) in nm³  (re-exported: tests import it from here)
 
 
 @dataclass
@@ -54,6 +57,15 @@ class BindingConfig:
     seed: int = 2026
     hold_spectators: bool = True           # D-61: other ligands of a shared pocket stay bound while one is pulled
     spectator_hold_nm: float = 0.3         # free within ±0.3 nm of their bound distance to the pocket anchor
+    # D-140 (A8): "none" = COM-distance CV, 1 M radial integral (approximate, not for ranking);
+    # "funnel" = axial CV z + funnel restraint + analytic standard-state correction (docs/specs/binding_funnel_restraints.md).
+    # Default "none" for every tier: see DECISIONS D-140 (the real-engine path is unvalidated; switch after CI + 3PTB).
+    restraint: str = "none"
+    funnel_r_cyl_nm: float = FN.DEFAULTS["r_cyl_nm"]
+    funnel_r_cone_nm: float = FN.DEFAULTS["r_cone_nm"]
+    funnel_z_cc_nm: float | None = None    # None = automatic (pocket exit + ligand radius + 0.3 nm)
+    funnel_k: float = FN.DEFAULTS["k_kj_mol_nm2"]   # kJ/mol/nm²
+    funnel_z_min_nm: float = FN.DEFAULTS["z_min_nm"]
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -147,8 +159,9 @@ def select_groups(topology, positions_nm: np.ndarray, *, ligand_resname: str | N
     return anc, lig, {"anchor_atoms": anc.tolist(), "ligand_atoms": lig.tolist(), "note": note}
 
 
-def build_pulling_system(system, positions_nm: np.ndarray, anchor: np.ndarray, ligand: np.ndarray):
-    """Add the CV bias; free the ligand from build restraints; re-reference backbone restraints; NVT."""
+def build_pulling_system(system, positions_nm: np.ndarray, anchor: np.ndarray, ligand: np.ndarray, funnel=None):
+    """Add the CV bias; free the ligand from build restraints; re-reference backbone restraints; NVT.
+    `funnel` (FN.FunnelGeometry, D-140): the CV bias acts on the axial coordinate z and the funnel restraint is added."""
     import openmm as mm
     for i in range(system.getNumForces()):
         f = system.getForce(i)
@@ -171,6 +184,10 @@ def build_pulling_system(system, positions_nm: np.ndarray, anchor: np.ndarray, l
                 k = 0.0 if (idx in lig_set or side) else prm[0]
                 x, y, z = positions_nm[idx]
                 f.setParticleParameters(p, idx, [k, x, y, z] + prm[4:])
+    if funnel is not None:
+        FN.add_axial_cv_bias(system, funnel, anchor, ligand)
+        FN.add_funnel_forces(system, funnel, anchor, ligand)
+        return system
     bias = mm.CustomCentroidBondForce(2, "0.5*k_cv*(distance(g1,g2)-r0_cv)^2")
     bias.addGlobalParameter("k_cv", 0.0)
     bias.addGlobalParameter("r0_cv", 0.0)
@@ -278,7 +295,7 @@ def radial_pmf(pres, temperature_k: float) -> dict:
             "tail_rise_kj_mol": round(tail_rise, 3), "plateau": bool(abs(tail_rise) <= kT), "r_max": float(gt[-1])}
 
 
-def bootstrap_binding_sigma(grid_nm, boot_pmfs, temperature_k: float, *, min_ok: int = 10) -> dict:
+def bootstrap_binding_sigma(grid_nm, boot_pmfs, temperature_k: float, *, min_ok: int = 10, pmf_fn=None) -> dict:
     """σ of ΔPMF and ΔG° from the bootstrap PMF replicates: each replicate goes through the same Jacobian
     correction / well / radial integration as the estimate, so the SD is that of the derived quantity."""
     from types import SimpleNamespace
@@ -288,7 +305,7 @@ def bootstrap_binding_sigma(grid_nm, boot_pmfs, temperature_k: float, *, min_ok:
     dp, dg = [], []
     for curve in np.asarray(boot_pmfs, dtype=float):
         try:
-            r = radial_pmf(SimpleNamespace(grid_nm=grid_nm, pmf_kj_mol=curve, err_kj_mol=None), temperature_k)
+            r = (pmf_fn or radial_pmf)(SimpleNamespace(grid_nm=grid_nm, pmf_kj_mol=curve, err_kj_mol=None), temperature_k)
         except Exception:  # noqa: BLE001
             continue
         if r["delta_pmf"] is not None and np.isfinite(r["delta_pmf"]):
@@ -488,12 +505,24 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                 platform_name: str = "CPU", platform_properties: dict | None = None,
                 decisions: DecisionLog | None = None, should_pause: Callable[[], str | None] | None = None,
                 progress_cb: Callable[[dict], None] | None = None, positions_override=None,
-                other_ligand_indices: dict[str, list[int]] | None = None) -> BindingResult:
+                other_ligand_indices: dict[str, list[int]] | None = None, recorder: Callable | None = None) -> BindingResult:
+    """`recorder` (D-137 hook): called with every refinement plan (`adaptive.plan_refinement(recorder=)`); None = no change."""
     cfg = config or BindingConfig()
+    cfg_user = cfg                       # what the caller asked for; the manifest keeps this (finished_result compares it)
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
     done = finished_result(out, cfg)
     if done is not None:
         return done
+    if cfg.restraint not in ("none", "funnel"):
+        msg = f"binding.config.restraint = {cfg.restraint!r} 不是有效值（none 或 funnel）。"
+        return BindingResult(status="NEEDS_HUMAN", caveats=[msg + "選項：restraint: none（徑向 1 M，近似）／restraint: funnel（漏斗約束＋解析標準態校正）"])
+    # D-140: samples of the two coordinates (distance vs axial z) must never be mixed in one output directory
+    marker = out / "restraint.json"
+    prev_restraint = load_json(marker, {}).get("restraint", "none") if marker.is_file() or (out / "smd.json").is_file() else cfg.restraint
+    if prev_restraint != cfg.restraint:
+        msg = (f"輸出資料夾 {out} 已有 restraint = {prev_restraint} 的拉離與 window 取樣，這次要求 {cfg.restraint}；"
+               "兩種反應座標（距離與沿軸 z）的樣本不能混在一起。")
+        return BindingResult(status="NEEDS_HUMAN", caveats=[msg + "選項：改用新的輸出資料夾重算／把 restraint 改回原值"])
     import openmm as mm
     from openmm import app, unit, XmlSerializer
     wdir = out / "windows"; wdir.mkdir(exist_ok=True)
@@ -518,18 +547,87 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             decisions.record("binding.path", "multi-ligand exit path", "rerouted", gi["note"], kind="auto_fixed")
     else:
         reroute = None
-    system = build_pulling_system(system, pos, anchor, ligand)
+    box_arr = np.array([[v.x, v.y, v.z] for v in box_vecs]) if box_vecs else None
+    funnel_geom, funnel_info, protein_idx, funnel_params = None, None, np.array([], dtype=int), None
+    if cfg.restraint == "funnel":
+        if box_arr is None:
+            msg = "漏斗約束需要週期盒子（最小映像）來定義軸向座標 z，這個系統沒有盒子。"
+            return BindingResult(status="NEEDS_HUMAN", caveats=[msg + "選項：restraint: none（徑向 1 M，近似）"])
+        atoms_ = list(top.atoms())
+        lig_res_ = {atoms_[int(i)].residue.index for i in ligand}
+        spect_ = {int(i) for v in (other_ligand_indices or {}).values() for i in v}
+        spect_res_ = {atoms_[i].residue.index for i in spect_}
+        protein_idx = np.array([a.index for a in atoms_ if a.element is not None and a.element.symbol != "H"
+                                and a.residue.name not in _SOLVENT_RESNAMES and a.residue.index not in lig_res_
+                                and a.residue.index not in spect_res_], dtype=int)
+        try:
+            funnel_geom, funnel_info = FN.estimate_geometry(
+                pos, box_arr, anchor, ligand, masses, protein_idx, r_cyl_nm=cfg.funnel_r_cyl_nm, r_cone_nm=cfg.funnel_r_cone_nm,
+                z_cc_nm=cfg.funnel_z_cc_nm, k_kj_mol_nm2=cfg.funnel_k, z_min_nm=cfg.funnel_z_min_nm)
+        except ValueError as exc:
+            msg = f"無法定義漏斗：{exc}。"
+            if decisions:
+                decisions.record("binding.funnel", "funnel axis", "NEEDS_HUMAN", msg, kind="human")
+            return BindingResult(status="NEEDS_HUMAN", caveats=[msg + "選項：指定 anchor 殘基（binding.anchor_residues）／restraint: none"])
+        funnel_params = {"r_cyl_nm": funnel_geom.r_cyl_nm, "k_kj_mol_nm2": funnel_geom.k_kj_mol_nm2, "z_cc_nm": funnel_geom.z_cc_nm}
+        need = funnel_info["pull_needed_nm"]
+        funnel_info["pull_requested_nm"] = float(cfg.pull_distance_nm)
+        if cfg.pull_distance_nm < need - 1e-9:
+            import dataclasses as _dc
+            new_pull = math.ceil(need * 100.0) / 100.0
+            funnel_info["pull_extended_to_nm"] = new_pull
+            cfg = _dc.replace(cfg, pull_distance_nm=new_pull)
+            if decisions:
+                decisions.record("binding.funnel", "pull distance", f"{funnel_info['pull_requested_nm']:.2f} → {new_pull:.2f} nm",
+                                 f"漏斗圓柱段從 z_cc = {funnel_geom.z_cc_nm:.2f} nm 開始；要在圓柱段檢查配體已溶劑化（z ≥ z_cc + "
+                                 f"{FN.SOLVATION_OFFSET_NM} nm）並留出 {FN.BULK_STRETCH_NM} nm 的 PMF 平台，拉離範圍需要 {need:.2f} nm，"
+                                 f"原設定 {funnel_info['pull_requested_nm']:.2f} nm 不夠，已自動加長到 {new_pull:.2f} nm。盒子若放不下會在下一步擋下並給出 padding。",
+                                 kind="auto_fixed")
+        if decisions:
+            decisions.record("binding.funnel", "funnel geometry",
+                             {"axis": [round(x, 3) for x in funnel_geom.axis], "z_cc_nm": round(funnel_geom.z_cc_nm, 3)},
+                             f"漏斗軸＝口袋 anchor 質心指向配體質心（與 SMD 拉離方向相同，沒有新增選擇），結合態 z₀ = {funnel_info['z0_nm']:.2f} nm。"
+                             f"口袋出口 z = {funnel_info['z_exit_nm']:.2f} nm（軸附近 {FN.EXIT_TUBE_NM} nm 管內蛋白重原子第一個 ≥ {FN.EXIT_GAP_NM} nm 的缺口），"
+                             f"配體半徑 {funnel_info['ligand_radius_nm']:.2f} nm；z_cc = "
+                             + (f"出口 + 配體半徑 + {FN.Z_CC_MARGIN_NM} nm = {funnel_geom.z_cc_nm:.2f} nm（自動）。" if funnel_info["z_cc_source"] == "auto"
+                                else f"{funnel_geom.z_cc_nm:.2f} nm（使用者指定）。")
+                             + f"圓柱半徑 {funnel_geom.r_cyl_nm} nm、圓錐半徑 {funnel_geom.r_cone_nm} nm、k = {funnel_geom.k_kj_mol_nm2:g} kJ/mol/nm²、"
+                             f"z 下限牆 {funnel_geom.z_min_nm} nm。", kind="auto")
+    atoms_all = list(top.atoms())
+    system = build_pulling_system(system, pos, anchor, ligand, funnel=funnel_geom)
+    cv_label = FN.CV_AXIAL if funnel_geom is not None else FN.CV_RADIAL
+
+    def cv_value(xyz_, box_) -> float:
+        """The reaction coordinate of the ligand: axial z (funnel) or COM distance to the anchor."""
+        if funnel_geom is not None:
+            return funnel_geom.decompose_xyz(xyz_, box_, anchor, ligand, masses)[0]
+        return cv_distance(xyz_, box_, anchor, ligand, masses)
+
+    lig_heavy_ = np.array([int(i) for i in ligand if atoms_all[int(i)].element is None or atoms_all[int(i)].element.symbol != "H"], dtype=int)
+    z_chk = (funnel_geom.z_cc_nm + FN.SOLVATION_OFFSET_NM) if funnel_geom is not None else None
+
+    def dmin_to_protein(xyz_, box_) -> float:
+        """Shortest ligand heavy atom - protein heavy atom distance (nm, minimum image); NaN without protein atoms."""
+        if not len(protein_idx) or not len(lig_heavy_):
+            return float("nan")
+        d = FN._min_image_many(xyz_[protein_idx][None, :, :] - xyz_[lig_heavy_][:, None, :], box_)
+        return float(np.sqrt((d * d).sum(-1)).min())
+
     spect = {}
     if other_ligand_indices and cfg.hold_spectators:
         spect = add_spectator_hold(system, pos, np.array([[v.x, v.y, v.z] for v in box_vecs]) if box_vecs else None, anchor,
                                    {k: np.array(v, dtype=int) for k, v in other_ligand_indices.items() if v}, masses, cfg.spectator_hold_nm)
     manifest = load_json(out / "binding_manifest.json", {})
-    manifest.update({"config": cfg.to_dict(), "groups": gi, "platform": platform_name, "updated_at": now_iso()})
+    manifest.update({"config": cfg_user.to_dict(), "groups": gi, "platform": platform_name, "updated_at": now_iso(),
+                     "cv": cv_label})
+    if funnel_info is not None:
+        manifest["funnel"] = {**funnel_info, "effective_pull_distance_nm": float(cfg.pull_distance_nm)}
+    atomic_write_json({"restraint": cfg.restraint, "at": now_iso()}, marker)
     if reroute:
         manifest["reroute"] = reroute
     if decisions:
-        decisions.record("binding.setup", "CV", "COM distance anchor–ligand", gi["note"] or "使用者指定 anchor 原子。",
-                         k_pull=cfg.k_pull, v=cfg.pull_velocity_nm_per_ps)
+        decisions.record("binding.setup", "CV", ("axial projection z (funnel)" if funnel_geom is not None else "COM distance anchor–ligand"),
+                         gi["note"] or "使用者指定 anchor 原子。", k_pull=cfg.k_pull, v=cfg.pull_velocity_nm_per_ps)
     # ------------------------------------------------------------------ SMD
     smd_file = out / "smd.json"
     smd = load_json(smd_file, {})
@@ -541,7 +639,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     if "msw_fb_scale" in ctx.getParameters():
         ctx.setParameter("msw_fb_scale", 0.0)   # multi-ligand flat-bottom restraints are off for free-energy work
     xyz, box = _state_xyz_box(ctx)
-    d0 = cv_distance(xyz, box, anchor, ligand, masses)
+    d0 = cv_value(xyz, box)
     bc = smd_half_box_need(xyz, box, anchor, ligand, masses, pull_nm=cfg.pull_distance_nm, margin_nm=cfg.box_margin_nm)
     lig_radius, need = bc["ligand_radius_nm"], bc["need_half_box_nm"]
     lig_xyz = xyz[ligand]
@@ -556,7 +654,9 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         msg = (f"水盒太小：拉離終點 {d0 + cfg.pull_distance_nm:.2f} nm + 配體半徑 {lig_radius:.2f} + 安全距離 "
                f"{cfg.box_margin_nm:.1f} = {need:.2f} nm，超過盒子半長 {half_box:.2f} nm；配體會接近週期影像，PMF 不可信。"
                f"這個結構至少要 padding {p_need + 0.05:.2f} nm（OpenMM 的 padding 是溶質到自身影像的距離，只加一次）。"
-               f"選項：md.padding_nm: {p_need + 0.05:.2f} 後重建／縮短 binding.config.pull_distance_nm。")
+               f"選項：md.padding_nm: {p_need + 0.05:.2f} 後重建／縮短 binding.config.pull_distance_nm。"
+               + (f"（漏斗約束把拉離範圍加長到 {cfg.pull_distance_nm:.2f} nm，因為圓柱段 z_cc = {funnel_geom.z_cc_nm:.2f} nm；"
+                  "也可以改 restraint: none。）" if funnel_info and funnel_info.get("pull_extended_to_nm") else ""))
         manifest.update({"status": "NEEDS_HUMAN", "reason": msg})
         atomic_write_json(json.loads(json.dumps(manifest, default=_np_default)), out / "binding_manifest.json")
         if decisions:
@@ -606,7 +706,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             nstep = min(rec_every, n_steps - s)
             dr = cfg.pull_velocity_nm_per_ps * dt_ps * nstep
             xyz, box = _state_xyz_box(ctx)
-            d = cv_distance(xyz, box, anchor, ligand, masses)
+            d = cv_value(xyz, box)
             force = cfg.k_pull * (r0 - d)
             work += force * dr
             path_rec.offer(len(rows), s * dt_ps, d, r0, xyz, box)
@@ -626,17 +726,17 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             saved[w] = {"path": str(path), **rec}
         # windows the ligand never reached (lags behind the spring): seed from the last frame
         xyz, box = _state_xyz_box(ctx)
-        path_rec.finish(out, n_steps * dt_ps, cv_distance(xyz, box, anchor, ligand, masses), r0, xyz, box, decisions=decisions)
+        path_rec.finish(out, n_steps * dt_ps, cv_value(xyz, box), r0, xyz, box, decisions=decisions)
         for w in range(len(plan.centers_nm)):
             if w in saved:
                 continue
             path = wdir / f"w{w:03d}_start.xml"
             path.write_text(XmlSerializer.serialize(ctx.getState(getPositions=True, getVelocities=True)), encoding="utf-8")
-            saved[w] = {"path": str(path), "cv": cv_distance(xyz, box, anchor, ligand, masses), "fallback": True}
+            saved[w] = {"path": str(path), "cv": cv_value(xyz, box), "fallback": True}
         arr = np.array(rows)
         smd_diag = smd_ringing(arr)
         np.savetxt(out / "smd.tsv", arr, header="time_ps\tr0_nm\td_nm\tforce_kj_mol_nm\twork_kj_mol", delimiter="\t")
-        smd = {"status": "PASS", "d0_nm": d0, "n_steps": n_steps, "max_force_kj_mol_nm": float(arr[:, 3].max()),
+        smd = {"status": "PASS", "cv": cv_label, "d0_nm": d0, "n_steps": n_steps, "max_force_kj_mol_nm": float(arr[:, 3].max()),
                "final_work_kj_mol": float(arr[-1, 4]), "window_starts": {str(k): v for k, v in saved.items()},
                "diagnostics": smd_diag,
                "plan": plan.to_dict(), "sealed_at": now_iso()}
@@ -655,9 +755,29 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     k_file = wdir / "windows_k.json"
     ks: dict[float, float] = {float(c): float(v) for c, v in load_json(k_file, {}).items() if not c.startswith("_")}
     refine_log: list[dict] = load_json(out / "refine_log.json", [])
+    aux: dict[float, dict] = {}          # funnel only: per-window lateral distance rho and shortest ligand-protein distance
+    last_aux: dict = {}
 
     def wfile(c: float, kind: str) -> Path:
         return wdir / f"w_{c:.4f}_{kind}"
+
+    def load_aux(c: float) -> None:
+        """Funnel samples carry rho and dmin next to z; a file that is missing or of another length counts as not recorded."""
+        z = samples[c]
+        got = {}
+        for key in ("rho", "dmin"):
+            f = wfile(c, f"{key}.npy")
+            a = np.load(f) if f.is_file() else None
+            got[key] = a if a is not None and len(a) == len(z) else None
+        aux[c] = got
+
+    def save_aux(c: float, extend: bool) -> None:
+        for key in ("rho", "dmin"):
+            new = np.asarray(last_aux.get(key, []), float)
+            if extend and aux.get(c, {}).get(key) is not None:
+                new = np.concatenate([aux[c][key], new])
+            aux.setdefault(c, {})[key] = new
+            np.save(wfile(c, f"{key}.npy"), new)
 
     alerts_seen: set = set()
     planned_now: list = []
@@ -727,11 +847,18 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         if equilibrate:
             integ.step(eq_steps * f)
         vals = []
+        rho_l, dmin_l = [], []
         wall = 0
         for _ in range(0, pr_steps, cfg.sample_every_steps):
             integ.step(cfg.sample_every_steps * f)
             xyz_, box_ = _state_xyz_box(ctx)
-            vals.append(cv_distance(xyz_, box_, anchor, ligand, masses))
+            if funnel_geom is not None:
+                z_, rho_ = funnel_geom.decompose_xyz(xyz_, box_, anchor, ligand, masses)
+                vals.append(z_)
+                rho_l.append(rho_)
+                dmin_l.append(dmin_to_protein(xyz_, box_) if z_ >= z_chk else float("nan"))   # only where the check uses it
+            else:
+                vals.append(cv_distance(xyz_, box_, anchor, ligand, masses))
             for sp in spect.values():
                 if abs(cv_distance(xyz_, box_, anchor, sp["idx"], masses) - sp["d0_nm"]) > cfg.spectator_hold_nm:
                     wall += 1
@@ -741,6 +868,9 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         arr = np.asarray(vals)
         if not np.all(np.isfinite(arr)):
             raise RuntimeError(f"window {c:.3f} nm 出現 NaN")
+        last_aux.clear()
+        if funnel_geom is not None:
+            last_aux.update({"rho": rho_l, "dmin": dmin_l})
         xml = XmlSerializer.serialize(ctx.getState(getPositions=True, getVelocities=True))
         del ctx, integ
         return arr, xml
@@ -757,6 +887,8 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         npy = wfile(c, "cv.npy")
         if npy.is_file():
             samples[c] = np.load(npy)
+            if funnel_geom is not None:
+                load_aux(c)
             finals[c] = str(wfile(c, "final.xml"))
             ks.setdefault(c, float(k))
             return True
@@ -764,6 +896,8 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
             return False
         arr, xml = sim_window(c, k, start_xml, seed, equilibrate=True)
         wfile(c, "final.xml").write_text(xml, encoding="utf-8")
+        if funnel_geom is not None:
+            save_aux(c, extend=False)          # before cv.npy: cv.npy is the "window finished" flag
         np.save(npy, arr)
         samples[c], finals[c], ks[c] = arr, str(wfile(c, "final.xml")), float(k)
         atomic_write_json({f"{kc:.4f}": kv for kc, kv in ks.items()}, k_file)
@@ -783,6 +917,15 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         if paused():
             return False
         arr, xml = sim_window(c, ks[c], finals[c], cfg.seed + 104729 + rnd + int(c * 1e4), equilibrate=False)
+        if funnel_geom is not None:
+            if c not in aux:
+                load_aux(c)
+            if aux[c].get("rho") is None or aux[c].get("dmin") is None:      # earlier part not recorded: stays unknown
+                aux[c] = {"rho": None, "dmin": None}
+                for key in ("rho", "dmin"):
+                    wfile(c, f"{key}.npy").unlink(missing_ok=True)
+            else:
+                save_aux(c, extend=True)
         samples[c] = np.concatenate([samples[c], arr])
         np.save(wfile(c, "cv.npy"), samples[c])
         wfile(c, "final.xml").write_text(xml, encoding="utf-8")
@@ -864,7 +1007,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                              k_max=cfg.k_umbrella_max, max_new_per_round=cfg.max_new_per_round,
                              max_total_windows=cfg.max_windows, cv_range=(d0, d0 + cfg.pull_distance_nm),
                              min_effective_samples=min(100.0, 0.25 * pr_steps / cfg.sample_every_steps),
-                             extensions_done=ext_count, max_extensions=cfg.max_extensions_per_window)
+                             extensions_done=ext_count, max_extensions=cfg.max_extensions_per_window, recorder=recorder)
         final_plan = rp
         entry = {"round": rnd + 1, "insert": rp.insert, "extend": [e["center"] for e in rp.extend],
                  "holes": rp.holes, "unsamplable": rp.unsamplable, "notes": rp.notes, "continuous": rp.continuous,
@@ -911,10 +1054,11 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     res = BindingResult(status="PASS", d_bound_nm=d0, smd=smd, windows=[{"center_nm": c, "k": ks[c], "n": int(len(samples[c])),
                         "mean_nm": float(samples[c].mean()), "sd_nm": float(samples[c].std()), "added": c in added,
                         "manual": c in manual} for c in centers])
-    rp = radial_pmf(pres, cfg.temperature_k)
+    pmf_fn = (lambda p_, T_: FN.axial_pmf(p_, T_, funnel_params)) if funnel_geom is not None else radial_pmf
+    rp = pmf_fn(pres, cfg.temperature_k)
     g, Wv, err = rp["grid"], rp["W"], rp["err"]
     res.delta_pmf_kj_mol, res.dG_standard_kj_mol = rp["delta_pmf"], rp["dG"]
-    bs = bootstrap_binding_sigma(pres.grid_nm, getattr(pres, "boot_pmfs", None), cfg.temperature_k)
+    bs = bootstrap_binding_sigma(pres.grid_nm, getattr(pres, "boot_pmfs", None), cfg.temperature_k, pmf_fn=pmf_fn)
     # bootstrap SD of the derived quantities; the point-wise approximation is only a fallback
     res.delta_pmf_err_kj_mol = bs["delta_pmf_sd"] if bs["delta_pmf_sd"] is not None else rp["delta_pmf_err"]
     res.dG_err_kj_mol = bs["dG_sd"]
@@ -925,9 +1069,9 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     try:
         h1 = {c: v[: len(v) // 2] for c, v in samples.items()}
         h2 = {c: v[len(v) // 2:] for c, v in samples.items()}
-        a = radial_pmf(pmf_from_windows(h1, force_constant_kj_mol_nm2=dict(ks), temperature_k=cfg.temperature_k,
+        a = pmf_fn(pmf_from_windows(h1, force_constant_kj_mol_nm2=dict(ks), temperature_k=cfg.temperature_k,
                                         n_bootstrap=0), cfg.temperature_k)
-        b = radial_pmf(pmf_from_windows(h2, force_constant_kj_mol_nm2=dict(ks), temperature_k=cfg.temperature_k,
+        b = pmf_fn(pmf_from_windows(h2, force_constant_kj_mol_nm2=dict(ks), temperature_k=cfg.temperature_k,
                                         n_bootstrap=0), cfg.temperature_k)
         half = {"first_half_dpmf": a["delta_pmf"], "second_half_dpmf": b["delta_pmf"],
                 "diff_kj_mol": round(abs(a["delta_pmf"] - b["delta_pmf"]), 3)}
@@ -938,7 +1082,7 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     for fr in (0.25, 0.5, 0.75):
         try:
             part = {c: v[: max(5, int(len(v) * fr))] for c, v in samples.items()}
-            q = radial_pmf(pmf_from_windows(part, force_constant_kj_mol_nm2=dict(ks), temperature_k=cfg.temperature_k,
+            q = pmf_fn(pmf_from_windows(part, force_constant_kj_mol_nm2=dict(ks), temperature_k=cfg.temperature_k,
                                             n_bootstrap=0), cfg.temperature_k)
             conv[f"{fr:.2f}"] = {"grid_nm": np.asarray(q["grid"]).tolist(), "pmf_kj_mol": np.asarray(q["W"]).tolist(),
                                  "delta_pmf": q["delta_pmf"]}
@@ -952,9 +1096,17 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         overlap = {"error": str(exc)}
     res.pmf = {"method": pres.method, "converged": pres.converged, "quality": pres.quality,
                "bound_cutoff_nm": rp["r_cut"], "w_bulk_kj_mol": rp["w_bulk"], "r_min_nm": rp["r_min"],
-               "jacobian_corrected": True, "half_split": half, "convergence": conv, "overlap_matrix": overlap,
+               "jacobian_corrected": funnel_geom is None, "cv": cv_label,
+               "standard_state": ({"treatment": FN.STANDARD_STATE_FUNNEL, "v0_nm3": V0_NM3, "a_eff_nm2": rp["a_eff_nm2"],
+                                   "k_b_nm3": rp["k_b_nm3"], "site_nm": rp["site_nm"],
+                                   "site_edge_sensitivity_kj_mol": rp["site_edge_sensitivity_kj_mol"]}
+                                  if funnel_geom is not None else {"treatment": FN.STANDARD_STATE_RADIAL, "v0_nm3": V0_NM3}),
+               "half_split": half, "convergence": conv, "overlap_matrix": overlap,
                "err_kj_mol": (np.asarray(err).tolist() if err is not None else None),
                "grid_nm": g.tolist(), "pmf_radial_kj_mol": Wv.tolist(), "pmf_raw_kj_mol": rp["W_raw"].tolist()}
+    # NB `pmf_radial_kj_mol` is the plotted 1-D profile the report reads; with the funnel it is the axial PMF (see "cv")
+    if funnel_geom is not None:
+        res.pmf["pmf_axial_kj_mol"] = Wv.tolist()
     res.smd_contacts = smd_contacts
     res.figures = dict(pres.figures)
     from ..analysis.plots import plot_pmf
@@ -966,7 +1118,15 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
         f"（避免整顆蛋白被拖走）；PMF 不包含蛋白構形重排的自由能。",
         "ΔPMF 是一維 COM 距離 PMF 的井深，不等於實驗結合自由能。",
         "PMF 已做 Jacobian 校正（+2kT·ln r）；未校正的一維距離 PMF 會因 r² 體積項而在遠距離偏低。",
-        "ΔG° 以徑向積分與 1 M 標準態估算，未包含方向／構形約束校正；適合比較配體間趨勢。",
+        "ΔG° 以徑向積分與 1 M 標準態估算，未包含方向／構形約束校正，是近似值，不用於親和力排序。",
+        "SMD 的功與拉伸速度有關（不可逆），只有 PMF 是自由能剖面。",
+    ] if funnel_geom is None else [
+        f"拉離與每個 window 期間，蛋白骨架施加 {cfg.backbone_restraint_scale * 1000:.0f} kJ/mol/nm² 位置限制"
+        f"（避免整顆蛋白被拖走）；PMF 不包含蛋白構形重排的自由能。",
+        "ΔPMF 是沿漏斗軸 z 的井深（漏斗約束下的 PMF），不等於實驗結合自由能。",
+        "反應座標是沿軸投影 z，不是距離，所以不加 Jacobian（+2kT·ln r）；側向體積由圓柱截面積 A_eff 在標準態校正中處理。",
+        f"ΔG° = −kT ln(A_eff·∫site exp[−(W−W_bulk)/kT] dz / V°)，V° = {V0_NM3:.3f} nm³（1 M），A_eff = {rp['a_eff_nm2']:.4f} nm²"
+        "（圓柱截面含彈性壁的 Boltzmann 積分）。配體方向與構形在結合態與溶液中都未約束，所以不需另外的方向校正。",
         "SMD 的功與拉伸速度有關（不可逆），只有 PMF 是自由能剖面。",
     ]
     diag = (smd or {}).get("diagnostics") or {}
@@ -1018,6 +1178,24 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
                                f"已改用 {tr['replaced_by']} 以同一批樣本計算全範圍（D-62）。")
         else:
             reasons.append(f"PMF 只涵蓋 {tr['finite_nm']} nm，未涵蓋 window 取樣範圍 {tr['sampled_nm']} nm（MBAR 與 WHAM 皆是）")
+    if funnel_geom is not None:
+        per_window = {c: {"z": samples[c], "rho": (aux.get(c) or {}).get("rho"), "dmin": (aux.get(c) or {}).get("dmin")}
+                      for c in samples}
+        fchk = FN.sample_checks(funnel_geom, per_window, z_well_nm=rp["r_min"], bulk_in_cylinder=rp["in_cylinder"])
+        res.pmf["funnel"] = {"schema": FN.SCHEMA, "geometry": funnel_info, "checks": fchk,
+                             "effective_pull_distance_nm": float(cfg.pull_distance_nm)}
+        fw = FN.funnel_withheld_reason(fchk)
+        if fw:
+            reasons.append(fw)
+            if decisions:
+                decisions.record("binding.funnel", "standard-state checks", "NEEDS_HUMAN", fw +
+                                 "。選項：加大 binding.config.funnel_r_cone_nm／指定 funnel_z_cc_nm／加長 pull_distance_nm 後重算；"
+                                 "或改 restraint: none（徑向 1 M，近似，不用於排序）。", kind="human")
+        elif decisions:
+            decisions.record("binding.funnel", "standard-state checks", "pass",
+                             f"結合態 ρ 的 99% 分位距漏斗壁 {-fchk['bound_state']['q99_margin_nm']:.2f} nm（需 ≥ {FN.BOUND_MARGIN_NM}）；"
+                             f"z ≥ {fchk['solvation']['z_from_nm']:.2f} nm 處配體–蛋白最短距離的 1% 分位 {fchk['solvation']['q01_dmin_nm']:.2f} nm"
+                             f"（需 > {FN.SOLVATED_MIN_NM}）；PMF 末端平台在圓柱段內。")
     res.pmf["plateau"] = bool(rp.get("plateau", True))          # D-96: explicit, so a missing field means "unknown"
     if not rp.get("plateau", True):
         reasons.append(f"PMF 末端（{rp['r_max']:.2f} nm）仍未持平（尾段變化 {rp['tail_rise_kj_mol']:.1f} kJ/mol > 1 kT）：ΔPMF 是邊緣值不是井深；"
@@ -1046,13 +1224,22 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
 
 
 def binding_condition(cfg, other_ligand_indices=None, anchor_indices=None) -> dict:
-    """Condition signature of a pull (A8): results whose signatures differ estimate different quantities."""
-    return {"cv": "com_distance_radial", "temperature_k": float(cfg.temperature_k),
-            "backbone_restraint_kj_mol_nm2": round(float(cfg.backbone_restraint_scale) * 1000.0, 3),
-            "spectators": sorted(other_ligand_indices or {}), "hold_spectators": ({"on": bool(cfg.hold_spectators), "width_nm": float(cfg.spectator_hold_nm)}
-                                if other_ligand_indices else None),
-            "anchor": "user residues" if anchor_indices is not None else "automatic",
-            "funnel_restraint": False, "standard_state": "1 M radial integral (no orientational correction)"}
+    """Condition signature of a pull (A8): results whose signatures differ estimate different quantities.
+    D-140: with `restraint = "funnel"` the CV is the axial projection z, `funnel_restraint` is True, the standard state is
+    the analytic cylinder treatment, and the user-set funnel parameters are part of the signature (z_cc is per ligand,
+    so only whether it was automatic or fixed is recorded)."""
+    c = {"cv": FN.CV_RADIAL, "temperature_k": float(cfg.temperature_k),
+         "backbone_restraint_kj_mol_nm2": round(float(cfg.backbone_restraint_scale) * 1000.0, 3),
+         "spectators": sorted(other_ligand_indices or {}), "hold_spectators": ({"on": bool(cfg.hold_spectators), "width_nm": float(cfg.spectator_hold_nm)}
+                                                                                if other_ligand_indices else None),
+         "anchor": "user residues" if anchor_indices is not None else "automatic",
+         "funnel_restraint": False, "standard_state": FN.STANDARD_STATE_RADIAL}
+    if getattr(cfg, "restraint", "none") == "funnel":
+        c.update({"cv": FN.CV_AXIAL, "funnel_restraint": True, "standard_state": FN.STANDARD_STATE_FUNNEL,
+                  "funnel": {"r_cyl_nm": float(cfg.funnel_r_cyl_nm), "r_cone_nm": float(cfg.funnel_r_cone_nm),
+                             "k_kj_mol_nm2": float(cfg.funnel_k), "z_min_nm": float(cfg.funnel_z_min_nm),
+                             "z_cc": "auto" if cfg.funnel_z_cc_nm is None else float(cfg.funnel_z_cc_nm)}})
+    return c
 
 
 def _np_default(o):

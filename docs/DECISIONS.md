@@ -6,6 +6,21 @@
 ---
 
 ## 2026-11-08
+### D-140　A8 漏斗約束與標準態校正：`restraint: funnel` 才能做親和力排序；徑向 1 M ΔG° 降為「近似，不用於排序」
+- **授權**：使用者 2026-11-08（「都做」）授權 A8 方法變更：ΔG° 只有在以漏斗／方向標準態處理計算時才可用於親和力排序。依 `docs/specs/binding_funnel_restraints.md` 選項 A 實作（規格 §6 有公式與差異）。
+- **決定**：
+  - `binding.config.restraint = "none" | "funnel"`（既有 binding 步驟的選項，不新增 phase／step）。funnel：CV 改為沿軸投影 z、圓錐＋圓柱平底側向約束與 z 下限牆（SMD 與每個 window 都開）、不加 +2kT ln r、ΔG° = −kT ln(A_eff·∫_site e^{−β(W−W_bulk)}dz / V°)，A_eff 對圓柱截面數值積分。軸＝anchor 質心指向配體質心（與 SMD 方向相同）。z_cc 自動＝口袋出口＋配體半徑＋0.3 nm。拉離範圍不夠時自動加長（AUTO_FIXED）。
+  - 結果帶 `binding_condition`：`cv`（`com_distance_radial` 或 `axial_projection_z`）、`funnel_restraint`、`standard_state`（`1 M radial integral (no orientational correction)` 或 `funnel_cylinder_analytic`）、funnel 參數。`pmf["cv"]`、`pmf["standard_state"]`、`pmf["funnel"]`（幾何與三項檢查）同樣寫入。
+  - 三項漏斗檢查（結合態未被壓住、圓柱段已溶劑化、平台在圓柱內）進 assessment 的 `funnel_*` 診斷；沒資料＝unknown；不過時 ΔG° 不輸出並寫 NEEDS_HUMAN 決策與選項。
+  - 說法資格：`affinity_ranking` 需 funnel ＋ `funnel_cylinder_analytic` ＋ 既有全部診斷，且 assessment 的 `reference_state` 與結果 `condition` 兩邊都記錄。`dG_standard` 對徑向結果保留，文字四語改為「近似，不用於排序」。`compare_binding`（`context_basis.use_dG`）、證據矩陣、圖說、比較矩陣一律讀 `affinity_ranking`；徑向結果只剩路徑特定井深順序。`THRESHOLDS_VERSION` → 2026-11-08.1（門檻沒動）、claim schema → `/2`；舊儲存評估沒有 `reference_state`，自動不用於排序。
+  - D-137 掛鉤：`run_binding(recorder=None)` 傳給每一輪 `plan_refinement(recorder=)`；預設 None 行為不變。
+- **預設值：`restraint = "none"`（所有 tier，含 teaching／research）**。規格 §3.4 原寫 teaching／research 預設 funnel，這裡**偏離**，理由：(1) 真實引擎路徑（OpenMM 運算式、取樣、三項檢查）容器無法執行，只有純 Python 證明，CI 與筆電都還沒看過；預設開啟等於讓所有 teaching／research 協定在未驗證的力上跑，運算式若有錯，所有結合計算同時失敗。(2) `finished_result` 以預設值補舊 manifest 的設定；預設 funnel 會讓舊（徑向）結果被當成「已完成的 funnel 結果」。(3) 不改預設不會損失任何誠實度：徑向結果現在明講「近似，不用於排序」，要排序就明確開 funnel。切換條件：CI `test_nacl_funnel` 綠 ＋ 筆電 3PTB teaching ΔG° 對實驗 −26.8 kJ/mol 誤差 < 8 kJ/mol（規格 §4.3）後由使用者決定；屆時只需改 `BindingConfig.restraint` 預設與 `workflow._binding_config` 的 tier 預設。
+- **理由**：筆電 3PTB 實證（134→100 kJ/mol，ΔG° −29.5／−21.2 vs 實驗 −6.4 kcal/mol）顯示一維距離 CV 的方向與側向自由度未平衡，徑向積分又假設球對稱。漏斗限制側向路徑、軸向 z 是直線座標，標準態校正有解析式；方法在文獻（Limongelli 2013、Rizzi 2019）成熟，教學層級成本只多一個力。
+- **被否決**：(a) 預設開啟（見上）。(b) 只改文字、保留徑向 ΔG° 可排序（違反授權：排序必須用漏斗處理）。(c) 方案 B Woo–Roux 六組約束（等於新增多個階段，違反「不新增 phase」）。(d) 把門檻放寬讓三項檢查比較容易過（不放寬）。(e) 為了讓規格的溶劑化檢查總是可達，改成用質心距離判斷——改而把配體半徑加進 z_cc（規格 §6.3 第 3 點）。(f) 輸出資料夾裡混用兩種座標的樣本（改為 NEEDS_HUMAN）。
+- **證據／測試**：`tests/test_funnel.py`（34 項，純 Python）：z／ρ 分解與最小映像、ρ_max(z)、能量平底與二次、OpenMM 運算式文字以小型求值器對照純 Python 能量（含相鄰週期影像、三斜盒子）、A_eff 硬壁極限與封閉式、標準態解析案例（平坦 W、硬圓柱 → −kT ln(πR²L/V°)）、方井 Boltzmann 權重、軸向 WHAM（合成樣本）還原已知井與 ΔG°、自動幾何、三項檢查 pass／fail／unknown、assessment 閘門（徑向不可排序；funnel 且診斷全過可排序；缺平台、任一漏斗檢查非 pass、旗標被竄改、condition 缺漏皆不可）、condition／config 向後相容、`compare_binding`／比較矩陣、四語文字、`recorder` 傳遞、混用座標與非法值在模擬前被擋。更新 `test_evidence_assessment.py`、`test_comparability_matrix.py`、`test_multi_binding.py` 的 fixture（排序需 funnel 紀錄）。真實引擎：`tests/test_binding_integration.py::test_nacl_funnel`（Context 建得起來、力的能量與純 Python 一致、短跑記錄 z／ρ、condition 正確、不混用座標）——**容器無 OpenMM，待 CI**。
+- **未決**：(1) 預設何時改 funnel（見上）。(2) 規格 §5 五個審查問題。(3) 規格 §4.2 的 NaCl 有／無漏斗 ΔG° 一致性測試未做（CI 的 window 只有 2 ps）。(4) 報告 PMF 圖橫軸標籤仍寫「距離」，`workflow_report` 的 ΔG° 欄還沒標示「近似」（文字在 interpret／figure_text／evidence 已改）。(5) Lepton 對 `CustomCentroidBondForce` 的 `x1..z2` 變數與「定義可引用其右側名稱」的語意依 OpenMM 文件與原始碼記憶撰寫，未在真實引擎驗證，若 CI 的 `test_nacl_funnel` 在建 Context 時報錯，先查這兩點。
+- **相關檔案**：`md20/sampling/funnel.py`（新）、`md20/sampling/binding.py`、`md20/sampling/assessment.py`、`md20/sampling/multi.py`、`md20/report/comparability.py`、`md20/report/evidence.py`、`md20/report/interpret.py`、`md20/report/figure_text.py`、`tests/test_funnel.py`、`tests/test_binding_integration.py`、`tests/test_evidence_assessment.py`、`tests/test_comparability_matrix.py`、`tests/test_multi_binding.py`、`docs/specs/binding_funnel_restraints.md`、`docs/specs/claims_audit.md`、`docs/specs/assessment.md`、`docs/specs/README.md`。
+
 ### D-139　c014e8b CI 紅燈分析與修正：鋅第二個弱配位水、授權測試真的跑 CG、Windows 換行與路徑、pose-screen 斷言自相矛盾
 - **CI**：run 42389077410（`c014e8b`），以及上一輪 42385841086（`58d81bc`，本 session 改動之前）。逐 job 讀日誌（單次查詢）。
 - **heavy-metal（D-133 的後續）**：3KS3 在 2.6 Å 內有**兩個**水：鋅水 1.90 Å，另一個 2.57 Å。D-133 兩個都鍵結，變成五配位，測試要求 4 個鍵而失敗（沒進到 MD）。

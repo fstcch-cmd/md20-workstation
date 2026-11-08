@@ -178,7 +178,7 @@ def context_basis(results: dict, keys: list[str]) -> dict:
     """The eligibility judgement compare_binding applies inside one single-ligand-type context (D-96), as a pure function:
     executed = PASS with a ΔPMF; path_ok = executed and the assessment allows a path-specific ΔPMF; cond_bad = the
     path_ok results do not share one condition signature (or one has none); use_dG = at least two path_ok, same
-    conditions and every ΔG° qualified.  status: PASS (ΔΔG°) | PATH_SPECIFIC (ΔPMF order) | INSUFFICIENT.
+    conditions and every ΔG° qualified AND funnel-corrected (affinity_ranking, D-140).  status: PASS (ΔΔG°) | PATH_SPECIFIC (ΔPMF order) | INSUFFICIENT.
     The comparability matrix (D-120) calls this on each pair, so it can never grade differently from the table."""
     executed = [k for k in keys if (results.get(k) or {}).get("status") == "PASS"
                 and results[k].get("delta_pmf_kj_mol") is not None]
@@ -186,7 +186,9 @@ def context_basis(results: dict, keys: list[str]) -> dict:
     conds = {_cond_key(results[k]) for k in path_ok}
     cond_bad = len(conds) > 1 or None in conds
     enough = len(path_ok) >= 2 and not cond_bad
-    use_dG = enough and all(_claim_ok(results[k], "dG_standard") and results[k].get("dG_standard_kj_mol") is not None
+    # D-140 (A8): ΔΔG° ranks affinities, so every ΔG° must carry the funnel restraint + analytic standard-state correction
+    # (claim affinity_ranking); a 1 M radial ΔG° is approximate and leaves the comparison at the path-specific order
+    use_dG = enough and all(_claim_ok(results[k], "affinity_ranking") and results[k].get("dG_standard_kj_mol") is not None
                             for k in path_ok)
     return {"executed": executed, "path_ok": path_ok, "cond_bad": cond_bad, "enough": enough, "use_dG": use_dG,
             "status": ("PASS" if use_dG else "PATH_SPECIFIC") if enough else "INSUFFICIENT"}
@@ -279,16 +281,21 @@ def compare_binding(results: dict, *, contexts: dict[str, list[str]]) -> dict:
                       (f"井深較淺（{cmp}）", f"shallower well ({cmp})", f"井戸が浅い（{cmp}）", f"우물이 더 얕음({cmp})"))
             rows.append({"key": k, "value": round(val[k], 3), "err": err[k], "delta": dd,
                          "sigma": None if s is None else round(s, 3), "verdict": v4[0], "verdict_i18n": v4})
-        reason = (("所有配體都有等級允許輸出的 ΔG°", "Every ligand has a ΔG° that its tier allows",
-                   "すべてのリガンドにレベルで許された ΔG° があります", "모든 리간드에 등급이 허용한 ΔG°가 있습니다")
+        reason = (("所有配體都有漏斗約束加解析標準態校正的合格 ΔG°",
+                   "Every ligand has a qualified ΔG° from the funnel restraint with the analytic standard-state correction",
+                   "すべてのリガンドに、ファンネル拘束と解析的な標準状態補正による合格した ΔG° があります",
+                   "모든 리간드에 깔때기 구속과 해석적 표준 상태 보정으로 얻은 적격한 ΔG°가 있습니다")
                   if use_dG else
-                  ("至少一個配體沒有合格的 ΔG°，所以只列出沿各自拉離路徑的 ΔPMF 井深順序；這是路徑與 anchor 相依的量，不是親和力排名",
-                   "At least one ligand has no qualified ΔG°, so only the ordering of ΔPMF well depths along each pull path is "
-                   "listed. That quantity depends on the path and anchor; it is not an affinity ranking",
-                   "合格した ΔG° がないリガンドが少なくとも1つあるため、各引き離し経路に沿った ΔPMF の井戸の深さの順序だけを示します。"
+                  ("至少一個配體沒有漏斗約束加解析標準態校正的合格 ΔG°（1 M 徑向 ΔG° 只是近似，不用於排序），所以只列出沿各自拉離路徑的 ΔPMF 井深順序；這是路徑與 anchor 相依的量，不是親和力排名",
+                   "At least one ligand has no qualified ΔG° from the funnel restraint with the analytic standard-state correction "
+                   "(a 1 M radial ΔG° is approximate and is not used for ranking), so only the ordering of ΔPMF well depths along "
+                   "each pull path is listed. That quantity depends on the path and anchor; it is not an affinity ranking",
+                   "少なくとも1つのリガンドに、ファンネル拘束と解析的な標準状態補正による合格した ΔG° がありません"
+                   "（1 M 動径の ΔG° は近似で、順位づけには使いません）。そのため、各引き離し経路に沿った ΔPMF の井戸の深さの順序だけを示します。"
                    "これは経路とアンカーに依存する量で、親和性の順位ではありません",
-                   "적격한 ΔG°가 없는 리간드가 하나 이상 있어 각 당김 경로를 따른 ΔPMF 우물 깊이 순서만 제시합니다. 이것은 경로와 "
-                   "anchor에 따라 달라지는 양이며 친화도 순위가 아닙니다"))
+                   "적어도 한 리간드에 깔때기 구속과 해석적 표준 상태 보정으로 얻은 적격한 ΔG°가 없어"
+                   "(1 M 방사 ΔG°는 근사값이라 순위에 쓰지 않음) 각 당김 경로를 따른 ΔPMF 우물 깊이 순서만 제시합니다. "
+                   "이것은 경로와 anchor에 따라 달라지는 양이며 친화도 순위가 아닙니다"))
         why = (f"{ctx}：以 {q4[0]} 比較。{reason[0]}。差距小於 2σ 視為不可區分。",
                f"{ctx}: compared by {q4[1]}. {reason[1]}. A difference below 2σ counts as not distinguishable.",
                f"{ctx}：{q4[2]} で比較します。{reason[2]}。差が 2σ 未満なら区別できないとみなします。",

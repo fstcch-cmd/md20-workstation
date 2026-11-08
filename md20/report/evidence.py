@@ -60,11 +60,24 @@ R = {
                            "この引き離し経路に沿った PMF（記述的）だけで、標準 ΔG° ではない",
                            "이 당김 경로를 따른 PMF(기술적)일 뿐 표준 ΔG°가 아님"),
     "no_curve": ("沒有 PMF 曲線", "no PMF curve", "PMF 曲線がない", "PMF 곡선 없음"),
+    # D-140 (A8): the 1 M radial ΔG° is approximate; a ranking needs the funnel restraint with the analytic standard state
+    "no_funnel_standard_state": ("ΔG° 沒有漏斗約束與解析標準態校正（1 M 徑向近似），不用於親和力排序",
+                                 "the ΔG° has no funnel restraint or analytic standard-state correction (1 M radial approximation) "
+                                 "and is not used for affinity ranking",
+                                 "この ΔG° にはファンネル拘束も解析的な標準状態補正もなく（1 M 動径近似）、親和性の順位づけには使わない",
+                                 "이 ΔG°에는 깔때기 구속과 해석적 표준 상태 보정이 없어(1 M 방사 근사) 친화도 순위에 쓰지 않음"),
 }
 # the claim a row is judged against (what the row may say when its status is "supported")
 C = {
-    "dG_standard": ("標準結合自由能 ΔG°（1 M 徑向近似）", "standard binding free energy ΔG° (1 M radial approximation)",
-                    "標準結合自由エネルギー ΔG°（1 M 動径近似）", "표준 결합 자유 에너지 ΔG°(1 M 방사 근사)"),
+    "affinity_ranking": ("標準結合自由能 ΔG°（漏斗約束加解析標準態校正，可用於親和力排序）",
+                         "standard binding free energy ΔG° (funnel restraint with analytic standard-state correction; may be used "
+                         "for affinity ranking)",
+                         "標準結合自由エネルギー ΔG°（ファンネル拘束と解析的な標準状態補正、親和性の順位づけに使える）",
+                         "표준 결합 자유 에너지 ΔG°(깔때기 구속과 해석적 표준 상태 보정, 친화도 순위에 사용 가능)"),
+    "dG_standard": ("近似的標準結合自由能 ΔG°（1 M 徑向近似，不用於親和力排序）",
+                    "approximate standard binding free energy ΔG° (1 M radial approximation, not for affinity ranking)",
+                    "近似的な標準結合自由エネルギー ΔG°（1 M 動径近似、親和性の順位づけには使わない）",
+                    "근사 표준 결합 자유 에너지 ΔG°(1 M 방사 근사, 친화도 순위에 쓰지 않음)"),
     "path_specific": ("沿拉離路徑的 PMF 井深（路徑特定，不是內在親和力）", "PMF well depth along the pulling path (path-specific, not an intrinsic affinity)",
                       "引き離し経路に沿った PMF の井戸の深さ（経路固有、固有の親和性ではない）",
                       "당김 경로를 따른 PMF 우물 깊이(경로 특이적, 고유 친화도 아님)"),
@@ -87,13 +100,17 @@ def _binding_row(t: str, r: dict) -> dict:
     """The binding row is decided by the SAME claim_status record as the comparison, captions and summary."""
     from ..sampling.assessment import claim_status
     dg, path = claim_status(r, "dG_standard"), claim_status(r, "path_specific")
+    rank = claim_status(r, "affinity_ranking")
     asm = {"state": path["assessment"], "source": path["assessment_source"], "thresholds_version": path["thresholds_version"],
            "evidence_ids": path["evidence_ids"], "failed": path["failed"], "unknown": path["unknown"],
            "overrides": path["overrides"]}
     if not path["executed"]:
         return _row("binding", t, True, False, "missing", ("not_run",), assessment=asm, claim="dG_standard", claim_eligibility=False)
-    if dg["eligible"]:
-        return _row("binding", t, True, True, "supported", assessment=asm, claim="dG_standard", claim_eligibility=True)
+    if rank["eligible"]:                       # D-140: funnel + analytic standard state: the only ΔG° that may rank affinities
+        return _row("binding", t, True, True, "supported", assessment=asm, claim="affinity_ranking", claim_eligibility=True)
+    if dg["eligible"]:                         # 1 M radial approximation: stated as approximate, not for ranking
+        return _row("binding", t, True, True, "supported", ("no_funnel_standard_state",), assessment=asm, claim="dG_standard",
+                    claim_eligibility=True)
     if path["eligible"]:
         reasons = ["path_specific_only"] + (["dg_withheld"] if r.get("dG_withheld") or r.get("dG_standard_kj_mol") is None else [])
         row = _row("binding", t, True, True, "limited", reasons, assessment=asm, claim="path_specific", claim_eligibility=True,

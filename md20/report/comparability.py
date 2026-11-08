@@ -65,6 +65,7 @@ FIELD = {
     "anchor": ("anchor", "anchor", "アンカー", "anchor"),
     "funnel_restraint": ("漏斗約束", "funnel restraint", "ファンネル拘束", "깔때기 구속"),
     "standard_state": ("標準態處理", "standard-state treatment", "標準状態の扱い", "표준 상태 처리"),
+    "funnel": ("漏斗參數", "funnel parameters", "ファンネルのパラメータ", "깔때기 매개변수"),
     "ensemble": ("系綜", "ensemble", "アンサンブル", "앙상블"),
     "restrained": ("正式模擬的約束", "production restraints", "本計算の拘束", "본 계산의 구속"),
     "water_model": ("水模型", "water model", "水モデル", "물 모델"),
@@ -102,6 +103,11 @@ LIM = {
                       "In a shared pocket each ligand has different spectators and exit paths, so values are listed, not ranked",
                       "共通ポケットでは各リガンドの傍観リガンドと引き離し経路が異なるため、値は示しますが順位はつけません",
                       "공유 포켓에서는 리간드마다 관찰 리간드와 당김 경로가 달라 값만 제시하고 순위는 매기지 않습니다"),
+    "radial_not_ranked": ("{d} 的 ΔG° 只是 1 M 徑向近似（沒有漏斗約束與解析標準態校正），不用於排序，所以只給順序",
+                          "The ΔG° of {d} is only the 1 M radial approximation (no funnel restraint or analytic standard-state "
+                          "correction) and is not used for ranking, so only the order is given",
+                          "{d} の ΔG° は 1 M 動径近似にすぎず（ファンネル拘束も解析的な標準状態補正もない）、順位づけには使わないため、順序だけを示します",
+                          "{d}의 ΔG°는 1 M 방사 근사일 뿐이며(깔때기 구속과 해석적 표준 상태 보정 없음) 순위에 쓰지 않으므로 순서만 제시합니다"),
     "diagnostic_only": ("{d} 未通過取樣評估，只是診斷用的數值", "{d} did not pass the sampling assessment: diagnostic values only",
                         "{d} は取得評価に不合格で、診断用の値です", "{d} 샘플링 평가 미통과, 진단용 값"),
     "co_occupancy_pair": ("同一個配體的單獨結合與共同口袋，位移請看共存效應",
@@ -205,8 +211,13 @@ def _cell(ka: str, kb: str, results: dict, md_conditions) -> dict:
             if grade == "order":
                 lacking = [k for k in (ka, kb) if not (results[k].get("dG_standard_kj_mol") is not None and
                                                        claim_eligible(results[k], "dG_standard"))]
-                limits.append({"code": "no_dG", "keys": lacking,
-                               "withheld": {k: results[k].get("dG_withheld") for k in lacking if results[k].get("dG_withheld")}})
+                if lacking:
+                    limits.append({"code": "no_dG", "keys": lacking,
+                                   "withheld": {k: results[k].get("dG_withheld") for k in lacking if results[k].get("dG_withheld")}})
+                # D-140: a qualified but radial (not funnel-corrected) ΔG° is approximate and does not rank
+                radial = [k for k in (ka, kb) if k not in lacking and not claim_eligible(results[k], "affinity_ranking")]
+                if radial:
+                    limits.append({"code": "radial_not_ranked", "keys": radial})
         else:
             reasons += cell_reasons
             if not cell_reasons and basis["cond_bad"]:
@@ -322,7 +333,7 @@ def reason_text(x: dict, lang: str) -> str:
         if w:
             d += " (" + "; ".join(f"{k}: {v}" for k, v in w.items()) + ")"
         return t.format(d=d)
-    if code == "diagnostic_only":
+    if code in ("diagnostic_only", "radial_not_ranked"):
         return t.format(d=sep.join(x["keys"]))
     if code in ("md_differs", "md_unknown"):
         return t.format(d=sep.join(_field(f, lang) for f in x["fields"]))
