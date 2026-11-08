@@ -180,10 +180,23 @@ def test_setup_vina_falls_back_to_pinned_release_when_api_is_rate_limited(monkey
 
 @pytest.mark.skipif(not os.environ.get("GITHUB_ACTIONS"), reason="checks real GitHub URLs; CI only")
 def test_pinned_vina_assets_exist():
+    # D-157: this test checks the pinned Vina asset URLs still EXIST (a wrong/removed pin must fail), not GitHub's
+    # uptime.  A 404 means the pin is broken -> fail.  A transient network error (5xx, read timeout, DNS/connection)
+    # just means GitHub is momentarily unreachable -> skip, so a CDN hiccup never reddens the pure-python suite.
+    import socket
+    import urllib.error
     import urllib.request
+    import pytest
     from md20.docking import vina_cli
     for name in vina_cli.PINNED_ASSETS.values():
         url = f"https://github.com/ccsb-scripps/AutoDock-Vina/releases/download/{vina_cli.PINNED_VERSION}/{name}"
         req = urllib.request.Request(url, method="HEAD")
-        with urllib.request.urlopen(req, timeout=60) as r:
-            assert r.status == 200, url
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                assert r.status == 200, url
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise AssertionError(f"pinned Vina asset is missing (404): {url}") from None
+            pytest.skip(f"GitHub returned {e.code} for {url}; transient, not a pin problem")
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as e:
+            pytest.skip(f"network error reaching {url}: {e}; transient, not a pin problem")

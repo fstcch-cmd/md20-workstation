@@ -6,6 +6,14 @@
 ---
 
 ## 2026-11-08
+### D-157　pure-python 的 test_pinned_vina_assets_exist 改為網路錯誤時 skip(消除反覆的 CDN flake)
+- **CI 證據**：d912b15 重跑後,其他所有 pure-python(5 個 OS/版本)與 openmm-stack(macos)全綠、heavy/installer 全綠,**唯一的紅**是 pure-python(ubuntu 3.12)的 `test_pinned_vina_assets_exist`,錯誤 `TimeoutError: The read operation timed out`(對 github.com 抓 Vina release asset)。前一輪也有 502/503。
+- **根因**：此測試對每個釘選 Vina asset URL 發即時 HEAD 請求驗 200;放在「pure-python 快速套件」卻依賴 GitHub 網路,GitHub 一慢就硬失敗,反覆毒害 CI。
+- **決定**：區分失敗種類——**404(asset 真的不存在=釘選錯了)→ 失敗**(保留測試目的:抓錯誤/被移除的釘選);**5xx、讀取逾時、DNS/連線錯(GitHub 暫時不可達)→ `pytest.skip`**。此測試驗的是「釘選的 asset 還在」,不是「GitHub 的 uptime」。
+- **證據**：本機 `tests/test_docking_pure.py` 全綠(此測試在無網路容器 skip);CI 有網路時 200 通過、暫時錯誤時 skip,絕不因 CDN flake 變紅。
+- **相關檔案**：`tests/test_docking_pure.py`。
+- **註**：openmm-stack 的 `test_cg_integration`(martini_openmm 504)屬真工具 job 建環境時的 infra 失敗,該 job 本就需網路,不在此修範圍(重跑即過)。
+
 ### D-156　修 openmm-stack 唯一紅:test_funnel 測試裡殘留的 np.trapezoid(D-154 漏改)
 - **CI 證據**（a9d6cf0/D-154 的 openmm-stack，ubuntu＋macos）:`1 failed, 1531 passed, 9 skipped, 1 xfailed`。唯一失敗 `test_wham_on_synthetic_axial_samples_recovers_the_known_well_and_dG`，錯誤 `AttributeError: module 'numpy' has no attribute 'trapezoid'`。
 - **根因**：D-154 把**產品碼**的 `np.trapezoid` 全改成版本無關的 `funnel.trapz`，但**漏了測試檔** `tests/test_funnel.py:471` 計算參考 ΔG° 時仍用 `np.trapezoid`。CI 的 numpy 沒有這個屬性（numpy 2.0 移除 `np.trapz`、`np.trapezoid` 在更早版本不存在，且 numpy 的 `__getattr__` 讓 `hasattr` 說謊）。
