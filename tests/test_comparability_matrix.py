@@ -8,13 +8,14 @@ import pytest
 from md20.report.comparability import (GRADES, comparability_matrix, md_conditions_map, reason_text, R, LIM, NOTE)
 from md20.sampling.multi import compare_binding
 
-COND = {"cv": "com_distance_radial", "temperature_k": 300.0, "backbone_restraint_kj_mol_nm2": 100.0, "spectators": [],
-        "anchor": "automatic", "funnel_restraint": False}
+COND = {"cv": "axial_projection_z", "temperature_k": 300.0, "backbone_restraint_kj_mol_nm2": 100.0, "spectators": [],
+        "anchor": "automatic", "funnel_restraint": True, "standard_state": "funnel_cylinder_analytic"}
+REF = {"cv": "axial_projection_z", "standard_state": "funnel_cylinder_analytic", "funnel": True}   # D-140: ranking needs the funnel
 
 
 def _a(dG=True, path=True, reasons=()):
     return {"eligibility": {"delta_pmf_curve": True, "delta_pmf_path_specific": path, "dG_standard": dG and path,
-                            "affinity_ranking": dG and path}, "reasons": list(reasons)}
+                            "affinity_ranking": dG and path}, "reference_state": dict(REF), "reasons": list(reasons)}
 
 
 def _r(dpmf=30.0, dG=-25.0, ligand=None, context="single", status="PASS", assessment="ok", cond="ok", replicas=3, **kw):

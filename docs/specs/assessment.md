@@ -15,7 +15,7 @@
 | 說法資格 | 這個結果可以講哪一句話 | `assessment.eligibility` ＋ ΔG° 值是否存在、有沒有被撤回 | 可以，**依說法分開** |
 | 比較資格 | 兩個以上結果可不可以放在一起比 | 說法資格＋條件簽章一致＋情境 | `compare_binding`、`comparability` 決定 |
 
-說法（claim）由弱到強：`diagnostic_curve`（只當診斷曲線）→ `path_specific`（沿這條拉離路徑的 PMF 井深，不是內在親和力）→ `dG_standard`（1 M 徑向近似下的標準結合自由能）→ `affinity_ranking`（親和力排序，另需 compare 判定條件相容）。
+說法（claim）由弱到強：`diagnostic_curve`（只當診斷曲線）→ `path_specific`（沿這條拉離路徑的 PMF 井深，不是內在親和力）→ `dG_standard`（標準結合自由能；徑向 1 M 近似時是「近似，不用於排序」）→ `affinity_ranking`（親和力排序：**D-140 起必須有漏斗約束＋解析標準態校正**，assessment 的 `reference_state` 與結果的 `condition` 都要記錄，另需 compare 判定條件相容）。細節 `binding_funnel_restraints.md` §6.4。
 一個結果可以支持較弱的說法而不支持較強的：例如 ΔG° 被撤回但路徑特定 PMF 合格 → 證據矩陣寫「只有沿這條拉離路徑的 PMF（描述性），不是標準 ΔG°」。
 
 ## 3. 唯一的入口：`md20/sampling/assessment.py`

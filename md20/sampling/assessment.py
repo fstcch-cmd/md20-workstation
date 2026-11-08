@@ -21,7 +21,11 @@ from typing import Iterable
 import numpy as np
 
 SCHEMA = "md20.assessment.pmf/1"
-THRESHOLDS_VERSION = "2026-11-07.2"
+# 2026-11-08.1 (D-140, A8): thresholds unchanged.  What changed is the CLAIM rule: `affinity_ranking` now needs the funnel
+# restraint + analytic standard-state treatment (sampling/funnel.py); a 1 M radial ΔG° stays `dG_standard` (approximate)
+# and is no longer a ranking.  Funnel results add three diagnostics (bound state not squeezed, ligand solvated in the
+# cylinder, bulk plateau inside the cylinder).
+THRESHOLDS_VERSION = "2026-11-08.1"
 THRESHOLDS = {
     "overlap_edge_min": (0.03, "edge of the window-overlap graph when only the histogram matrix is stored; same order "
                                "as the MBAR quality report's minimum_overlap (D-43); empirical"),
@@ -37,6 +41,13 @@ THRESHOLDS = {
 REQUIRED_PATH = ("overlap_graph", "window_ess", "solver", "half_split", "cumulative_drift", "endpoint_plateau",
                  "range_coverage")
 PASS, FAIL, UNKNOWN = "pass", "fail", "unknown"
+# D-140: diagnostics that exist only for a funnel result.  The first one distorts the PMF itself (path-specific claim);
+# all three decide whether the funnel standard-state correction may stand (dG_standard, affinity_ranking).
+FUNNEL_PATH = ("funnel_bound_state",)
+FUNNEL_STANDARD = ("funnel_bound_state", "funnel_solvation", "funnel_bulk_cylinder")
+CV_AXIAL = "axial_projection_z"
+STANDARD_STATE_FUNNEL = "funnel_cylinder_analytic"
+STANDARD_STATE_RADIAL_TEXT = "approximate standard binding free energy under the 1 M radial approximation (not for ranking)"
 
 
 def _thr(thresholds: dict | None, key: str) -> float:
@@ -177,13 +188,33 @@ def assess_pmf(pmf: dict | None, *, dG_withheld: str | None = None, has_dG: bool
         rc = PASS
     diags.append(_diag("range_coverage", "PMF finite over the whole sampled range", "global", rc, value=tr or None))
 
+    fn = pmf.get("funnel") if isinstance(pmf.get("funnel"), dict) else None
+    funnel_mode = bool(fn) or pmf.get("cv") == CV_AXIAL
+    ss = pmf.get("standard_state") if isinstance(pmf.get("standard_state"), dict) else {}
+    treatment = ss.get("treatment")
+    if funnel_mode:
+        ck = (fn or {}).get("checks") or {}
+        for did, key, method, note in (
+                ("funnel_bound_state", "bound_state", "99 % of bound-state samples lie >= 0.05 nm inside the funnel wall (spec §3.3)",
+                 "a funnel that squeezes the bound state biases the PMF itself"),
+                ("funnel_solvation", "solvation", "ligand heavy atoms > 0.6 nm from the protein where z >= z_cc + 0.5 nm (spec §3.3)",
+                 "the cylinder correction assumes a ligand free of the protein there"),
+                ("funnel_bulk_cylinder", "bulk_in_cylinder", "the PMF's bulk plateau lies in the cylinder (z >= z_cc)",
+                 "A_eff is the cylinder cross-section; it is wrong where the cone still restrains the ligand")):
+            c = ck.get(key) or {}
+            st = c.get("status") if c.get("status") in (PASS, FAIL) else UNKNOWN
+            val = c.get("q99_margin_nm", c.get("q01_dmin_nm", c.get("z_cc_nm")))
+            thr = c.get("required_below_nm", c.get("required_above_nm"))
+            diags.append(_diag(did, method, "global", st, value=val, threshold=thr,
+                               source="spec docs/specs/binding_funnel_restraints.md §3.3", note=note))
     by = {d["id"]: d for d in diags}
     failed = [d["id"] for d in diags if d["status"] == FAIL]
     unknown = [d["id"] for d in diags if d["status"] == UNKNOWN]
-    req_bad = [i for i in REQUIRED_PATH if by[i]["status"] != PASS]
+    required = REQUIRED_PATH + (FUNNEL_PATH if funnel_mode else ())
+    req_bad = [i for i in required if by[i]["status"] != PASS]
     if by["mbar_overlap"]["status"] == FAIL:          # D-113: required when the matrix exists
         req_bad.append("mbar_overlap")
-    adequate = None if (not failed and any(i in unknown for i in REQUIRED_PATH)) else (not req_bad)
+    adequate = None if (not failed and any(i in unknown for i in required)) else (not req_bad)
     conflicts = []
     for loc in ("histogram_coverage", "adjacent_overlap_min"):
         if by[loc]["status"] == PASS and by["overlap_graph"]["status"] == FAIL:
@@ -198,8 +229,14 @@ def assess_pmf(pmf: dict | None, *, dG_withheld: str | None = None, has_dG: bool
     if by["cumulative_drift"]["status"] == PASS and by["half_split"]["status"] == FAIL:
         conflicts.append("cumulative estimates are stable but the two halves disagree")
     path_ok = not req_bad
-    dg_ok = path_ok and not dG_withheld and has_dG
-    reasons = [f"{i}: {by[i]['status']}" for i in req_bad]
+    std_bad = [i for i in FUNNEL_STANDARD if funnel_mode and by[i]["status"] != PASS]
+    dg_ok = path_ok and not dG_withheld and has_dG and not std_bad
+    # D-140: a ranking needs the funnel restraint AND the analytic standard-state treatment on top of a qualified ΔG°
+    rank_ok = bool(dg_ok and funnel_mode and treatment == STANDARD_STATE_FUNNEL)
+    reasons = [f"{i}: {by[i]['status']}" for i in req_bad + [x for x in std_bad if x not in req_bad]]
+    if dg_ok and not rank_ok:
+        reasons.append("affinity ranking needs the funnel restraint with the analytic standard-state correction "
+                       "(restraint: funnel); the 1 M radial ΔG° is approximate")
     if dG_withheld:
         reasons.append(f"ΔG° withheld: {dG_withheld}")
     return {
@@ -209,13 +246,16 @@ def assess_pmf(pmf: dict | None, *, dG_withheld: str | None = None, has_dG: bool
             "delta_pmf_curve": bool(pmf.get("pmf_radial_kj_mol") is not None or pmf.get("grid_nm") is not None),
             "delta_pmf_path_specific": bool(path_ok),
             "dG_standard": bool(dg_ok),
-            # an affinity ranking needs a qualified ΔG° *and* a compatible comparison; compare_binding decides the latter
-            "affinity_ranking": bool(dg_ok),
+            # an affinity ranking needs a qualified funnel ΔG° *and* a compatible comparison; compare_binding decides the latter
+            "affinity_ranking": rank_ok,
         },
+        "reference_state": {"cv": pmf.get("cv"), "standard_state": treatment, "funnel": funnel_mode},
         "reasons": reasons,
         "permitted": (["diagnostic PMF curve"] + (["path-specific well depth under the recorded conditions"] if path_ok else [])
-                      + (["standard binding free energy under the 1 M radial approximation"] if dg_ok else [])),
-        "prohibited": (["affinity ranking", "'strongest' label", "ΔΔG°"] if not dg_ok else [])
+                      + ([STANDARD_STATE_RADIAL_TEXT] if (dg_ok and not funnel_mode) else [])
+                      + (["standard binding free energy with the funnel standard-state correction"] if (dg_ok and funnel_mode) else [])
+                      + (["affinity ranking among results with identical funnel conditions"] if rank_ok else [])),
+        "prohibited": (["affinity ranking", "'strongest' label", "ΔΔG°"] if not rank_ok else [])
                       + (["any well-depth comparison"] if not path_ok else [])
                       + ["SMD work or peak force as binding free energy", "intrinsic affinity from a co-occupancy pull"],
     }
@@ -258,7 +298,7 @@ def eligibility_of(result: dict) -> dict:
 # One versioned record per (result, claim) that EVERY consumer reads — evidence matrix, captions, executive summary,
 # comparison, GUI.  Execution status (the calculation ran) is carried but never decides a claim; the claim is decided by
 # the stored assessment (diagnostics → eligibility) and nothing else.  A human override is recorded, never applied.
-CLAIM_SCHEMA = "md20.assessment.claim/1"
+CLAIM_SCHEMA = "md20.assessment.claim/2"       # /2 (D-140): + reference_state, ranking needs the funnel treatment
 CLAIM_ELIGIBILITY_KEY = {"diagnostic_curve": "delta_pmf_curve", "path_specific": "delta_pmf_path_specific",
                          "dG_standard": "dG_standard", "affinity_ranking": "affinity_ranking"}
 CLAIM_ORDER = ("affinity_ranking", "dG_standard", "path_specific", "diagnostic_curve")     # strongest first
@@ -291,6 +331,22 @@ def override_record(claim: str, by: str, why: str, at: str | None = None) -> dic
     return {"claim": claim, "by": by, "why": why, "at": at, "effect": "recorded decision only"}
 
 
+def ranking_basis(result: dict | None, assessment: dict | None) -> tuple[bool, dict]:
+    """(ok, record) — may this result enter an affinity ranking as far as its reference state goes (D-140)?
+    Needs, in BOTH the stored assessment and the recorded pull condition: the axial CV, the funnel restraint and the
+    analytic cylinder standard state.  A field that is not recorded is not accepted (no guessing)."""
+    rs = (assessment or {}).get("reference_state") or {}
+    cond = (result or {}).get("condition") or {}
+    a_ok = bool(rs.get("funnel")) and rs.get("standard_state") == STANDARD_STATE_FUNNEL and rs.get("cv") == CV_AXIAL
+    c_ok = (cond.get("funnel_restraint") is True and cond.get("standard_state") == STANDARD_STATE_FUNNEL
+            and cond.get("cv") == CV_AXIAL)
+    return bool(a_ok and c_ok), {"assessment": {"cv": rs.get("cv"), "standard_state": rs.get("standard_state"),
+                                                "funnel": rs.get("funnel")},
+                                 "condition": {"cv": cond.get("cv"), "standard_state": cond.get("standard_state"),
+                                               "funnel_restraint": cond.get("funnel_restraint")},
+                                 "funnel_standard_state": bool(a_ok and c_ok)}
+
+
 def claim_status(result: dict | None, claim: str = "dG_standard", *, pmf: dict | None = None,
                  overrides: list[dict] | None = None) -> dict:
     """Versioned verdict of ONE claim for ONE binding result.
@@ -307,13 +363,19 @@ def claim_status(result: dict | None, claim: str = "dG_standard", *, pmf: dict |
     executed = r.get("status") == "PASS"
     needs_diag = claim != "diagnostic_curve"
     ids = list(BLOCKING) if needs_diag else []
+    extra = (FUNNEL_PATH if claim == "path_specific" else FUNNEL_STANDARD if needs_diag else ())
+    ids += [i for i in extra if i in by]                 # funnel diagnostics exist only for a funnel result
     failed = [i for i in ids if (by.get(i) or {}).get("status") == FAIL]
     unknown = [i for i in REQUIRED_PATH if needs_diag and (by.get(i) or {}).get("status", UNKNOWN) == UNKNOWN]
+    unknown += [i for i in extra if i in by and by[i].get("status") == UNKNOWN]
     el = a.get("eligibility") or {}
+    basis_ok, basis = ranking_basis(r, a)
     withheld = r.get("dG_withheld") or None
     ok = bool(el.get(CLAIM_ELIGIBILITY_KEY[claim])) and executed
     if claim in ("dG_standard", "affinity_ranking"):
         ok = ok and r.get("dG_standard_kj_mol") is not None and not withheld       # a stored flag cannot outvote the value
+    if claim == "affinity_ranking":
+        ok = ok and basis_ok          # D-140: a stored flag cannot outvote the recorded CV / restraint / standard state
     if not executed:
         state = UNKNOWN
     elif failed:
@@ -334,8 +396,12 @@ def claim_status(result: dict | None, claim: str = "dG_standard", *, pmf: dict |
             reasons.append("assess_failed")
         elif unknown and source == "stored":
             reasons.append("assess_unknown")
-        if claim in ("dG_standard", "affinity_ranking") and not ok and state == PASS:
-            reasons.append("dg_withheld")
+        if claim in ("dG_standard", "affinity_ranking") and state == PASS:
+            dg_part = bool(el.get("dG_standard")) and r.get("dG_standard_kj_mol") is not None and not withheld
+            if not dg_part:
+                reasons.append("dg_withheld")
+            elif claim == "affinity_ranking" and not basis_ok:
+                reasons.append("no_funnel_standard_state")      # D-140: the 1 M radial ΔG° is approximate, not a ranking
         if claim == "diagnostic_curve" and not ok:
             reasons.append("no_curve")
     ovs = [{**o, "effect": "recorded decision only"} for o in (overrides or r.get("overrides") or [])
@@ -349,6 +415,7 @@ def claim_status(result: dict | None, claim: str = "dG_standard", *, pmf: dict |
         "diagnostics": [{k: by[i].get(k) for k in ("id", "status", "value", "threshold", "threshold_source")}
                         for i in ids if i in by],
         "conflicts": list(a.get("conflicts") or []), "reasons": reasons, "withheld": withheld,
+        "reference_state": basis,
         "overrides": ovs,
         "override_effect": "an override is a recorded decision; it does not change a failed or unknown diagnostic",
     }

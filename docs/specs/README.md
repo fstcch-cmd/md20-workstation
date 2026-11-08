@@ -21,7 +21,7 @@
 | [pbc_centering.md](pbc_centering.md) | 週期邊界歸零：蛋白鏈＋bonded 金屬為錨、配體／胜肽折回、歸零 DCD 輸出、視覺性解離閘門 | 已驗證（全流程 CI＋筆電） |
 | [hts_screen.md](hts_screen.md) | 高通量前期篩選：Excel/CSV 化合物庫 → 自動下載 3D → 批次快速對接 → 排名圖 → 勾選進入正式對接/MD | 已驗證（`test_screen_integration` 三 OS，1634916 起含 Windows） |
 | [ci_validation.md](ci_validation.md) | CI 架構、重測、論文對接重現、hsieh2024 不可重現分析、這幾輪抓到的 bug | 進行中 |
-| [binding_funnel_restraints.md](binding_funnel_restraints.md) | 結合自由能的漏斗約束與標準態校正：沿拉離軸投影 CV、圓錐＋圓柱側向約束、解析 K_b；筆電 3PTB 證據（一維距離 PMF 高估 3 倍以上） | **設計中**（a3 不含；請審查 §5） |
+| [binding_funnel_restraints.md](binding_funnel_restraints.md) | 結合自由能的漏斗約束與標準態校正：沿拉離軸投影 CV、圓錐＋圓柱側向約束、解析 K_b；筆電 3PTB 證據（一維距離 PMF 高估 3 倍以上） | **已實作，待 CI 與筆電驗證**（D-140；預設關閉；請審查 §5、§6） |
 | [analysis_toolbox.md](analysis_toolbox.md) | 軌跡分析工具箱：tICA、MSM（附資格）、側鏈氫鍵網路、水合位點（D-105） | 已實作・待 CI |
 | [smd_contacts.md](smd_contacts.md) | SMD 拉離路徑上的接觸釋放：稀疏溶質座標、釋放點、峰值時斷開的接觸、報告圖與表（D-116，F13） | 已實作・待 CI |
 | [gui_stability.md](gui_stability.md) | GUI 穩定性：計算獨立子程序、狀態與進度從檔案讀回、GUI 重開接回（D-103） | 已實作・待 CI |
@@ -57,7 +57,7 @@
 | [figures.md](figures.md) | 自動產圖規則：時間軸、圖例在圖外、每條線命名、顏色一致、多系列改小圖、細線＋移動平均（D-89） | 已實作・純 Python 與繪圖測試 |
 | [licensing.md](licensing.md) | 簽章授權（第 2–3 層）：授權檔格式 v1／v2、機器碼、期限、閘門清單（擋／不擋）、功能閘門與評估版浮水印、輸出授權編號、簽章撤銷清單、不可由外部關閉、誠實限制（D-125、D-128）；md20 只留驗證、簽發端在私人 repo、格式測試向量 v1／v2（D-127） | 已實作・純 Python 測試（Windows 工具與 GUI 卡片待真機／CI） |
 | [supply_chain.md](supply_chain.md) | 外部執行檔與環境版本：Vina 單一釘選版＋sha256 驗證、執行檔身分記錄；micromamba／conda 鎖版待做（D-114，REVIEW #19） | Vina 已實作・純 Python 測試 |
-| [claims_audit.md](claims_audit.md) | 宣稱稽核（R6）：PMF／ΔG°／共存的區分、Jacobian 與標準態現況、進階描述子與機制文字改為有界觀察（D-138） | 文字已改；A8 參考態待授權 |
+| [claims_audit.md](claims_audit.md) | 宣稱稽核（R6）：PMF／ΔG°／共存的區分、Jacobian 與標準態現況、進階描述子與機制文字改為有界觀察（D-138） | 文字已改；A8 參考態已實作（D-140） |
 | [replicas.md](replicas.md) | 獨立重複：每個分析是否需要重複、條數取最大值（3）、報告如何呈現跨重複不確定性、開始時告知使用者（D-129）；重複計畫與告知（D-131） | 規格；§3–§5 已實作，待 CI；§7 每條重複分析與跨重複彙總（D-130 重做）已實作，待 CI |
 | [autonomy.md](autonomy.md) | 有界自主行動帳本（R8）：評估→提案→授權→執行→重新評估→停止／升級；預設只提建議；append-only 帳本、冪等鍵、預算與重試上限、禁止類別永不執行（D-137） | **已實作・純 Python（待 CI）**；未接進工作流程執行路徑，使用者尚未授權計算預算 |
 | [replicas.md](replicas.md) | 獨立重複：每個分析是否需要重複、條數取最大值（3）、報告如何呈現跨重複不確定性、開始時告知使用者（D-129）；重複計畫與告知（D-131） | 規格；§3–§5 已實作，待 CI |

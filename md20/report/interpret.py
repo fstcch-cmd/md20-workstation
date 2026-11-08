@@ -341,13 +341,30 @@ def binding(results: dict) -> list[dict]:
                          "標準結合自由エネルギーとしては扱わず、診断値としてだけ残し、比較も順位づけもしません。",
                          f"{name}: ΔG° = {g:.1f} kJ mol⁻¹가 계산되었지만 샘플링 평가가 미통과·누락이거나 구버전 데이터이므로 "
                          "표준 결합 자유 에너지로 쓰지 않고 진단 값으로만 남기며 비교하거나 순위를 매기지 않습니다."))
-        elif r.get("dG_standard_kj_mol") is not None:
+        elif r.get("dG_standard_kj_mol") is not None and claim_status(r, "affinity_ranking")["eligible"]:
             g = r["dG_standard_kj_mol"]
             out.append(F("good",
-                         f"{name}：標準結合自由能 ΔG° = {g:.1f} kJ mol⁻¹（{g / 4.184:.1f} kcal mol⁻¹），已含體積修正。",
-                         f"{name}: standard binding free energy ΔG° = {g:.1f} kJ mol⁻¹ ({g / 4.184:.1f} kcal mol⁻¹), including the volume correction.",
-                         f"{name}：標準結合自由エネルギー ΔG° = {g:.1f} kJ mol⁻¹（{g / 4.184:.1f} kcal mol⁻¹）。体積補正を含みます。",
-                         f"{name}: 표준 결합 자유 에너지 ΔG° = {g:.1f} kJ mol⁻¹({g / 4.184:.1f} kcal mol⁻¹). 부피 보정을 포함합니다."))
+                         f"{name}：標準結合自由能 ΔG° = {g:.1f} kJ mol⁻¹（{g / 4.184:.1f} kcal mol⁻¹），以漏斗約束加解析標準態校正計算（1 M，圓柱截面積與體積修正）。"
+                         "只有這種 ΔG° 可以用來比較配體的親和力，而且要在相同漏斗條件下比較。",
+                         f"{name}: standard binding free energy ΔG° = {g:.1f} kJ mol⁻¹ ({g / 4.184:.1f} kcal mol⁻¹), computed with the "
+                         "funnel restraint and the analytic standard-state correction (1 M, cylinder cross-section and volume term). "
+                         "Only this kind of ΔG° may be used to compare ligand affinities, and only under identical funnel conditions.",
+                         f"{name}：標準結合自由エネルギー ΔG° = {g:.1f} kJ mol⁻¹（{g / 4.184:.1f} kcal mol⁻¹）。ファンネル拘束と解析的な標準状態補正"
+                         "（1 M、円柱断面積と体積項）で計算しました。リガンドの親和性の比較に使えるのはこの種の ΔG° だけで、同じファンネル条件の間でのみ比較できます。",
+                         f"{name}: 표준 결합 자유 에너지 ΔG° = {g:.1f} kJ mol⁻¹({g / 4.184:.1f} kcal mol⁻¹). 깔때기 구속과 해석적 표준 상태 보정"
+                         "(1 M, 원통 단면적과 부피 항)으로 계산했습니다. 리간드 친화도 비교에 쓸 수 있는 것은 이 종류의 ΔG°뿐이며, 같은 깔때기 조건 안에서만 비교할 수 있습니다."))
+        elif r.get("dG_standard_kj_mol") is not None:
+            g = r["dG_standard_kj_mol"]
+            out.append(F("note",
+                         f"{name}：近似的 ΔG° = {g:.1f} kJ mol⁻¹（{g / 4.184:.1f} kcal mol⁻¹），是 1 M 徑向積分的近似值，沒有漏斗約束與解析標準態校正，"
+                         "不用於比較親和力或排序。要排序，請以 restraint: funnel 重算。",
+                         f"{name}: approximate ΔG° = {g:.1f} kJ mol⁻¹ ({g / 4.184:.1f} kcal mol⁻¹), a 1 M radial-integral estimate without a "
+                         "funnel restraint or analytic standard-state correction. It is not used to compare affinities or to rank. "
+                         "To rank, rerun with restraint: funnel.",
+                         f"{name}：近似的な ΔG° = {g:.1f} kJ mol⁻¹（{g / 4.184:.1f} kcal mol⁻¹）。1 M 動径積分による近似値で、ファンネル拘束も"
+                         "解析的な標準状態補正もありません。親和性の比較や順位づけには使いません。順位づけには restraint: funnel で計算し直してください。",
+                         f"{name}: 근사 ΔG° = {g:.1f} kJ mol⁻¹({g / 4.184:.1f} kcal mol⁻¹)로, 깔때기 구속과 해석적 표준 상태 보정이 없는 "
+                         "1 M 방사 적분 추정값입니다. 친화도 비교나 순위에는 쓰지 않습니다. 순위를 매기려면 restraint: funnel로 다시 계산하십시오."))
         else:
             out.append(F("note",
                          f"{name}：沒有輸出 ΔG°，原因見下方說明。ΔPMF 只適合用來比較同一設定下的配體。",

@@ -1,7 +1,7 @@
-# 結合自由能：漏斗（funnel）約束與標準態校正 —— 讓一維 PMF 可以和實驗比 **[設計中]**
+# 結合自由能：漏斗（funnel）約束與標準態校正 —— 讓一維 PMF 可以和實驗比 **[已實作，待 CI 與筆電驗證]**
 
 > 2026-11-02，session_016gcJz9hwPAMieHsNEctkzL。起因：筆電 3PTB 實測（`docs/archive/runs/2026-11-02_laptop_3ptb/`、D-62–D-65）。
-> 本文件在**實作前**供審查；a3 發行時不含此功能。
+> 2026-11-08（D-140）：使用者授權 A8，選項 A 已實作（§6）；真實引擎路徑（OpenMM 運算式、取樣、檢查）只在純 Python 驗證，**待 CI `openmm-stack` 與筆電 3PTB**。§1–§5 保留為設計原文，與實作不同處列在 §6.3。
 
 ## 1. 要解決的問題（證據）
 目前結合計算：SMD 拉離 → 傘狀採樣沿**錨點（口袋 Cα 質心）到配體質心的距離** r → WHAM/MBAR → 徑向 PMF w(r)（+2kT ln r Jacobian）→
@@ -63,3 +63,59 @@ K_b = π R_cyl² ∫_site exp[−β (W(z) − W_bulk)] dz（site = W 回到 W_bu
 3. R_cyl 0.2 nm 的選擇：太小會讓圓柱段的取樣窄、平台估計偏差；太大會增加側向熵、平台收斂慢。是否應依配體大小縮放？
 4. 結合態構形變化（例如配體在口袋內翻轉）未加 RMSD 約束時，K_b 是否仍可信？是否至少在 research 層級加 B 的構形 RMSD 項？
 5. 教學層級時間預算：funnel 讓 window 數略減（圓柱段收斂快）但每個 window 仍需 ≥ 500 ps；整體可否維持 RTX 4060 約 1 小時？
+
+## 6. 實作（D-140，2026-11-08）
+程式：`md20/sampling/funnel.py`（幾何、運算式、標準態、檢查）、`md20/sampling/binding.py`（選項、取樣、報告欄位）、`md20/sampling/assessment.py`（說法資格）。不新增 phase／step：仍是既有的 binding 步驟，`binding.config.restraint` 切換。
+
+### 6.1 設定與預設
+| 鍵 | 預設 | 說明 |
+|---|---|---|
+| `restraint` | `"none"` | `"none"`＝距離 CV＋徑向 1 M 積分（近似，**不用於排序**）；`"funnel"`＝軸向 z＋漏斗＋解析標準態 |
+| `funnel_r_cyl_nm` | 0.2 | 圓柱半徑 R_cyl |
+| `funnel_r_cone_nm` | 1.0 | z = 0 處的圓錐半徑 R_cone |
+| `funnel_z_cc_nm` | `None`（自動） | 圓錐與圓柱交界；自動＝口袋出口 ＋ 配體半徑 ＋ 0.3 nm |
+| `funnel_k` | 4000 | 側向與 z 下限牆的彈簧常數 k_f（kJ/mol/nm²） |
+| `funnel_z_min_nm` | −0.2 | z 下限牆 |
+
+**預設為 `none`（所有 tier）。** 規格 §3.4 原寫「teaching／research 預設 funnel」；實作時改為預設關閉，理由與切換條件在 DECISIONS D-140。切換前使用者以 `binding.config.restraint: funnel` 明確開啟。
+
+### 6.2 公式（單位：長度 nm，能量 kJ/mol，kT = k_B T）
+- 軸與座標：c = 口袋 anchor 質心（活的），**u** = 起始結合態 (配體質心 − c)／‖…‖（最小映像）。z = (x − c)·u；ρ = ‖(x − c) − z·u‖。z₀ = ‖x₀ − c‖。
+- 允許半徑：ρ_max(z) = R_cyl + (R_cone − R_cyl)·clip((z_cc − z)/z_cc, 0, 1)。
+- 約束能：U = ½k_f·max(0, ρ − ρ_max(z))² ＋ ½k_f·max(0, z_min − z)²。
+- CV 彈簧（SMD 與每個 window）：½k_cv(z − r0_cv)²，全域參數名與距離版相同。
+- OpenMM：兩個 `CustomCentroidBondForce`（`md20_cv_bias`、`md20_funnel`，後者在 force group 31 以便單獨讀能量）。最小映像用 `floor(d/L+0.5)` 逐軸寫在運算式裡（reduced-form 盒子，與 `binding.min_image` 同順序 z、y、x），因為 `distance()` 失去正負號。`tests/test_funnel.py` 用小型 Lepton 求值器證明運算式文字與純 Python 能量一致（含相鄰週期影像、三斜盒子）。
+- 側向有效截面積：A_eff = ∫₀^∞ exp[−U_lat(ρ; ρ_max = R_cyl)/kT]·2πρ dρ（數值積分，單位 nm²）；封閉式 πR² + 2π[R·½√(π/a) + 1/(2a)]，a = k_f/(2kT)，測試交叉驗證（k → ∞ 得 πR²）。k_f = 4000、R_cyl = 0.2、300 K 時 A_eff ≈ 0.169 nm²（比 πR² 大 34%，標準態項差 0.7 kJ/mol）。
+- 標準態：**ΔG° = −kT ln( A_eff · ∫_site exp[−(W(z) − W_bulk)/kT] dz / V° )**，V° = 1.66054 nm³（1 M）。W(z) 為漏斗約束下 z 的 PMF（**沒有 +2kT ln r**）。
+  - W_bulk：PMF 在**取樣範圍內**最後 10%（至少 3 格）的平均；平台檢查沿用 D-65（尾段直線擬合的上升 ≤ 1 kT）。
+  - site：[第一格, 最小值之後第一個 W ≥ W_bulk − 0.5kT 的 z]（與徑向積分同一規則）；結果另報 `site_edge_sensitivity_kj_mol`（邊界外移 0.1 nm 時 ΔG° 的變化，只報告，沒有門檻）。
+  - 解析測試：W ≡ 0、硬圓柱、長度 L → ΔG° = −kT ln(πR²L/V°)。
+- 診斷（`pmf["funnel"]["checks"]`，進 assessment 的三個 `funnel_*` 診斷）：
+  1. `funnel_bound_state`：結合態 window（中心 ≤ PMF 最小值 z ＋ 0.1 nm，至少第一個）中 ρ − ρ_max(z) 的 99% 分位 < −0.05 nm。不過：PMF 本身被漏斗扭曲，**路徑特定也不成立**。
+  2. `funnel_solvation`：z ≥ z_cc + 0.5 nm 的樣本，配體重原子到蛋白重原子最短距離的 **1% 分位** > 0.6 nm（沿用規格 99% 慣例；只在 z 夠大時才計算）。
+  3. `funnel_bulk_cylinder`：PMF 末端平台下緣 ≥ z_cc。
+  2、3 不過或沒資料：ΔG° 不輸出（`dG_withheld`，DecisionLog 寫 NEEDS_HUMAN 與選項），`dG_standard` 與 `affinity_ranking` 都不成立。缺資料＝unknown，不當 pass。
+
+### 6.3 與設計原文的差異（實作時的判斷）
+1. 預設 `restraint: none`（見 6.1、D-140）。
+2. 軸方向用起始狀態（`start_state_xml`）的瞬時向量，而非「production 最後一段平均」（`run_binding` 只拿到終點狀態；SMD 方向本來就是這個向量）。軸固定在實驗室座標，蛋白朝向由既有的骨架位置限制（×0.1）維持。
+3. z_cc 自動值多加**配體半徑**：原式 z_cc = 口袋深度 + 0.3 nm 時，大配體在 z_cc + 0.5 nm 處最近原子距蛋白仍 < 0.6 nm，規格自己的溶劑化檢查達不到。口袋出口＝軸附近 0.5 nm 管內蛋白重原子沿軸**第一個 ≥ 0.35 nm 的缺口**（啟發式，可用 `funnel_z_cc_nm` 覆蓋；規格 §5 問 1 仍未決）。
+4. 拉離範圍不足時**自動加長**（AUTO_FIXED，寫 DecisionLog）：需要 z_cc + 0.5 + 0.3 − z₀ nm；盒子放不下時由既有的盒子檢查擋下並給 padding（NEEDS_HUMAN）。
+5. ρ_max 在 z < 0 夾住於 R_cone（原式會無限變寬）。
+6. W_bulk 取取樣範圍內的尾段，而非整條格點的最後 10%（徑向版把取樣範圍之外的邊緣格也平均進去；軸向版不沿用這個缺點）。徑向版未改。
+7. 同一輸出資料夾不可混用兩種座標：`restraint.json` 記錄，不一致即 NEEDS_HUMAN。
+8. 驗證計畫 §4 的 2（NaCl 有／無漏斗 ΔG° 在 2 kJ/mol 內一致）**未做**：CI 的 NaCl 測試（`test_nacl_funnel`）只驗證力與記錄，window 2 ps 不足以比較 ΔG°。3（筆電 3PTB）未做。
+
+### 6.4 說法資格（assessment）
+`THRESHOLDS_VERSION` 2026-11-08.1（門檻沒動，改的是說法規則）；claim 紀錄 schema `md20.assessment.claim/2`（加 `reference_state`）。
+| 說法 | 條件 |
+|---|---|
+| `dG_standard` | 既有診斷全過 ＋ 有 ΔG° 值且未撤回 ＋（若為漏斗）三個 `funnel_*` 全 pass。徑向 1 M 結果仍成立，但文字一律是「近似，不用於親和力排序」 |
+| `affinity_ranking` | 上列全成立 ＋ assessment 的 `reference_state` 與結果的 `condition` **兩邊都**記錄 `cv = axial_projection_z`、`funnel_restraint = True`、`standard_state = funnel_cylinder_analytic`。缺紀錄＝不成立 |
+`compare_binding` 的 ΔΔG°（`context_basis.use_dG`）、證據矩陣、圖說、比較矩陣全部讀 `affinity_ranking`；徑向結果只剩路徑特定井深順序（`order`），矩陣的 limits 說明原因（`radial_not_ranked`）。舊的儲存評估沒有 `reference_state`，自動變成「不用於排序」。
+
+### 6.5 未決
+- 規格 §5 的 5 個審查問題仍待審查者回答。
+- 預設何時改為 funnel：CI `test_nacl_funnel` 綠（OpenMM 運算式在三個 OS 都能建 Context 並與純 Python 能量一致）＋筆電 3PTB teaching 的 ΔG° 與實驗 −26.8 kJ/mol 誤差 < 8 kJ/mol（§4.3）之後，由使用者決定。
+- 報告的 PMF 圖橫軸標籤仍寫「距離」（`workflow_report`／`figures.pmf` 不在本次範圍）；funnel 結果的 `pmf["cv"]` 已記錄。
+- 配體多原子 ρ 取質心；很長的配體在圓柱段可能轉動超出 R_cyl（質心受限不代表原子受限），這是標準 funnel 的既有近似。

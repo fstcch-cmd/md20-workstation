@@ -15,7 +15,13 @@ COND = {"cv": "com_distance_radial", "temperature_k": 300.0, "backbone_restraint
         "anchor": "automatic", "funnel_restraint": False}
 
 
-def _pmf(connected=True):
+FCOND = {**COND, "cv": "axial_projection_z", "funnel_restraint": True, "standard_state": "funnel_cylinder_analytic"}
+FCHECKS = {"bound_state": {"status": "pass", "q99_margin_nm": -0.2, "required_below_nm": -0.05},
+           "solvation": {"status": "pass", "q01_dmin_nm": 0.8, "required_above_nm": 0.6},
+           "bulk_in_cylinder": {"status": "pass", "z_cc_nm": 1.5}}
+
+
+def _pmf(connected=True, funnel=False, checks=None):
     """A PMF whose solver succeeded.  connected=False: two blocks of windows that never overlap (full graph disconnected)
     while pooled coverage and adjacent overlap inside each block look fine."""
     n = 6
@@ -25,7 +31,10 @@ def _pmf(connected=True):
     else:
         M = [[1.0 if i == j else (0.3 if abs(i - j) == 1 and (i < 3) == (j < 3) else 0.0) for j in range(n)] for i in range(n)]
         mn = 0.0
-    return {"method": "MBAR", "converged": True, "plateau": True, "pmf_radial_kj_mol": [0, 1, 2],
+    extra = ({"cv": "axial_projection_z", "standard_state": {"treatment": "funnel_cylinder_analytic"},
+              "funnel": {"checks": checks or FCHECKS}} if funnel else
+             {"cv": "com_distance_radial", "standard_state": {"treatment": "1 M radial integral (no orientational correction)"}})
+    return {**extra, "method": "MBAR", "converged": True, "plateau": True, "pmf_radial_kj_mol": [0, 1, 2],
             "quality": {"window_stats": [{"n_effective": 400.0}] * n},
             "coverage": {"continuous": True, "breaks": []},
             "overlap_matrix": {"matrix": M, "min_neighbour": mn},
@@ -34,11 +43,12 @@ def _pmf(connected=True):
                             "1.00": {"delta_pmf": 20.0}}}
 
 
-def _res(connected=True, dG=-30.0, withheld=None, stored=True, ligand="A", **kw):
+def _res(connected=True, dG=-30.0, withheld=None, stored=True, ligand="A", funnel=False, checks=None, **kw):
     r = {"status": "PASS", "ligand": ligand, "context": "single", "delta_pmf_kj_mol": 30.0, "delta_pmf_err_kj_mol": 1.0,
-         "dG_standard_kj_mol": dG, "dG_err_kj_mol": 1.0, "dG_withheld": withheld, "replicas": 3, "condition": dict(COND)}
+         "dG_standard_kj_mol": dG, "dG_err_kj_mol": 1.0, "dG_withheld": withheld, "replicas": 3,
+         "condition": dict(FCOND if funnel else COND)}
     if stored:
-        r["assessment"] = assess_pmf(_pmf(connected), dG_withheld=withheld, has_dG=dG is not None)
+        r["assessment"] = assess_pmf(_pmf(connected, funnel, checks), dG_withheld=withheld, has_dG=dG is not None)
     r.update(kw)
     return r
 
@@ -82,7 +92,9 @@ def test_execution_plus_numeric_dG_with_failed_sampling_is_never_supported_anywh
     assert ra["execution_status"] == "ran" and ra["assessment"]["state"] == "fail"
     assert "overlap_graph" in ra["assessment"]["failed"] and ra["assessment"]["thresholds_version"]
     assert "assess_failed" in ra["reasons"]
+    # D-140: a radial 1 M ΔG° is stated as approximate (claim dG_standard) and carries the "not for ranking" reason
     assert rb["status"] == "supported" and rb["claim"] == "dG_standard" and rb["claim_eligibility"] is True
+    assert "no_funnel_standard_state" in rb["reasons"]
     # captions / executive summary sentences
     from md20.report.interpret import binding as interpret_binding
     from md20.report.figure_text import classify_assessment
@@ -91,7 +103,10 @@ def test_execution_plus_numeric_dG_with_failed_sampling_is_never_supported_anywh
     assert any(f["level"] == "caution" and "not treated as a standard binding free energy" in f["text"][1] for f in findings)
     assert classify_assessment("A", bad["assessment"])[0]["level"] == "caution"
     good_findings = interpret_binding({"B": good})
-    assert any(f["level"] == "good" and "standard binding free energy" in f["text"][1] for f in good_findings)
+    assert not [f for f in good_findings if f["level"] == "good" and "standard binding free energy" in f["text"][1]]   # radial: approximate
+    assert any("not used to compare affinities" in f["text"][1] for f in good_findings)
+    fun_findings = interpret_binding({"F": _res(True, funnel=True, ligand="F")})
+    assert any(f["level"] == "good" and "funnel restraint" in f["text"][1] for f in fun_findings)
     # comparison: the failed one is out, so nothing is ranked
     comp = compare_binding({"A": bad, "B": good}, contexts={"single": ["A", "B"]})
     c = comp["contexts"]["single"]
@@ -106,15 +121,22 @@ def test_execution_plus_numeric_dG_with_failed_sampling_is_never_supported_anywh
 
 
 def test_matrix_comparison_and_claim_agree_on_a_grid(tmp_path):
-    """The three consumers can never contradict: supported <=> claim eligible <=> context_basis use_dG."""
+    """The consumers can never contradict: supported <=> dG_standard eligible; context_basis use_dG <=> affinity_ranking
+    eligible (D-140: ranking needs the funnel treatment; the partner "z" is a qualified funnel result)."""
     from md20.sampling.multi import context_basis
     cases = {"ok": _res(True, ligand="a"), "bad": _res(False, ligand="b"), "legacy": _res(stored=False, ligand="c"),
-             "withheld": _res(True, dG=None, withheld="classroom", ligand="d")}
+             "withheld": _res(True, dG=None, withheld="classroom", ligand="d"), "funnel": _res(True, ligand="e", funnel=True),
+             "funnel_bad": _res(False, ligand="f", funnel=True)}
     rows = {r["subject"]: r for r in evidence_rows(_wf(tmp_path, cases)) if r["item"] == "binding"}
     for k, r in cases.items():
         el = claim_eligible(r, "dG_standard")
         assert (rows[k]["status"] == "supported") == el
-        assert (context_basis({k: r, "z": _res(True, ligand="z")}, [k, "z"])["use_dG"]) == el
+        z = _res(True, ligand="z", funnel=True)
+        z["condition"] = dict(r["condition"])            # same signature, so only the ranking rule decides
+        assert (context_basis({k: r, "z": z}, [k, "z"])["use_dG"]) == claim_eligible(r, "affinity_ranking")
+    assert claim_eligible(cases["ok"], "dG_standard") and not claim_eligible(cases["ok"], "affinity_ranking")
+    assert claim_eligible(cases["funnel"], "affinity_ranking")
+    assert rows["funnel"]["claim"] == "affinity_ranking" and rows["ok"]["claim"] == "dG_standard"
 
 
 def test_qualified_result_is_supported_and_versioned(tmp_path):
