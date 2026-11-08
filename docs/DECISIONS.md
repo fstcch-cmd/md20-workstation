@@ -6,6 +6,16 @@
 ---
 
 ## 2026-11-08
+### D-145　鋅位點配位水的 H 塌陷（CI 6c85bde NaN）：經金屬到水 H 的 1-4 對改為排除，水 H 一律加 M–O–H 角（更正 D-133 的「不加 M–O–H 角」）
+- **證據**：run 42430961347（`6c85bde`）heavy-metal：結構斷言（4 個鍵含 1 個水）通過，MD 前 2 ps 出現 `Particle coordinate is NaN`。
+- **原因（程式缺陷，D-133 引入）**：水 O 成為鍵結配位原子後，His N–Zn–O(水) 是經金屬的 1-3，被排除，N 與水 O 之間不再有 LJ 排斥；經金屬的 1-4 對「His N ↔ 水 H」則是縮放後的庫侖作用，而 TIP3P 的 H **沒有 LJ**——這對只剩吸引。
+  D-133 又刻意不加 M–O–H 角，水 H 可以轉向 His N 塌陷。蛋白配位原子沒有這個問題：經金屬連到的鄰原子是有 LJ 的碳。
+- **決定**：(1) 經金屬的 1-4 對，若另一端是位點水的 H，改為排除（不加縮放庫侖）。(2) 每個位點水的 H 都加 M–O–H 角：擬合參數有就用擬合值（D-141 OH⁻），否則用幾何預設 θ0 = (360° − 104.52°)/2 = 127.7°（金屬與兩個 H 在 O 周圍成平面三角），k 同 M–D–X（50 kcal/mol/rad²）。O(水)–M–N–C 仍是縮放 1-4（C 有 LJ）。
+- **更正**：D-133 的「不加 M–O–H 角（剛性水可以轉動）」是錯的判斷，原文保留；D-141「沒有擬合角就不加」同樣改為用幾何預設。
+- **被否決**：給水 H 加 LJ（等於改 TIP3P 模型）；保留縮放 1-4 但靠角度擋（吸引仍存在，角度一鬆就塌）。
+- **測試**：`test_site_water_hydrogens_get_moh_angles_and_no_attractive_14_pairs`（取代原本「不加角」的測試）；`test_metal_hydroxide.py` 對應更新。真實驗證待 heavy-metal CI。門檻未動。
+- **相關檔案**：`md20/build/metal.py`（`MOH_THETA0_DEG`、`bonded_metal_terms`）、`tests/test_metal_site_water.py`、`tests/test_metal_hydroxide.py`、`docs/specs/metal_sites.md` §4d。
+
 ### D-144　經驗門檻校準：CV 提醒維持 0.25 但據實標為弱提醒；PCA／分群敏感度的 `consistent` 改用時間前後半（使用者 11/08 要求審閱）
 - **證據**：合成校準（`docs/specs/thresholds_calibration.md`）。(1) n=3 時 CV>0.25 對真實 CV 0.30 只有 50% 觸發、對 0.15 有 6.7% 誤報。(2) 有自相關的軌跡，交錯分半（偶／奇幀）PC1 幾乎永遠一致（τ=50 幀時失敗率 0–8%），
   而前／後半段在同樣情況下 100% 不一致。
@@ -153,6 +163,7 @@
   **後續（2026-11-08，D-141）**：使用者已授權 OH⁻ 選項，(1)(2) 的處理見 D-141 與 `docs/specs/metal_sites.md` §4e；原文不改。
 - **相關檔案**：`md20/build/receptor.py`（`metal_site_water_lines`、側檔）、`md20/build/metal.py`（`BONDED_POLICIES`、`site_waters_to_add`、`read_site_waters`、`site_water_ligand_gate`、`plan_site`、`bonded_metal_terms`、`apply_metal_policy`）、`md20/build/assemble.py`、`md20/build/pipeline.py`、`md20/advisor.py`、`md20/gui/actions.py`、`md20/gui/gate_text.py`、`tests/test_metal_site_water.py`、`tests/test_metal_integration.py`、`docs/specs/metal_sites.md` §1、§4d。
 
+- **更正（2026-11-08，D-145）**：「不加 M–O–H 角」造成 CI 6c85bde 的 NaN（水 H 沒有 LJ，經金屬的 1-4 對只剩吸引）；現在改為排除這些對，並一律加 M–O–H 角。
 ### D-130（重做）重複分析彙總：每一條獨立重複都分析，跨重複 mean／SD／t 區間、k／n，單一軌跡不給不確定性
 - 背景：這是 R1（`docs/specs/evidence_driven_repair_prompt.md`）的**重做**。先前的 D-130 嘗試沒有進 main，這次從規格 D-129 §2 重新做，沒有沿用舊程式。查證的缺口（已驗證）：`Workflow.analyse`、`_comparability`、`_common_basis` 只用 `run_ids[0]`；報告 `actual_values` 讀 `md.get("replicas", 1)`，而預設已是 3 條（D-131）。範圍：只改分析、彙總與報告的 MD／重複部分；不新增 phase／step；不動 `report/evidence.py`、`sampling/*`、`analysis/traj.py`、`extended.py`、`persistence.py`、`common_basis.py`（其他代理負責）。
 - **決定**：

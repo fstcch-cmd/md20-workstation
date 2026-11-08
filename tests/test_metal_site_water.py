@@ -68,7 +68,11 @@ def test_fitted_params_do_not_bind_the_water():
     assert site_waters_to_add(sites, plans, far) == []
 
 
-def test_no_angle_on_the_water_hydrogens_but_13_excluded():
+def test_site_water_hydrogens_get_moh_angles_and_no_attractive_14_pairs():
+    """D-145 (CI 6c85bde NaN): the water H has no LJ and D–O(water) is a through-metal 1-3 exclusion, so a scaled
+    D–M–O–H 1-4 pair would be pure Coulomb attraction (His N⁻ ← H⁺) with nothing repelling → collapse.
+    Those pairs are excluded and every water H gets an M–O–H angle (default 127.7°)."""
+    import math
     # Zn 0; His NE2 1 with ring neighbours 2,3; water O 4 with H 5,6
     bonds = [(1, 2), (1, 3), (4, 5), (4, 6)]
     pos = np.zeros((7, 3))
@@ -77,7 +81,12 @@ def test_no_angle_on_the_water_hydrogens_but_13_excluded():
     plans = [{"action": "bonded", "metal_index": 0, "bonds": [{"donor": 1}, {"donor": 4, "water": True}]}]
     t = bonded_metal_terms(bonds, plans, pos)
     assert (0, 5) in t["excl13"] and (0, 6) in t["excl13"]          # Zn–H(water) is 1-3: no nonbonded term
-    assert {(d, x) for _m, d, x, _ in t["angles"]} == {(1, 2), (1, 3)}   # water may rotate
+    assert (1, 5) in t["excl13"] and (1, 6) in t["excl13"]          # N–Zn–O–H: excluded, not a scaled 1-4
+    assert not {(1, 5), (1, 6)} & set(t["pairs14"])
+    assert (2, 4) in t["pairs14"] and (3, 4) in t["pairs14"]        # O(water)–M–N–C stays a scaled 1-4 (C has LJ)
+    assert {(d, x) for _m, d, x, _ in t["angles"]} == {(1, 2), (1, 3)}
+    assert sorted((d, x) for _m, d, x, *_ in t["angles_moh"]) == [(4, 5), (4, 6)]
+    assert all(abs(a[3] - math.radians(127.74)) < 1e-3 for a in t["angles_moh"])
 
 
 def test_ligand_on_the_site_water_is_stopped():

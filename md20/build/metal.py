@@ -719,6 +719,9 @@ def _qm_waters(site: dict, plan: dict, atoms: list[dict], state: str) -> list[di
     return out
 
 
+MOH_THETA0_DEG = (360.0 - 104.52) / 2.0     # D-145: geometric default M–O–H angle for a bonded site water
+
+
 def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], positions_nm) -> dict:
     """Topology terms that make a metal behave as covalently bound to its donors (pure Python).
 
@@ -730,8 +733,8 @@ def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], position
     same metal are a 1-3 pair (D–M–D′, excluded) and a donor with the neighbour of another donor is 1-4
     (D–M–D′–X′, scaled).  Without that, the three His NE2 (≈ −0.5 e each, 3.3 Å apart) repel at full strength
     while the D–M–D′ angle term tries to hold them — the Zn–N bonds stretch.
-    D-141: a hydroxide site water gets an M–O–H angle only when the fitted parameters provide one
-    (`site_water.moh_angle`) → "angles_moh": [(m, o, h, θ0 rad, k)]; otherwise (and for a plain water) none.
+    D-141/D-145: every bonded site-water H gets an M–O–H angle: the fitted one for a hydroxide when given
+    (`site_water.moh_angle`) → "angles_moh": [(m, o, h, θ0 rad, k)]; otherwise (D-145) the geometric default 127.7°.
     Returns {"excl13": [(a, b)], "pairs14": [(a, b)], "angles": [(m, d, x, θ0 rad)]} with no duplicates, plus
     "angles_moh" only when there is such an angle."""
     import numpy as np  # noqa: F811
@@ -747,6 +750,7 @@ def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], position
         donors = {b["donor"] for b in p["bonds"]}
         excl12 |= {(m, d) for d in donors}
         dl = sorted(donors)
+        waters = {b["donor"] for b in p["bonds"] if b.get("water")}
         for i, d in enumerate(dl):                       # through-metal pairs: D–M–D′ (1-3) and D–M–D′–X′ (1-4)
             for d2 in dl[i + 1:]:
                 excl13.add((d, d2))
@@ -755,8 +759,13 @@ def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], position
                     continue
                 for x2 in nbr.get(d2, ()):
                     if x2 != m and x2 not in donors and x2 != d and x2 not in nbr.get(d, ()):
-                        pairs14.add((min(d, x2), max(d, x2)))
-        waters = {b["donor"] for b in p["bonds"] if b.get("water")}
+                        if d2 in waters:
+                            # D-145: a site-water H has no LJ (TIP3P); with D–O(water) already a 1-3 exclusion
+                            # nothing repels it from the other donors, so a scaled 1-4 Coulomb pair is purely
+                            # attractive and collapses (CI 6c85bde: NaN in the first 2 ps) — excluded instead
+                            excl13.add((min(d, x2), max(d, x2)))
+                        else:
+                            pairs14.add((min(d, x2), max(d, x2)))
         moh = (p.get("site_water") or {}).get("moh_angle")
         o_idx = (p.get("site_water") or {}).get("o_index")
         for d in donors:
@@ -764,9 +773,14 @@ def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], position
                 if x == m or x in donors:
                     continue
                 excl13.add((m, x))
-                if d in waters:          # D-133: a coordinated water may rotate (rigid TIP3P); no M–O–H angle term
-                    if moh and d == o_idx:       # D-141: unless fitted parameters give one for the hydroxide
+                if d in waters:
+                    # D-145: an M–O–H angle keeps each water H off the metal side (fitted value for a hydroxide when
+                    # given, D-141; otherwise the geometric default (360° − 104.52°)/2 = 127.7°: metal and the two
+                    # H trigonal around O).  Without it the H swung onto a His N (CI 6c85bde NaN).
+                    if moh and d == o_idx:
                         angles_moh.append((m, d, x, math.radians(moh["theta0_deg"]), moh["k"]))
+                    else:
+                        angles_moh.append((m, d, x, math.radians(MOH_THETA0_DEG), K_ANGLE_MDX))
                     continue
                 u, v = pos[m] - pos[d], pos[x] - pos[d]
                 th = float(np.arccos(np.clip(np.dot(u, v) / np.linalg.norm(u) / np.linalg.norm(v), -1.0, 1.0)))

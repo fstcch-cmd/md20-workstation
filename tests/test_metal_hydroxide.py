@@ -237,7 +237,10 @@ def test_plan_with_fitted_water_bond_and_template():
     nbr_bonds = [(1, 2), (3, 4), (5, 6), (O_IDX, H_IDX)]
     pos = np.array([a["xyz"] for a in atoms]) / 10.0
     t = bonded_metal_terms(nbr_bonds, [p], pos)
-    assert (0, H_IDX) in t["excl13"] and "angles_moh" not in t and {(d, x) for _m, d, x, _ in t["angles"]} == {(1, 2), (3, 4), (5, 6)}
+    assert (0, H_IDX) in t["excl13"] and {(d, x) for _m, d, x, _ in t["angles"]} == {(1, 2), (3, 4), (5, 6)}
+    # D-145: without a fitted M–O–H angle the geometric default (127.7°) keeps the H off the metal side
+    assert [(m, d, x) for m, d, x, *_ in t["angles_moh"]] == [(0, O_IDX, H_IDX)]
+    assert t["angles_moh"][0][3] == pytest.approx(math.radians((360 - 104.52) / 2))
 
 
 def test_fitted_moh_angle_is_the_only_way_to_get_an_moh_term():
