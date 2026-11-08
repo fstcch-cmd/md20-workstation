@@ -6,6 +6,23 @@
 ---
 
 ## 2026-11-08
+### D-155　清除遺留 trypsin/benzamidine 示範：使用者看到的示範一律改用真實教學案例(hsieh2024)
+- **問題**（使用者 2026-11-08）：`docked_BEN`／`trypsin_demo` 這組苯甲脒—胰蛋白酶假資料在整個教學專案裡從未出現（教學案例是藜芽代謝物對 NF-κB p65），卻被當成示範硬留著，造成理解錯誤。使用者指示：要示範就用真實教學案例，否則直接刪掉，別硬留會誤導的東西。
+- **查證**：遺留示範散在三個「給人看」的預覽工具——
+  1. `tools/gui_preview.py` `build_demo`（CI gui-preview 首頁／工作流截圖）用 `example_config()`（3PTB＋BEN）改名 `trypsin_demo`、建 `demo_docked_BEN`、記「BEN rank 1 −6.11、晶體 RMSD 0.38 Å」、假 metal ZN 閘門。
+  2. 同檔 `build_e2e`（Playwright 點擊自檢）用同底，配體用非真實代碼 `CAR`／`GLU`。
+  3. `tools/theme_preview.py` 硬編「計算進行中：trypsin_demo」。
+- **決定**：這三處（使用者會看到的示範）全部改用真實教學案例一 `teaching_config("hsieh2024")`——受體 **1VKX**（p50/p65＋κB DNA 2.9 Å，排除 DNA 鏈 C、D）、六個 LC-MS/MS 代謝物（PGA/GLC/URI/MAL/ALC/PAN）**同時對接**、課堂 exhaustiveness 8、總結合能 −13.86 kcal/mol、24 氫鍵。
+  - `build_demo`：案例改 `docked_multi`、六代謝物、組裝閘門改「simultaneous pose clash（AUTO_FIXED）」、NEEDS_HUMAN 閘門改真案例的「非蛋白分子：1VKX 含 κB DNA 鏈 C、D」。移除與本案無關的假鋅閘門。
+  - `build_e2e`：底改 `teaching_config("hsieh2024")`、三個真實代謝物（PGA/GLC/URI，含真實 SMILES）驅動點擊路徑；`e2e()` 斷言同步 `multi:CAR→multi:GLC`、`multi:GLU→multi:URI`。移除 `import copy`、`example_config` 依賴。
+  - `theme_preview.py`：示範字串改 `hsieh2024_rela_1vkx`。
+- **report_template.py 不改（刻意保留苯甲脒，純加說明註解）**：`test_report_template` 強制報告涵蓋 `figure_text.FIG` 的**每一種圖**，其中 `pose_rmsd`（每個 pose 對**共結晶 pose** 的 RMSD，redocking 自檢）結構上**必須有共結晶配體**。真實教學案例（藜芽代謝物對 p65）**沒有共結晶**，產生不了這張圖。故 report_template 的 trypsin/benzamidine 共結晶是「圖涵蓋自檢」而非「專案示範」；強行換成教學案例會破壞圖涵蓋合約，或逼我捏造論文裡沒有的共結晶——反而製造新的誤導。它本就以 `trypsin_benzamidine` 命名並標「合成示範資料」，與教學結果可區分。僅在檔頭加 D-155 說明，讓維護者不再誤認。
+- **理由／取捨**：使用者實際看到並誤解的是 GUI／主題示範（未清楚標示、像真專案），已全改真案例；report_template 是明確標示的合成圖涵蓋測試，且受「每種圖都要有」合約約束，苯甲脒共結晶有結構上的必要，保留並說明比刪除或造假正確。
+- **被否決**：把 report_template 也換成教學案例（會破壞 `pose_rmsd` 圖涵蓋或逼造假共結晶）；改動 test_gui_server／test_binding_targets 的內部 fixture 名（那是單元測試鷹架，非使用者看到的示範，不在本次範圍）。
+- **測試／證據**：本機 `build_demo`／`build_e2e` 均產生真實教學案例專案（`hsieh2024_rela_1vkx`／`hsieh2024_e2e`）；無測試依賴被改掉的舊示範名；`pose_rmsd` 定義佐證共結晶必要（`md20/report/figure_text.py:1433`）。CI gui-preview 四語截圖與 report-template 圖涵蓋待這輪 CI 確認。
+- **相關檔案**：`tools/gui_preview.py`、`tools/theme_preview.py`、`tools/report_template.py`（檔頭說明）。
+- **未決**：若日後希望 report-template 也展示教學案例的報告版面，需另外決定是否加一個「教學案例報告」預覽（與圖涵蓋自檢分離），或接受該版面不含 `pose_rmsd` 圖。
+
 ### D-154　CI d89255e 回饋修正：鋅 restrain 與漏斗力真機通過；修 import、閘門範圍、漏斗預設層級、np.trapezoid
 - **CI 證據**（run 42451748970，`d89255e`）：**`test_bonded_zinc_ca2`（鋅 restrain）與 `test_nacl_funnel`（漏斗力）真機 PASSED**——選項 D 的 restrain（排除非鍵＋下限牆）真的防住 Glu106 塌陷；漏斗力表達式正確。但有四處回歸要修：
   1. **pure-python 全平台**：`test_metal_competing_carboxylate.py` 用 `from tests.test_metal_site_water import`，CI rootdir 下 `tests` 非 package（D-95 老坑）→ 改 `from test_metal_site_water`。

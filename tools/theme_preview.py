@@ -17,7 +17,7 @@ th{{background:#F7FAFA;color:var(--md20-ink-muted);font-size:12.5px;font-weight:
 <body><header class="md20-header hdr" style="height:56px;display:flex"><div class="wrap hdr" style="width:100%;padding-top:0;padding-bottom:0">
 <span class="md20-title text-lg">MD20 分子模擬工作站</span><span class="row" style="gap:16px"><a href="#" style="color:var(--md20-ink);text-decoration:none">首頁</a><a href="#" style="color:var(--md20-ink);text-decoration:none">電腦狀態</a><span class="md20-muted">繁體中文</span></span></div></header>
 <div class="wrap">
-<div class="md20-running row" style="padding:10px 16px;margin:16px 0;border-radius:8px"><span class="md20-pulse"></span><span class="text-sm" style="margin-left:8px">計算進行中：trypsin_demo · 傘狀採樣 window 7/12</span></div>
+<div class="md20-running row" style="padding:10px 16px;margin:16px 0;border-radius:8px"><span class="md20-pulse"></span><span class="text-sm" style="margin-left:8px">計算進行中：hsieh2024_rela_1vkx · 傘狀採樣 window 7/12</span></div>
 <h1 class="text-2xl" style="margin:.4em 0 .1em">MD20 分子模擬工作站</h1>
 <p class="md20-muted">從分子對接、分子動力學一路做到結合自由能。每一步都會先檢查輸入；程式自動修正的地方會說明改了什麼，需要你判斷的地方流程會停下來並列出可選的做法。</p>
 <h2 class="md20-section">選擇工作模式</h2>

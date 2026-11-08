@@ -1,6 +1,13 @@
 """Report template (D-59): one demo workflow with synthetic data for EVERY figure kind, rendered in English and
 Traditional Chinese.  The numbers are invented to exercise layout and wording; they are not a simulation result.
 
+D-155: this template deliberately uses a trypsin / benzamidine (BEN) co-crystal system, NOT the teaching case.
+It is a *figure-coverage self-check*, not a demo of the project: the `pose_rmsd` figure (score vs RMSD to the
+co-crystal pose) requires a known experimental binding pose, which the teaching case — six djulis metabolites on
+NF-κB p65 (no co-crystal) — structurally cannot provide.  The user-facing demos (GUI preview, theme preview) use
+the real teaching case instead; see DECISIONS D-155.  The rendered HTML is labelled "synthetic demo data" and
+named `trypsin_benzamidine`, so it is not mistaken for a teaching result.
+
 Usage: python tools/report_template.py OUT_DIR      (CI job `report-template` runs it with RDKit installed, so the
 compound and 2D-interaction figures appear too)
 """

@@ -5,7 +5,6 @@ starts `md20 gui`, and screenshots every page with Playwright/Chromium.  Usage: 
 """
 from __future__ import annotations
 
-import copy
 import os
 import socket
 import subprocess
@@ -24,26 +23,33 @@ def _free_port() -> int:
 
 
 def build_demo(root: Path) -> tuple[str, str]:
+    # D-155：示範一律用真實教學案例一（發酵臺灣藜芽的六個代謝物同時對接 NF-κB p65，1VKX），不再用遺留的
+    # trypsin / benzamidine（BEN）假資料——那個系統在整個教學專案裡從未出現，只會造成理解錯誤。
     from test_gui_views import _mini_pdb
     from md20.project.store import Project
     from md20.util.jsonio import atomic_write_json
-    from md20.workflow import Workflow, WorkflowBlocked, example_config
-    cfg = copy.deepcopy(example_config()); cfg["name"] = "trypsin_demo"
-    proj = Project.create(root, "教學示範")
+    from md20.gui.content import teaching_config
+    from md20.workflow import Workflow, WorkflowBlocked
+    cfg = teaching_config("hsieh2024")              # name=hsieh2024_rela_1vkx；1VKX（排除 κB DNA 鏈 C、D）；六個代謝物 simultaneous 對接
+    metabolites = ["PGA", "GLC", "URI", "MAL", "ALC", "PAN"]   # L-焦麩胺酸…等六個 LC-MS/MS 代謝物
+    proj = Project.create(root, "教學示範：藜芽代謝物與 NF-κB p65")
     wf = Workflow(proj, cfg)
-    case = proj.new_case("demo_docked_BEN")
+    case = proj.new_case("docked_multi")
     case.build_dir.mkdir(parents=True, exist_ok=True)
     top = case.build_dir / "topology.pdb"; top.write_text(_mini_pdb(), encoding="utf-8")
     atomic_write_json({"topology_pdb": str(top), "system_xml": "s",
-                       "assembly": {"ligands": [{"name": "L01", "atom_indices": [50, 51, 52, 53], "heavy_atom_indices": [50, 51, 52]}],
-                                    "gates": {"gates": [{"name": "metal ZN:C1", "status": "AUTO_FIXED", "explanation": "bonded"}]}}},
+                       "assembly": {"ligands": [{"name": "PGA", "atom_indices": [50, 51, 52, 53], "heavy_atom_indices": [50, 51, 52]}],
+                                    "gates": {"gates": [{"name": "simultaneous pose clash", "status": "AUTO_FIXED",
+                                                         "explanation": "六個配體放入 p65 同一搜尋框，彼此 3.3–4.5 Å，無重疊或穿環"}]}}},
                       case.build_dir / "build_manifest.json")
-    wf.dec.record("workflow.pose", "BEN", "rank 1", "第 1 名 pose（-6.11 kcal/mol）；與晶體 RMSD 0.38 Å。")
-    wf._mark("md_cases", cases={"docked_BEN": {"case_id": case.case_id, "mode": "docked_single", "ligands": ["BEN"]}})
+    wf.dec.record("workflow.pose", "docked_multi", "simultaneous",
+                  "六個代謝物同時對接 p65 同一搜尋框；總結合能 −13.86 kcal/mol、24 個氫鍵（課堂 exhaustiveness 8）。")
+    wf._mark("md_cases", cases={"docked_multi": {"case_id": case.case_id, "mode": "docked_multi", "ligands": metabolites}})
     try:
-        wf._block("structure_gate", "結構可信度：resolution", gates=[{
-            "name": "resolution", "status": "NEEDS_HUMAN", "explanation": "解析度 3.4 Å（教學示範：故意擋下）",
-            "options": ["換一個更高解析度的結構", "仍要使用（structure_override.resolution）"]}])
+        wf._block("structure_gate", "結構可信度：非蛋白分子", gates=[{
+            "name": "non-protein molecules", "status": "NEEDS_HUMAN",
+            "explanation": "1VKX（p50/p65＋κB DNA，2.9 Å）含 DNA 鏈 C、D；論文移除非蛋白分子（教學示範：在此停下讓人確認）",
+            "options": ["排除 DNA 鏈 C、D（依論文）", "保留 DNA 鏈（structure_override）"]}])
     except WorkflowBlocked:
         pass
     return proj.dir.name, wf.name
@@ -284,15 +290,19 @@ def _demo_membrane_scene(stage: str) -> dict:
 
 
 def build_e2e(root: Path) -> tuple[str, str]:
-    """A finished all-ligands workflow (hsieh2024-like): MD complete, PGA pulled once, report written."""
+    """A finished all-ligands workflow (hsieh2024): MD complete, PGA pulled once from the six-metabolite pocket,
+    report written.  D-155: real teaching case (1VKX + djulis metabolites), not the retired trypsin/benzamidine
+    demo.  Three of the six metabolites drive the e2e click-path (binding panel, add one, one more run)."""
     from md20.project.store import Project
     from md20.util.jsonio import atomic_write_json
-    from md20.workflow import Workflow, example_config
-    cfg = copy.deepcopy(example_config()); cfg["name"] = "multi_demo"
-    cfg["ligands"] = [{"name": n, "smiles": "CCO"} for n in ("PGA", "CAR", "GLU")]
-    cfg["md"]["systems"] = ["apo", "docked_multi"]
+    from md20.gui.content import teaching_config
+    from md20.workflow import Workflow
+    cfg = teaching_config("hsieh2024"); cfg["name"] = "hsieh2024_e2e"   # 受體 1VKX、六個代謝物、simultaneous 對接
+    cfg["ligands"] = [{"name": "PGA", "smiles": "[O-]C(=O)[C@@H]1CCC(=O)N1"},                 # L-焦麩胺酸
+                      {"name": "GLC", "smiles": "OC[C@@H](O)[C@@H](O)[C@H](O)[C@@H](O)C([O-])=O"},  # 葡萄糖酸
+                      {"name": "URI", "smiles": "OC[C@H]1O[C@@H](N2C=CC(=O)NC2=O)[C@H](O)[C@@H]1O"}]   # 尿苷
     cfg["binding"] = {"enabled": True, "ligands": ["PGA"], "multi": True, "config": {}}
-    proj = Project.create(root, "multi")
+    proj = Project.create(root, "教學示範（完成）：藜芽代謝物與 NF-κB p65")
     wf = Workflow(proj, cfg)
     case = proj.new_case("docked_multi")             # D-94: a built case with a small topology, for the 3D tab
     lines, i = [], 0
@@ -310,10 +320,10 @@ def build_e2e(root: Path) -> tuple[str, str]:
                       case.build_dir / "build_manifest.json")
     st = wf.state()
     st["steps"]["md_cases"] = {"status": "PASS", "cases": {"docked_multi": {"case_id": case.case_id, "mode": "docked_multi",
-                                                                            "ligands": ["PGA", "CAR", "GLU"]}}}
+                                                                            "ligands": ["PGA", "GLC", "URI"]}}}
     st["steps"]["md_runs"] = {"status": "PASS", "runs": {"docked_multi": {"status": "COMPLETE", "case_id": case.case_id, "run_ids": []}}}
     st["steps"]["binding"] = {"status": "PASS", "results": {"multi:PGA": {
-        "status": "PASS", "ligand": "PGA", "context": "multi:docked_multi", "co_ligands": ["CAR", "GLU"], "replicas": 1,
+        "status": "PASS", "ligand": "PGA", "context": "multi:docked_multi", "co_ligands": ["GLC", "URI"], "replicas": 1,
         "delta_pmf_kj_mol": 18.0, "delta_pmf_err_kj_mol": 1.5, "dG_standard_kj_mol": -9.5, "dG_err_kj_mol": 1.6,
         "dG_standard_kcal_mol": -2.27, "dG_withheld": None, "per_replica": [], "caveats": [], "figures": {}}}}
     atomic_write_json(st, wf.state_path)
@@ -365,18 +375,18 @@ def e2e(out: Path) -> int:
             pg.get_by_test_id("binding-panel").locator(".q-expansion-item__container > .q-item").first.click()
             pg.wait_for_timeout(1500)
             panel = pg.get_by_test_id("binding-panel")
-            for tk in ("multi:PGA", "multi:CAR", "multi:GLU"):
+            for tk in ("multi:PGA", "multi:GLC", "multi:URI"):
                 check(panel.locator("tr", has_text=tk).count() == 1, f"binding panel lists {tk}")
             pg.screenshot(path=str(out / "e2e_binding_panel.png"), full_page=True)
-            panel.locator("tr", has_text="multi:CAR").locator(".q-checkbox").first.click()
+            panel.locator("tr", has_text="multi:GLC").locator(".q-checkbox").first.click()
             pg.get_by_test_id("binding-add").click()
             pg.wait_for_timeout(4000)
-            check("multi:CAR" in (cfg().get("binding") or {}).get("added", []), "Compute the selected ligands writes binding.added")
+            check("multi:GLC" in (cfg().get("binding") or {}).get("added", []), "Compute the selected ligands writes binding.added")
             st = json.loads((wf_dir / "state.json").read_text(encoding="utf-8"))
             check((st["steps"].get("binding") or {}).get("results", {}).get("multi:PGA", {}).get("status") == "PASS",
                   "the finished PGA result is kept")
             pg.wait_for_timeout(3000)                   # let the 2 s stand-in run end before the next button
-            panel.locator("tr", has_text="multi:CAR").locator(".q-checkbox").first.click()
+            panel.locator("tr", has_text="multi:GLC").locator(".q-checkbox").first.click()
             panel.locator("tr", has_text="multi:PGA").locator(".q-checkbox").first.click()
             pg.get_by_test_id("binding-more").click()
             pg.wait_for_timeout(4000)
