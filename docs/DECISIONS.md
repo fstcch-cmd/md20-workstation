@@ -38,6 +38,33 @@
 - **證據**：`tests/test_replica_observables.py`（31 項）：Welch CI 與 scipy 一致；發散的重複使區間變寬並翻轉「不同」的判定；每邊 1 條 → unavailable、不給區間；位點配對與未重現；DSSP／DCCM／分群彙總；無共同基底 → `not_comparable`；tICA 不合併；膜指標；n = 1 與缺欄位 → unavailable 加原因；報告列出每條重複的驗收與四語；膜-only 清單有指紋、可重用、舊清單重算且不呼叫 MD、膜計畫改變即重算。全套 pytest 見 commit。
 - **未決**：(1) 位點配對是貪婪法，緊鄰位點可能錯配；各重複的疊合參考不同，座標一致需各條同姿勢起步，待真實資料驗證 0.2 nm。(2) 單一系統的多條重複沒有可比的低谷佔比（需要共同基底）；是否為單一系統建立重複共同基底，待使用者決定。(3) BASIN_RANGE_INCONSISTENT = 0.25、DCCM 強相關 0.5／重複下限 0.3 是經驗起始值，要依系統驗證。(4) DCCM 平均矩陣沒有出圖。(5) ΔRMSF 多重比較校正方式。(6) 真實 mdtraj／OpenMM 路徑只由 CI 驗證。
 - **相關檔案**：`md20/analysis/replica_set.py`、`md20/analysis/membrane_run.py`（`out_dir`、`membrane_fingerprint_extra`、`membrane_only_analysis(fingerprint=)`）、`md20/workflow.py`（`analyse`、`_replica_cross_system`、`_analyse_one_run`、`_reuse_analysis_manifest`）、`md20/report/replica_section.py`、`md20/report/workflow_report.py`（`_md`、`_acceptance_html`、`_equil_figures`、CSS `details.fold`）、`tests/test_replica_observables.py`、`tests/test_membrane_workflow.py`（替身簽名）、`docs/specs/replicas.md`（§2、§7、§8）。
+### D-141　金屬配位水的質子化選項（OH⁻）：只在有擬合參數時提供，永不自動決定，不憑空設定電荷
+- **背景**：D-133／D-139 把晶體第一配位殼的水以中性 TIP3P 鍵結到 `bonded` 位點。CA II 鋅水 pKa ≈ 7，可能是 H₂O 也可能是 OH⁻；D-133 未決 (1) 是否做 OH⁻ 選項需使用者決定，D-133 未決 (2) QM 小模型輸入不含水。
+  擁有者 2026-11-08 授權加入 OH⁻ 選項，條件是以證據為基礎、不得發明參數。
+- **決定**：
+  - 新設定 `metal_water_state`（`{位點鍵或元素: "water" | "hydroxide"}`，位點優先，預設 `water` ＝ D-133／D-139 現況）；列入 `workflow.DECISION_KEYS`。**X 光看不到質子，程式不自動決定**：沒指定就是水；`metal_params` 帶了氫氧根區塊卻沒指定狀態是衝突（NEEDS_HUMAN），不是決定。
+  - 選 `hydroxide` 時，電荷與 M–O 鍵**必須來自擬合參數**：`metal_params` 新增選用的 `site_water` 區塊（`state`、`charges{O,H}`、選填 `metal_charge`、`bond`、D–M–O `angles`、選填 `angle_MOH`；mcpb 用 `residue` 指向 MCPB mol2 的 OH 殘基）。
+    驗證（純函式）：state 必須是 hydroxide；缺 H 或多一個 H 都擋；列出的電荷總和須為整數，只列 O、H 時須為 −1（總和 0 是水），加金屬電荷時須為氧化態 − 1；M–O 的 r0 與 k 走既有範圍檢查。
+    hessian 來源把水 O 當第四個配位原子一起擬合（M–O 的 k 與 r0 來自 QM cluster），mcpb 查 frcmod（`M-oh`、`D-M-oh`、選填 `ho-oh-M`）。
+  - 沒有參數 → NEEDS_HUMAN 閘門 `metal water state <位點>`（四語），選項：(1) `metal_water_state: {…: water}` 一鍵維持中性水、(2) 產生含 OH⁻ 的 QM 小模型輸入、(3) 在 `metal_params` 提供 `site_water`。(2)(3) 是程式外的工作，不做假按鈕。閘門出現前程式已把含 OH⁻ 的 QM 輸入寫到 `metal_qm/<位點>_hydroxide/`。
+    其他擋關：policy 不是 `bonded`（`bonded_open` 沒有水、`keep_nonbonded` 沒有鍵）、第一殼沒有水（不憑空放氧）、第一殼有多個水（不猜哪個是氫氧根）。
+  - **拓樸**（只在有參數時）：水 O 加回並加氫後，刪掉朝金屬的那個氫（M–O–H 角較小者；`choose_hydroxide_h`），殘基改名 `OHM`、氫 `H1`；`createSystem` 之前用純函式 `hydroxide_template_xml` 產生只含 `<Residues>` 的樣板並 `ForceField.loadFile`（也寫成 `hydroxide_template.xml` 供審查）。
+    電荷用擬合值；原子型態用 Amber ff14SB 羥基 `protein-OH`／`protein-HO`（與 GAFF `oh`/`ho` 相同）——**LJ 與 O–H 鍵長是沿用、不是擬合**，明講為假設，缺型態時擋下。Zn–O 鍵用擬合值；Zn–H 1-3 排除；**沒有 M–O–H 角**，除非參數給了 `angle_MOH`。
+  - D-133「擬合參數不加水」改為：有 `site_water` 區塊且狀態為 hydroxide 才加回並以擬合參數鍵結；沒有區塊行為不變（`site_waters_to_add`、`plan_site`）。
+  - `write_qm_cluster(…, waters=…)`：把配位水放進 QM cluster，H₂O（電荷 0）或 OH⁻（電荷 −1 加進總電荷；`qm_charge` 仍是金屬氧化態）。幾何鍵結位點的 cluster 現在也含水（否則 QM 會把四面體位點最佳化成三配位，擬出的力常數對不上 MD 模型）。回傳多一個 `waters` 欄位，`residues` 不變。
+- **理由**：(1) 質子不可見，自動選一種等於猜；(2) OH⁻ 結合金屬的電荷分布（O 的電荷被金屬極化）不是 amber 樣板裡任何現成殘基的值，用 Ser 的羥基電荷或形式電荷 −1/0 都是發明參數；(3) 現有 `metal_params` 路徑（hessian、MCPB、JSON）本來就是為了接收擬合結果，擴充它最不改變架構；
+  (4) 沿用既有的整數電荷檢查邏輯（`add_metal_forces` 的群組檢查），不另立一套。
+- **被否決**：自動依 pKa 或鄰近殘基判斷質子化（沒有證據）；用形式電荷（O −1、H 0）或 Ser/Tyr 羥基電荷當預設（發明參數）；為 OH⁻ 發明 M–O–H 角（H 的位置任意）；把氫氧根做成「帶 −1 的單原子 O」（拿掉氫是另一個模型，且 `protein-OH` 的氫沒了）；
+  讓區塊存在就自動切換成 OH⁻（把「提供參數」當成「決定質子化」，違反不自動決定）；在 `bonded_open`／`keep_nonbonded` 下默默忽略要求。
+- **證據／測試**：`tests/test_metal_hydroxide.py`（31 項，純邏輯）：設定解析與優先序、決定矩陣、沒有參數的閘門與一鍵動作、四語標題與選項、policy／水數量擋關、`site_water` 區塊各種錯誤（缺 H、多 H、淨電荷不整數、總和 0、金屬電荷不一致、k 與 r0 超出範圍）、
+  fitted 水鍵與 6 個角、樣板 XML 內容（只有 `<Residues>`、型態與電荷、O–H 鍵）、M–O–H 角、hessian 路徑還原已知 M–O 力常數（合成 Hessian）、MCPB 路徑（合成 mol2／frcmod）、QM cluster 含 H₂O／OH⁻ 的電荷與多重度行。
+  `tests/test_metal_integration.py` 新增兩個需要 OpenMM 的測試（`MD20_HEAVY=1` 才跑）：帶參數時 OHM 殘基、電荷、4 個鍵、系統中性；無參數時停在閘門並寫出 `* xyz 1 1` 的 QM 輸入。**這兩個測試尚未在真實 OpenMM 上跑過**，用的電荷是測試值。
+- **未驗證**：Modeller 刪氫與改名、`loadFile` 載入純 `<Residues>` 樣板、`protein-OH`／`protein-HO` 名稱（寫自 amber14 protein.ff14SB.xml 的記憶，缺型態時程式會擋而不是猜）、System 建構、氫氧根在 NVT 中的穩定性；mcpb 轉譯沒有真實 MCPB.py 輸出。
+- **未決**：(1) 氫氧根 LJ 沿用羥基型態是否合適（Zn–OH⁻ 的 12-6 或 12-6-4 參數屬於擬合工作）；(2) 氫氧根的 M–O–H 角是否應該有（需要 QM 證據）；(3) 分析與報告尚未把 OHM 與位點水一起處理（目前當作一般小分子殘基，且 mdtraj 影像化時不在錨點內）；
+  (4) 從 topology.pdb 另外重建 System 的程式（若有）需要同一份樣板；目前所有建模都經過 `assemble_system`，所以樣板每次重新註冊。
+- **相關檔案**：`md20/build/metal.py`（`water_state_for`、`decide_water_mode`、`hydroxide_template_xml`、`choose_hydroxide_h`、`convert_waters_to_hydroxide`、`register_hydroxide_template`、`plan_site`、`site_waters_to_add`、`apply_metal_policy`、`bonded_metal_terms`、`add_metal_forces`）、
+  `md20/build/metal_params.py`（`site_water_block`、`check_site_water_block`、`site_water_charge_problems`、`_apply_site_water`、`_from_json`／`_from_mcpb`、`write_qm_cluster`）、`md20/build/assemble.py`、`md20/build/pipeline.py`（`metal_water_state` 轉傳）、
+  `md20/workflow.py`（`DECISION_KEYS` 與 build_case 一個參數）、`md20/gui/actions.py`、`md20/gui/gate_text.py`、`tests/test_metal_hydroxide.py`、`tests/test_metal_integration.py`、`docs/specs/metal_sites.md` §4e。
 
 ### D-139　c014e8b CI 紅燈分析與修正：鋅第二個弱配位水、授權測試真的跑 CG、Windows 換行與路徑、pose-screen 斷言自相矛盾
 - **CI**：run 42389077410（`c014e8b`），以及上一輪 42385841086（`58d81bc`，本 session 改動之前）。逐 job 讀日誌（單次查詢）。
@@ -79,6 +106,7 @@
 - **被否決**：放寬門檻或丟掉前段幀（違反使用者指示）；在開放位點加虛擬排斥牆（非物理、不可解釋）；把水留在 `receptor_clean.pdb`（影響對接）；自動判斷 H₂O 或 OH⁻（X 光看不到氫，不猜）。
 - **證據／測試**：`tests/test_metal_site_water.py`（7 項：鍵結第四配位、`bonded_open`、蛋白配位數閘門、擬合參數不加水、水無 M–O–H 角但 1-3 排除、配體佔位閘門、側檔只選保留金屬上的水並忽略第二 altloc）；`tests/test_metal.py`、`test_metal_params.py`、`test_gate_text.py` 照過。**真實驗證待 heavy-metal CI**（容器無 OpenMM）。
 - **未決**：(1) 鋅水以中性 TIP3P 表示；CA II 鋅水 pKa ≈ 7，OH⁻ 模型（淨電荷 +1）未提供，報告標註——要不要做 OH⁻ 選項是科學模型決定，需使用者。(2) QM 小模型輸入仍只含蛋白配位殘基（不含水）。(3) 若 heavy-metal 仍紅，下一步看 Zn LJ（H3），不放寬門檻。
+  **後續（2026-11-08，D-141）**：使用者已授權 OH⁻ 選項，(1)(2) 的處理見 D-141 與 `docs/specs/metal_sites.md` §4e；原文不改。
 - **相關檔案**：`md20/build/receptor.py`（`metal_site_water_lines`、側檔）、`md20/build/metal.py`（`BONDED_POLICIES`、`site_waters_to_add`、`read_site_waters`、`site_water_ligand_gate`、`plan_site`、`bonded_metal_terms`、`apply_metal_policy`）、`md20/build/assemble.py`、`md20/build/pipeline.py`、`md20/advisor.py`、`md20/gui/actions.py`、`md20/gui/gate_text.py`、`tests/test_metal_site_water.py`、`tests/test_metal_integration.py`、`docs/specs/metal_sites.md` §1、§4d。
 
 ### D-130（重做）重複分析彙總：每一條獨立重複都分析，跨重複 mean／SD／t 區間、k／n，單一軌跡不給不確定性

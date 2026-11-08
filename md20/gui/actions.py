@@ -24,6 +24,7 @@ STEP_ORDER = ["structure_gate", "receptor_docking", "screen_library", "screen_do
 STRUCTURE_OVERRIDE = {"resolution": "resolution", "R-free": "r_free", "ligand occupancy": "ligand_occupancy",
                       "pocket occupancy": "pocket"}
 _METAL_OPT = re.compile(r"metal_policy:\s*\{\s*([A-Za-z0-9:]+)\s*:\s*(bonded_open|bonded|keep_nonbonded|remove)\s*\}")
+_WATER_STATE_OPT = re.compile(r"metal_water_state:\s*\{\s*([A-Za-z0-9:]+)\s*:\s*(water|hydroxide)\s*\}")
 _LOCATIONS = {"intracellular": "intracellular", "extracellular-membrane": "extracellular-membrane", "secreted": "secreted"}
 
 
@@ -67,6 +68,13 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
     m = _METAL_OPT.search(option)
     if m:
         return _act(option, [{"path": ["metal_policy", m.group(1)], "value": m.group(2)}], step)
+    # D-141 metal-bound water state: keep the neutral water (one click), confirm the hydroxide, or fall back on `bonded`.
+    # The QM-input / provide-parameters options are work outside the program, so they stay hints.
+    if name.startswith("metal water state "):
+        m = _WATER_STATE_OPT.search(option)
+        if m:
+            return _act(option, [{"path": ["metal_water_state", m.group(1)], "value": m.group(2)}], "md_cases")
+        return None            # "metal_policy: {…: bonded}" is handled by the generic metal_policy rule above
     # imported charges refused at build time: keep the fitted bonds/angles, drop the charges for that site
     if name.startswith("metal charges ") and gate.get("status") == "NEEDS_HUMAN":
         key = name.split(" ", 2)[2]

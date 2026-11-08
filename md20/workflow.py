@@ -181,7 +181,7 @@ def example_config(screen: bool = False) -> dict:
 # keys that hold *human decisions* written back by gates/GUI (never re-derivable); re-running `pipeline run` from
 # the student's original file must not silently discard them
 DECISION_KEYS: tuple[tuple[str, ...], ...] = (
-    ("pose_choices",), ("human_choices",), ("structure_override",), ("metal_policy",), ("metal_params",), ("peptide_policy",),
+    ("pose_choices",), ("human_choices",), ("structure_override",), ("metal_policy",), ("metal_params",), ("metal_water_state",), ("peptide_policy",),
     ("docking", "skip_redock"), ("box", "allow_blind"), ("binding", "manual_windows"),
     ("screen", "select"), ("screen", "next_mode"), ("screen", "allow_partial"), ("md_confirmed",), ("ligand_metal",),
     ("multi_ligand",), ("md", "long_run_confirmed"), ("md", "long_run"),
@@ -1369,6 +1369,7 @@ class Workflow:
                        extra_ligand_resnames=drop, peptides=peps or None, ligand_names=small,
                        exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])),
                        metal_policy=self.cfg.get("metal_policy") or None,
+                       metal_water_state=self.cfg.get("metal_water_state") or None,
                        peptide_policy=self.cfg.get("peptide_policy") or None,
                        metal_params=self._metal_params(), solvent=self._solvent(screen),
                        box_shape=self.cfg.get("md", {}).get("box_shape", "dodecahedron"),

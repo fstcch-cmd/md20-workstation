@@ -19,6 +19,15 @@ Everything is checked before use (寧可擋也不要猜): every protein donor mu
 near the crystal distance, force constants must be physical, imported charges must sum to the same integer
 as the force field's.  Anything else → NEEDS_HUMAN with the reason.
 
+D-141 `site_water` block (optional, any source; json: inside the file/data, hessian/mcpb: next to `source`):
+the metal-bound water as a *hydroxide* (OH-) with fitted parameters — never invented by the program:
+    {"state": "hydroxide", "charges": {"O": q, "H": q}, "metal_charge": q (optional),
+     "bond": {"k_kcal_A2": k, "r0_A": r (optional)} (json; hessian takes it from the QM cluster),
+     "angles": {...} (json: D–M–O angles like the global `angles`), "angle_MOH": {"k_kcal_rad2", "theta0_deg"} (optional),
+     "residue": "OH1", "O_atom": "O", "H_atom": "H" (mcpb: the OH residue of the MCPB mol2)}
+The net charge of the listed charges is checked (OH- alone = −1; with metal/residue charges the group must be an
+integer and, at build time, equal the force field's).  Without the block a hydroxide request stops at a gate.
+
 Conventions: internal k is OpenMM's, E = ½ k (r − r0)², kJ/mol/nm² (angles kJ/mol/rad²).  Amber frcmod uses
 E = K (r − r0)², so k = 2·K.  The Hessian-derived k is already in the ½-k convention.
 """
@@ -272,6 +281,129 @@ def mcpb_residue_map(pdb_text: str) -> dict:
     return out
 
 
+# ============================================================================================== site_water
+SITE_WATER_KEYS = {"state", "charges", "metal_charge", "bond", "angles", "angle_MOH", "residue", "O_atom", "H_atom"}
+
+
+def site_water_block(spec: dict | None) -> tuple[dict | None, str | None]:
+    """D-141 (pure): the `site_water` block of a metal_params spec → (block | None, error | None).  Looked up in the
+    spec itself, then (source json) in the file/data.  A file that cannot be read is not reported here (the final
+    resolution reports it); a block that is not an object is."""
+    if not spec:
+        return None, None
+    blk = spec.get("site_water")
+    if blk is None and spec.get("source") == "json":
+        import json
+        try:
+            data = json.loads(Path(spec["file"]).read_text(encoding="utf-8")) if spec.get("file") else spec.get("data") or {}
+        except (OSError, ValueError, TypeError, KeyError):
+            return None, None
+        blk = data.get("site_water") if isinstance(data, dict) else None
+    if blk is None:
+        return None, None
+    if not isinstance(blk, dict):
+        return None, "site_water 必須是物件（state、charges、bond …）"
+    return blk, None
+
+
+def _num(v) -> float | None:
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return x if math.isfinite(x) else None
+
+
+def check_site_water_block(block: dict, *, charges_required: bool = True) -> list[str]:
+    """D-141 (pure): structure of a `site_water` block → list of problems (empty = fine)."""
+    problems = []
+    unknown = sorted(set(block) - SITE_WATER_KEYS)
+    if unknown:
+        problems.append(f"site_water 有不認得的欄位 {unknown}（可用：{sorted(SITE_WATER_KEYS)}）")
+    if str(block.get("state", "")).lower() != "hydroxide":
+        problems.append(f"site_water.state 必須是 hydroxide（目前：{block.get('state')!r}）")
+    ch = block.get("charges")
+    if ch is None:
+        if charges_required:
+            problems.append("site_water.charges 缺少（需要氫氧根 O 與 H 的電荷，程式不提供預設值）")
+    elif not isinstance(ch, dict):
+        problems.append("site_water.charges 必須是 {\"O\": q, \"H\": q}")
+    else:
+        for el in ("O", "H"):
+            if el not in ch:
+                problems.append(f"site_water.charges 缺少 {el}（氫氧根需要 O 與 H 兩個電荷）")
+            elif _num(ch[el]) is None or abs(_num(ch[el])) > 3.0:
+                problems.append(f"site_water.charges.{el} 不是合理的數值（{ch[el]!r}）")
+        extra = sorted(set(ch) - {"O", "H"})
+        if extra:
+            problems.append(f"site_water.charges 有多餘的原子 {extra}（氫氧根只有 O 與 H；兩個 H 代表這是水不是氫氧根）")
+    if block.get("metal_charge") is not None and _num(block["metal_charge"]) is None:
+        problems.append(f"site_water.metal_charge 不是數值（{block['metal_charge']!r}）")
+    b = block.get("bond")
+    if b is not None and (not isinstance(b, dict) or _num(b.get("k_kcal_A2")) is None):
+        problems.append("site_water.bond 需要 k_kcal_A2（r0_A 省略時用晶體距離）")
+    moh = block.get("angle_MOH")
+    if moh is not None and (not isinstance(moh, dict) or _num(moh.get("k_kcal_rad2")) is None or _num(moh.get("theta0_deg")) is None):
+        problems.append("site_water.angle_MOH 需要 k_kcal_rad2 與 theta0_deg（氫的位置是任意的，不用晶體角）")
+    return problems
+
+
+def site_water_charge_problems(q_o: float, q_h: float, *, metal_charge: float | None, other_charges: list[float],
+                               metal_element: str) -> list[str]:
+    """D-141 (pure): net-charge consistency of the fitted hydroxide.  The listed charges (O, H, metal if given, other
+    imported residue charges) must sum to an integer.  When nothing else is listed they must equal what the formal
+    charges say: −1 for OH- alone, (oxidation state − 1) with the metal charge — a pair that sums to 0 is a water, not
+    a hydroxide.  With residue charges listed the integer is compared with the force field at build time."""
+    total = q_o + q_h + (metal_charge or 0.0) + sum(other_charges)
+    if abs(total - round(total)) > 0.02:
+        return [f"氫氧根與已列出的電荷總和 {total:+.3f} 不是整數（位點淨電荷不一致）"]
+    if other_charges:
+        return []
+    if metal_charge is None:
+        expected = -1
+    elif metal_element.upper() in CLOSED_SHELL:
+        expected = CLOSED_SHELL[metal_element.upper()][0] - 1
+    else:
+        return []
+    if round(total) != expected:
+        what = "氫氧根 O＋H" if metal_charge is None else f"金屬＋氫氧根"
+        return [f"{what}電荷總和 {total:+.3f}，但氫氧根的形式電荷要求 {expected:+d}（OH⁻ 淨電荷 −1）"]
+    return []
+
+
+def _apply_site_water(out: dict, site: dict) -> dict:
+    """D-141: merge the `site_water` block into a resolved site (charges, optional M–O–H angle) and return it, or a
+    NEEDS_HUMAN result.  Bond/angle constants of the M–O pair were produced by the source like any other donor."""
+    sw = site.get("site_water")
+    if not sw or out["status"] == NEEDS_HUMAN:
+        return out
+    blk = sw["block"] or {}
+    o, h = sw["o_index"], sw["h_index"]
+    if h is None:
+        return _fail(out["source"], "找不到氫氧根的氫原子 H1（拓樸編輯未完成），無法套用 site_water 參數")
+    have_src = o in out["charges"] and h in out["charges"]
+    problems = check_site_water_block(blk, charges_required=not have_src)
+    bc = blk.get("charges") or {}
+    if "O" in bc and "H" in bc and not problems:
+        out["charges"][o], out["charges"][h] = float(bc["O"]), float(bc["H"])
+    if blk.get("metal_charge") is not None and not problems:
+        out["charges"][site["metal_index"]] = float(blk["metal_charge"])
+    if not problems and (o not in out["charges"] or h not in out["charges"]):
+        problems.append("缺少氫氧根 O／H 電荷")
+    if problems:
+        return _fail(out["source"], "site_water 參數未通過檢查：" + "；".join(problems) + "。")
+    moh = out.pop("moh_angle", None)
+    if blk.get("angle_MOH"):
+        a = blk["angle_MOH"]
+        moh = {"theta0_deg": float(a["theta0_deg"]), "k_kcal_rad2": float(a["k_kcal_rad2"]),
+               "k": float(a["k_kcal_rad2"]) * KCAL_RAD2_TO_KJ_RAD2}
+    out["site_water"] = {"state": "hydroxide", "o_index": o, "h_index": h, "q_O": out["charges"][o], "q_H": out["charges"][h],
+                         "metal_charge": out["charges"].get(site["metal_index"]) if blk.get("metal_charge") is not None else None,
+                         "moh_angle": moh}
+    out["why"] += " 配位水依 site_water 為氫氧根（OH⁻），O／H 電荷與 M–O 鍵／角由擬合參數給定。"
+    return out
+
+
 # ======================================================================================= resolution per site
 def _bond_label(d: dict) -> str:
     return f"{d['resname']}{d['resseq']}:{d['name']}"
@@ -296,6 +428,7 @@ def resolve_site_params(site: dict, spec: dict, xyz_of: dict, *, ff_charges: dic
             out = _from_json(site, spec, xyz_of, residue_atoms or {})
         else:
             return _fail(src, f"metal_params.{site['key']}.source 必須是 hessian / mcpb / json（目前：{src}）")
+        out = _apply_site_water(out, site)
     except (ValueError, KeyError, OSError) as exc:
         return _fail(src, f"讀取擬合參數失敗：{exc}")
     if out["status"] == NEEDS_HUMAN:
@@ -361,8 +494,22 @@ def _from_mcpb(site, spec, xyz_of, residue_atoms) -> dict:
     mres, mt = typed(re.sub(r"^\D*", "", site["key"].split(":")[1]), metal_name, None)
     bonds, angles, charges = {}, {}, {}
     donor_types = {}
+    swb = (site.get("site_water") or {}).get("block") or {}
+    water_names = None                       # D-141: (mol2, O atom name, H atom name) of the MCPB hydroxide residue
     for d in site["donors"]:
-        m, t = typed(d["resseq"], d["name"], None)
+        if d.get("is_site_water"):
+            rn = swb.get("residue")
+            wm_ = by_res.get(rn) if rn else None
+            if wm_ is None:
+                raise ValueError("source mcpb 的氫氧根需要 site_water.residue＝MCPB 輸出中 OH 殘基的 mol2 殘基名稱（例如 OH1）")
+            on = swb.get("O_atom") or next((n for n in wm_["atoms"] if n.upper().startswith("O")), None)
+            hn = swb.get("H_atom") or next((n for n in wm_["atoms"] if n.upper().startswith("H")), None)
+            if on not in wm_["atoms"] or hn not in wm_["atoms"] or len(wm_["atoms"]) != 2:
+                raise ValueError(f"mol2 殘基 {rn} 應恰有 O 與 H 兩個原子（氫氧根），目前：{sorted(wm_['atoms'])}")
+            water_names = (wm_, on, hn)
+            m, t = wm_, wm_["atoms"][on]["type"]
+        else:
+            m, t = typed(d["resseq"], d["name"], None)
         donor_types[d["index"]] = (m, t)
         if (mt, t) not in frc["bonds"]:
             raise ValueError(f"frcmod 沒有鍵 {mt}-{t}（{_bond_label(d)}）")
@@ -383,6 +530,8 @@ def _from_mcpb(site, spec, xyz_of, residue_atoms) -> dict:
         if mq is not None:
             charges[site["metal_index"]] = mq
         for d in ds:
+            if d.get("is_site_water"):
+                continue
             m = donor_types[d["index"]][0]
             rid = f"{d['chain']}:{d['resseq']}"
             names = residue_atoms.get(rid) or {}
@@ -394,7 +543,19 @@ def _from_mcpb(site, spec, xyz_of, residue_atoms) -> dict:
             for n, idx in names.items():
                 if m["atoms"][n]["charge"] is not None:
                     charges[idx] = m["atoms"][n]["charge"]
+    moh = None
+    if water_names is not None:
+        wm_, on, hn = water_names
+        sw = site["site_water"]
+        if spec.get("charges", True):
+            for n, idx in ((on, sw["o_index"]), (hn, sw["h_index"])):
+                if wm_["atoms"][n]["charge"] is not None and idx is not None:
+                    charges[idx] = wm_["atoms"][n]["charge"]
+        rec = frc["angles"].get((wm_["atoms"][hn]["type"], wm_["atoms"][on]["type"], mt))
+        if rec is not None:
+            moh = {"theta0_deg": rec[1], "k_kcal_rad2": 2 * rec[0], "k": 2 * rec[0] * KCAL_RAD2_TO_KJ_RAD2}
     return {"status": AUTO_FIXED, "source": "mcpb", "bonds": bonds, "angles": angles, "charges": charges,
+            **({"moh_angle": moh} if moh else {}),
             "why": f"由 MCPB.py 輸出轉譯（{Path(spec['frcmod']).name}，{len(mols)} 個 mol2）：鍵／角依原子型態查表"
                    + ("，RESP 電荷套用到金屬與配位殘基" if charges else "，電荷沿用力場") + "。",
             "caveats": ["MCPB.py 的二面角與 LJ 參數未轉譯（金屬 LJ 沿用力場離子模型）。"] +
@@ -407,9 +568,10 @@ def _from_json(site, spec, xyz_of, residue_atoms) -> dict:
     data = json.loads(Path(spec["file"]).read_text(encoding="utf-8")) if spec.get("file") else spec.get("data") or {}
     bonds, angles, charges = {}, {}, {}
     jb = data.get("bonds") or {}
+    swb = (site.get("site_water") or {}).get("block") or {}
     for d in site["donors"]:
         lab = _bond_label(d)
-        rec = jb.get(lab) or jb.get(d["name"]) or jb.get(d["element"])
+        rec = (swb.get("bond") if d.get("is_site_water") else None) or jb.get(lab) or jb.get(d["name"]) or jb.get(d["element"])
         if not rec:
             raise ValueError(f"json 缺少配位原子 {lab} 的鍵參數（可用鍵名：{lab}、{d['name']} 或元素 {d['element']}）")
         k = float(rec["k_kcal_A2"]); r0 = float(rec.get("r0_A") or d["distance_A"])
@@ -419,7 +581,8 @@ def _from_json(site, spec, xyz_of, residue_atoms) -> dict:
     for i in range(len(ds)):
         for j in range(i + 1, len(ds)):
             a, b = ds[i], ds[j]
-            rec = ja.get(f"{_bond_label(a)}|{_bond_label(b)}") or ja.get(f"{_bond_label(b)}|{_bond_label(a)}") or ja.get("default")
+            tab = {**ja, **(swb.get("angles") or {})} if (a.get("is_site_water") or b.get("is_site_water")) else ja
+            rec = tab.get(f"{_bond_label(a)}|{_bond_label(b)}") or tab.get(f"{_bond_label(b)}|{_bond_label(a)}") or tab.get("default")
             if not rec:
                 raise ValueError(f"json 缺少角 {_bond_label(a)}–金屬–{_bond_label(b)} 的參數（或 angles.default）")
             from .metal import _angle
@@ -459,6 +622,15 @@ def _validate(site, out, xyz_of, ff_charges) -> dict:
             problems.append(f"角 {_bond_label(ds[a])}–M–{_bond_label(ds[b])} θ0 {rec['theta0_deg']:.0f}° 與晶體 {cryst:.0f}° 差 > {MAX_THETA_DEV_DEG}°")
         if not K_ANGLE_RANGE[0] <= rec["k_kcal_rad2"] <= K_ANGLE_RANGE[1]:
             problems.append(f"角力常數 {rec['k_kcal_rad2']:.1f} kcal/mol/rad² 超出合理範圍 {K_ANGLE_RANGE}")
+    sw = out.get("site_water")
+    if sw:
+        others = [q for i, q in out["charges"].items() if i not in (sw["o_index"], sw["h_index"], site["metal_index"])]
+        problems += site_water_charge_problems(sw["q_O"], sw["q_H"], metal_charge=sw.get("metal_charge") if sw.get("metal_charge") is not None
+                                               else out["charges"].get(site["metal_index"]),
+                                               other_charges=others, metal_element=site["key"].split(":")[0])
+        moh = sw.get("moh_angle")
+        if moh and not (K_ANGLE_RANGE[0] <= moh["k_kcal_rad2"] <= K_ANGLE_RANGE[1] and 60.0 <= moh["theta0_deg"] <= 180.0):
+            problems.append(f"M–O–H 角參數超出合理範圍（k {moh['k_kcal_rad2']:.1f} kcal/mol/rad²，θ0 {moh['theta0_deg']:.0f}°）")
     if out["charges"] and ff_charges:
         idx = list(out["charges"])
         old = sum(ff_charges.get(i, 0.0) for i in idx); new = sum(out["charges"].values())
@@ -484,15 +656,42 @@ OPEN_SHELL_HINT = {"FE": "Fe(II) 高自旋 5、低自旋 1；Fe(III) 高自旋 6
                    "CO": "Co(II) 高自旋 4；Co(III) 低自旋 1", "NI": "Ni(II) 3（四面體）或 1（平面四方）"}
 
 
+def _water_readme(rows: list[dict]) -> str:
+    if not rows:
+        return ""
+    parts = []
+    for r in rows:
+        if r["state"] == "hydroxide":
+            parts.append(f"{r['residue']} 為氫氧根 OH⁻（電荷 −1 已加進總電荷）。X 光看不到質子，OH⁻ 或 H₂O 是你的決定"
+                         "（metal_water_state），程式沒有自動判斷（CA II 鋅水 pKa ≈ 7）")
+        else:
+            parts.append(f"{r['residue']} 為中性水 H₂O（與 MD 的 TIP3P 配位水相同位置；沒有它，QM 會把四面體位點最佳化成三配位）")
+    return "- 配位水：" + "；".join(parts) + "。\n"
+
+
+def _readme_config(key: str, rows: list[dict]) -> str:
+    if any(r["state"] == "hydroxide" for r in rows):
+        return ("   ```json\n   \"metal_water_state\": {\"" + key + "\": \"hydroxide\"},\n"
+                "   \"metal_params\": {\"" + key + "\": {\"source\": \"hessian\", \"file\": \"orca.hess\",\n"
+                "       \"site_water\": {\"state\": \"hydroxide\", \"charges\": {\"O\": <RESP 的 O 電荷>, \"H\": <RESP 的 H 電荷>}}}}\n   ```\n"
+                "   Hessian 同時給出金屬–O 鍵的力常數（氫氧根的 O 和蛋白配位原子一樣被擬合）。\n")
+    return f"   ```json\n   \"metal_params\": {{\"{key}\": {{\"source\": \"hessian\", \"file\": \"orca.hess\"}}}}\n   ```\n"
+
+
 def write_qm_cluster(atoms: list[dict], site: dict, out_dir: Path | str, *, charge: int | None = None,
-                     multiplicity: int | None = None, method: str = "B3LYP D3BJ def2-SVP") -> dict:
+                     multiplicity: int | None = None, method: str = "B3LYP D3BJ def2-SVP",
+                     waters: list[dict] | None = None) -> dict:
     """Small-model QM input for the site, MCPB.py-style: metal + the coordinating side chains cut at Cα→Cβ
     (the Cα becomes a capping H at 1.09 Å, so each residue is its methyl-capped side chain), hydrogens as in the
     protonated receptor topology.  Writes cluster.xyz, orca.inp (Opt+Freq, capping carbons frozen so the
     fragments keep the protein's arrangement), gaussian.gjf and a Chinese README with the next steps.
 
     atoms: the receptor atoms (index, name, resname, chain, resseq, element, xyz Å) *after* protonation.
-    Returns {"status", "files", "charge", "multiplicity", "n_atoms", "why"}; open-shell metals without an
+    `waters` (D-141) = [{"rid": "chain:resseq", "state": "water" | "hydroxide"}]: the bonded site water goes into the
+    cluster with all its atoms (H₂O: O + 2 H, charge 0; OH⁻: O + 1 H, charge −1 added to the total) — without it the
+    QM geometry/Hessian of a Zn–His₃ site would be the trigonal 3-coordinate one, not the site the MD models.
+    `charge` is the metal's oxidation state (as before); the residues' and the water's charges are added.
+    Returns {"status", "files", "charge", "multiplicity", "n_atoms", "waters", "why"}; open-shell metals without an
     explicit charge/multiplicity → NEEDS_HUMAN (never guess a spin state)."""
     out_dir = Path(out_dir)
     metal_el = site["key"].split(":")[0].upper()
@@ -535,6 +734,21 @@ def write_qm_cluster(atoms: list[dict], site: dict, out_dir: Path | str, *, char
         q = SIDECHAIN_CHARGE.get(resname, 0)
         total_q += q
         residues.append({"residue": rid, "resname": resname, "n_atoms": len(side) + 1, "charge": q})
+    water_rows = []
+    for w in waters or []:
+        ra = by_res.get(w["rid"], [])
+        el_of = lambda a: (a.get("element") or a["name"][:1]).upper()[:1]    # noqa: E731
+        oxy, hyd = [a for a in ra if el_of(a) == "O"], [a for a in ra if el_of(a) == "H"]
+        want_h = 1 if w["state"] == "hydroxide" else 2
+        if w["state"] not in ("water", "hydroxide") or len(oxy) != 1 or len(hyd) != want_h:
+            return {"status": NEEDS_HUMAN, "files": [],
+                    "why": f"配位水 {w['rid']} 應為 {'氫氧根（O＋1 H）' if w['state'] == 'hydroxide' else '水（O＋2 H）'}，"
+                           f"拓樸裡是 {len(oxy)} 個 O、{len(hyd)} 個 H，無法放進 QM 小模型。"}
+        for a in oxy + hyd:
+            cluster.append((el_of(a), np.asarray(a["xyz"], float)))
+        q = -1 if w["state"] == "hydroxide" else 0
+        total_q += q
+        water_rows.append({"residue": w["rid"], "state": w["state"], "n_atoms": 1 + want_h, "charge": q})
     out_dir.mkdir(parents=True, exist_ok=True)
     n = len(cluster)
     xyz_lines = [f"{el:<3s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}" for el, p in cluster]
@@ -551,17 +765,22 @@ def write_qm_cluster(atoms: list[dict], site: dict, out_dir: Path | str, *, char
         encoding="utf-8")
     (out_dir / "README.md").write_text(
         f"# {site['key']} QM 小模型（擬合金屬鍵結參數用）\n\n"
-        f"- 內容：金屬 + {len(residues)} 個配位殘基的側鏈（Cα 以 H 封端），共 {n} 原子；電荷 {total_q:+d}、多重度 {multiplicity}。\n"
+        f"- 內容：金屬 + {len(residues)} 個配位殘基的側鏈（Cα 以 H 封端）"
+        + (f" + {len(water_rows)} 個配位水" if water_rows else "") + f"，共 {n} 原子；電荷 {total_q:+d}、多重度 {multiplicity}。\n"
         f"- 配位殘基：" + "、".join(f"{r['residue']} {r['resname']}（{r['charge']:+d}）" for r in residues) + "。\n"
+        + _water_readme(water_rows) +
         f"- 方法：{method}，Opt + Freq；Cβ 固定（保持蛋白中的相對排列）。\n\n"
         "## 下一步\n"
         "1. 用 ORCA（免費）跑 `orca orca.inp > orca.out`，或用 Gaussian 跑 `gaussian.gjf` 後 `formchk cluster.chk cluster.fchk`。\n"
         "2. 確認沒有虛頻（Freq 全為正）；若有，先在 QM 程式中重新最佳化。\n"
         "3. 把 `orca.hess`（或 `cluster.fchk`）放到工作流程資料夾，在設定檔加上：\n"
-        f"   ```json\n   \"metal_params\": {{\"{site['key']}\": {{\"source\": \"hessian\", \"file\": \"orca.hess\"}}}}\n   ```\n"
+        + _readme_config(site["key"], water_rows) +
         "4. 重新建模：程式會把 Hessian 轉成金屬–配位鍵與角的力常數並檢查（r0 與晶體差 > 0.25 Å、力常數不合理都會擋下）。\n"
-        "5. 電荷仍沿用力場；若要 RESP 電荷，請走 MCPB.py 路徑（source: mcpb）。\n", encoding="utf-8")
+        + ("5. 氫氧根的 O／H 電荷 Hessian 給不出來，須另外以 RESP 擬合（例如 ORCA＋Multiwfn，或 MCPB.py 路徑）後填進 `site_water.charges`；"
+           "程式沒有預設值，也不會替你補。O＋H（＋金屬）的電荷總和要符合形式電荷（OH⁻ 單獨是 −1），否則建模會擋下。\n"
+           if any(r["state"] == "hydroxide" for r in water_rows) else
+           "5. 電荷仍沿用力場；若要 RESP 電荷，請走 MCPB.py 路徑（source: mcpb）。\n"), encoding="utf-8")
     return {"status": "PASS", "files": [str(out_dir / f) for f in ("cluster.xyz", "orca.inp", "gaussian.gjf", "README.md")],
-            "charge": total_q, "multiplicity": multiplicity, "n_atoms": n, "residues": residues, "frozen": frozen,
+            "charge": total_q, "multiplicity": multiplicity, "n_atoms": n, "residues": residues, "waters": water_rows, "frozen": frozen,
             "why": f"已產生 {site['key']} 的 QM 小模型輸入（{n} 原子，電荷 {total_q:+d}，多重度 {multiplicity}）於 {out_dir}；"
                    "算完 Hessian 後可在 metal_params 指定檔案，升級為擬合參數。"}

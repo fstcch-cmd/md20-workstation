@@ -947,3 +947,37 @@ GATES.update({
          "OpenMM 용매화는 가끔 물 두 개를 거의 겹치게 놓습니다. 최소화로는 떼어 낼 수 없고 MD 시작 직후 NaN이 납니다. "
          "이온은 물을 바꿔 넣는 방식이라 겹친 물과 바뀌면 이온이 다른 물에 붙어 같은 문제가 생깁니다. 모델링 단계에서 남는 물을 지웁니다(이온은 남김). 물을 지워도 풀리지 않는 겹침(물이 용질 안에 박힘, 이온끼리 겹침)은 멈추고 모델 확인을 요청합니다.")),
 })
+
+
+# D-141 protonation state of the water bound to a metal (md20/build/metal.py decide_water_mode, docs/specs/metal_sites.md §4e)
+GATES.update({
+    "metal water state": (
+        ("金屬配位水的質子化狀態", "Protonation state of the metal-bound water", "金属に結合した水のプロトン化状態",
+         "금속에 결합한 물의 양성자화 상태"),
+        ("鍵結金屬模型預設把金屬上的配位水當成中性的水。X 光看不到質子，所以它是水還是氫氧根，程式不替你決定。"
+         "選氫氧根時，它的電荷和金屬鍵的參數必須來自擬合（QM 加 RESP），力場樣板裡沒有，程式也不會自己設定。"
+         "沒有參數時會停在這裡，並在 metal_qm 資料夾寫出含氫氧根的 QM 小模型輸入，讓你去擬合。",
+         "The bonded metal model treats the water on the metal as a neutral water by default. X-ray cannot see the "
+         "proton, so the program does not decide whether it is a water or a hydroxide. A hydroxide needs charges and "
+         "metal-bond parameters from a fit (QM plus RESP). They are not in the force field templates and the program "
+         "does not make them up. Without them the build stops here and writes a QM cluster input that contains the "
+         "hydroxide into the metal_qm folder, so you can run the fit.",
+         "結合金属モデルは、金属に付いた水を既定では中性の水として扱います。X 線ではプロトンが見えないため、水か水酸化物イオンかをプログラムは決めません。"
+         "水酸化物イオンにするには、電荷と金属結合のパラメータをフィッティング（QM と RESP）で得る必要があります。力場のテンプレートにはなく、"
+         "プログラムが勝手に設定することもありません。パラメータがないときはここで止まり、水酸化物イオンを含む QM 小モデルの入力を metal_qm フォルダに書き出します。",
+         "결합 금속 모델은 금속에 붙은 물을 기본적으로 중성 물로 다룹니다. X선으로는 양성자가 보이지 않으므로 물인지 수산화 이온인지 프로그램이 정하지 않습니다. "
+         "수산화 이온을 쓰려면 전하와 금속 결합 매개변수를 피팅(QM과 RESP)으로 얻어야 합니다. 역장 템플릿에는 없고 프로그램이 임의로 정하지도 않습니다. "
+         "매개변수가 없으면 여기서 멈추고, 수산화 이온을 포함한 QM 소모델 입력을 metal_qm 폴더에 씁니다.")),
+})
+
+OPTIONS.update({
+    "產生含氫氧根的 QM 小模型輸入（metal_qm 資料夾），自行擬合電荷與 M–O 鍵參數": (
+        "Use the QM cluster input with the hydroxide (metal_qm folder) and fit the charges and the M-O bond yourself",
+        "水酸化物イオンを含む QM 小モデルの入力（metal_qm フォルダ）を使い、電荷と M-O 結合を自分でフィッティングする",
+        "수산화 이온을 포함한 QM 소모델 입력(metal_qm 폴더)으로 전하와 M-O 결합을 직접 피팅"),
+    "在 metal_params 提供 site_water 區塊（RESP 電荷與 M–O 鍵參數）": (
+        "Give a site_water block in metal_params (RESP charges and M-O bond parameters)",
+        "metal_params に site_water ブロック（RESP 電荷と M-O 結合パラメータ）を指定する",
+        "metal_params에 site_water 블록(RESP 전하와 M-O 결합 매개변수) 제공"),
+})
+PREFIX.append(("metal_water_state: {", ("Water state of the metal-bound water:", "金属に結合した水の状態：", "금속에 결합한 물의 상태:")))

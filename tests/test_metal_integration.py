@@ -111,3 +111,50 @@ def test_fitted_zinc_params_json_ca2(pdb_ca2, tmp_path):
     assert res2.status == "NEEDS_HUMAN"
     g = next(g for g in res2.gates["gates"] if g["name"].startswith("metal ZN"))
     assert "與晶體" in g["explanation"] and any("幾何鍵結模型" in o for o in g["options"])
+
+
+# ------------------------------------------------------------------------------------------------------- D-141
+_OH_TEST_JSON = {"bonds": {"N": {"k_kcal_A2": 60.0}}, "angles": {"default": {"k_kcal_rad2": 30.0}},
+                 # TEST VALUES that exercise the plumbing (template, topology edit, charges, bonds); not parameters for a real study
+                 "site_water": {"state": "hydroxide", "charges": {"O": -1.2, "H": 0.2}, "bond": {"k_kcal_A2": 80.0}}}
+
+
+def test_hydroxide_site_water_with_fitted_params_ca2(pdb_ca2, tmp_path):
+    """D-141 plumbing on CA II: crystal zinc water → OHM (O + one H), template from the fitted charges, M–O bond bonded."""
+    import json
+    import openmm as mm
+    from openmm import app, XmlSerializer
+    rman = prepare_receptor(pdb_ca2, tmp_path / "rec", keep_hetero={"ZN"}, human_choices={"hetero groups": "移除"})
+    f = tmp_path / "zn_oh.json"
+    f.write_text(json.dumps(_OH_TEST_JSON))
+    res = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys", padding_nm=1.0, metal_policy={"ZN": "bonded"},
+                          metal_params={"ZN": {"source": "json", "file": str(f)}}, metal_water_state={"ZN": "hydroxide"})
+    assert res.status != "NEEDS_HUMAN", res.gates
+    p = next(p for p in res.restraints["metals"]["plans"] if p["key"].startswith("ZN"))
+    assert p["water_mode"] == "hydroxide" and p["source"] == "json" and len(p["bonds"]) == 4
+    wb = [b for b in p["bonds"] if b.get("hydroxide")]
+    assert len(wb) == 1 and abs(wb[0]["k"] - 80.0 * 418.4) < 1e-6
+    pdb = app.PDBFile(res.topology_pdb)
+    oh = [r for r in pdb.topology.residues() if r.name == "OHM"]
+    assert len(oh) == 1 and sorted(a.name for a in oh[0].atoms()) == ["H1", "O"]
+    system = XmlSerializer.deserialize(open(res.system_xml, encoding="utf-8").read())
+    nb = next(f_ for f_ in system.getForces() if isinstance(f_, mm.NonbondedForce))
+    o, h = p["site_water"]["o_index"], p["site_water"]["h_index"]
+    assert abs(nb.getParticleParameters(o)[0]._value + 1.2) < 1e-6 and abs(nb.getParticleParameters(h)[0]._value - 0.2) < 1e-6
+    total = sum(nb.getParticleParameters(i)[0]._value for i in range(nb.getNumParticles()))
+    assert abs(total) < 1e-3                                            # neutralised with the hydroxide counted
+    hb = next(system.getForce(i) for i in range(system.getNumForces()) if system.getForce(i).getName() == "msw_metal_bonds")
+    assert hb.getNumBonds() == 4
+    assert (tmp_path / "sys" / "metal_qm" / "ZN_A262" / "hydroxide_template.xml").is_file()
+
+
+def test_hydroxide_without_parameters_stops_and_writes_the_qm_input(pdb_ca2, tmp_path):
+    rman = prepare_receptor(pdb_ca2, tmp_path / "rec", keep_hetero={"ZN"}, human_choices={"hetero groups": "移除"})
+    res = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys", padding_nm=1.0, metal_policy={"ZN": "bonded"},
+                          metal_water_state={"ZN": "hydroxide"})
+    assert res.status == "NEEDS_HUMAN"
+    g = next(g for g in res.gates["gates"] if g["name"].startswith("metal water state ZN"))
+    assert g["status"] == "NEEDS_HUMAN" and len(g["options"]) == 3
+    qm = tmp_path / "sys" / "metal_qm" / "ZN_A262_hydroxide"
+    assert "* xyz 1 1" in (qm / "orca.inp").read_text(encoding="utf-8")            # Zn(+2) + three neutral His + OH(−1)
+    assert "氫氧根" in (qm / "README.md").read_text(encoding="utf-8")

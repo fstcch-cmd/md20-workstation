@@ -17,11 +17,15 @@ No policy → the force field's nonbonded ion, unchanged (pocket transition meta
 policy: the WP6 structure gate stops them first).
 Gates (pure logic, `plan_site`): fewer than 3 protein donors, a docked/other ligand among the donors, a
 His coordinating through both nitrogens, or an unsupported metal → NEEDS_HUMAN (never guess a coordination).
-Coordinating waters are listed but not bonded (receptor waters are removed; the open site is a caveat).
+Coordinating waters: under `bonded` the first-shell crystal water is added back and bonded as a neutral TIP3P water
+(D-133/D-139).  D-141: `metal_water_state` may ask for a hydroxide (OH-) instead — never decided automatically (X-ray
+cannot see the proton) and never with invented charges: it needs fitted parameters (`site_water` block of
+`metal_params`); without them the build stops at a NEEDS_HUMAN gate and writes the QM cluster input with the OH-.
 """
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 
@@ -43,6 +47,12 @@ WATER = {"HOH", "WAT", "TIP3", "SOL"}
 WATER_TARGET_A = {"ZN": 2.09, "FE": 2.13, "FE2": 2.13, "CU": 2.00, "CU1": 2.00, "MN": 2.19, "CO": 2.09, "NI": 2.09,
                   "MG": 2.07, "CA": 2.39, "CD": 2.31}
 WATER_SHELL_TOL_A = 0.25
+# D-141: protonation state of the metal-bound water.  "water" (default, neutral TIP3P) | "hydroxide" (OH-, fitted params only)
+WATER_STATES = ("water", "hydroxide")
+HYDROXIDE_RESNAME = "OHM"
+# LJ / bonded types of the hydroxide template: Amber ff14SB hydroxyl O and H of Ser/Thr/Tyr (same values as GAFF oh/ho).
+# Only the *charges* come from the fitted parameters; the LJ type is an assumption stated in the report (docs §4e).
+HYDROXIDE_ATOM_TYPES = {"O": "protein-OH", "H": "protein-HO"}
 
 
 def water_bond_max_A(metal_resname: str) -> float:
@@ -58,6 +68,17 @@ SCEE, SCNB = 1.2, 2.0                # Amber 1-4 scaling (electrostatics, LJ)
 def policy_for(key: str, policy: dict | None) -> str | None:
     p = policy or {}
     return p.get(key) or p.get(key.split(":")[0])
+
+
+def water_state_for(key: str, cfg: dict | None) -> str | None:
+    """D-141: `metal_water_state` for a site (site key wins over the element); None = not set (default water, but
+    then a `site_water` block in metal_params is a conflict that needs a human).  Returned lower-case, unvalidated."""
+    v = policy_for(key, cfg)
+    return None if v is None else str(v).strip().lower()
+
+
+def is_site_water(resname: str) -> bool:
+    return resname.upper() in WATER or resname.upper() == HYDROXIDE_RESNAME
 
 
 def _base(resname: str) -> str:
@@ -79,7 +100,7 @@ def find_sites(atoms: list[dict], *, metals: set[str] | None = None) -> list[dic
         for j in np.where((d > 0.5) & (d < 3.0))[0]:
             a = atoms[int(j)]
             el = (a.get("element") or a["name"][:1]).upper()[:1]
-            if a["resname"].upper() in WATER:
+            if is_site_water(a["resname"]):
                 if el == "O" and d[j] <= CUTOFF_A["O"]:
                     waters.append({"index": a["index"], "name": a["name"], "resname": a["resname"], "chain": a["chain"],
                                    "resseq": a["resseq"], "element": "O", "distance_A": round(float(d[j]), 2)})
@@ -103,15 +124,93 @@ def _angle(a, m, b) -> float:
     return math.degrees(math.acos(max(-1.0, min(1.0, c))))
 
 
+def _water_state_option(key: str, state: str) -> str:
+    text = {"water": "維持中性 TIP3P 水，不改質子化狀態", "hydroxide": "確認改用氫氧根 OH⁻（需 metal_params 的 site_water 參數）"}[state]
+    return "metal_water_state: {" + key + ": " + state + "}（" + text + "）"
+
+
+OPT_QM_HYDROXIDE = "產生含氫氧根的 QM 小模型輸入（metal_qm 資料夾），自行擬合電荷與 M–O 鍵參數"
+OPT_PROVIDE_SITE_WATER = "在 metal_params 提供 site_water 區塊（RESP 電荷與 M–O 鍵參數）"
+
+
+def decide_water_mode(key: str, policy: str | None, state: str | None, params: dict | None) -> dict:
+    """D-141 (pure): how the metal-bound water of a site is modelled → {"mode": "none"|"water"|"hydroxide",
+    "block": site_water block | None, "problem": str | None, "options": [...], "caveat": str | None}.
+
+    never decided automatically: hydroxide only when `metal_water_state` says so (X-ray cannot see the proton); a
+    `site_water` block in metal_params while the state is unset is a conflict, not a decision."""
+    from .metal_params import site_water_block
+    out = {"mode": "none", "block": None, "problem": None, "options": [], "caveat": None}
+    block, err = site_water_block(params) if params else (None, None)
+    out["block"] = block
+    if err:
+        out.update(problem=f"讀取 metal_params 的 site_water 區塊失敗：{err}。",
+                   options=["修正 metal_params 設定", _water_state_option(key, "water")])
+        return out
+    if state is not None and state not in WATER_STATES:
+        out.update(problem=f"metal_water_state「{state}」不認得（可用 water / hydroxide）。",
+                   options=[_water_state_option(key, "water")])
+        return out
+    if policy != "bonded":
+        if state == "hydroxide":
+            out.update(problem=f"metal_water_state 要求氫氧根，但 metal_policy 是「{policy}」：氫氧根是鍵結模型的第四個配位，"
+                               "只在 metal_policy: bonded 下有意義（bonded_open 不加回配位水，keep_nonbonded 不建鍵）。",
+                       options=["metal_policy: {" + key + ": bonded}（氫氧根需要鍵結模型）", _water_state_option(key, "water")])
+        return out
+    if state == "hydroxide":
+        out["mode"] = "hydroxide"
+        return out
+    if block is not None and state is None:
+        out.update(problem="metal_params 含氫氧根的 site_water 參數，但 metal_water_state 沒有指定。配位水是 H₂O 還是 OH⁻ "
+                           "X 光看不到（質子不可見），程式不自動決定；請明確選擇。",
+                   options=[_water_state_option(key, "hydroxide"), _water_state_option(key, "water")])
+        return out
+    if block is not None:
+        out["caveat"] = "metal_params 內的 site_water 區塊未使用（metal_water_state 設為 water）。"
+    out["mode"] = "none" if params else "water"
+    return out
+
+
+def hydroxide_template_xml(q_o: float, q_h: float, resname: str = HYDROXIDE_RESNAME) -> str:
+    """D-141 (pure): OpenMM ForceField XML for a metal-bound hydroxide residue — O + one H, charges from the fitted
+    parameters, atom types `protein-OH` / `protein-HO` (Amber ff14SB hydroxyl O/H: LJ and the O–H bond come from the
+    force field; nothing else is invented).  The Residues-only XML is loaded into the ForceField with loadFile."""
+    return ('<ForceField>\n <Residues>\n'
+            f'  <Residue name="{resname}">\n'
+            f'   <Atom name="O" type="{HYDROXIDE_ATOM_TYPES["O"]}" charge="{float(q_o)!r}"/>\n'
+            f'   <Atom name="H1" type="{HYDROXIDE_ATOM_TYPES["H"]}" charge="{float(q_h)!r}"/>\n'
+            '   <Bond atomName1="O" atomName2="H1"/>\n'
+            '  </Residue>\n </Residues>\n</ForceField>\n')
+
+
+def choose_hydroxide_h(metal_xyz, o_xyz, h_xyzs) -> int:
+    """D-141 (pure): which of the (two) hydrogens Modeller put on the site water stays as the hydroxide H — the one
+    with the larger M–O–H angle (pointing away from the metal).  No geometry is invented; the other H is deleted."""
+    best, best_a = 0, -1.0
+    for i, h in enumerate(h_xyzs):
+        a = _angle(metal_xyz, o_xyz, h)
+        if a > best_a:
+            best, best_a = i, a
+    return best
+
+
 def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params: dict | None = None,
-              residue_atoms: dict | None = None) -> dict:
+              residue_atoms: dict | None = None, water_state: str | None = None) -> dict:
     """Decide what to do with one metal site → {status, action, bonds, angles, variants, gate, why}.
 
     `params` (metal_params spec for this site) replaces the crystal-geometry constants with fitted ones
-    (see metal_params.py); it is only resolved when `xyz_of` is given (final pass on the edited topology)."""
+    (see metal_params.py); it is only resolved when `xyz_of` is given (final pass on the edited topology).
+    `water_state` (D-141, `metal_water_state` of this site: None | "water" | "hydroxide"): see decide_water_mode;
+    the plan carries `water_mode` ("none" | "water" | "hydroxide") and, for a gate about the water state,
+    `gate_name` ("metal water state <key>")."""
     key = site["key"]
     out = {"key": key, "metal_index": site["metal_index"], "policy": policy, "action": None, "bonds": [], "angles": [],
            "variants": {}, "caveats": [], "charges": {}, "source": "geometric"}
+    if water_state == "hydroxide" and policy in (None, "keep_nonbonded"):
+        # D-141: the user asked for a hydroxide on a site that gets no bonded model — say so instead of ignoring it
+        wm = decide_water_mode(key, policy, water_state, None)
+        out.update(status=NEEDS_HUMAN, gate_name=f"metal water state {key}", why=f"{key}：{wm['problem']}", options=wm["options"])
+        return out
     if policy is None:
         # pocket transition metals were already stopped by the structure gate (WP6); anything reaching here
         # without a policy keeps the pre-existing behaviour, stated explicitly
@@ -155,12 +254,43 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
     bonds = [{"metal": site["metal_index"], "donor": d["index"], "r0_nm": round(d["distance_A"] / 10.0, 4), "k": K_BOND,
               "label": f"{d['resname']}{d['resseq']}:{d['name']}"} for d in donors]
     # D-133: under `bonded` a crystal water on the site (added back by apply_metal_policy) is bonded too, so the site
-    # keeps its coordination number; `bonded_open` leaves the position open (the pre-D-133 model)
+    # keeps its coordination number; `bonded_open` leaves the position open (the pre-D-133 model).
+    # D-141: the water may instead be a hydroxide (`metal_water_state`), only with fitted parameters (site_water block)
+    wm = decide_water_mode(key, policy, water_state, params)
+    out["water_mode"] = wm["mode"]
+    if wm["problem"]:
+        out.update(status=NEEDS_HUMAN, gate_name=f"metal water state {key}", why=f"{key}：{wm['problem']}",
+                   options=wm["options"], water_mode="none")
+        return out
+    mode, block = wm["mode"], wm["block"]
     wmax = water_bond_max_A(site.get("metal") or key.split(":")[0])
-    site_w = [w for w in site.get("waters") or [] if w.get("index") is not None and w["distance_A"] <= wmax] \
-        if policy == "bonded" and not params else []        # fitted params cover only the donors they were fitted on
+    first_shell = [w for w in site.get("waters") or [] if w.get("index") is not None and w["distance_A"] <= wmax]
+    final_pass = bool(xyz_of)
+    site_w = []
+    if mode == "water":
+        site_w = first_shell        # fitted params cover only the donors they were fitted on (mode "none" then)
+    elif mode == "hydroxide" and final_pass:
+        why_not = None
+        if not first_shell:
+            why_not = "晶體沒有第一配位殼的配位水可轉成氫氧根（程式不憑空放置氧原子）"
+        elif len(first_shell) > 1:
+            why_not = f"第一配位殼有 {len(first_shell)} 個水，無法決定哪一個是氫氧根"
+        elif first_shell[0]["resname"].upper() != HYDROXIDE_RESNAME:
+            why_not = "配位水尚未轉成氫氧根（缺氫原子的拓樸編輯未完成）"
+        if why_not:
+            out.update(status=NEEDS_HUMAN, gate_name=f"metal water state {key}", why=f"{key}：metal_water_state=hydroxide，但{why_not}。",
+                       options=[_water_state_option(key, "water")])
+            return out
+        if block is None:
+            out.update(status=NEEDS_HUMAN, gate_name=f"metal water state {key}", needs_water_params=True,
+                       why=f"{key}：metal_water_state 要求配位水為氫氧根（OH⁻），但沒有擬合參數。X 光看不到質子，程式不自動決定質子化狀態；"
+                           "OH⁻ 結合金屬的電荷與 M–O 鍵參數不在 amber14／OpenMM 樣板裡，程式不憑空設定。",
+                       options=[_water_state_option(key, "water"), OPT_QM_HYDROXIDE, OPT_PROVIDE_SITE_WATER])
+            return out
+        site_w = first_shell
     bonds += [{"metal": site["metal_index"], "donor": w["index"], "r0_nm": round(w["distance_A"] / 10.0, 4), "k": K_BOND,
-               "label": f"{w['resname']}{w['resseq']}:{w['name']}", "water": True} for w in site_w]
+               "label": f"{w['resname']}{w['resseq']}:{w['name']}", "water": True,
+               **({"hydroxide": True} if mode == "hydroxide" else {})} for w in site_w]
     cage = list(donors) + list(site_w)
     angles = []
     if xyz_of:
@@ -176,7 +306,13 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
     fitted = ""
     if params and xyz_of:
         from .metal_params import resolve_site_params
-        fp = resolve_site_params(site, params, xyz_of, residue_atoms=residue_atoms)
+        rsite = site
+        if mode == "hydroxide":                       # the hydroxide O is one more fitted partner of the metal
+            w = site_w[0]
+            hidx = ((residue_atoms or {}).get(f"{w['chain']}:{w['resseq']}") or {}).get("H1")
+            rsite = {**site, "donors": list(donors) + [{**w, "is_site_water": True}],
+                     "site_water": {"o_index": w["index"], "h_index": hidx, "block": block}}
+        fp = resolve_site_params(rsite, params, xyz_of, residue_atoms=residue_atoms)
         if fp["status"] == NEEDS_HUMAN:
             out.update(status=NEEDS_HUMAN, why=f"{key}：{fp['why']}", options=fp.get("options") or [],
                        evidence=fp.get("evidence", {}))
@@ -192,14 +328,26 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
         out["evidence"] = fp.get("evidence", {})
         caveats = list(fp.get("caveats", []))
         fitted = "（擬合參數：" + fp["why"] + "）"
+        if mode == "hydroxide":
+            sw = fp["site_water"]
+            out["site_water"] = {**sw, "resname": HYDROXIDE_RESNAME,
+                                 "template_xml": hydroxide_template_xml(sw["q_O"], sw["q_H"])}
+            caveats.append(
+                f"金屬配位水依使用者指定（metal_water_state）以氫氧根 OH⁻ 建模（殘基 {HYDROXIDE_RESNAME}，淨電荷 −1）：X 光看不到質子，"
+                f"程式沒有自動判斷（CA II 鋅水 pKa ≈ 7）。O／H 電荷 {sw['q_O']:+.3f}／{sw['q_H']:+.3f} 與 M–O 鍵來自擬合參數；"
+                f"LJ 與 O–H 鍵沿用 Amber ff14SB 羥基型態（{HYDROXIDE_ATOM_TYPES['O']}／{HYDROXIDE_ATOM_TYPES['H']}，未擬合）。"
+                + ("M–O–H 角使用擬合參數。" if sw.get("moh_angle") else "沒有 M–O–H 角項（參數未提供），氫可自由轉動。"))
     elif params and not xyz_of:
         out["source"] = "pending"            # resolved on the final pass
-    if site_w:
+    if wm.get("caveat"):
+        caveats.append(wm["caveat"])
+    if site_w and mode == "water":
         caveats.append(f"晶體中的 {len(site_w)} 個配位水保留並以鍵結項連到金屬（中性 TIP3P 水，不是氫氧根；"
-                       "鋅水的質子化狀態依 pKa 可能不同，報告標註）。這是為了讓配位數與晶體一致，避免開放位點被附近帶負電基團佔據（D-133）。")
+                       "鋅水的質子化狀態依 pKa 可能不同，X 光看不到質子，報告標註；要改成 OH⁻ 見 metal_water_state，需擬合參數）。"
+                       "這是為了讓配位數與晶體一致，避免開放位點被附近帶負電基團佔據（D-133）。")
     elif policy == "bonded_open":
         caveats.append("bonded_open：配位水不加回，該配位位置開放；附近帶負電的基團可能塌陷到金屬上（D-133 診斷），只在配體要佔該位置時使用。")
-    elif len(donors) < 4:
+    elif len(donors) < 4 and not site_w:
         caveats.append(f"只有 {len(donors)} 個配位原子且晶體沒有記錄配位水：開放位點可能被溶劑水、配體或附近帶負電基團佔據。")
     out.update(status=AUTO_FIXED, action="bonded", bonds=bonds, angles=angles, variants=variants, caveats=caveats,
                why=f"{key} 依使用者設定建立鍵結模型：{geom}（" + "、".join(b["label"] + f" {b['r0_nm'] * 10:.2f} Å" for b in bonds)
@@ -302,9 +450,10 @@ def site_water_ligand_gate(plans: list[dict], positions_nm, ligand_indices: list
 
 
 def site_gates(plans: list[dict]) -> list[Gate]:
-    return [Gate(f"metal {p['key']}", p["status"], p["why"], options=p.get("options") or [],
+    return [Gate(p.get("gate_name") or f"metal {p['key']}", p["status"], p["why"], options=p.get("options") or [],
                  evidence={"action": p["action"], "n_bonds": len(p["bonds"]), "variants": p["variants"],
-                           "source": p.get("source", "geometric"), **(p.get("evidence") or {})}) for p in plans]
+                           "source": p.get("source", "geometric"), "water_mode": p.get("water_mode"),
+                           **(p.get("evidence") or {})}) for p in plans]
 
 
 def residue_variant(resname: str, atom_names: set[str]) -> str | None:
@@ -342,10 +491,16 @@ def site_waters_to_add(sites: list[dict], plans: list[dict], waters: list[dict],
                        cutoff_A: float | None = None) -> list[dict]:
     """D-133 (pure): which sidecar crystal waters (metal_site_waters.pdb records {resname, resseq, xyz (Å)}) go back
     into the model — only for a site whose policy is exactly `bonded` with no fitted parameters, and only waters
-    within the O cutoff of that metal.  Each water is returned once with the metal key it serves."""
+    within the O cutoff of that metal.  Each water is returned once with the metal key it serves.
+    D-141: a site whose plan has `water_mode == "hydroxide"` gets its water back as well (also with fitted
+    parameters — they carry the `site_water` block; without it the build writes the QM input and stops); the record
+    carries `state` ("water" | "hydroxide") so the topology edit knows which to convert."""
     out, used = [], set()
     for s, p in zip(sites, plans):
-        if p.get("policy") != "bonded" or p.get("action") != "bonded" or policy_for(s["key"], metal_params):
+        if p.get("policy") != "bonded" or p.get("action") != "bonded":
+            continue
+        mode = p.get("water_mode") or "water"
+        if mode == "none" or (policy_for(s["key"], metal_params) and mode != "hydroxide"):
             continue
         cut = water_bond_max_A(s.get("metal") or s["key"].split(":")[0]) if cutoff_A is None else cutoff_A
         for k, w in enumerate(waters):
@@ -353,7 +508,8 @@ def site_waters_to_add(sites: list[dict], plans: list[dict], waters: list[dict],
                 continue
             if float(np.linalg.norm(np.asarray(w["xyz"], float) - np.asarray(s["metal_xyz"], float))) <= cut:
                 used.add(k)
-                out.append({**w, "metal_key": s["key"], "chain": s.get("chain") or (s["key"].split(":")[1][:1] if ":" in s["key"] else "A")})
+                out.append({**w, "metal_key": s["key"], "chain": s.get("chain") or (s["key"].split(":")[1][:1] if ":" in s["key"] else "A"),
+                            "state": "hydroxide" if mode == "hydroxide" else "water"})
     return out
 
 
@@ -373,11 +529,66 @@ def read_site_waters(path) -> list[dict]:
     return out
 
 
+def _find_residue(topology, chain_id: str, resid: str, name: str | None = None):
+    for r in topology.residues():
+        if r.chain.id == chain_id and str(r.id) == str(resid) and (name is None or r.name == name):
+            return r
+    return None
+
+
+def convert_waters_to_hydroxide(modeller, waters: list[dict], metal_xyz_A: dict) -> list[str]:
+    """D-141: the added site waters whose state is "hydroxide" lose one hydrogen (the one pointing at the metal, see
+    choose_hydroxide_h) and become residue OHM with atoms O, H1.  Returns problems (empty when all converted)."""
+    from openmm import unit
+    problems, done = [], []
+    for w in waters:
+        r = _find_residue(modeller.topology, w["chain"], w["resseq"], "HOH")
+        hs = [a for a in r.atoms() if a.element is not None and a.element.symbol == "H"] if r is not None else []
+        o = next((a for a in r.atoms() if a.name == "O"), None) if r is not None else None
+        if r is None or o is None or len(hs) != 2:
+            problems.append(f"{w['metal_key']}：找不到配位水 {w['chain']}:{w['resseq']} 或它的氫原子不是 2 個，無法轉成氫氧根")
+            continue
+        pos = np.asarray(modeller.positions.value_in_unit(unit.nanometer)) * 10.0
+        keep = choose_hydroxide_h(metal_xyz_A[w["metal_key"]], pos[o.index], [pos[h.index] for h in hs])
+        modeller.delete([hs[1 - keep]])
+        done.append(w)
+    for w in done:
+        r = _find_residue(modeller.topology, w["chain"], w["resseq"], "HOH")
+        r.name = HYDROXIDE_RESNAME
+        for a in r.atoms():
+            if a.name != "O":
+                a.name = "H1"
+    return problems
+
+
+def register_hydroxide_template(forcefield, xml: str, path=None) -> str | None:
+    """D-141: load the OHM residue template into the ForceField (before createSystem — Modeller.addSolvent builds a
+    System too).  Returns an error text, or None.  Checks the Amber hydroxyl atom types exist first."""
+    types = getattr(forcefield, "_atomTypes", None)
+    if types is not None:
+        missing = [t for t in HYDROXIDE_ATOM_TYPES.values() if t not in types]
+        if missing:
+            return f"力場沒有羥基原子型態 {missing}，無法建立氫氧根樣板"
+    try:
+        if path is not None:
+            from pathlib import Path as _P
+            _P(path).parent.mkdir(parents=True, exist_ok=True)
+            _P(path).write_text(xml, encoding="utf-8")
+            forcefield.loadFile(str(path))
+        else:
+            import io
+            forcefield.loadFile(io.StringIO(xml))
+    except Exception as exc:  # noqa: BLE001  (bad XML / unknown type: report, never guess)
+        return f"載入氫氧根樣板失敗：{exc}"
+    return None
+
+
 def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float = 7.4,
-                       metal_params: dict | None = None, qm_dir=None, site_waters=None) -> list[dict]:
+                       metal_params: dict | None = None, qm_dir=None, site_waters=None,
+                       water_state: dict | None = None) -> list[dict]:
     """Edit the receptor Modeller in place (remove metals / reprotonate coordinating residues) and return the
     final per-site plans with indices valid for the edited topology (ligands/solvent are appended later,
-    so receptor indices stay valid in the assembled system)."""
+    so receptor indices stay valid in the assembled system).  `water_state` = `metal_water_state` (D-141)."""
     import numpy as np  # noqa: F811
     from openmm import unit
 
@@ -387,10 +598,14 @@ def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float =
         sites = find_sites(atoms)
         return atoms, sites
 
+    def plan_for(s, xyz_of=None, residue_atoms=None):
+        return plan_site(s, policy_for(s["key"], policy), xyz_of, params=policy_for(s["key"], metal_params),
+                         residue_atoms=residue_atoms, water_state=water_state_for(s["key"], water_state))
+
     atoms, sites = snapshot()
     if not sites:
         return []
-    plans = [plan_site(s, policy_for(s["key"], policy)) for s in sites]
+    plans = [plan_for(s) for s in sites]
     if any(p["status"] == NEEDS_HUMAN for p in plans):
         return plans
     # 1) removals
@@ -401,7 +616,7 @@ def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float =
     added_w = []
     if site_waters:
         atoms, sites = snapshot()
-        plans = [plan_site(s, policy_for(s["key"], policy)) for s in sites]
+        plans = [plan_for(s) for s in sites]
         added_w = site_waters_to_add(sites, plans, read_site_waters(site_waters) if not isinstance(site_waters, list)
                                      else site_waters, metal_params)
         if added_w:
@@ -414,6 +629,7 @@ def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float =
             modeller.add(wt, [Vec3(*[c / 10.0 for c in w["xyz"]]) for w in added_w] * unit.nanometer)
     # 2) reprotonation of coordinating residues (delete their H, re-add with explicit variants everywhere)
     want = {k: v for p in plans if p["action"] == "bonded" for k, v in p["variants"].items()}
+    convert_problems: list[str] = []
     if want or added_w:
         res_of = {f"{r.chain.id}:{r.id}": r for r in modeller.topology.residues()}
         modeller.delete([a for k in want if k in res_of for a in res_of[k].atoms()
@@ -423,33 +639,84 @@ def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float =
             k = f"{r.chain.id}:{r.id}"
             variants.append(want.get(k) or residue_variant(r.name, {a.name for a in r.atoms()}))
         modeller.addHydrogens(forcefield, pH=ph, variants=variants)
+        # 2b) D-141: hydroxide state → one H of that water goes, the residue becomes OHM (template registered below)
+        hyd = [w for w in added_w if w.get("state") == "hydroxide"]
+        if hyd:
+            convert_problems = convert_waters_to_hydroxide(modeller, hyd, {s_["key"]: s_["metal_xyz"] for s_ in sites})
     # 3) final plans on the edited topology (indices + angles)
     atoms, sites = snapshot()
     xyz_of = {a["index"]: a["xyz"] for a in atoms}
     residue_atoms = {}
     for r in modeller.topology.residues():
         residue_atoms[f"{r.chain.id}:{r.id}"] = {a.name: a.index for a in r.atoms()}
-    final = [plan_site(s, policy_for(s["key"], policy), xyz_of, params=policy_for(s["key"], metal_params),
-                       residue_atoms=residue_atoms) for s in sites]
+    final = [plan_for(s, xyz_of, residue_atoms) for s in sites]
     for p in final:
         if p["action"] == "bonded":
             p["variants"] = {k: v for k, v in want.items() if k in p["variants"]} or p["variants"]
-    # geometric bonded sites: write the QM small-model input so the student can upgrade to fitted parameters
+    if convert_problems:
+        for p in final:
+            if p.get("water_mode") == "hydroxide" and p["action"] == "bonded":
+                p.update(status=NEEDS_HUMAN, action=None, gate_name=f"metal water state {p['key']}",
+                         why=f"{p['key']}：" + "；".join(convert_problems) + "。",
+                         options=[_water_state_option(p["key"], "water")])
+    # 3b) D-141: register the OHM template from the fitted charges before anything builds a System
+    for s_, p in zip(sites, final):
+        sw = p.get("site_water")
+        if not sw or p["action"] != "bonded":
+            continue
+        tpl_path = (Path(qm_dir) / s_["key"].replace(":", "_") / "hydroxide_template.xml") if qm_dir is not None else None
+        err = register_hydroxide_template(forcefield, sw["template_xml"], tpl_path)
+        if err:
+            p.update(status=NEEDS_HUMAN, action=None, gate_name=f"metal water state {p['key']}", why=f"{p['key']}：{err}。",
+                     options=[_water_state_option(p["key"], "water")])
+        elif tpl_path is not None:
+            sw["template_file"] = str(tpl_path)
+    # QM small-model input: geometric bonded sites (so the student can upgrade to fitted parameters) and, D-141, the
+    # hydroxide site that stopped for lack of parameters (the cluster then carries the OH-)
     if qm_dir is not None:
-        from pathlib import Path as _P
         from .metal_params import write_qm_cluster
         for s_, p in zip(sites, final):
-            if p["action"] != "bonded" or p.get("source") != "geometric":
+            geometric = p["action"] == "bonded" and p.get("source") == "geometric"
+            need_oh = bool(p.get("needs_water_params"))
+            if not (geometric or need_oh):
                 continue
             spec = policy_for(s_["key"], metal_params) or {}
-            qm = write_qm_cluster(atoms, s_, _P(qm_dir) / s_["key"].replace(":", "_"),
-                                  charge=spec.get("qm_charge"), multiplicity=spec.get("qm_multiplicity"))
+            wl = _qm_waters(s_, p, atoms, "hydroxide" if need_oh else "water")
+            sub = s_["key"].replace(":", "_") + ("_hydroxide" if need_oh else "")
+            qm = write_qm_cluster(atoms, s_, Path(qm_dir) / sub, charge=spec.get("qm_charge"),
+                                  multiplicity=spec.get("qm_multiplicity"), waters=wl)
             p["qm_input"] = qm
-            if qm["status"] == "PASS":
-                p["caveats"].append(f"可升級：QM 小模型輸入已寫到 {_P(qm_dir) / s_['key'].replace(':', '_')}（見 README.md）。")
+            if need_oh:
+                p.setdefault("evidence", {})["qm_input_dir"] = str(Path(qm_dir) / sub) if qm["status"] == "PASS" else None
+                p["why"] += (f" 已把含氫氧根的 QM 小模型輸入寫到 {Path(qm_dir) / sub}（見 README.md）。" if qm["status"] == "PASS"
+                             else " 未能產生含氫氧根的 QM 小模型輸入：" + qm["why"])
+            elif qm["status"] == "PASS":
+                p["caveats"].append(f"可升級：QM 小模型輸入已寫到 {Path(qm_dir) / sub}（見 README.md）。"
+                                    + ("輸入含配位水（H₂O）。" if wl else ""))
             else:
                 p["caveats"].append("未產生 QM 小模型輸入：" + qm["why"])
     return final
+
+
+def _qm_waters(site: dict, plan: dict, atoms: list[dict], state: str) -> list[dict]:
+    """The site waters that go into the QM cluster: the bonded water of a water-mode plan, or (hydroxide state without
+    parameters) the first-shell water of the site — as {"rid": "chain:resseq", "state"}."""
+    out, seen = [], set()
+    by_index = {a["index"]: a for a in atoms}
+    if plan.get("needs_water_params"):
+        wmax = water_bond_max_A(site.get("metal") or site["key"].split(":")[0])
+        idxs = [w["index"] for w in site.get("waters") or [] if w.get("index") is not None and w["distance_A"] <= wmax]
+    else:
+        idxs = [b["donor"] for b in plan.get("bonds") or [] if b.get("water")]
+    for i in idxs:
+        a = by_index.get(i)
+        if a is None:
+            continue
+        rid = f"{a['chain']}:{a['resseq']}"
+        if rid not in seen:
+            seen.add(rid)
+            out.append({"rid": rid, "state": state})
+    return out
 
 
 def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], positions_nm) -> dict:
@@ -463,13 +730,16 @@ def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], position
     same metal are a 1-3 pair (D–M–D′, excluded) and a donor with the neighbour of another donor is 1-4
     (D–M–D′–X′, scaled).  Without that, the three His NE2 (≈ −0.5 e each, 3.3 Å apart) repel at full strength
     while the D–M–D′ angle term tries to hold them — the Zn–N bonds stretch.
-    Returns {"excl13": [(a, b)], "pairs14": [(a, b)], "angles": [(m, d, x, θ0 rad)]} with no duplicates."""
+    D-141: a hydroxide site water gets an M–O–H angle only when the fitted parameters provide one
+    (`site_water.moh_angle`) → "angles_moh": [(m, o, h, θ0 rad, k)]; otherwise (and for a plain water) none.
+    Returns {"excl13": [(a, b)], "pairs14": [(a, b)], "angles": [(m, d, x, θ0 rad)]} with no duplicates, plus
+    "angles_moh" only when there is such an angle."""
     import numpy as np  # noqa: F811
     nbr: dict[int, set[int]] = {}
     for a, b in bonds:
         nbr.setdefault(a, set()).add(b); nbr.setdefault(b, set()).add(a)
     pos = np.asarray(positions_nm, float)
-    excl12, excl13, pairs14, angles = set(), set(), set(), []
+    excl12, excl13, pairs14, angles, angles_moh = set(), set(), set(), [], []
     for p in plans:
         if p.get("action") != "bonded":
             continue
@@ -487,12 +757,16 @@ def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], position
                     if x2 != m and x2 not in donors and x2 != d and x2 not in nbr.get(d, ()):
                         pairs14.add((min(d, x2), max(d, x2)))
         waters = {b["donor"] for b in p["bonds"] if b.get("water")}
+        moh = (p.get("site_water") or {}).get("moh_angle")
+        o_idx = (p.get("site_water") or {}).get("o_index")
         for d in donors:
             for x in nbr.get(d, ()):
                 if x == m or x in donors:
                     continue
                 excl13.add((m, x))
                 if d in waters:          # D-133: a coordinated water may rotate (rigid TIP3P); no M–O–H angle term
+                    if moh and d == o_idx:       # D-141: unless fitted parameters give one for the hydroxide
+                        angles_moh.append((m, d, x, math.radians(moh["theta0_deg"]), moh["k"]))
                     continue
                 u, v = pos[m] - pos[d], pos[x] - pos[d]
                 th = float(np.arccos(np.clip(np.dot(u, v) / np.linalg.norm(u) / np.linalg.norm(v), -1.0, 1.0)))
@@ -507,7 +781,10 @@ def bonded_metal_terms(bonds: list[tuple[int, int]], plans: list[dict], position
     norm = lambda pairs: {(min(a, b), max(a, b)) for a, b in pairs}  # noqa: E731
     excl12n, excl13n = norm(excl12), norm(excl13) - norm(excl12) - bonded12 - bonded13
     pairs14n = norm(pairs14) - excl12n - excl13n - bonded12 - bonded13
-    return {"excl13": sorted(excl13n), "pairs14": sorted(pairs14n), "angles": angles}
+    out = {"excl13": sorted(excl13n), "pairs14": sorted(pairs14n), "angles": angles}
+    if angles_moh:
+        out["angles_moh"] = angles_moh
+    return out
 
 
 def add_metal_forces(system, plans: list[dict], positions_nm, topology=None) -> dict:
@@ -569,7 +846,10 @@ def add_metal_forces(system, plans: list[dict], positions_nm, topology=None) -> 
                         pass
             for m, d, x, th in terms["angles"]:
                 ha.addAngle(m, d, x, th, K_ANGLE_MDX)
-            info.update(exclusions_13=len(terms["excl13"]), scaled_14=len(terms["pairs14"]), angles_mdx=len(terms["angles"]))
+            for m, d, x, th, k in terms.get("angles_moh", []):
+                ha.addAngle(m, d, x, th, k)
+            info.update(exclusions_13=len(terms["excl13"]), scaled_14=len(terms["pairs14"]), angles_mdx=len(terms["angles"]),
+                        angles_moh=len(terms.get("angles_moh", [])))
         system.addForce(hb); system.addForce(ha)
     keep = [p for p in plans if p["action"] == "keep_nonbonded"]
     if keep:
