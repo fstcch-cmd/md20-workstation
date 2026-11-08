@@ -10,6 +10,8 @@
   md20 setup-fold [--engine omegafold|boltz|esmfold] [--yes] [--warmup]  install a folding tool (plan first)
   md20 setup-cg [--yes]                         install martinize2, insane, martini_openmm (plan first)
   md20 license status|machine|install FILE|update-revocations FILE   signed licence (D-125, D-128); real calculations need one
+  md20 autonomy policy set|show|revoke | plan | status | approve | run   bounded autonomy (D-137, D-143); no policy = recommendations only
+  md20 binding reassess WORKFLOW                re-assess stored binding results with the current rules and write back (D-143)
 """
 from __future__ import annotations
 
@@ -682,6 +684,8 @@ def main(argv=None) -> int:
     ur = ls.add_parser("update-revocations", help="import a signed revocation list (revoked.json); only a newer valid list is accepted")
     ur.add_argument("file")
     lc.set_defaults(fn=cmd_license)
+    from .autonomy.cli import register as register_autonomy       # D-143: `md20 autonomy ...`, `md20 binding reassess`
+    register_autonomy(sub)
     a = ap.parse_args(argv)
     if a.dir is None and a.cmd not in ("demo", "license"):                # D-88: same projects folder as the GUI chose last time
         from .gui.folders import saved_projects_dir

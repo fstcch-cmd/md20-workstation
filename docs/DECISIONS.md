@@ -6,6 +6,36 @@
 ---
 
 ## 2026-11-08
+### D-143　自主行動可用化與舊結果重新評估回寫：擁有者 CLI、執行器、檢查點指紋、成本輸入、`binding reassess`
+- **背景**：擁有者 2026-11-08 要求讓 D-137 的自主迴圈「可用」。**擁有者沒有給預算數字**；因此本條只做機制，不替擁有者決定任何額度，也不建立任何政策檔。
+- **決定**：
+  1. **擁有者入口**（`md20 autonomy policy set/show/revoke`、`plan`、`status`、`approve`、`run`）。`policy set` 用既有 `save_policy`、記錄核准時間，先印白話摘要，需輸入 yes 或 `--yes`；未知行動、禁止類別、空允許清單、無核准者、無正預算一律拒絕；預算沒給＝該項沒核准，程式碼裡沒有任何預設額度。`plan` 乾跑且不寫檔；`run` 沒有有效政策就拒絕。AI session 不得替擁有者執行 `policy set`。
+  2. **執行器**（`md20/autonomy/executors.py`）只包裝既有公開操作：重新評估（結合走 `reassess_workflow`，軌跡走 `Workflow.analyse`）、補獨立重複（D-131 補跑路徑，一次一條）、補傘狀窗口（`binding.manual_windows` 加窗口後走 `run_binding` 續跑，同 GUI `resample_range`）、延長已核准的執行（`engine.chunks.run_stage` 較長的 spec）。全部經 `Ledger.claim`；實測牆鐘、GPU 小時、核心小時、磁碟增量，與模擬 ps 分開記帳。決策紀錄 `kind="auto"`，`why` 中文。
+  3. **檢查點指紋**：production 完成時 `run.json` 記 `checkpoint_fingerprint`（狀態檔 sha256＋chunk 清單摘要）；驗證器核對；舊 run 沒有指紋就升級並說明原因。
+  4. **成本輸入**：`ns_per_day` 取自 doctor benchmark 記錄，`gb_per_ns` 取自軌跡間隔與每幀位元組；沒有記錄就是未知（要人工核准）。
+  5. **D-134 的「重新評估並寫回」**：新檔 `md20/sampling/reassess.py`，是 `reanalysis` 的結合變體；provenance `{source:"reassessed", thresholds_version, original_version, at}`；覆寫前備份 `<檔>.pre-reassess-<時間>`（不覆蓋既有備份）；可重跑（冪等）；`md20 binding reassess <workflow>`。
+  6. 控制器小改：`preflight`（claim 之前、不耗嘗試次數）、每次 claim 前重讀政策（撤銷立即生效）、舊（legacy）評估不算達標。
+- **理由**：自主迴圈沒有入口、沒有執行器、沒有指紋，就只是紙上設計；但「能執行」不等於「預設執行」，所以所有東西都被擁有者簽下的政策檔擋在後面。執行器只呼叫既有操作，不重寫科學邏輯。
+- **被否決**：
+  - 只傳受影響系統給 `Workflow.analyse`：會覆寫 `steps.analysis`，少掉其他系統；改傳全部 runs，沒變的由指紋沿用。
+  - 用 GUI 的 `set_replicas` 補重複：它記的是「人的決定」，自主行動不能冒充。
+  - 每個系統各自補重複：比較需要雙方重複數相同，所以全域補一條。
+  - 延長長度或預算給預設值：違反「擁有者尚未給數字」；延長長度必須由人給，沒給就被 `extension_length` 擋。
+  - 為了補窗口改 `binding.py`：不在本任務範圍；改為 preflight 拒絕並升級 `cannot_start`。
+  - 缺的 PMF 欄位用樣本重算：舊結果缺欄位就標失敗並寫原因，不猜。
+  - 預設開啟執行：任何情況都不行。
+- **證據**：`tests/test_autonomy_usable.py`、`tests/test_reassess.py`、`tests/test_autonomy_kit.py`（FakeBackend 真引擎延長、Workflow 替身）；既有 `tests/test_autonomy.py` 與 `tests/test_i18n_coverage.py` 不變通過。CI 真實引擎矩陣尚未跑過這條路。
+- **未決**（誠實）：
+  - **預算數字待擁有者設定**；在那之前所有自主行動都停在「只提建議」。
+  - 傘狀窗口層級的延長需要 `binding.py` 公開 API，目前不啟動。
+  - 延長 MD production 軌跡是否改善窗口 ESS／漂移診斷沒有證據（標 heuristic）。
+  - 延長後 `run.json` 的 protocol 仍是原長度，比較與報告尚不知道 `effective_production_ps`／`extensions`。
+  - 延長中途當機會停在 `EXTENDING`，不自動接續。
+  - 從樣本重算缺的 PMF 欄位、重新評估後自動重建報告：未做。
+  - 補重複的提案只附在第一個目標；沒有結合評估的工作流程沒有提案；軌跡分析變體沒有規則觸發。
+  - GPU／CPU 小時是牆鐘與程序 CPU 時間，不是硬體計量；執行器在本程序內執行，沒有用 GUI 的 Runner／ProcessJob；Windows 未測；GUI 入口未做（`status_data()` 已備好）。
+- **相關檔案**：`md20/autonomy/{cli,executors,inputs,controller,rules}.py`、`md20/sampling/reassess.py`、`md20/engine/runner.py`（指紋）、`md20/cli.py`、`docs/specs/autonomy.md` §9、`docs/specs/assessment.md` §7、上述三個測試檔。
+
 ### D-139　c014e8b CI 紅燈分析與修正：鋅第二個弱配位水、授權測試真的跑 CG、Windows 換行與路徑、pose-screen 斷言自相矛盾
 - **CI**：run 42389077410（`c014e8b`），以及上一輪 42385841086（`58d81bc`，本 session 改動之前）。逐 job 讀日誌（單次查詢）。
 - **heavy-metal（D-133 的後續）**：3KS3 在 2.6 Å 內有**兩個**水：鋅水 1.90 Å，另一個 2.57 Å。D-133 兩個都鍵結，變成五配位，測試要求 4 個鍵而失敗（沒進到 MD）。

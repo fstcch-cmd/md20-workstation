@@ -125,8 +125,10 @@ class CycleReport:
 
 
 def default_checkpoint_validator(cp: dict) -> tuple[bool, str]:
-    """A required checkpoint must be a non-empty file whose cheap fingerprint (size + edge hash) matches the one recorded
-    when the run was approved.  No fingerprint recorded → cannot be verified → invalid (better blocked than guessed)."""
+    """A required checkpoint must be a non-empty file whose fingerprint matches the one recorded when the run finished
+    (`engine.runner.checkpoint_fingerprint`: size + edge hash, and — when recorded — the full sha256 and the digest of the
+    chunk manifest).  No fingerprint recorded → cannot be verified → invalid (better blocked than guessed); a run that
+    finished before fingerprints were recorded says so (`legacy_run`)."""
     if not isinstance(cp, dict) or not cp.get("required"):
         return True, ""
     path = cp.get("path")
@@ -137,25 +139,46 @@ def default_checkpoint_validator(cp: dict) -> tuple[bool, str]:
         return False, f"檢查點不存在或是空檔：{pth.name}"
     fp = cp.get("fingerprint")
     if not isinstance(fp, dict):
+        if cp.get("legacy_run"):
+            return False, ("這個 run 是在記錄檢查點指紋之前完成的（舊版），無法確認檢查點沒有損毀或被換過；"
+                           "延長需要使用者確認這個 run 的檢查點後重新核准，或重新跑一個新的 run。")
         return False, "檢查點沒有核准時記錄的指紋，無法確認未損毀"
     from ..util import verify_cheap_fingerprint
     try:
         ok = verify_cheap_fingerprint(pth, fp)
+        if ok and fp.get("sha256"):
+            from ..util import sha256_file
+            ok = sha256_file(pth) == fp["sha256"]
     except OSError as exc:
         return False, f"讀取檢查點失敗：{exc}"
-    return (True, "") if ok else (False, f"檢查點內容與核准時的指紋不符（可能損毀或被換過）：{pth.name}")
+    if not ok:
+        return False, f"檢查點內容與核准時的指紋不符（可能損毀或被換過）：{pth.name}"
+    cm = fp.get("chunk_manifest")
+    if isinstance(cm, dict) and cm.get("digest"):
+        from ..util import load_json
+        prog = pth.parent / str(cm.get("file") or "")
+        if not cm.get("file") or not prog.is_file():
+            return False, "檢查點的 chunk 清單檔不存在，無法確認取樣歷程沒有被改過"
+        from ..engine.runner import chunk_manifest_digest
+        if chunk_manifest_digest(load_json(prog, {})) != cm["digest"]:
+            return False, f"chunk 清單與核准時的摘要不符（取樣歷程被改過？）：{prog.name}"
+    return True, ""
 
 
 class Controller:
     def __init__(self, ledger: Ledger | Path | str, policy: Policy | None = None, executor: Callable | None = None, *,
                  checkpoint_validator: Callable[[dict], tuple[bool, str]] = default_checkpoint_validator,
                  reassessor: Callable[[dict, ExecutionResult], dict | None] | None = None,
+                 preflight: Callable[[ActionProposal], tuple[bool, str]] | None = None,
+                 policy_loader: Callable[[], Policy | None] | None = None,
                  worker: str | None = None, clock: Callable[[], str] = now_iso):
         self.ledger = ledger if isinstance(ledger, Ledger) else Ledger(ledger, clock=clock)
         self.policy = policy
         self.executor = executor
         self.checkpoint_validator = checkpoint_validator
         self.reassessor = reassessor
+        self.preflight = preflight                  # D-143: can this computer start the action at all? (before claim: costs nothing)
+        self.policy_loader = policy_loader          # D-143: re-read before every launch, so a revocation applies at once
         self.worker = worker or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
         self.clock = clock
 
@@ -163,6 +186,7 @@ class Controller:
     def for_workflow(cls, workflow_dir: Path | str, executor: Callable | None = None, **kw) -> "Controller":
         """Ledger under `<workflow>/autonomy/`; policy from `autonomy_policy.json` there if the user wrote one."""
         policy, _ = load_policy(workflow_dir)
+        kw.setdefault("policy_loader", lambda: load_policy(workflow_dir)[0])
         return cls(Path(workflow_dir) / "autonomy", policy=policy, executor=executor, **kw)
 
     # ------------------------------------------------------------------ mode
@@ -188,7 +212,9 @@ class Controller:
         if problems:
             return [], [], {"reason": R_UNKNOWN_ASSESSMENT, "detail": "；".join(problems)}, None
         summ = summarize(inputs.assessment)
-        if summ["sampling_adequate"] is True:
+        # D-143: a legacy assessment is a recomputed view, not a stored verdict: its "adequate" does not end the work, the
+        # re-assessment that would make it a stored one is still proposed
+        if summ["sampling_adequate"] is True and not summ["legacy"]:
             return [], [], {"reason": R_GOAL, "detail": "評估認為取樣已足夠；不需要行動。", "persisted": False}, summ
         if sc["streak"] >= self._no_improvement_limit():
             return [], [], {"reason": R_NO_IMPROVEMENT, "detail": f"連續 {sc['streak']} 個已執行的行動後評估都沒有改善（上限 {self._no_improvement_limit()}）。"}, summ
@@ -265,6 +291,13 @@ class Controller:
         if self.executor is None:
             out.reason = "沒有提供執行器：只提出建議。"
             return out
+        if self.preflight is not None:
+            ok, why = self.preflight(p)
+            if not ok:
+                self.ledger.escalate("cannot_start", key=key, detail=why, options=["補齊執行條件後重新提出", "放棄此行動"])
+                out.reason = f"目前無法啟動，升級給使用者、不執行：{why}"
+                out.stop = {"reason": "cannot_start", "detail": why}
+                return out
         cp = p.checkpoint or {}
         if cp.get("required"):
             ok, why = self.checkpoint_validator(cp)
@@ -280,6 +313,11 @@ class Controller:
             if self.ledger.cancel_requested(key):
                 out.status, out.reason = "cancelled", "已取消，沒有啟動。"
                 return out
+            if self.policy_loader is not None:
+                self.policy = self.policy_loader()
+                if self.policy is None:
+                    out.status, out.reason = ("failed" if out.attempts else "not_executed"), "行動政策已撤銷或失效：不再啟動。"
+                    return out
             claim = self.ledger.claim(p, self.policy, worker=self.worker)
             if not claim.ok:
                 out.reason = claim.detail or claim.reason
@@ -412,13 +450,15 @@ class Controller:
             ps = st.proposals.get(p.idempotency_key)
             dec = authorize(p, pol, committed=st.committed(), approved=bool(ps and ps.approvals), now=self.clock())
             in_ledger = ps.status if ps is not None else None
+            pre_ok, pre_why = (True, "") if self.preflight is None else self.preflight(p)
             would = dec.executable and in_ledger not in (ST_SUCCEEDED, ST_RUNNING, ST_CANCELLED, ST_EXHAUSTED) and self.executor is not None \
-                and stop is None
+                and stop is None and pre_ok
             rows.append({"proposal_id": p.proposal_id, "action_type": p.action_type, "target": p.target, "trigger": p.trigger,
                          "estimate": p.estimate, "expected_benefit": p.expected_benefit, "decision": dec.to_dict(),
-                         "ledger_status": in_ledger, "would_execute": bool(would)})
+                         "ledger_status": in_ledger, "would_execute": bool(would), "preflight": None if pre_ok else pre_why})
             lines.append(f"{ACTION_LABEL_ZH[p.action_type]}：{dec.outcome} — {dec.reason}"
-                         + (f"（帳本狀態：{in_ledger}）" if in_ledger else ""))
+                         + (f"（帳本狀態：{in_ledger}）" if in_ledger else "")
+                         + ("" if pre_ok else f"（這台電腦目前無法啟動：{pre_why}）"))
         mode = "policy" if (pol is not None and pol.effective()[0]) else "recommendation_only"
         if mode == "recommendation_only":
             lines.insert(0, "目前是只提建議模式：沒有使用者核准的政策與預算，不會執行任何行動。")

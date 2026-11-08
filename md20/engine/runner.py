@@ -10,10 +10,39 @@ import dataclasses
 from pathlib import Path
 from typing import Callable
 
-from ..util import atomic_write_json, load_json, now_iso, DecisionLog
+from ..util import atomic_write_json, load_json, now_iso, DecisionLog, cheap_fingerprint, sha256_file
 from ..analysis import read_state_log, evaluate_acceptance, plot_stage_log, plot_minimization, plot_overview
 from .protocol import Protocol, StageSpec
 from .chunks import run_stage, NeedsHuman, Paused, StageResult
+
+
+def chunk_manifest_digest(progress: dict) -> str:
+    """sha256 of what identifies a stage's chunk sequence: for each chunk its number, step range and the size and edge hash
+    of every artifact.  Absolute paths and timestamps are left out, so a project that was moved or copied keeps its digest."""
+    import hashlib
+    import json
+    rows = []
+    for c in progress.get("chunks") or []:
+        arts = {role: {"bytes": a.get("bytes"), "edge_sha256": a.get("edge_sha256"), "pruned": bool(a.get("pruned"))}
+                for role, a in sorted((c.get("artifacts") or {}).items())}
+        rows.append({"chunk": c.get("chunk"), "start": c.get("start_local_step"), "end": c.get("end_local_step"), "artifacts": arts})
+    return hashlib.sha256(json.dumps(rows, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def checkpoint_fingerprint(run_dir: Path | str, stage: str = "production") -> dict | None:
+    """D-143: what a later action must find unchanged before it continues this run from its end state: the sealed state file
+    (size, edge hash and the full sha256) and the digest of the chunk manifest.  None when the stage has no sealed state
+    (a run that never got there, or a stage layout this does not know)."""
+    sdir = Path(run_dir) / "stages" / stage
+    state = sdir / f"{stage}_state.xml"
+    if not state.is_file():
+        return None
+    fp = {**cheap_fingerprint(state), "sha256": sha256_file(state), "stage": stage, "state_file": state.name,
+          "recorded_at": now_iso()}
+    prog = sdir / f"{stage}_progress.json"
+    if prog.is_file():
+        fp["chunk_manifest"] = {"file": prog.name, "digest": chunk_manifest_digest(load_json(prog, {}))}
+    return fp
 
 
 def _minimize(stage_dir: Path, spec: StageSpec, make_backend, *, identity: dict, decisions: DecisionLog | None) -> dict:
@@ -165,6 +194,12 @@ def run_protocol(run_dir: Path | str, protocol: Protocol, make_backend: Callable
         if frames:
             results["overview_figure"] = plot_overview(frames, figures / "run_overview")
         status.update({"status": "COMPLETE", "results": results, "finished_at": now_iso()})
+        try:                                    # D-143: lets a later action verify the end state; never fails the run
+            fp = checkpoint_fingerprint(run_dir)
+            if fp:
+                status["checkpoint_fingerprint"] = fp
+        except Exception:  # noqa: BLE001
+            pass
         atomic_write_json(status, run_dir / "run.json")
         return status
     except Paused as exc:

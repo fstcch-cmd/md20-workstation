@@ -52,4 +52,16 @@
 ## 6. 已知限制
 - 評估的 `thresholds_version` 與目前版本不同時只在紀錄上標示（`current_thresholds_version`），不自動重評；舊門檻版本寫下的資格仍沿用。
 - 對接、軌跡分析列的 `supported` 仍由各自的檢查旗標決定（沒有科學門檻評估），只有 MD 與結合列改成本規格的語意。
-- 沒有「重新評估並寫回」的動作：舊結果要從合格變成成立，必須重新分析（重跑 binding 的分析）才會寫入儲存的評估。
+- 「重新評估並寫回」見 §7（D-143）。仍未做：缺少的欄位（plateau、窗口統計、累積曲線）不會由樣本重算，只用 manifest 已儲存的 PMF 欄位。
+
+## 7. 重新評估並寫回（D-143，`md20/sampling/reassess.py`，`md20 binding reassess <workflow>`）
+D-134 的未決項目。舊結果（D-96 之前，沒有儲存評估）原本只能「顯示診斷、資格不成立」。現在可以用**目前的** `assess_pmf` 由已儲存的 PMF 欄位重算並寫回。
+- **資料來源**：每個重複的 `binding/<目標>/[repN/]binding_manifest.json` 的 `result.pmf`（不重新取樣、不開模擬）。多個重複依 workflow 原本的規則合併：每個重複都支持，結論才成立（`Workflow._binding_assessment`）。
+- **寫回位置**：每個重複的 manifest（`result.assessment`）與 `state.json` 的 `steps.binding.results[目標].assessment`。評估內附 `provenance = {source: "reassessed", thresholds_version, original_version, original_was_legacy, original_eligibility, at, by, basis, backups}`。
+  寫回後 `resolve_assessment` 會把它當成儲存的評估（`claim_status.assessment_source == "stored"`）；來源只看 `provenance.source`。
+- **備份**：每個被改的檔案先複製成 `<檔名>.pre-reassess-<UTC 時間>`（已存在就加編號，不覆蓋舊備份）。原檔不會在沒有備份的情況下被改。
+- **資格**：只由 `assess_pmf` 決定。舊結果只有在目前的診斷全部通過時才成立；診斷不通過就如實存成不通過（原因代碼 `assess_failed`，不再是 `assess_legacy`）；欄位缺少仍是 `unknown`，資格不成立。不推測缺少的欄位。
+- **冪等**：已經是目前門檻版本的評估不動。舊門檻版本但非舊資料的評估，要加 `--include-outdated` 才重評（資格可能因此變動，`provenance.original_eligibility` 保留了原本的）。
+- **比較表**：有 Workflow 時用新的評估重算 `comparison` 與 `cooperativity`（與 `Workflow.binding` 同一組函式）；否則在 state 標 `comparison_stale`。報告不會自動重建，需在 GUI 重新整理報告或重新執行流程。
+- **決策紀錄**：每個目標一筆 `binding.reassess`（`why` 中文，含新成立的結論與仍未知的診斷）。
+- `--dry-run` 不寫任何檔案；結果以 `report_lines` 輸出。自主行動的 `reanalysis`（結合變體）呼叫同一個函式。
