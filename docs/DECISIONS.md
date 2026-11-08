@@ -6,6 +6,13 @@
 ---
 
 ## 2026-11-08
+### D-156　修 openmm-stack 唯一紅:test_funnel 測試裡殘留的 np.trapezoid(D-154 漏改)
+- **CI 證據**（a9d6cf0/D-154 的 openmm-stack，ubuntu＋macos）:`1 failed, 1531 passed, 9 skipped, 1 xfailed`。唯一失敗 `test_wham_on_synthetic_axial_samples_recovers_the_known_well_and_dG`，錯誤 `AttributeError: module 'numpy' has no attribute 'trapezoid'`。
+- **根因**：D-154 把**產品碼**的 `np.trapezoid` 全改成版本無關的 `funnel.trapz`，但**漏了測試檔** `tests/test_funnel.py:471` 計算參考 ΔG° 時仍用 `np.trapezoid`。CI 的 numpy 沒有這個屬性（numpy 2.0 移除 `np.trapz`、`np.trapezoid` 在更早版本不存在，且 numpy 的 `__getattr__` 讓 `hasattr` 說謊）。
+- **決定**：改用測試已匯入的 `FN.trapz`（`from md20.sampling import funnel as FN`，同參數順序 y, x）。全 repo 再掃無任何 `np.trapezoid/np.trapz` 實際呼叫。
+- **證據**：`tests/test_funnel.py` 本機 34 項全綠；heavy[metal] 鋅 restrain 真機 `test_bonded_zinc_ca2` PASSED（確認選項 D 防住 Glu106 塌陷）、論文驗證 hsieh2024/hsieh2025 PASSED——科學面無問題,此為純測試版本相容 bug。
+- **相關檔案**：`tests/test_funnel.py`。
+
 ### D-155　清除遺留 trypsin/benzamidine 示範：使用者看到的示範一律改用真實教學案例(hsieh2024)
 - **問題**（使用者 2026-11-08）：`docked_BEN`／`trypsin_demo` 這組苯甲脒—胰蛋白酶假資料在整個教學專案裡從未出現（教學案例是藜芽代謝物對 NF-κB p65），卻被當成示範硬留著，造成理解錯誤。使用者指示：要示範就用真實教學案例，否則直接刪掉，別硬留會誤導的東西。
 - **查證**：遺留示範散在三個「給人看」的預覽工具——

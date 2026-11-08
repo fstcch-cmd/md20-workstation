@@ -468,6 +468,6 @@ def test_wham_on_synthetic_axial_samples_recovers_the_known_well_and_dG():
     assert r["delta_pmf"] == pytest.approx(20.0, abs=1.5) and r["plateau"]
     a = FN.lateral_area_nm2(0.2, 4000.0, KT)
     sel = (zg >= 0.4) & (zg <= r["site_nm"][1])
-    ref = -KT * math.log(a * np.trapezoid(np.exp(-U[sel] / KT), zg[sel]) / V0_NM3)
+    ref = -KT * math.log(a * FN.trapz(np.exp(-U[sel] / KT), zg[sel]) / V0_NM3)   # D-156: np.trapezoid absent on the CI numpy; use the version-independent trapz
     assert r["dG"] == pytest.approx(ref, abs=1.5)
     assert r["dG"] < 0 and "pmf_kj_mol" not in r and np.all(np.isfinite(r["W"]))
