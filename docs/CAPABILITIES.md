@@ -782,7 +782,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 
 `gui_worker`
 
-**實作**：`md20/gui/app.py`、`md20/gui/worker.py::run_worker`、`md20/gui/state.py`、`md20/gui/actions.py`
+**實作**：`md20/gui/app.py`、`md20/gui/worker.py::run_worker`、`md20/gui/state.py`、`md20/gui/actions.py`、`md20/gui/theme.py`、`md20/gui/connection.py`
 
 **支援的系統類型**：Windows／macOS／Linux 瀏覽器介面（127.0.0.1）
 
@@ -791,6 +791,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 - worker 測試用 MD20_GUI_FAKE_RUN 假計算；真實引擎下的關 GUI→重開→接回沒有 CI 測試
 - 筆電上關主控台視窗時子程序是否存活未實測
 - 瀏覽器繪圖測試（playwright）在 openmm-stack 為 SKIPPED，只有 gui-preview 的截圖與點擊自測
+- D-146 設計系統（theme.py）與 D-147 連線穩定性（心跳 90s、分頁回前景重連、檔案替換重試）；實際頁面套用待 CI gui-preview
 
 **測試**：
 
@@ -805,6 +806,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 | `tests/test_gui_server.py` | gui | `ci.yml:openmm-stack` |
 | `tests/test_gate_actions.py` | unit | `ci.yml:pure-python` |
 | `tools/gui_preview.py` | gui | `gui-preview.yml:screenshots` |
+| `tests/test_gui_theme_connection.py` | unit | `ci.yml:pure-python` |
 
 **狀態**：implemented=`yes`｜synthetic_tested=`yes`｜real_engine_tested=`no`｜scientifically_benchmarked=`none`｜released_installer=`v0.1.0a17 (older code)`
 

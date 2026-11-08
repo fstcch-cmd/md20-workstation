@@ -63,3 +63,4 @@
 | [replicas.md](replicas.md) | 獨立重複：每個分析是否需要重複、條數取最大值（3）、報告如何呈現跨重複不確定性、開始時告知使用者（D-129）；重複計畫與告知（D-131） | 規格；§3–§5 已實作，待 CI |
 | [capabilities.md](capabilities.md) | 單一能力清單 `docs/capabilities.json`／`docs/CAPABILITIES.md`（五種彼此獨立的狀態、測試類型、CI job 分類、已發行安裝程式、版本對齊）與膜診斷驗收器 `tools/validate_membrane_diag.py`（D-136，R7＋R5 膜） | 已實作・純 Python 測試（CI 結果待下一輪） |
 | [thresholds_calibration.md](thresholds_calibration.md) | 經驗門檻校準：重複 CV 提醒的偵測特性、PCA／分群敏感度改用時間前後半（D-144） | 已實作 |
+| [gui_design.md](gui_design.md) | GUI 設計系統（D-146）與連線穩定性（D-147）：tokens、三態閘門、心跳與重連、檔案替換重試 | 已實作，待 CI gui-preview |

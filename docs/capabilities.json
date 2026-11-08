@@ -1538,7 +1538,9 @@
     "md20/gui/app.py",
     "md20/gui/worker.py::run_worker",
     "md20/gui/state.py",
-    "md20/gui/actions.py"
+    "md20/gui/actions.py",
+    "md20/gui/theme.py",
+    "md20/gui/connection.py"
    ],
    "supported_system_types": [
     "Windows／macOS／Linux 瀏覽器介面（127.0.0.1）"
@@ -1547,7 +1549,8 @@
     "關 GUI 不中斷計算（D-103，開發者決定，使用者可推翻）",
     "worker 測試用 MD20_GUI_FAKE_RUN 假計算；真實引擎下的關 GUI→重開→接回沒有 CI 測試",
     "筆電上關主控台視窗時子程序是否存活未實測",
-    "瀏覽器繪圖測試（playwright）在 openmm-stack 為 SKIPPED，只有 gui-preview 的截圖與點擊自測"
+    "瀏覽器繪圖測試（playwright）在 openmm-stack 為 SKIPPED，只有 gui-preview 的截圖與點擊自測",
+    "D-146 設計系統（theme.py）與 D-147 連線穩定性（心跳 90s、分頁回前景重連、檔案替換重試）；實際頁面套用待 CI gui-preview"
    ],
    "tests": [
     {
@@ -1594,6 +1597,11 @@
      "file": "tools/gui_preview.py",
      "type": "gui",
      "ci_job": "gui-preview.yml:screenshots"
+    },
+    {
+     "file": "tests/test_gui_theme_connection.py",
+     "type": "unit",
+     "ci_job": "ci.yml:pure-python"
     }
    ],
    "states": {

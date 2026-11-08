@@ -14,6 +14,8 @@ from ..workflow import Workflow
 from .logic import Runner, config_from_form, list_workflows, pose_table, set_pose_choice, screen_table
 from .actions import apply_gate_action, resample_range, select_screen_ligands
 from . import actions as ACT
+from . import theme
+from .connection import CONNECTION_JS, tune_heartbeat
 from ..docking.screen import echart_screen, echart_ranking
 from .views import (gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html,
                     coverage_targets, coverage_chart, coverage_summary, replica_card)
@@ -132,23 +134,12 @@ def set_lang(code: str) -> None:
     atomic_write_json(d, path)
 
 
-CSS = """
-<style>
-  body { font-family: "Inter", "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
-         background: #f6f7f9; color: #1f2933; }
-  .md20-header { background: #1f2933 !important; }
-  .md20-title { font-weight: 600; letter-spacing: .01em; }
-  .md20-section { font-size: 1.05rem; font-weight: 600; color: #1f2933; margin-top: .5rem; }
-  .md20-muted { color: #616e7c; font-size: .85rem; }
-  .md20-card { background: #fff; border: 1px solid #e4e7eb; border-radius: 6px; box-shadow: none; }
-  .md20-mode { cursor: pointer; transition: border-color .15s; }
-  .md20-mode:hover { border-color: #2f6f9f; }
-  .md20-param-label { font-size: .9rem; font-weight: 500; }
-  .md20-why { color: #52606d; font-size: .8rem; line-height: 1.35; }
-  .md20-changed { color: #b44d12; font-size: .75rem; }
-  .q-table th { font-weight: 600; }
-</style>
-"""
+def _theme_head(L: str) -> None:
+    """D-146: the design system (gui/theme.py) and the connection keeper (D-147) on every page."""
+    from . import theme
+    ui.colors(**theme.QUASAR_COLORS)
+    ui.add_head_html(theme.css(L))
+    ui.add_head_html(CONNECTION_JS)
 
 STATUS_COLOR = {"PASS": "positive", "COMPLETE": "positive", "RUNNING": "primary", "PAUSED": "warning",
                 "NEEDS_HUMAN": "negative", "ERROR": "negative"}
@@ -175,7 +166,7 @@ def _feature_card():
     if not texts:
         return
     L = lang()
-    with ui.card().classes("w-full max-w-5xl mx-auto md20-card").style("border-left: 4px solid #b5651d").props("data-testid=feature-card"):
+    with ui.card().classes("w-full max-w-5xl mx-auto md20-card md20-notice").props("data-testid=feature-card"):
         ui.label(_("你的授權不含此功能", "Your licence does not include this feature", "お持ちのライセンスにはこの機能が含まれていません",
                    "귀하의 라이선스에는 이 기능이 포함되어 있지 않습니다")).classes("md20-section")
         ui.label(pick(texts, L)).classes("text-sm")
@@ -194,7 +185,7 @@ def _license_card():
         _feature_card()
         return
     L = lang()
-    with ui.card().classes("w-full max-w-5xl mx-auto md20-card").style("border-left: 4px solid #b5651d").props("data-testid=license-card"):
+    with ui.card().classes("w-full max-w-5xl mx-auto md20-card md20-notice").props("data-testid=license-card"):
         ui.label(_("需要 MD20 授權", "MD20 licence needed", "MD20 のライセンスが必要です", "MD20 라이선스가 필요합니다")).classes("md20-section")
         ui.label(st.message(L)).classes("text-sm")
         ui.label(pick(LIC.HOWTO, L)).classes("text-sm")
@@ -229,7 +220,7 @@ def _license_card():
 
 def _header():
     L = lang()
-    ui.add_head_html(CSS)
+    _theme_head(L)
     with ui.header().classes("items-center justify-between md20-header"):
         ui.label(t("app_title", L)).classes("text-lg md20-title")
         with ui.row().classes("items-center gap-4"):
@@ -244,17 +235,17 @@ def _header():
                           "資源用量已更新，從下一個計算步驟開始生效。", "Resource use updated. It applies from the next step.",
                           "リソースの使用量を更新しました。次の計算ステップから反映されます。",
                           "자원 사용량을 바꿨습니다. 다음 계산 단계부터 적용됩니다.")))
-                      ).props("dense dark borderless options-dense").classes("w-56").tooltip(_(
+                      ).props("dense borderless options-dense").classes("w-56").tooltip(_(
                           "計算可以使用多少電腦資源", "How much of this computer a calculation may use",
                           "計算にこのパソコンの資源をどれだけ使うか", "계산에 이 컴퓨터 자원을 얼마나 쓸지"))
-            ui.select(LANG_NAMES, value=L, on_change=change).props("dense dark borderless options-dense data-testid=lang-select").classes("w-28")
+            ui.select(LANG_NAMES, value=L, on_change=change).props("dense borderless options-dense data-testid=lang-select").classes("w-28")
     _license_card()
     # D-67: wherever the user goes (home, system page, another language), the running calculation is one click away
     job = RUNNER.running(STATE["projects_dir"])
     if job is not None:
         href = f"/wf/{job.wf.project.dir.name}/{job.wf.name}"
-        with ui.row().classes("w-full items-center gap-3 px-4 py-2").style("background:#fff7e6;border-bottom:1px solid #f0d9a8"):
-            ui.icon("autorenew").classes("text-warning")
+        with ui.row().classes("w-full items-center gap-3 px-5 py-2 md20-running").props("data-testid=running-banner"):
+            ui.html('<span class="md20-pulse" aria-hidden="true"></span>')
             ui.label(_("計算進行中：", "Calculation running: ", "計算中：", "계산 중: ") + f"{job.wf.project.dir.name} / {job.wf.name}").classes("text-sm")
             ui.button(_("回到進度", "Back to progress", "進行状況に戻る", "진행 상황으로 돌아가기"),
                       on_click=lambda h=href: ui.navigate.to(h)).props("dense outline no-caps color=primary")
@@ -783,7 +774,7 @@ def workflow_page(project: str, name: str):
                 return
             card = next((c for c in gate_cards(wf, lang=lang()) if c["title"] == "confirm MD"), None)
             go = next((a for a in (card or {}).get("actions", []) if a["label"].startswith("進入分子動力學")), None)
-            with confirm_box, ui.card().classes("w-full md20-card").style("border-left: 4px solid #2f6f9f"):
+            with confirm_box, ui.card().classes("w-full md20-card md20-notice md20-notice--info"):
                 ui.label(t("confirm_md_title", lang())).classes("md20-section")
                 ui.label(_(stp.get("message", ""),
                            "Docking and pose selection are complete. Check the selected poses in the pose table, then decide "
@@ -1142,8 +1133,10 @@ def workflow_page(project: str, name: str):
                     if not cards:
                         ui.label(t("no_gates", L)).classes("text-gray-500")
                     for c in cards:
-                        with ui.card().classes("w-full"):
+                        mod, glyph = theme.gate_state(c.get("status"), bool(c.get("advisory")))
+                        with ui.card().classes(f"w-full md20-gate md20-gate--{mod}").props(f"data-gate-state={mod}"):
                             with ui.row().classes("items-center gap-2"):
+                                ui.html(f'<span class="md20-glyph" aria-hidden="true">{glyph}</span>')
                                 ui.badge(card_badge(c, L), color="blue-grey-6" if c.get("advisory") else c["color"])
                                 ui.label(f"{card_source(c['source'], L)} · {gate_title(c['title'], L)}").classes("font-semibold")
                             general = gate_general(c["title"], L)
@@ -1248,4 +1241,5 @@ def main(projects_dir: str | None = None, port: int = 8020, show: bool = True, h
     # showing "connection lost" and reloading the page
     import inspect
     extra = {"reconnect_timeout": 180.0} if "reconnect_timeout" in inspect.signature(ui.run).parameters else {}
+    tune_heartbeat()
     ui.run(title="MD20", host=host, port=port, show=show, reload=False, language=QUASAR_LANG[lang()], **extra)

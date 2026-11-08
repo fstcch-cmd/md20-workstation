@@ -18,7 +18,7 @@ from ..util import load_json
 STATIC = Path(__file__).parent / "static"
 # Status badge: (label in zh, en, ja, ko) and colour.  Cards keep the Chinese label in "label" when lang="zh" (app.py maps it).
 STATUS_STYLE = {"PASS": (("通過", "Passed", "合格", "통과"), "positive"),
-                "AUTO_FIXED": (("已自動修正", "Corrected automatically", "自動で修正済み", "자동 수정됨"), "warning"),
+                "AUTO_FIXED": (("已自動修正", "Corrected automatically", "自動で修正済み", "자동 수정됨"), "info"),   # D-146: blue = the program acted; amber is reserved for decisions
                 "NEEDS_HUMAN": (("需要你決定", "Needs your decision", "判断が必要", "결정 필요"), "negative"),
                 "PAUSED": (("已暫停", "Paused", "一時停止中", "일시 정지됨"), "warning"),
                 "RUNNING": (("執行中", "Running", "実行中", "실행 중"), "info")}

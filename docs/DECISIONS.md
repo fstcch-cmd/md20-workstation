@@ -6,6 +6,16 @@
 ---
 
 ## 2026-11-08
+### D-146／D-147　GUI 以 frontend-design 重做設計系統，並增強連線穩定性（使用者 2026-11-08）
+- **安全性確認（安裝前）**：Playwright MCP＝`@playwright/mcp`，Microsoft 維護、Apache-2.0、開源，以 `npx @playwright/mcp@0.0.84 --isolated` 釘版、隔離模式執行（CLAUDE.md 既定）。frontend-design＝Anthropic 官方 `frontend-design@claude-plugins-official`，純指令 skill、不執行程式。兩者皆官方來源，採用。
+- **D-146 設計系統**：新 `md20/gui/theme.py`（tokens／字型／元件 CSS），`_header` 以 `ui.colors(theme.QUASAR_COLORS)`＋`theme.css(lang)` 套用；移除各頁 inline 色碼。主色溶劑藍綠 `#0D6870`，紙面淡水色；三態閘門是唯一張揚元素，形狀＋顏色＋左緣色條；琥珀改 `#9A5A00` 達 WCAG AA。閘門徽章色 AUTO_FIXED 由 warning 改 info（藍＝程式動的，琥珀保留給「需要你決定」）。設計理由與避開的 AI tell 見 `docs/specs/gui_design.md`。
+- **D-147 連線穩定性**：`md20/gui/connection.py`：(1) 伺服器 engine.io ping timeout 20→90 s（撐過背景節流與 D-93 的 GIL 佔用）；(2) 用戶端 `visibilitychange`/`online`/`focus` 立即重連、保留頁面；(3) `util/jsonio.replace_retry` 讓 `atomic_write_json`／`atomic_copy` 在 Windows 檔案共享衝突時退避重試約 1.2 s，失敗則丟出不靜默。
+- **理由**：使用者要求「介面需使用 frontend-design 重寫、配色現代、線條簡潔、字體清晰」與「增強連線穩定性」。教學筆電最常見的斷線是背景分頁節流、睡眠、Wi-Fi 掉與 GIL 佔用，三者都針對。
+- **被否決**：用 web font（GUI 離線，改用系統 CJK 字）；斷線時強制重載頁面（會打斷，且狀態已在磁碟，改為保留頁面重連）；`os.replace` 失敗靜默跳過（會掉狀態更新，改為重試後丟出）。
+- **測試**：`tests/test_gui_theme_connection.py`（22 項，純邏輯）；`tools/theme_preview.py` 設計參考；真實頁面套用由 CI `gui-preview`。
+- **未決**：各頁實際套用後的視覺微調待 CI `gui-preview` 截圖與使用者在真機確認；本機 Playwright MCP 尚未接上（容器無 NiceGUI，無法起 GUI 實測）。
+- **相關檔案**：`md20/gui/theme.py`、`md20/gui/connection.py`、`md20/gui/app.py`、`md20/gui/views.py`、`md20/util/jsonio.py`、`tools/theme_preview.py`、`tests/test_gui_theme_connection.py`、`docs/specs/gui_design.md`、`docs/specs/README.md`。
+
 ### D-145　鋅位點配位水的 H 塌陷（CI 6c85bde NaN）：經金屬到水 H 的 1-4 對改為排除，水 H 一律加 M–O–H 角（更正 D-133 的「不加 M–O–H 角」）
 - **證據**：run 42430961347（`6c85bde`）heavy-metal：結構斷言（4 個鍵含 1 個水）通過，MD 前 2 ps 出現 `Particle coordinate is NaN`。
 - **原因（程式缺陷，D-133 引入）**：水 O 成為鍵結配位原子後，His N–Zn–O(水) 是經金屬的 1-3，被排除，N 與水 O 之間不再有 LJ 排斥；經金屬的 1-4 對「His N ↔ 水 H」則是縮放後的庫侖作用，而 TIP3P 的 H **沒有 LJ**——這對只剩吸引。

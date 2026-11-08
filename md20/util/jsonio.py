@@ -10,6 +10,26 @@ from pathlib import Path
 from typing import Any
 
 
+REPLACE_DELAYS = (0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5)     # ≈1.2 s in total
+
+
+def replace_retry(src, dst, *, delays=REPLACE_DELAYS, _replace=None, _sleep=None) -> None:
+    """D-147: on Windows, os.replace fails with PermissionError (sharing violation) while another process — the GUI
+    polling a progress file, an antivirus scan, OneDrive — has the destination open.  A calculation must not die or
+    lose a status update over that: retry with short back-off, then raise the last error (never a silent skip)."""
+    import time as _t
+    rep = _replace or os.replace
+    sleep = _sleep or _t.sleep
+    for d in tuple(delays) + (None,):
+        try:
+            rep(src, dst)
+            return
+        except PermissionError:
+            if d is None:
+                raise
+            sleep(d)
+
+
 def atomic_write_json(data: Any, path: Path | str, *, backup: bool = True) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -28,8 +48,8 @@ def atomic_write_json(data: Any, path: Path | str, *, backup: bool = True) -> Pa
             except OSError:
                 pass
         # os.replace is atomic on POSIX and on Windows (MoveFileEx with REPLACE_EXISTING)
-        # as long as the destination is not held open by another process.
-        os.replace(tmp, path)
+        # as long as the destination is not held open by another process — D-147: retried (see replace_retry)
+        replace_retry(tmp, path)
     finally:
         try:
             tmp.unlink()
@@ -65,7 +85,7 @@ def atomic_copy(src: Path | str, dst: Path | str) -> Path:
     tmp = Path(tmp_name)
     try:
         shutil.copyfile(src, tmp)
-        os.replace(tmp, dst)
+        replace_retry(tmp, dst)
     finally:
         try:
             tmp.unlink()
