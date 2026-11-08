@@ -1,5 +1,6 @@
 """D-130 redo (docs/specs/replicas.md §2, evidence_driven_repair_prompt.md R1): every independent replica is analysed,
 aggregated with a declared estimand, and shown; one trajectory gives "unavailable", never an invented interval."""
+from pathlib import Path
 import copy
 import math
 
@@ -188,7 +189,7 @@ def test_workflow_analyse_runs_every_replica_and_keeps_summaries_compatible(tmp_
     res = wf.analyse(runs)
     assert sorted(calls) == ["r1", "r2", "r3"]                                  # not only run_ids[0]
     s = res["summaries"]["complex"]
-    assert s["metrics_file"].endswith("r1/analysis/metrics.json") and s["rmsd_backbone_mean_A"] == 2.0      # old fields = first replica
+    assert Path(s["metrics_file"]).parts[-3:] == ("r1", "analysis", "metrics.json") and s["rmsd_backbone_mean_A"] == 2.0      # old fields = first replica
     assert [x["run_id"] for x in s["replicas"]] == ["r1", "r2", "r3"] and all(x["analysed"] for x in s["replicas"])
     assert s["n_replicas_analysed"] == 3 and s["representative_run_id"] == "r1"
     agg = load_json(s["replica_set_file"], {})

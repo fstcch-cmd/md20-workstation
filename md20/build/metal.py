@@ -37,6 +37,17 @@ HIS_NAMES = {"HIS", "HID", "HIE", "HIP"}
 CYS_NAMES = {"CYS", "CYM", "CYX"}
 CUTOFF_A = {"N": 2.45, "O": 2.6, "S": 2.6}
 WATER = {"HOH", "WAT", "TIP3", "SOL"}
+# D-139: first-shell metal–water(O) target distances (Å), Harding, Acta Cryst D 62:678 (2006) Table / Harding 2001;
+# a crystal water is bonded to a `bonded` site only within target + WATER_SHELL_TOL_A (2.6 Å stays the detection
+# cutoff for reporting).  CA II 3KS3: zinc water 1.90 Å (bonded), a second water at 2.57 Å (weak, not first shell)
+WATER_TARGET_A = {"ZN": 2.09, "FE": 2.13, "FE2": 2.13, "CU": 2.00, "CU1": 2.00, "MN": 2.19, "CO": 2.09, "NI": 2.09,
+                  "MG": 2.07, "CA": 2.39, "CD": 2.31}
+WATER_SHELL_TOL_A = 0.25
+
+
+def water_bond_max_A(metal_resname: str) -> float:
+    """Largest metal–O(water) distance (Å) treated as first-shell coordination for the bonded model."""
+    return WATER_TARGET_A.get(str(metal_resname).upper(), 2.09) + WATER_SHELL_TOL_A
 K_BOND = 2 * 46.0 * 4.184 * 100      # ZAFF-like Zn–N 46 kcal/mol/Å² → OpenMM ½k(r−r0)² in kJ/mol/nm²
 K_ANGLE = 2 * 25.0 * 4.184           # 25 kcal/mol/rad² → kJ/mol/rad²
 K_KEEP = 1000.0                      # kJ/mol/nm² position restraint for keep_nonbonded
@@ -145,7 +156,8 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
               "label": f"{d['resname']}{d['resseq']}:{d['name']}"} for d in donors]
     # D-133: under `bonded` a crystal water on the site (added back by apply_metal_policy) is bonded too, so the site
     # keeps its coordination number; `bonded_open` leaves the position open (the pre-D-133 model)
-    site_w = [w for w in site.get("waters") or [] if w.get("index") is not None] \
+    wmax = water_bond_max_A(site.get("metal") or key.split(":")[0])
+    site_w = [w for w in site.get("waters") or [] if w.get("index") is not None and w["distance_A"] <= wmax] \
         if policy == "bonded" and not params else []        # fitted params cover only the donors they were fitted on
     bonds += [{"metal": site["metal_index"], "donor": w["index"], "r0_nm": round(w["distance_A"] / 10.0, 4), "k": K_BOND,
                "label": f"{w['resname']}{w['resseq']}:{w['name']}", "water": True} for w in site_w]
@@ -331,11 +343,11 @@ def site_waters_to_add(sites: list[dict], plans: list[dict], waters: list[dict],
     """D-133 (pure): which sidecar crystal waters (metal_site_waters.pdb records {resname, resseq, xyz (Å)}) go back
     into the model — only for a site whose policy is exactly `bonded` with no fitted parameters, and only waters
     within the O cutoff of that metal.  Each water is returned once with the metal key it serves."""
-    cut = CUTOFF_A["O"] if cutoff_A is None else cutoff_A
     out, used = [], set()
     for s, p in zip(sites, plans):
         if p.get("policy") != "bonded" or p.get("action") != "bonded" or policy_for(s["key"], metal_params):
             continue
+        cut = water_bond_max_A(s.get("metal") or s["key"].split(":")[0]) if cutoff_A is None else cutoff_A
         for k, w in enumerate(waters):
             if k in used:
                 continue

@@ -179,7 +179,7 @@ def test_the_feature_message_is_in_four_languages(license_env):
     ("hts", lambda c: c.update(screen={"library": "x.xlsx"})),
     ("cg", lambda c: c["md"].update(resolution="cg")),
 ])
-def test_workflow_run_stops_at_the_entrance_without_the_feature(license_env, tmp_path, feature, cfg_edit):
+def test_workflow_run_stops_at_the_entrance_without_the_feature(license_env, tmp_path, monkeypatch, feature, cfg_edit):
     from md20.project import Project
     from md20.workflow import Workflow, example_config
     cfg = example_config()
@@ -192,14 +192,19 @@ def test_workflow_run_stops_at_the_entrance_without_the_feature(license_env, tmp
         wf.run(lambda case, proto: None, platform=None)
     assert e.value.feature == feature
     assert not (wf.dir / "running.json").exists()                          # nothing was started
-    # with the feature the gate opens (the run then fails for its own reasons, not for the licence)
+    # with the feature the gate opens.  The run body is replaced by a sentinel: with real OpenMM installed
+    # (openmm-stack CI) the cg branch otherwise ran a full Martini simulation here and pushed the job past its
+    # 90-minute limit (c014e8b, 58d81bc).  Reaching the sentinel is exactly "the licence let it through".
     _only(license_env, _v2(license_env, features=[feature]))
-    try:
-        wf.run(lambda case, proto: None, platform=None)
-    except L.LicenseRequired:
-        raise
-    except Exception:  # noqa: BLE001
+
+    class _Reached(Exception):
         pass
+
+    def _sentinel(*a, **k):
+        raise _Reached()
+    monkeypatch.setattr(Workflow, "_run", _sentinel)
+    with pytest.raises(_Reached):
+        wf.run(lambda case, proto: None, platform=None)
 
 
 def test_a_workflow_that_needs_nothing_runs_on_any_feature_set(license_env, tmp_path):

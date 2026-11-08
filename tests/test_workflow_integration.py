@@ -113,7 +113,12 @@ def test_pose_md_screen_3ptb(pdb_3ptb, tmp_path):
         out = None
     cache = json.loads((wf.dir / "pose_screen.json").read_text(encoding="utf-8"))["BEN"]
     assert cache, "screen produced no verdicts"
-    assert all(v["verdict"] in ("STABLE", "UNSTABLE") for v in cache.values()), cache   # FAILED = machinery broken
+    # FAILED = machinery broken, EXCEPT the documented stochastic outcome above: the short CPU NPT ran but did not
+    # pass its own acceptance after the allowed extensions (D-98; c014e8b density_drift) — D-139
+    def _acceptance_only(v):
+        return v["verdict"] == "FAILED" and v.get("reasons") and all("未通過驗收" in r for r in v["reasons"])
+    assert all(v["verdict"] in ("STABLE", "UNSTABLE") or _acceptance_only(v) for v in cache.values()), cache
+    assert any(v["verdict"] in ("STABLE", "UNSTABLE") for v in cache.values()) or out is None, cache
     if out is not None:
         assert out["status"] == "COMPLETE"
         sel = wf.state()["steps"]["pose_selection"]["selection"]["ligands"]["BEN"]

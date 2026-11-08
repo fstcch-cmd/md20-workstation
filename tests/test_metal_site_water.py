@@ -115,3 +115,19 @@ def test_receptor_sidecar_selects_only_waters_on_kept_metals(tmp_path):
     w = read_site_waters(f)
     assert w == [{"resname": "HOH", "resseq": "400", "xyz": (1.9, 0.3, 0.0)}]
     assert read_site_waters(tmp_path / "missing.pdb") == []
+
+
+def test_second_weak_water_is_not_first_shell():
+    """D-139 (CI c014e8b, 3KS3): two crystal waters inside the 2.6 Å detection cutoff — the zinc water at 1.90 Å and
+    a second one at 2.57 Å.  Only the first-shell water (≤ Harding Zn–O 2.09 + 0.25 Å) is bonded or added back."""
+    from md20.build.metal import water_bond_max_A
+    atoms = _ca2_like()
+    atoms[4]["xyz"] = list(np.asarray(atoms[4]["xyz"]) / 1.98 * 1.90)
+    atoms.append(_atom(5, "O", "HOH", 401, (0.2, 2.56, 0.0), "O", prot=False))        # 2.57 Å
+    s = find_sites(atoms)[0]
+    assert sorted(w["distance_A"] for w in s["waters"]) == [1.9, 2.57]               # still reported
+    p = plan_site(s, "bonded", {a["index"]: a["xyz"] for a in atoms})
+    assert [b["label"] for b in p["bonds"] if b.get("water")] == ["HOH400:O"] and len(p["bonds"]) == 4
+    side = [{"resname": "HOH", "resseq": "400", "xyz": atoms[4]["xyz"]}, {"resname": "HOH", "resseq": "401", "xyz": atoms[5]["xyz"]}]
+    assert [w["resseq"] for w in site_waters_to_add([s], [p], side)] == ["400"]
+    assert abs(water_bond_max_A("ZN") - 2.34) < 1e-9 and abs(water_bond_max_A("CA") - 2.64) < 1e-9

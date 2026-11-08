@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-11-08
+### D-139　c014e8b CI 紅燈分析與修正：鋅第二個弱配位水、授權測試真的跑 CG、Windows 換行與路徑、pose-screen 斷言自相矛盾
+- **CI**：run 42389077410（`c014e8b`），以及上一輪 42385841086（`58d81bc`，本 session 改動之前）。逐 job 讀日誌（單次查詢）。
+- **heavy-metal（D-133 的後續）**：3KS3 在 2.6 Å 內有**兩個**水：鋅水 1.90 Å，另一個 2.57 Å。D-133 兩個都鍵結，變成五配位，測試要求 4 個鍵而失敗（沒進到 MD）。
+  **修正**：只有第一配位殼的水才鍵結、才加回。上限＝Harding（Acta Cryst D 2006）金屬–水 O 目標距離＋0.25 Å（Zn 2.09 → 2.34 Å）。2.6 Å 仍是偵測與回報用的截斷。新測試 `test_second_weak_water_is_not_first_shell`（照 3KS3 的 1.90／2.57 Å）。0.03 nm 門檻沒動。
+- **openmm-stack 三 OS 都在 90 分鐘逾時**（58d81bc 已經如此，不是本 session 引入）：`test_license_v2.py::test_workflow_run_stops_at_the_entrance_without_the_feature[cg]` 的後半段要確認「有授權時閘門會打開」，
+  但它直接呼叫 `wf.run`；有真實 OpenMM 時會跑完整的 Martini 模擬（faulthandler 顯示卡在 `cg_run.run_cg` → `simulation.step`）。**修正**：把 `Workflow._run` 換成替身，碰到替身就代表授權已放行——驗證更強（原本吞掉所有例外），也不跑模擬。
+  `test_nacl_pmf` 的「Timeout (0:15:00)」只是 faulthandler 印堆疊，不會中止：580cbff 時同一測試跑了 1087 s 並通過，不是回歸。
+- **pure-python Windows**：(1) `test_license_vector_v2` 用 sha256 逐位元組比對測試向量，Windows checkout（autocrlf）把它轉成 CRLF → `.gitattributes` 設 `tests/data/license_vector*.json -text`。(2) `test_replica_analysis` 用 `/` 比對路徑 → 改用 `Path.parts`。
+- **heavy pose-screen（3PTB）**：短 CPU NPT 延長兩次仍未通過 density_drift，pose 判為 FAILED。測試註解和 D-98 都說明這是已知的隨機結果，而且不能拿別的 pose 頂替；但後面的斷言把所有 FAILED 都當成機制壞掉，前後矛盾，只有隨機失敗發生時才會露出來。
+  **修正**：只有「所有原因都是驗收未過」時才允許 FAILED；任何例外或其他原因仍然算失敗。另外要求：工作流程有完成時，至少要有一個 STABLE/UNSTABLE。這是把斷言改成和既有規格一致，**不是放寬科學判準**（驗收門檻沒動）。
+- **相關檔案**：`md20/build/metal.py`（`WATER_TARGET_A`、`water_bond_max_A`）、`tests/test_metal_site_water.py`、`tests/test_license_v2.py`、`.gitattributes`、`tests/test_replica_analysis.py`、`tests/test_workflow_integration.py`、`docs/specs/metal_sites.md` §4d。
+
 ## 2026-11-07
 ### D-138　R6 宣稱稽核：PMF／ΔG°／進階描述子據實核對，機制與因果句改為有界觀察（只改文字）
 - **核對**（細節 `docs/specs/claims_audit.md` §1–§2）：COM 距離 CV、Jacobian `+2kT·ln r`、端點持平、完整重疊圖與 MBAR overlap、半分與累積漂移、重複一致才合格、共存與熱力學循環閉合、SMD 功不當自由能——**現況皆符合**。
