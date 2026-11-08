@@ -15,6 +15,29 @@
 - **被否決**：把 CV 門檻調到 0.15（n=3 時誤報 22% 以上的區間變大，提醒變噪音）；完全刪掉交錯分半（它對「抽樣雜訊」仍有資訊）。
 - **測試**：`tests/test_thresholds_calibration.py`（4 項）；既有 `test_analysis_resolution.py` 照過。
 - **相關檔案**：`md20/analysis/extended.py`、`md20/analysis/replica_set.py`（註解）、`tests/test_thresholds_calibration.py`、`docs/specs/thresholds_calibration.md`、`docs/specs/README.md`。
+### D-142　重複彙總補完（D-130 未決項）：ΔRMSF 區間、水合位點、DSSP、PCA 低谷佔比、DCCM、tICA／MSM 資格、膜指標；平衡驗收逐條列出；膜-only 分析快取指紋
+- **決定**：
+  - **跨重複彙總**（`md20/analysis/replica_set.py`，schema 仍 `md20.replica_set/1`，加 `schema_revision: "1.1"`，只新增欄位）：從各重複的 `extended.json`／`membrane_metrics.json`／`membrane_report.json` 讀入，逐項宣告 estimand（每條先算一個數，再跨重複）。細節與公式在 `docs/specs/replicas.md` §8。
+    - ΔRMSF：複合物重複平均 − apo 重複平均，每殘基 **Welch t** 95 % CI；每邊 ≥ 2 條才給區間，否則 unavailable；CI 不含 0 才稱「不同」；`sign_k／n`；寫明預期偶然數量（0.05·N），不做多重比較校正；系統不可比 → `not_comparable`。
+    - 水合位點：貪婪依占有率配對，距離 ≤ 0.2 nm 視為同一位點；占有率 mean±SD 只含偵測到的重複；偵測 k／n；只出現在 1 條 → 「未重現」。
+    - DSSP：H／E／C 比例與逐殘基 H、E 比例的 mean±SD、CI。
+    - PCA 低谷佔比：只在使用共同基底（`analysis_common.json`）且同系統重複條件可比時彙總（每條投影幀指派到配對低谷中心）；範圍 > 0.25 → 「取樣分布、未收斂」旗標；否則寫 `not_comparable` 與原因。分群：只彙總與編號無關的數（群數、最大群占比）。
+    - DCCM：逐元素平均與 SD；遠距離摘要與重複間一致的強相關對。
+    - tICA／MSM：**不合併軌跡**；每條各自資格，報「n 條中 k 條合格」；不報平均時間尺度或速率。
+    - 膜：厚度、單脂面積、核心水、插入深度、穿過中心 k／n、驗收 PASS k／n、S_CD。
+  - **D-144 的 CV 規則**：「divergent」只用於嚴格為正的比例尺量。ΔRMSF、DCCM 元素、插入深度、S_CD、比例型（DSSP、占有率、低谷佔比）一律 `divergent: null`＋`divergent_reason`（`NO_CV_REASON`），改看 CI 與正負號一致的重複數。`between_replica_stats` 新增 `cv=False` 開關。
+  - **報告**：`replica_section.structure_html`／`delta_rmsf_html`（四語）；平衡驗收表改為每條重複一列（run id、MD 狀態、各階段通過數／檢查數與未通過項目），明細與平衡圖放進 `<details class=fold>`（多條時每條一個、第一條展開；只有一條時版面不變）。沒完成的重複照列狀態，不丟掉。
+  - **膜-only 分析（D-135 未決項）**：`membrane_only_analysis` 寫入指紋（膜計畫、頭基原子、溶質群、`MEMBRANE_ANALYSIS_VERSION`），輸出走暫存區＋清單最後換入；`Workflow._reuse_analysis_manifest` 對它也用指紋，舊清單 `legacy` → 只重算分析、不重跑 MD，舊結果留 `analysis/prev/`。
+- **理由**：同一條軌跡只是一次抽樣；ΔRMSF 的「不同」若只看單一對軌跡的差，會把取樣噪音當成配體效應。tICA／MSM 的時間尺度對軌跡長度與轉換次數很敏感，合併不連續的軌跡等於偽造不存在的轉換；MSM 本身（`toolbox.msm`）也明文「不從單一軌跡下速率結論」，所以改成逐條資格。
+- **被否決**：
+  - 把各重複頭尾接成一條軌跡做 tICA／MSM（規格 §2 原表寫「合併」）：會創造假的跨界轉換，已在 §2 表更正為逐條資格。
+  - 水合位點沒偵測到時記占有率 0：該位點只是低於偵測門檻，不是沒水，記 0 會把 SD 變小又偏低；改為「沒有值」並顯示 k／n。
+  - 在單一系統沒有共同基底時另建重複專用共同基底：會改變 `_common_basis` 的觸發條件與輸出檔，超出本條範圍；先照實寫 `not_comparable`。
+  - ΔRMSF 做 Bonferroni／FDR 校正：校正方式要使用者決定；先寫出預期偶然數量，不宣稱校正。
+  - 對差值型量也算 CV 並標「divergent」（D-144 指出沒有意義）。
+- **證據**：`tests/test_replica_observables.py`（31 項）：Welch CI 與 scipy 一致；發散的重複使區間變寬並翻轉「不同」的判定；每邊 1 條 → unavailable、不給區間；位點配對與未重現；DSSP／DCCM／分群彙總；無共同基底 → `not_comparable`；tICA 不合併；膜指標；n = 1 與缺欄位 → unavailable 加原因；報告列出每條重複的驗收與四語；膜-only 清單有指紋、可重用、舊清單重算且不呼叫 MD、膜計畫改變即重算。全套 pytest 見 commit。
+- **未決**：(1) 位點配對是貪婪法，緊鄰位點可能錯配；各重複的疊合參考不同，座標一致需各條同姿勢起步，待真實資料驗證 0.2 nm。(2) 單一系統的多條重複沒有可比的低谷佔比（需要共同基底）；是否為單一系統建立重複共同基底，待使用者決定。(3) BASIN_RANGE_INCONSISTENT = 0.25、DCCM 強相關 0.5／重複下限 0.3 是經驗起始值，要依系統驗證。(4) DCCM 平均矩陣沒有出圖。(5) ΔRMSF 多重比較校正方式。(6) 真實 mdtraj／OpenMM 路徑只由 CI 驗證。
+- **相關檔案**：`md20/analysis/replica_set.py`、`md20/analysis/membrane_run.py`（`out_dir`、`membrane_fingerprint_extra`、`membrane_only_analysis(fingerprint=)`）、`md20/workflow.py`（`analyse`、`_replica_cross_system`、`_analyse_one_run`、`_reuse_analysis_manifest`）、`md20/report/replica_section.py`、`md20/report/workflow_report.py`（`_md`、`_acceptance_html`、`_equil_figures`、CSS `details.fold`）、`tests/test_replica_observables.py`、`tests/test_membrane_workflow.py`（替身簽名）、`docs/specs/replicas.md`（§2、§7、§8）。
 
 ### D-139　c014e8b CI 紅燈分析與修正：鋅第二個弱配位水、授權測試真的跑 CG、Windows 換行與路徑、pose-screen 斷言自相矛盾
 - **CI**：run 42389077410（`c014e8b`），以及上一輪 42385841086（`58d81bc`，本 session 改動之前）。逐 job 讀日誌（單次查詢）。

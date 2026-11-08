@@ -1,6 +1,6 @@
 # 獨立重複（replicas）：哪些分析需要、需要幾條、報告怎麼呈現不確定性
 
-狀態：**§3–§5（重複計畫與開始前告知）已實作（D-131，待 CI）；§2 的分析彙總與報告已實作（D-130 重做，§7，待 CI；其中 §2 表的 ΔRMSF 信賴區間、DCCM、tICA／MSM 合併、DSSP、水合、膜指標的跨重複彙總尚未做，見 §7 限制）。** 規格 D-129，2026-11-07。 使用者 22:51 授權：「根據每一個分析思考哪些需要重複、哪些不需要；需要重複的取最大值，在一開始模擬時就告訴使用者會多花時間，確保報告完整。」
+狀態：**§3–§5（重複計畫與開始前告知）已實作（D-131，待 CI）；§2 的分析彙總與報告已實作（D-130 重做，§7，待 CI；D-142 補完 §2 表其餘項目的跨重複彙總，見 §8）。** 規格 D-129，2026-11-07。 使用者 22:51 授權：「根據每一個分析思考哪些需要重複、哪些不需要；需要重複的取最大值，在一開始模擬時就告訴使用者會多花時間，確保報告完整。」
 
 ## 1. 缺口（查到的事實）
 - `Workflow.analyse()` 只讀 `r["run_ids"][0]`：RMSD、RMSF、接觸、指紋、持續性、PCA／地形、DCCM、tICA／MSM、水合、膜指標、系統比較（D-106 共同基底、ΔRMSF）全部只看**第一條**軌跡；其餘重複跑了卻沒有進報告。
@@ -20,7 +20,7 @@
 | DSSP 二級結構比例 | 是 | 3 | mean ± SD |
 | PCA／自由能地形／分群／共同基底低谷佔比 | 是 | 3 | 所有重複放在同一組軸；每條各自的低谷佔比與 mean ± SD；各條不一致 → 「取樣分布、未收斂」 |
 | DCCM | 是 | 3 | 平均矩陣；只標出各重複一致的相關 |
-| tICA／MSM | 是（合併增加資料） | 3 | 合併所有重複估計；資格（D-105）仍適用，單一軌跡永不報速率 |
+| tICA／MSM | 是（各條各自檢查資格） | 3 | **不合併軌跡成速率**（D-142 更正：原寫「合併」）；每條各自資格（D-105），報「n 條中 k 條合格」；單一軌跡永不報速率 |
 | 膜面積、厚度、序參數 | 是 | 3 | mean ± SD |
 | 結合 ΔPMF／ΔG°（SMD＋傘狀採樣） | 是（既有 D-96） | 3（research） | 維持現狀 |
 | 對接 | 否 | — | 本身是搜尋，另有 redocking 驗證 |
@@ -80,8 +80,29 @@
 - **共同基底（`_common_basis`）**：每條可分析的重複各自成為一條軌跡，標籤 `系統/run_id`（只有一條的系統維持原標籤）；各自有地形與低谷佔比，**不頭尾接合**。`analysis_common.json` 的 `trajectory_labels` 對應回系統與 run id。
 - **報告（`md20/report/replica_section.py`，四語）**：MD 區加「獨立重複的彙總」：說明重複的定義與後代不算；每條重複的表（狀態、是否納入、RMSD 後半段平均與單條 SE、配體口袋 RMSD 與是否留在口袋、排除原因）；跨重複表（觀測量、n、平均 ± SD、t 區間、k／n、備註）；接觸占有率前 10 名；疊圖；n = 1 時寫「不可得」、不印 SD 與區間；不一致與排除會進該節的解讀。方法段與限制段的重複數改讀實際條數（`configured_or_actual`），不再把沒寫 `md.replicas` 讀成 1。
 - **限制（誠實）**：
-  - §2 表中尚未跨重複彙總：apo–複合物 ΔRMSF 的每殘基 CI、水合位點、DSSP、PCA 低谷佔比的 mean ± SD、DCCM、tICA／MSM 合併估計、膜面積與厚度。這些要等 `extended.json` 的對應欄位逐條讀入；目前只有第一條代表重複的版本。
+  - §2 表其餘項目（ΔRMSF 區間、水合、DSSP、PCA 低谷佔比、DCCM、tICA／MSM、膜指標）已在 D-142 補完，見 §8。
   - `engine/replicas.aggregate_replicas`（平衡階段的重複彙總）在 n = 1 時 SD 寫成 0.0，與本節「n = 1 不給不確定性」不一致，尚未改。
   - 證據矩陣（`report/evidence.py`）仍讀 `md.get("replicas") or 1`，由另一個代理處理。
   - 真實 mdtraj／OpenMM 路徑沒有在容器內跑，只用偽分析輸出測邏輯，真實路徑交給 CI。
 - 測試：`tests/test_replica_analysis.py`。
+
+## 8. 實作（D-142）：補完 §2 表的跨重複彙總
+輸出仍是 schema `md20.replica_set/1`，加 `schema_revision: "1.1"`（只新增欄位）。輸入是各重複的 `extended.json`、`membrane_metrics.json`、`membrane_report.json`（`Workflow.analyse` 讀入）；欄位缺少或該區塊出錯 → `{status: unavailable, reason, missing:[{run_id, reason}]}`，不補數字。n = 1 → 平均照列、SD／CI 為 `null`，`between_replica` 寫「單一軌跡無法估計重複間不確定性」。
+
+| 觀測量 | 每條重複先算出的數 | 跨重複彙總 | 位置 |
+|---|---|---|---|
+| apo–複合物 ΔRMSF | 各條 Cα RMSF（殘基以名稱＋編號配對，質子化變體折疊） | 每殘基 ΔRMSF＝複合物重複平均 − apo 重複平均，**Welch t** 95 % CI（Welch–Satterthwaite 自由度）；每邊至少 2 條，否則 unavailable 且不給區間；CI 不含 0 才稱「不同」；`sign_k／n`＝與差值同方向的複合物重複數；寫明預期偶然數量 0.05·N，**不做多重比較校正** | `analysis_delta_rmsf_replicas.json`、`comparison.delta_rmsf_replicas`；系統不可比（D-106）→ `not_comparable` |
+| 水合位點 | 該重複各位點占有率 | 位點以位置配對：占有率由高到低貪婪，與最近、尚無同重複位點的群組距離 ≤ **0.2 nm** 歸同一位點（座標在各重複自己的疊合座標系，註明）；占有率 mean±SD **只含偵測到該位點的重複**（沒偵測到＝沒有值，不是 0）；偵測 k／n；只在 1 條出現 → `not_reproduced`；水不存在或幀數不足的重複列為缺失 | `ligands.<配體>.hydration` |
+| DSSP | H／E／C 幀比例的時間平均；逐殘基 H、E 比例 | 平均、SD、t CI；殘基以共同標籤對齊；列出 SD 最大的殘基 | `structure.dssp` |
+| PCA 低谷佔比 | 共同基底上，該重複投影幀離各配對低谷中心最近的比例 | mean±SD、t CI、範圍；範圍 > 0.25（經驗起始值）→「取樣分布、未收斂」旗標 `unconverged:pca_basins`。**只有共同基底（≥ 2 個系統，`analysis_common.json`）且同系統重複條件可比時才算**；否則 `not_comparable` 並寫原因（各重複自己的 PCA 軸不同） | `structure.pca_basins`（`Workflow._replica_cross_system` 寫入） |
+| 分群 | 群數、最大群占比（與群編號無關） | mean±SD；群編號跨重複不對應，不彙總逐群占比 | `structure.clusters` |
+| DCCM | 各條 Cα 互相關矩陣 | 逐元素平均與 SD（≤ 500 殘基才存矩陣）；遠距離（序號差 ≥ 5）平均 \|C\| 的 mean±SD；強相關（\|mean\| ≥ 0.5）對數與「每條重複同號且 \|C\| ≥ 0.3」的對數；前 10 對的 sign k／n | `structure.dccm` |
+| tICA／MSM | 每條自己的資格（D-105：`msm.eligibility == exploratory`）、`its_flat` | **不合併軌跡、不報平均時間尺度或速率**；只報「n 條中 k 條合格」「其中 k 條持平」，`rate_reportable` 要求 ≥ 3 條都合格且持平（只是允許，不產生數值） | `structure.tica_msm` |
+| 膜指標 | 後半段平均：磷酸頭基間距、單脂面積、疏水核心水數；插入深度；是否穿過中心；平衡驗收是否 PASS；S_CD 逐碳 | mean±SD、t CI；k／n；膜-only 系統讀 `metrics.json["membrane"]` | `membrane` |
+
+- **CV 規則（D-144）**：「divergent」只用於嚴格為正的比例尺量（RMSD、Rg、RMSF、計數、距離）。差值型、帶正負號與比例型（ΔRMSF、DCCM 元素、插入深度、S_CD、DSSP／占有率／低谷佔比）一律 `divergent: null` 並寫 `divergent_reason`，改看 CI 與正負號一致的重複數 k／n。
+- **報告**（`report/replica_section.py::structure_html`／`delta_rmsf_html`，四語）：各表放在該系統「獨立重複的彙總」之後；沒有彙總的項目逐項列出原因。
+- **平衡過程與驗收表**（`report/workflow_report.py::_acceptance_html`／`_equil_figures`）：每條重複一列（run id、MD 狀態、NVT／NPT／正式模擬的「通過數／檢查數」與未通過的項目名）；逐項明細與平衡圖放在 `<details class=fold>`（多條時每條一個，第一條展開）。沒完成的重複照列狀態。只有一條時版面不變。列印時 `details` 不展開（CSS 既有規則），所以重點在永遠可見的緊湊表。
+- **膜-only 分析快取（D-135 未決項）**：`membrane_only_analysis(fingerprint=…)` 輸出先寫暫存區，`commit_staging` 換入並最後寫清單（含指紋、輸出雜湊、`prev/` 備份）；指紋 `extra` = 膜計畫、頭基原子、溶質群、`MEMBRANE_ANALYSIS_VERSION`。`_reuse_analysis_manifest` 對膜-only 也用指紋：舊清單（PASS 但無指紋）→ `legacy` 重算，**只重算分析、不重跑 MD**，舊結果留在 `analysis/prev/`。
+- 測試：`tests/test_replica_observables.py`。
+- **限制**：位點配對是貪婪、依序的，緊鄰的兩個位點可能被錯配（0.2 nm 是沿用單條內合併距離）；各重複的疊合參考不同（各自的第一幀），所以位點座標一致也需要各條從同一個姿勢起步。共同基底只在 ≥ 2 個系統時建立，單一系統的多條重複目前沒有可比的低谷佔比（`not_comparable`）。DCCM 平均矩陣沒有出圖（存在彙總檔）。tICA／MSM 不合併是刻意的；「合併增加資料」的做法（原規格表）改為不採用，見 DECISIONS D-142。
