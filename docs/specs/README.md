@@ -59,7 +59,7 @@
 | [supply_chain.md](supply_chain.md) | 外部執行檔與環境版本：Vina 單一釘選版＋sha256 驗證、執行檔身分記錄；micromamba／conda 鎖版待做（D-114，REVIEW #19） | Vina 已實作・純 Python 測試 |
 | [claims_audit.md](claims_audit.md) | 宣稱稽核（R6）：PMF／ΔG°／共存的區分、Jacobian 與標準態現況、進階描述子與機制文字改為有界觀察（D-138） | 文字已改；A8 參考態已實作（D-140） |
 | [replicas.md](replicas.md) | 獨立重複：每個分析是否需要重複、條數取最大值（3）、報告如何呈現跨重複不確定性、開始時告知使用者（D-129）；重複計畫與告知（D-131） | 規格；§3–§5 已實作，待 CI；§7 每條重複分析與跨重複彙總（D-130 重做）已實作，待 CI |
-| [autonomy.md](autonomy.md) | 有界自主行動帳本（R8）：評估→提案→授權→執行→重新評估→停止／升級；預設只提建議；append-only 帳本、冪等鍵、預算與重試上限、禁止類別永不執行（D-137） | **已實作・純 Python（待 CI）**；未接進工作流程執行路徑，使用者尚未授權計算預算 |
+| [autonomy.md](autonomy.md) | 有界自主行動帳本（R8）：評估→提案→授權→執行→重新評估→停止／升級；預設只提建議；append-only 帳本、冪等鍵、預算與重試上限、禁止類別永不執行（D-137） | **已實作・純 Python（待 CI）**；D-143 加上擁有者 CLI、執行器、檢查點指紋、成本輸入；沒有擁有者寫的政策檔就不執行，預算數字待擁有者設定 |
 | [replicas.md](replicas.md) | 獨立重複：每個分析是否需要重複、條數取最大值（3）、報告如何呈現跨重複不確定性、開始時告知使用者（D-129）；重複計畫與告知（D-131） | 規格；§3–§5 已實作，待 CI |
 | [capabilities.md](capabilities.md) | 單一能力清單 `docs/capabilities.json`／`docs/CAPABILITIES.md`（五種彼此獨立的狀態、測試類型、CI job 分類、已發行安裝程式、版本對齊）與膜診斷驗收器 `tools/validate_membrane_diag.py`（D-136，R7＋R5 膜） | 已實作・純 Python 測試（CI 結果待下一輪） |
 | [thresholds_calibration.md](thresholds_calibration.md) | 經驗門檻校準：重複 CV 提醒的偵測特性、PCA／分群敏感度改用時間前後半（D-144） | 已實作 |

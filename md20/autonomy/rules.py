@@ -42,6 +42,7 @@ class AssessmentInputs:
     invalid_models: list = field(default_factory=list)
     evidence_ids: dict = field(default_factory=dict)   # diagnostic id → [evidence IDs]
     max_attempts: int = 2
+    target_key: str | None = None             # D-143: the binding target this assessment belongs to (executors need it)
 
     @classmethod
     def from_any(cls, x) -> "AssessmentInputs":
@@ -106,9 +107,12 @@ def _round(x):
 
 
 def _est(sim_ps: float | None, costs: dict, *, reanalysis: bool = False) -> dict:
-    """Estimates derived only from recorded settings (same rule as report/auto_actions.py): unknown stays None."""
+    """Estimates derived only from recorded settings (same rule as report/auto_actions.py): unknown stays None.
+    D-143: `costs["device"]` is "gpu" or "cpu" (where the benchmark ran).  On a CPU benchmark the same hours are CPU core
+    hours (× `cpu_threads`, unknown if not given) and GPU hours are 0, not a GPU estimate for a computer without one."""
     e = {d: None for d in DIMS}
-    e["basis"] = "heuristic: derived from recorded settings, not measured"
+    note = costs.get("basis_note")
+    e["basis"] = "heuristic: derived from recorded settings, not measured" + (f"; {note}" if note else "")
     if reanalysis:
         e["sim_ns"], e["gpu_hours"] = 0.0, 0.0
         e["core_hours"] = _round(costs.get("reanalysis_core_hours"))
@@ -120,9 +124,16 @@ def _est(sim_ps: float | None, costs: dict, *, reanalysis: bool = False) -> dict
     e["sim_ns"] = _round(ns)
     npd = costs.get("ns_per_day")
     if isinstance(npd, (int, float)) and npd > 0:
-        e["gpu_hours"] = _round(ns / float(npd) * 24.0)
+        hours = ns / float(npd) * 24.0
+        if costs.get("device") == "cpu":
+            e["gpu_hours"] = 0.0
+            thr = costs.get("cpu_threads")
+            if isinstance(thr, (int, float)) and thr > 0:
+                e["core_hours"] = _round(hours * float(thr))
+        else:
+            e["gpu_hours"] = _round(hours)
     cph = costs.get("core_hours_per_ns")
-    if isinstance(cph, (int, float)) and cph >= 0:
+    if e["core_hours"] is None and isinstance(cph, (int, float)) and cph >= 0:
         e["core_hours"] = _round(ns * float(cph))
     gpn = costs.get("gb_per_ns")
     if isinstance(gpn, (int, float)) and gpn >= 0:
@@ -149,7 +160,10 @@ def _checkpoint(run: dict | None) -> tuple[dict, bool | None]:
     cp = (run or {}).get("checkpoint") if isinstance(run, dict) else None
     if not isinstance(cp, dict) or not cp.get("path"):
         return {"required": True, "path": None, "fingerprint": None}, (None if run is None else False)
-    return {"required": True, "path": str(cp["path"]), "fingerprint": cp.get("fingerprint")}, True
+    out = {"required": True, "path": str(cp["path"]), "fingerprint": cp.get("fingerprint")}
+    if cp.get("legacy_run"):
+        out["legacy_run"] = True              # finished before fingerprints were recorded: the validator says so
+    return out, True
 
 
 def _recovery(n: int) -> str:
@@ -170,6 +184,8 @@ def build_proposals(inp: AssessmentInputs, summary: dict) -> tuple[list[ActionPr
     plan = inp.refine_plan if isinstance(inp.refine_plan, dict) else None
 
     def make(action, target, trigger, prereqs, estimate, inputs, benefit, consequences, checkpoint=None):
+        if inp.target_key:
+            target = {**target, "binding_target": inp.target_key}
         return ActionProposal(
             action_type=action, scope=scope, target=target, trigger=list(trigger), evidence_ids=_ev(inp, digest, list(trigger)),
             prerequisites=prereqs, affected_claims=list(claims),
@@ -199,12 +215,14 @@ def build_proposals(inp: AssessmentInputs, summary: dict) -> tuple[list[ActionPr
             ks = {f"{round(float(i['center']), 4):.4f}": float(i.get("k", 0)) for i in ins if isinstance(i, dict) and "center" in i}
             per = (_ps(costs, "window_equil_ps") or 0.0) + (_ps(costs, "window_prod_ps") or 0.0) \
                 if _ps(costs, "window_prod_ps") is not None and _ps(costs, "window_equil_ps") is not None else None
+            reps = costs.get("binding_replicas")
+            reps = int(reps) if isinstance(reps, (int, float)) and reps >= 1 else 1      # every replica gets the same windows
             props.append(make(
                 ACTION_REFINE, {"scope": scope, "insert_centres": centres, "k": ks}, cov,
                 [{"id": "planner_plan", "description": "規劃器（plan_refinement）本輪有要插入的窗口", "satisfied": True},
                  {"id": "within_approved_k", "description": "新窗口的 k 不超過已核准的 k_max（規劃器已限制）", "satisfied": True},
                  {"id": "within_window_cap", "description": "未超過規劃器的窗口總數上限", "satisfied": not bool((plan or {}).get("budget_exhausted"))}],
-                _est(None if per is None else per * len(centres), costs),
+                _est(None if per is None else per * len(centres) * reps, costs),
                 {"insert": centres, "k": ks, "round_notes": len((plan or {}).get("notes") or [])},
                 f"補上 {len(centres)} 個窗口，目標是消除取樣缺口／重疊不足；是否真的連續要等重新評估（啟發式估計，未校準）。",
                 ["PMF 與 ΔPMF 會因新窗口重算，不確定度也要重算；補窗是依資料決定的適應性程序，須在報告註明。",
@@ -228,14 +246,24 @@ def build_proposals(inp: AssessmentInputs, summary: dict) -> tuple[list[ActionPr
         prod = _ps(costs, "window_prod_ps")
         n_win = len(centres) if centres else (run or {}).get("n_windows")
         sim = prod * n_win if (prod is not None and isinstance(n_win, int)) else None
+        # D-143: extending the approved MD run needs an amount chosen by a person (never a default): without it the proposal is
+        # blocked, and the estimate is unknown rather than guessed
+        ext_ps = _ps(run or {}, "extend_ps")
+        if ext_ps is not None and ext_ps > 0 and not centres:
+            sim = ext_ps
+        tgt = {"scope": scope, "run_id": (run or {}).get("run_id"), "window_centres": centres}
+        if ext_ps is not None and ext_ps > 0:
+            tgt["extend_ps"] = ext_ps
         props.append(make(
-            ACTION_EXTEND, {"scope": scope, "run_id": (run or {}).get("run_id"), "window_centres": centres}, ln,
+            ACTION_EXTEND, tgt, ln,
             [{"id": "approved_run", "description": "有已核准的執行可延長（run_id 與協定雜湊）",
               "satisfied": None if run is None else bool(run.get("run_id") and run.get("protocol_hash"))},
              {"id": "checkpoint_present", "description": "有可續跑的檢查點（執行時還會驗證指紋）", "satisfied": cp_ok},
-             {"id": "extension_cap", "description": "延長次數未達上限（避免無止境延長）", "satisfied": under_cap}],
+             {"id": "extension_cap", "description": "延長次數未達上限（避免無止境延長）", "satisfied": under_cap},
+             ] + ([{"id": "extension_length", "description": "延長的長度由使用者指定（--extend-ps），不使用預設值",
+                    "satisfied": True if (ext_ps is not None and ext_ps > 0) else None}] if run and "extend_ps" in run else []),
             _est(sim, costs), {"run_id": (run or {}).get("run_id"), "protocol_hash": (run or {}).get("protocol_hash"),
-                               "centres": centres, "extensions_done": done},
+                               "centres": centres, "extensions_done": done, "extend_ps": ext_ps},
             "用同一個協定增加取樣長度，降低統計誤差與漂移（啟發式估計，未校準；相關時間長時效益可能有限）。",
             ["同協定延長：該系統的取樣量變大，與未延長的候選比較要註明取樣量差異，或把被比較者延長到同一標準。",
              "延長後要重新評估；不可只延長結果看起來有利的系統。"], checkpoint=cp))

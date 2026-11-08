@@ -1,6 +1,6 @@
 # 有界自主行動帳本（R8，D-137）
 
-狀態：**已實作・純 Python（容器可測，待 CI）；預設只提建議，沒有接進工作流程的執行路徑。** 規格來源：`evidence_driven_repair_prompt.md` §3 R8；對應 `master_iteration_2026-11-07.md` 的 P1A。
+狀態：**已實作・純 Python（容器可測，待 CI）；預設只提建議。D-143 起有擁有者入口（CLI）與執行器，但只有擁有者寫下政策檔才會執行任何東西（§9）。** 規格來源：`evidence_driven_repair_prompt.md` §3 R8；對應 `master_iteration_2026-11-07.md` 的 P1A。
 **使用者尚未授權任何計算預算，所以預設不會自動啟動任何模擬。** 要啟用自動執行，必須由使用者寫下行動政策（見 §3）。
 
 ## 1. 要解決什麼
@@ -77,13 +77,74 @@ assess  →  propose  →  authorize  →  execute  →  reassess  →  stop / e
 ## 7. 誠實限制
 - 只有純 Python 邏輯與 fake 執行器的測試；沒有接真正的 Runner／ProcessJob，沒有任何真實模擬被這個模組啟動過。
 - 預期效益與成本估計都是啟發式（只由已記錄的設定推得；沒有時間／速度資料就是未知，未知會讓政策預算要求人工核准）。
-- 沒有政策檔的 GUI／CLI 入口；使用者目前要自己放 `autonomy_policy.json`（`save_policy` 可用）。
+- 政策入口：D-143 起有 CLI（§9）；GUI 入口尚未做。
 - 帳本沒有輪替／壓縮；規模預期很小（每個行動幾行）。
 - `recover_stale` 需要呼叫端提供存活探測（pid／host／heartbeat）；沒提供就永遠不自動回收。
-- 提案的 `checkpoint` 指紋來自「核准執行當時的記錄」，目前 workflow 沒有寫這個欄位；整合時要補（沒有指紋＝視為無效，會擋）。
+- 提案的 `checkpoint` 指紋：D-143 起引擎在 production 完成時寫進 `run.json`（§9.4）；舊 run 沒有，延長會升級並說明原因。
 
 ## 8. 想請審查者回答的問題
 1. 「沒有改善」的定義（通過診斷數、達到足夠、重新分析看未知數）合理嗎？要不要看具體診斷值（例如重疊度上升）？
 2. 預設 `max_attempts=2`、`no_improvement_stop=2` 是否過鬆或過緊？
 3. 估計未知時要求人工核准是否太保守（會讓沒有速度資料的案例永遠要人核准）？
 4. 在不能確認 worker 存活的平台（Windows 無 pid 檔）上，進行中卻無心跳的行動要多久才建議人工 `abandon`？
+
+## 9. 可用化（D-143）
+**原則不變：沒有擁有者寫下的政策檔，什麼都不會自動執行；程式碼裡沒有任何預算預設值，AI session 不得替擁有者執行 `policy set`。**
+
+### 9.1 擁有者入口（`md20/autonomy/cli.py`，`md20 autonomy ...`）
+| 指令 | 作用 |
+|---|---|
+| `policy set --approver 名字 --allow 行動[,..] [--ns N] [--gpu-hours H] [--core-hours H] [--storage-gb G] [--max-attempts K] [--no-improvement-stop K] [--yes]` | 寫 `<workflow>/autonomy/autonomy_policy.json`（用既有 `save_policy`），核准時間由程式記錄。先印出完整白話摘要（允許什麼、各項上限、永遠不會自動做什麼），要擁有者輸入 yes 或明確加 `--yes` 才寫；沒有終端機又沒有 `--yes` 就拒絕。舊政策改名為 `autonomy_policy.superseded-<時間>.json` 保留。帳本記 `policy_set`。 |
+| `policy show [--json]` | 白話摘要＋剩餘額度；沒有政策或無效就明說「只提建議」。 |
+| `policy revoke --by 名字` | 政策檔改名為 `autonomy_policy.revoked-<時間>.json`（保留歷史），帳本記 `policy_revoked`。控制器每次 `claim` 前重讀政策，所以撤銷在下一次啟動前就生效；進行中的行動不會被殺掉（用 `request_cancel`）。 |
+| `plan [--extend-ps PS] [--json]` | 乾跑：每個結合目標會提出什麼、怎麼決定、為什麼不能執行。**不寫任何檔案**（測試以整個資料夾的位元組比對）。 |
+| `status [--json]` | 帳本摘要：嘗試／失敗／取消／重試次數、實際用量（牆鐘、GPU 小時、核心小時、磁碟）與模擬時間（分開）、剩餘額度、已停止的範圍、帳本完整性。`status_data()` 回傳同一份資料，GUI 之後可唯讀顯示。 |
+| `approve 提案 --by 名字` | 個案核准（只解除「需要核准」）。 |
+| `run [--max-cycles N] [--extend-ps PS] [--fake]` | 沒有有效政策就拒絕（exit 2）。有政策時，對每個結合目標用**新**證據跑 `Controller.run_until_stop`，每圈最多一個行動。 |
+
+- **拒絕**：未知行動、禁止類別（`FORBIDDEN_CHANGES` 的八個標籤）、空的允許清單、沒有核准者、沒有任何正的預算、負數或非有限數、`--max-attempts`／`--no-improvement-stop` < 1，一律 exit 2、什麼都不寫。預算數字沒給＝那項資源沒核准（不是預設值）。
+- 語言：`--lang zh|en|ja|ko`（預設 zh；命令列文字依 `writing_style.md` §3 維持中文為預設）。政策摘要、拒絕訊息、狀態標籤有四語。
+
+### 9.2 輸入（`md20/autonomy/inputs.py`，只讀檔案）
+每個完成的結合目標一份 `AssessmentInputs`，`scope = <workflow>/<目標>`：
+- **評估**：`state.json` 儲存的評估；舊結果用 `resolve_assessment` 由 manifest 的 PMF 欄位重算（顯示診斷、資格不成立）。**舊（legacy）評估即使 `sampling_adequate` 為 True 也不算達標**（它是重算的檢視，不是儲存的判定），所以仍會提出重新評估。
+- **成本**：
+  - `ns_per_day`：`app_data_dir()/doctor/doctor_report.json` 的 benchmark（`md20 doctor` 存的），用原子數與時間步依 `engine.longrun.scaled_ns_per_day` 換算到這個系統；沒有記錄＝未知（估計 None，政策要求人工核准）。benchmark 的平台是 CPU 時，同樣的時數記為核心小時（× 邏輯核心數）、GPU 小時為 0。
+  - `gb_per_ns`：每 ns 的幀數（run.json 的 production 軌跡間隔）× `engine.longrun.dcd_frame_bytes(原子數)`。
+  - `replica_ns`：一條重複的模擬 ns × 系統數（工作流程的重複數是全域設定，補一條＝每個系統各補一條，比較雙方重複數才相同）。
+  - 窗口時間與重複數取自該目標的 `binding_manifest.json` 的 config（檔案為準）。
+  - 重新評估（由已儲存欄位，不模擬）的 CPU 時間與磁碟估計為 0（可忽略）；執行器會**量測**實際用量並計入帳本，所以不會繞過預算。
+  - 估計的依據寫在 `estimate.basis`（含 benchmark 時間）。
+- **approved_run**：該目標第一次拉離所用的 MD run（`replica_sources[0].md_run_id`），帶 `run.json` 的 `checkpoint_fingerprint`；沒有指紋的 run 標 `legacy_run`。`extend_ps` 由使用者以 `--extend-ps` 指定，**沒有預設值**；沒給時延長提案被「extension_length」先決條件擋住。
+- **replicas**：只附在第一個目標（重複屬於工作流程，不屬於某次拉離），`required` 為 `required_replicas()`。
+- 限制：只讀結合評估，所以沒有完成結合計算的工作流程沒有提案。
+
+### 9.3 執行器（`md20/autonomy/executors.py`，`WorkflowExecutors`）
+`Controller(executor=ex, preflight=ex.preflight, reassessor=ex.reassessor)`。執行器只會在 `Ledger.claim()` 成功後被呼叫；`preflight` 在 `claim` 之前（不花嘗試次數、不記成本），失敗就升級 `cannot_start`。
+| 行動 | 呼叫的既有公開操作 | 先決（preflight） |
+|---|---|---|
+| `reanalysis`（結合） | `sampling.reassess.reassess_workflow`（`include_outdated=True`，只用已儲存欄位） | 無 |
+| `reanalysis`（軌跡，`target.what == "trajectory analysis"`） | `Workflow.analyse(全部 runs)`——只傳受影響的系統會讓 `steps.analysis` 少了其他系統；沒變的系統由分析指紋沿用，只算受影響的 | 目前沒有規則會提出這個變體 |
+| `add_independent_replica` | config `md.replicas` +1、丟掉 analysis／report 步驟、`Workflow.run_md`（D-131 補跑路徑：同一組、只跑缺的）、`Workflow.analyse` | 設定要求的重複數 ≤ 已完成＋1（一次只補一條，否則請用一般流程）；沒有別的 MD20 程序擁有該工作流程（`running.json`）；授權 |
+| `refine_approved_umbrella_windows` | config `binding.manual_windows[目標]` 加窗口、從 state 移除該目標的結果、`Workflow.binding` → `run_binding` 續跑（與 GUI 的 `resample_range` 同一條路，只是決策紀錄 `kind="auto"`）；完成後 `refresh_report` | 同上，且需要平台 |
+| `extend_approved_run` | `engine.chunks.run_stage` 對該 run 的 production stage 用較長的 spec（引擎自己的自動延長機制：同一串 chunk、同一組種子、從已驗證檢查點接續）；成功後 `run.json` 加 `extensions`、`effective_production_ps`、新的 `checkpoint_fingerprint`，並重做分析 | `extend_ps` 由使用者給；提案時的 `protocol_hash`、延長次數與 run.json 一致，否則 `scientific` 失敗；**窗口層級的延長（`window_centres` 非空）沒有公開介面，不啟動** |
+- **只有人決定的 DecisionLog**：這些行動的決策紀錄 `kind="auto"`，`why` 寫明「自主行動（帳本 key、政策）」；不冒充使用者在 GUI 的選擇。
+- **量測**：`resources.wall_s`＝牆鐘；`gpu_hours`＝GPU 平台時的牆鐘小時（否則 0.0）；`core_hours`＝本程序的 CPU 秒數／3600；`storage_gb`＝被監看資料夾的增加量。`simulated_ps` 另外由檔案讀回（`*_complete.json` 的步數×時間步；窗口樣本數×取樣間隔＋平衡時間）。GPU／CPU 小時不是硬體計量，是牆鐘與程序 CPU 時間。
+- **取消／暫停**：`req.cancelled()` 併入引擎的 `should_pause`；被取消回報 `cancelled`，其他暫停回報 `failed`（`paused`，不重試、升級）。
+- **事後評估**：`reassessor` 讀該目標在 state 裡的評估。replica／extend 不改變結合評估，所以通常算「沒有改善」，連續 N 次就停止——這是如實的結果，不是錯誤。
+
+### 9.4 檢查點指紋（`engine/runner.py`）
+production 完成（`run.json` `COMPLETE`）時記 `checkpoint_fingerprint = {bytes, mtime_ns, edge_sha256, sha256, stage, state_file, recorded_at, chunk_manifest: {file, digest}}`。`chunk_manifest.digest` 是 `production_progress.json` 的每個 chunk（編號、步數範圍、各 artifact 的大小與邊緣雜湊）的 sha256，不含路徑與時間，所以搬動專案不變。計算失敗不會讓 run 失敗（只是沒有指紋，之後延長會升級）。
+`default_checkpoint_validator` 驗：檔案存在非空、大小與邊緣雜湊、（有記錄時）完整 sha256、chunk 清單摘要。舊 run（沒有指紋）：升級 `invalid_checkpoint`，訊息說明「在記錄指紋之前完成的舊版，無法確認未損毀」，不執行。
+
+### 9.5 其他控制器變動
+`preflight`（可選）、`policy_loader`（`for_workflow` 預設；每次 `claim` 前重讀政策，撤銷立即生效，政策消失則不再啟動）；`dry_run` 回報 `preflight`。`rules.py`：`target_key`、裝置類型、延長長度、重複數倍率、基礎說明；舊測試全數不變。
+
+### 9.6 未做／未驗證（誠實）
+- GUI 入口與唯讀面板沒做（`status_data()` 已備好）。
+- 沒有真實 OpenMM／真實 `Workflow.run_md`／`run_binding` 的整合測試：執行器的測試用 FakeBackend（延長）與 Workflow 替身（補重複、補窗），CI 的真實引擎矩陣還沒跑過這條路。
+- 延長的是 **MD production 軌跡**；規則把傘狀窗口的 ESS／漂移失敗對應到「延長已核准的執行」，這個對應是否真的改善窗口診斷沒有證據（預期效益標 heuristic）。窗口層級延長需要 `binding.py` 公開 API。
+- 延長後 `run.json['protocol']` 仍是原核准長度；實際長度在 `effective_production_ps`／`extensions`。`analysis`／`report/comparability` 目前讀 protocol，**還不知道**延長（比較兩個長度不同的 run 時不會自動註明）。
+- 延長中途當機：`run.json` 狀態停在 `EXTENDING`（分析會略過，使用者可見），不會自動接續。
+- 只讀結合評估；沒有結合結果的工作流程沒有提案。軌跡分析變體沒有規則觸發。
+- 預算數字：待擁有者設定。
