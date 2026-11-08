@@ -374,8 +374,11 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
     # D-152: a non-coordinating anionic carboxylate near a bonded metal collapses onto it in a point-charge model
     # (CI: CA II Glu106 → Zn 1.74 Å).  Stop for the user's decision rather than build a model that will collapse;
     # `bonded_open`/hydroxide handle their own open-site case above, so this guards the plain `bonded` water model.
+    # D-152: only the plain table-based bonded water model gates on a competing carboxylate.  A fitted-parameter site
+    # (params) or a hydroxide site (mode) has had its charges/environment handled by QM/MCPB, so its collapse, if any,
+    # is the fitted model's responsibility — not this gate (a caveat still flags it below).
     comp = [c for c in (site.get("competing_carboxylates") or [])]
-    if comp and policy == "bonded":
+    if comp and policy == "bonded" and not params and mode == "water":
         if carboxylate is None:
             names = "、".join(f"{c['resname']}{c['resseq']}:{c['name']}（{c['distance_A']} Å）" for c in comp)
             out.update(status=NEEDS_HUMAN, gate_name=f"competing carboxylate {key}", competing_carboxylates=comp,

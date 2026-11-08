@@ -247,8 +247,15 @@ def add_axial_cv_bias(system, geom: FunnelGeometry, anchor, ligand):
 
 
 # --------------------------------------------------------------------------------------------- standard state
-def _trapz(y, x) -> float:
-    return float(np.trapezoid(y, x)) if hasattr(np, "trapezoid") else float(np.trapz(y, x))
+def trapz(y, x) -> float:
+    """Trapezoidal integral, implemented directly so it works on every NumPy version: np.trapz is gone in NumPy 2.0
+    and np.trapezoid is absent before it — and numpy's __getattr__ makes hasattr(np, "trapezoid") lie (it returns
+    True, then the call raises AttributeError), so a hasattr guard was not enough (CI: openmm-stack AttributeError)."""
+    y = np.asarray(y, dtype=float); x = np.asarray(x, dtype=float)
+    return float(np.sum((x[1:] - x[:-1]) * (y[1:] + y[:-1]) * 0.5))
+
+
+_trapz = trapz   # back-compat alias
 
 
 def lateral_area_nm2(r_cyl_nm: float, k_kj_mol_nm2: float, kT: float, *, n: int = 20001) -> float:

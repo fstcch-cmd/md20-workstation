@@ -64,7 +64,7 @@ def test_carboxylate_for_reads_the_site_decision():
 
 def test_a_bonded_site_with_no_competing_carboxylate_is_unaffected():
     # the CA-II-like His3 + water site (no Glu) still plans normally
-    from tests.test_metal_site_water import _ca2_like
+    from test_metal_site_water import _ca2_like
     atoms = _ca2_like()
     p = plan_site(find_sites(atoms)[0], "bonded", {a["index"]: a["xyz"] for a in atoms})
     assert p["status"] == "AUTO_FIXED" and not p.get("competing_restraints")

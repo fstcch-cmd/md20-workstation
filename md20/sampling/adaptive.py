@@ -53,7 +53,8 @@ def gaussian_overlap(mu1: float, s1: float, mu2: float, s2: float) -> float:
     x = np.linspace(lo, hi, 2001)
     p1 = np.exp(-0.5 * ((x - mu1) / s1) ** 2) / (s1 * math.sqrt(2 * math.pi))
     p2 = np.exp(-0.5 * ((x - mu2) / s2) ** 2) / (s2 * math.sqrt(2 * math.pi))
-    return float(np.trapezoid(np.minimum(p1, p2), x) if hasattr(np, "trapezoid") else np.trapz(np.minimum(p1, p2), x))
+    yy = np.minimum(np.asarray(p1, float), np.asarray(p2, float)); xx = np.asarray(x, float)
+    return float(np.sum((xx[1:] - xx[:-1]) * (yy[1:] + yy[:-1]) * 0.5))
 
 
 def spacing_for_overlap(sigma: float, target_overlap: float) -> float:

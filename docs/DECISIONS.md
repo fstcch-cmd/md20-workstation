@@ -6,6 +6,15 @@
 ---
 
 ## 2026-11-08
+### D-154　CI d89255e 回饋修正：鋅 restrain 與漏斗力真機通過；修 import、閘門範圍、漏斗預設層級、np.trapezoid
+- **CI 證據**（run 42451748970，`d89255e`）：**`test_bonded_zinc_ca2`（鋅 restrain）與 `test_nacl_funnel`（漏斗力）真機 PASSED**——選項 D 的 restrain（排除非鍵＋下限牆）真的防住 Glu106 塌陷；漏斗力表達式正確。但有四處回歸要修：
+  1. **pure-python 全平台**：`test_metal_competing_carboxylate.py` 用 `from tests.test_metal_site_water import`，CI rootdir 下 `tests` 非 package（D-95 老坑）→ 改 `from test_metal_site_water`。
+  2. **heavy[metal]**：競爭羧基閘門太廣，誤擋擬合參數與 OH⁻ 路徑（它們也用 CA II/Glu106）→ 閘門只在純 bonded 水模型（`not params and mode == "water"`）觸發；擬合／OH⁻ 的電荷由其 QM/MCPB 模型負責。
+  3. **openmm-stack 既有結合測試**：D-151 把 funnel 設成 `BindingConfig` 的 dataclass 預設，連帶改變所有直接用 `BindingConfig()` 的既有測試（拉離更遠→水盒不足）→ dataclass 預設改回 `none`，funnel 預設只在 pipeline 層（`Workflow._binding_config`，teaching/research）。這才是「pipeline 預設開啟」的正確層級。
+  4. **openmm-stack test_wham**：`np.trapezoid` 的 `hasattr` 保護無效——numpy 的 `__getattr__` 讓 `hasattr(np,"trapezoid")` 回 True 卻在呼叫時 raise（future-attribute 機制）→ 改用不依賴版本的自實作梯形積分（`funnel.trapz`），adaptive/binding 同步。
+- **相關檔案**：`tests/test_metal_competing_carboxylate.py`、`md20/build/metal.py`（閘門範圍）、`md20/sampling/binding.py`（restraint dataclass 預設回 none）、`tests/test_funnel.py`、`md20/sampling/funnel.py`／`adaptive.py`（trapz）。
+- **未決**：擬合參數／OH⁻ 路徑的競爭羧基塌陷風險（Glu106 仍是標準力場帶電羧基）目前不擋，列為 D-152 後續；heavy[metal] 其餘真機結果待這輪 CI 確認。
+
 ### D-153　流程頁步驟表改為四階段完整骨架：由上到下＝前到後（使用者 2026-11-08）
 - **問題**：使用者指出 UI 步驟表由上到下看起來順序怪——「建模」排在對接後面像顛倒、條件步驟（折疊／高通量）沒跑到就不顯示讓骨架跳。
 - **查證**：實際執行順序正確（高通量篩選、胜肽折疊都在對接前；MD 系統建立在對接後，因為要用選定姿勢組裝，是必然）。問題在呈現，不在執行順序。

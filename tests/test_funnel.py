@@ -336,7 +336,7 @@ def test_stored_flag_cannot_outvote_the_recorded_reference_state():
     r["assessment"]["eligibility"]["affinity_ranking"] = True             # tampered / stale flag
     assert not claim_eligible(r, "affinity_ranking")
     r = _res(funnel=True)
-    r["condition"] = binding_condition(BindingConfig(restraint="none"))   # condition says radial
+    r["condition"] = binding_condition(BindingConfig())                   # condition says radial (default)
     assert not claim_eligible(r, "affinity_ranking") and ranking_basis(r, r["assessment"])[0] is False
     r["condition"] = None                                                 # condition not recorded: not guessed
     assert not claim_eligible(r, "affinity_ranking")
@@ -352,7 +352,7 @@ def test_versions_were_bumped():
 
 # ------------------------------------------------------------------------------------------------ condition, compare, config
 def test_binding_condition_carries_cv_restraint_and_standard_state():
-    c0 = binding_condition(BindingConfig(restraint="none"))      # D-151: radial is no longer the default
+    c0 = binding_condition(BindingConfig())
     assert (c0["cv"], c0["funnel_restraint"], c0["standard_state"]) == (FN.CV_RADIAL, False, FN.STANDARD_STATE_RADIAL) and "funnel" not in c0
     c1 = binding_condition(BindingConfig(restraint="funnel", funnel_z_cc_nm=1.7))
     assert (c1["cv"], c1["funnel_restraint"], c1["standard_state"]) == (FN.CV_AXIAL, True, FN.STANDARD_STATE_FUNNEL)
@@ -360,14 +360,14 @@ def test_binding_condition_carries_cv_restraint_and_standard_state():
     assert binding_condition(BindingConfig(restraint="funnel"))["funnel"]["z_cc"] == "auto"
 
 
-def test_default_config_is_funnel_and_old_radial_results_stay_finished_as_radial(tmp_path):
+def test_dataclass_default_is_radial_and_old_results_stay_finished(tmp_path):
+    # D-151: the funnel default lives in the pipeline layer (test_workflow_gates); the dataclass default stays radial
     d = BindingConfig()
-    assert d.restraint == "funnel" and d.funnel_z_cc_nm is None and (d.funnel_r_cyl_nm, d.funnel_r_cone_nm, d.funnel_k) == (0.2, 1.0, 4000.0)
-    old = {k: v for k, v in d.to_dict().items() if not k.startswith("funnel") and k != "restraint"}   # manifest from before the funnel default
+    assert d.restraint == "none" and d.funnel_z_cc_nm is None and (d.funnel_r_cyl_nm, d.funnel_r_cone_nm, d.funnel_k) == (0.2, 1.0, 4000.0)
+    old = {k: v for k, v in d.to_dict().items() if not k.startswith("funnel") and k != "restraint"}   # manifest from before funnel existed
     (tmp_path / "binding_manifest.json").write_text(json.dumps({"status": "PASS", "config": old, "result": {"status": "PASS", "d_bound_nm": 0.3}}))
-    # D-151: the stored result is radial (no restraint key); only a radial request returns it, a funnel request reopens
-    assert finished_result(tmp_path, BindingConfig(restraint="none")) is not None
-    assert finished_result(tmp_path, d) is None
+    assert finished_result(tmp_path, d) is not None                                   # radial request matches stored radial
+    assert finished_result(tmp_path, BindingConfig(restraint="funnel")) is None       # a funnel request reopens it
 
 
 def test_compare_binding_ranks_only_funnel_results():

@@ -60,8 +60,10 @@ class BindingConfig:
     spectator_hold_nm: float = 0.3         # free within ±0.3 nm of their bound distance to the pocket anchor
     # D-140 (A8): "none" = COM-distance CV, 1 M radial integral (approximate, not for ranking);
     # "funnel" = axial CV z + funnel restraint + analytic standard-state correction (docs/specs/binding_funnel_restraints.md).
-    # D-151 (user 2026-11-08): funnel is the default (ranking-grade ΔG°); the workflow sets "none" for the classroom tier.
-    restraint: str = "funnel"
+    # D-151 (user 2026-11-08): the ranking-grade funnel default is applied at the PIPELINE layer (Workflow._binding_config:
+    # funnel for teaching/research, none for classroom).  The dataclass default stays "none" so a direct BindingConfig()
+    # — advanced API use and the integration tests — is the conservative radial 1 M unless funnel is asked for.
+    restraint: str = "none"
     funnel_r_cyl_nm: float = FN.DEFAULTS["r_cyl_nm"]
     funnel_r_cone_nm: float = FN.DEFAULTS["r_cone_nm"]
     funnel_z_cc_nm: float | None = None    # None = automatic (pocket exit + ligand radius + 0.3 nm)
@@ -288,7 +290,7 @@ def radial_pmf(pres, temperature_k: float) -> dict:
     r_cut = float(g[i_min + beyond[0]] if len(beyond) else g[-1])
     bound = g <= r_cut
     integrand = 4 * np.pi * g[bound] ** 2 * np.exp(-(Wv[bound] - w_bulk) / kT)
-    k_eq = float(np.trapezoid(integrand, g[bound])) if hasattr(np, "trapezoid") else float(np.trapz(integrand, g[bound]))
+    k_eq = FN.trapz(integrand, g[bound])
     dG = round(-kT * math.log(k_eq / V0_NM3), 3) if k_eq > 0 else None
     from .multi import delta_pmf_error
     return {"grid": g, "W": Wv, "W_raw": W_raw - np.min(W_raw), "err": err, "w_bulk": w_bulk, "r_min": float(g[i_min]),
