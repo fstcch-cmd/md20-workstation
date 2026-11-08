@@ -6,6 +6,16 @@
 ---
 
 ## 2026-11-08
+### D-144　經驗門檻校準：CV 提醒維持 0.25 但據實標為弱提醒；PCA／分群敏感度的 `consistent` 改用時間前後半（使用者 11/08 要求審閱）
+- **證據**：合成校準（`docs/specs/thresholds_calibration.md`）。(1) n=3 時 CV>0.25 對真實 CV 0.30 只有 50% 觸發、對 0.15 有 6.7% 誤報。(2) 有自相關的軌跡，交錯分半（偶／奇幀）PC1 幾乎永遠一致（τ=50 幀時失敗率 0–8%），
+  而前／後半段在同樣情況下 100% 不一致。
+- **決定**：CV 門檻不改，但規格與註解寫明是「請看各條」的提醒，不是檢定；沒觸發也不是一致的證據；只用於恆正的量（已通知 D-142 子代理：差值型量不算 CV）。
+  `extended.pca_sensitivity` 新增 `block_halves`，`consistent` 改由前／後半（與全幀比較）決定；`cluster_sensitivity` 加前／後半的最大族群差並據此判定。交錯分半保留，註明只代表抽樣雜訊。
+- **理由**：D-135 的 `consistent` 建立在一個量不到取樣不足的比較上，會把未收斂報成一致——這違反 R3／R6「不得暗示收斂」。數值門檻本身沒有證據需要改。
+- **被否決**：把 CV 門檻調到 0.15（n=3 時誤報 22% 以上的區間變大，提醒變噪音）；完全刪掉交錯分半（它對「抽樣雜訊」仍有資訊）。
+- **測試**：`tests/test_thresholds_calibration.py`（4 項）；既有 `test_analysis_resolution.py` 照過。
+- **相關檔案**：`md20/analysis/extended.py`、`md20/analysis/replica_set.py`（註解）、`tests/test_thresholds_calibration.py`、`docs/specs/thresholds_calibration.md`、`docs/specs/README.md`。
+
 ### D-139　c014e8b CI 紅燈分析與修正：鋅第二個弱配位水、授權測試真的跑 CG、Windows 換行與路徑、pose-screen 斷言自相矛盾
 - **CI**：run 42389077410（`c014e8b`），以及上一輪 42385841086（`58d81bc`，本 session 改動之前）。逐 job 讀日誌（單次查詢）。
 - **heavy-metal（D-133 的後續）**：3KS3 在 2.6 Å 內有**兩個**水：鋅水 1.90 Å，另一個 2.57 Å。D-133 兩個都鍵結，變成五配位，測試要求 4 個鍵而失敗（沒進到 MD）。

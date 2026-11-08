@@ -33,7 +33,7 @@ UNAVAILABLE_SINGLE = "單一軌跡無法估計重複間不確定性"
 UNAVAILABLE_NONE = "沒有可分析的重複，無法彙總"
 # Empirical starting value (like ligand_state thresholds): replicas whose per-replica values have a coefficient of
 # variation above this are labelled "divergent" (docs/specs/replicas.md §2: "各條不一致時標註").  Validate per system.
-CV_DIVERGENT = 0.25
+CV_DIVERGENT = 0.25   # D-144: a caution, not a test (n=3: fires 50 % at true CV 0.30, 7 % at 0.15; thresholds_calibration.md)
 IN_POCKET_MIN_FRACTION = 0.5          # final-20 % ligand_state: (retained + changed-in-pocket) >= this -> "in pocket"
 OCCUPANCY_PERSISTENT = 0.5            # a residue "persists" in a replica when its contact occupancy is >= this
 MAX_RESIDUES_LISTED = 30

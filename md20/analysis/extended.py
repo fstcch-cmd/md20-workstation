@@ -15,7 +15,7 @@ import numpy as np
 EXTENDED_SCHEMA = "md20.extended/3"      # D-135: bump when extended.json gains/changes fields (invalidates cached analyses)
 MAX_FRAMES = 250            # frames used for the expensive parts (SASA, clustering, water bridges)
 SENSITIVITY_TOLERANCES = {"pc1_abs_cos_min": 0.9, "explained_abs_diff_max": 0.10, "largest_cluster_abs_diff_max": 0.15,
-                          "basis": "declared reporting thresholds (empirical); not a convergence criterion"}
+                          "basis": "declared reporting thresholds (empirical); applied to chronological halves (D-144); not a convergence criterion"}
 ALL_FRAMES_PCA_MAX_ELEMENTS = 20_000_000   # frames × 3·N_Cα above which the all-frame PCA comparison is skipped as costly
 HB_DIST_NM = 0.35           # donor–acceptor heavy-atom distance for a hydrogen bond
 HYDROPHOBIC_NM = 0.40
@@ -81,16 +81,26 @@ def pca_sensitivity(xyz_sel: np.ndarray, xyz_all: np.ndarray | None = None, *, n
         out["interleaved_halves"] = {"status": "insufficient", "reason": f"{len(X)} frames in the subsample"}
         out["consistent"] = None
         return out
-    fa, Va = _pca_axes(X[0::2], n_components)
-    fb, Vb = _pca_axes(X[1::2], n_components)
+    def _cmp(A, B, la, lb):
+        fa, Va = _pca_axes(A, n_components)
+        fb, Vb = _pca_axes(B, n_components)
+        k = min(len(fa), len(fb))
+        return {"status": "ok", f"explained_{la}": fa[:k].round(4).tolist(), f"explained_{lb}": fb[:k].round(4).tolist(),
+                "pc1_abs_cos": round(float(abs(Va[0] @ Vb[0])), 4), "subspace_overlap": round(_subspace_overlap(Va, Vb), 4),
+                "max_explained_abs_diff": round(float(np.abs(fa[:k] - fb[:k]).max()), 4)}
     f0, V0 = _pca_axes(X, n_components)
-    k = min(len(fa), len(fb))
-    out["interleaved_halves"] = {
-        "status": "ok", "explained_even": fa[:k].round(4).tolist(), "explained_odd": fb[:k].round(4).tolist(),
-        "pc1_abs_cos": round(float(abs(Va[0] @ Vb[0])), 4), "subspace_overlap": round(_subspace_overlap(Va, Vb), 4),
-        "max_explained_abs_diff": round(float(np.abs(fa[:k] - fb[:k]).max()), 4)}
-    ok = [out["interleaved_halves"]["pc1_abs_cos"] >= tol["pc1_abs_cos_min"],
-          out["interleaved_halves"]["max_explained_abs_diff"] <= tol["explained_abs_diff_max"]]
+    h = len(X) // 2
+    # D-144: the chronological first/second halves are what can reveal slow, unconverged sampling; the interleaved
+    # (even/odd) halves of an autocorrelated trajectory are nearly the same data and agree even when the halves in time
+    # disagree completely (synthetic AR(1) calibration: docs/specs/thresholds_calibration.md) — reported as
+    # subsample noise only and never used for `consistent`
+    out["block_halves"] = {**_cmp(X[:h], X[h:], "first", "second"),
+                           "note": "chronological halves of the subsample: sensitive to drift and slow sampling"}
+    out["interleaved_halves"] = {**_cmp(X[0::2], X[1::2], "even", "odd"),
+                                 "note": "subsample noise only: agrees for autocorrelated frames even when sampling is "
+                                         "unconverged; not used for `consistent`"}
+    ok = [out["block_halves"]["pc1_abs_cos"] >= tol["pc1_abs_cos_min"],
+          out["block_halves"]["max_explained_abs_diff"] <= tol["explained_abs_diff_max"]]
     if xyz_all is None:
         out["all_frames"] = {"status": "skipped", "reason": "not provided"}
     else:
@@ -120,12 +130,17 @@ def cluster_sensitivity(D: np.ndarray, cutoff_A: float = 2.0) -> dict:
     if len(D) < 8:
         return {"status": "insufficient", "tolerances": tol, "reason": f"{len(D)} frames in the subsample"}
     res = {}
-    for name, ix in (("all_subsample", np.arange(len(D))), ("even", np.arange(0, len(D), 2)), ("odd", np.arange(1, len(D), 2))):
+    h = len(D) // 2
+    for name, ix in (("all_subsample", np.arange(len(D))), ("even", np.arange(0, len(D), 2)), ("odd", np.arange(1, len(D), 2)),
+                     ("first_half", np.arange(0, h)), ("second_half", np.arange(h, len(D)))):
         c = cluster_from_rmsd(D[np.ix_(ix, ix)], cutoff_A=cutoff_A)
         res[name] = {"n_frames": int(len(ix)), "n_clusters": c["n_clusters"], "largest_population": max(c["populations"])}
     diff = abs(res["even"]["largest_population"] - res["odd"]["largest_population"])
+    bdiff = abs(res["first_half"]["largest_population"] - res["second_half"]["largest_population"])
+    # D-144: `consistent` from the chronological halves; even/odd is subsample noise only (see pca_sensitivity)
     return {"status": "ok", "tolerances": tol, **res, "largest_population_abs_diff": round(float(diff), 4),
-            "consistent": bool(diff <= tol["largest_cluster_abs_diff_max"]),
+            "block_largest_population_abs_diff": round(float(bdiff), 4),
+            "consistent": bool(bdiff <= tol["largest_cluster_abs_diff_max"]),
             "note": "sensitivity to which frames were subsampled; the cluster count is a property of the cutoff and the "
                     "subsample, not a converged conformational census"}
 
