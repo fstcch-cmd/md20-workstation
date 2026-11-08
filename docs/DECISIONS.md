@@ -6,6 +6,18 @@
 ---
 
 ## 2026-11-08
+### D-158　離子重疊改為「建模階段去碰撞重新安置」(通則,非單一個案補丁;使用者 2026-11-08 要求)
+- **現象**：`test_pose_md_screen_3ptb`(heavy[pose-screen])在 f1ef4df 失敗;上一輪 a9d6cf0 PASSED。根因不是程式邏輯,而是 **OpenMM `addSolvent` 加離子時不檢查離子彼此最小間距**:它隨機把水換成離子以達鹽濃度並中和,偶爾把兩顆離子換到相鄰水位(< 0.22 nm,比接觸離子對 Na–Cl≈0.28 還近),靜電力爆成 NaN。刪水救不了(兩個都是離子)。這是**所有需加鹽的全原子系統都會遇到的通則問題**,非 3PTB／pose-screen 特有。
+- **否決的做法**：原本(D-115)碰到離子-離子重疊就 NEEDS_HUMAN「重新建模」。我一度想用「重試 addSolvent 幾次」——使用者正確指出那是**為單一個案打補丁、重擲骰子治標**,不保證成功、每次重做整個溶劑化。使用者要求:解法必須是**通則**、服務未來多場域,不是為單案新增流程。
+- **決定(通則)**：把系統既有的「建模階段去碰撞修復」原則(水彼此重疊就刪多餘的水,`remove_overlapping_waters`/D-102)**一般化到整個溶劑殼層**——離子彼此重疊時,用**確定性重新安置**:把重疊對中的一顆離子移到一個合法的空水位(與所有其他離子都 ≥ 最小間距),並刪掉那顆捐出位置的水。
+  - **保持組成**:離子數、淨電荷、鹽濃度都不變(只是換座標);力場不動;最小化後自然鬆弛。離子移到的本來就是水位(與溶質已安全),新位置的鄰水是正常第一殼層距離(非 NaN 等級的硬重疊)。
+  - **確定性**:純幾何規劃(按距離排序、移高索引、選最近的清空水位),不是重擲骰子。
+  - **仍守「寧可擋也不猜」**:只有在盒子太擠、真的找不到任何清空水位時才 NEEDS_HUMAN(建議重建或加大 padding)。
+- **實作**：新純函式 `assemble.plan_ion_declash(ion_xyz, water_O_xyz, box, used_waters=…)`(純 numpy 幾何、PBC、可完全離線測試);織進 `remove_overlapping_waters`:偵測到離子-離子重疊 → 規劃重新安置 → 套用(移離子座標、捐出的水併入刪除清單)→ AUTO_FIXED;規劃不出來才 NEEDS_HUMAN。
+- **測試／證據**：`tests/test_ion_declash.py`(6 項純幾何:無重疊 no-op、重疊重新安置且清開夥伴、清開**所有**離子非只夥伴、無空位→unresolved、不重用已刪的水、PBC);`test_declash_waters`/`test_ion_water_clash` 與容器全套仍綠(exit 0)。真實引擎(把重新安置套回 OpenMM 拓樸、pose-screen 不再被隨機擋)交 CI heavy[pose-screen]/openmm-stack 驗證。
+- **相關檔案**：`md20/build/assemble.py`(`plan_ion_declash`＋`remove_overlapping_waters`)、`tests/test_ion_declash.py`。
+- **未決**：CI 確認重新安置在真機消除 NaN 且 pose-screen 轉綠;極罕見的「盒太擠無空位」仍走 NEEDS_HUMAN。
+
 ### D-157　pure-python 的 test_pinned_vina_assets_exist 改為網路錯誤時 skip(消除反覆的 CDN flake)
 - **CI 證據**：d912b15 重跑後,其他所有 pure-python(5 個 OS/版本)與 openmm-stack(macos)全綠、heavy/installer 全綠,**唯一的紅**是 pure-python(ubuntu 3.12)的 `test_pinned_vina_assets_exist`,錯誤 `TimeoutError: The read operation timed out`(對 github.com 抓 Vina release asset)。前一輪也有 502/503。
 - **根因**：此測試對每個釘選 Vina asset URL 發即時 HEAD 請求驗 200;放在「pure-python 快速套件」卻依賴 GitHub 網路,GitHub 一慢就硬失敗,反覆毒害 CI。

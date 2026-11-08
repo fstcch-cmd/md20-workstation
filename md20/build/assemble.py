@@ -385,6 +385,74 @@ def ion_water_clashes(ion_xyz: np.ndarray, ion_el: list[str], o_xyz: np.ndarray,
     return out
 
 
+def plan_ion_declash(ion_xyz, water_O_xyz, box, *, used_waters=(), min_ion_ion: float = ION_ION_MIN_NM,
+                     margin: float = 0.02) -> dict:
+    """D-158 (general build-stage declash, pure — no OpenMM).  OpenMM's addSolvent places ions by replacing random
+    waters and does not enforce a minimum ion–ion separation, so two ions occasionally end up closer than a contact
+    ion pair (< ``min_ion_ion``).  Removing a water cannot fix an ion–ion overlap, so this is the same principle as the
+    water declash applied to ions: relocate ONE ion of each overlapping pair to a free water site that clears every
+    ion, and remove that donor water.  Composition is preserved — the ion count, the net charge and the ionic
+    strength do not change, only one ion's coordinates (and one water goes away, as in the water declash).  Nothing
+    about the force field changes; minimisation then relaxes the move.  Deterministic: pairs are handled by increasing
+    distance, the higher-index ion moves, and the nearest clearing water wins.
+
+    ion_xyz (n,3) ion positions, water_O_xyz (m,3) candidate water O positions, box (3,) orthorhombic or None,
+    used_waters: water indices already slated for removal (not available as donors).  Returns
+    {"moves": [(ion_i, water_j, new_xyz)], "remove_waters": [j...], "unresolved": [(i, j, d)...],
+     "min_ion_ion_nm": float|None, "n_pairs": int}.  ``unresolved`` is non-empty only when the box is so ion-dense
+    that no water site clears every other ion — then the caller blocks (NEEDS_HUMAN), as before."""
+    ions = np.asarray(ion_xyz, float).reshape(-1, 3).copy()
+    W = np.asarray(water_O_xyz, float).reshape(-1, 3)
+    out = {"moves": [], "remove_waters": [], "unresolved": [], "min_ion_ion_nm": None, "n_pairs": 0}
+    n = len(ions)
+    if n < 2:
+        return out
+
+    def dmat(a, b):                                   # pairwise PBC distances, a:(p,3) b:(q,3) -> (p,q)
+        d = a[:, None, :] - b[None, :, :]
+        if box is not None:
+            d -= np.round(d / box) * box
+        return np.linalg.norm(d, axis=2)
+
+    dii = dmat(ions, ions)
+    iu = np.triu_indices(n, 1)
+    pair_d = dii[iu]
+    sel = pair_d < min_ion_ion
+    pairs = sorted((round(float(d), 4), int(i), int(j)) for d, i, j in zip(pair_d[sel], iu[0][sel], iu[1][sel]))
+    out["n_pairs"] = len(pairs)
+    if not pairs:
+        return out
+    out["min_ion_ion_nm"] = pairs[0][0]
+    busy = set(int(w) for w in used_waters)
+    moved: set = set()
+    thr = min_ion_ion + margin
+    for d, i, j in pairs:
+        if float(np.linalg.norm(((ions[i] - ions[j]) - (np.round((ions[i] - ions[j]) / box) * box if box is not None else 0)))) >= min_ion_ion:
+            continue                                   # already cleared by an earlier relocation
+        mv = j if j not in moved else (i if i not in moved else None)
+        if mv is None:
+            out["unresolved"].append((i, j, d)); continue
+        others = [k for k in range(n) if k != mv]
+        if len(W):
+            dW = dmat(W, ions[others]) if others else np.full((len(W), 1), 9.9)
+            clears = dW.min(axis=1) >= thr
+            for w in np.nonzero(clears)[0]:
+                if int(w) in busy:
+                    clears[w] = False
+            cand = np.nonzero(clears)[0]
+        else:
+            cand = np.array([], int)
+        if not len(cand):
+            out["unresolved"].append((i, j, d)); continue
+        dto = dmat(W[cand], ions[mv:mv + 1]).ravel()
+        tgt = int(cand[int(np.argmin(dto))])
+        ions[mv] = W[tgt]
+        busy.add(tgt); moved.add(mv)
+        out["moves"].append((mv, tgt, tuple(float(x) for x in W[tgt])))
+        out["remove_waters"].append(tgt)
+    return out
+
+
 def remove_overlapping_waters(modeller, report, decisions=None, *, o_o_min_nm: float = 0.21) -> dict:
     """D-102: delete waters OpenMM placed overlapping (build-stage repair, not an MD or model change).  AUTO_FIXED with
     a diff when any are removed; PASS when the box is clean; NEEDS_HUMAN only if an overlap cannot be fixed by removing
@@ -422,12 +490,27 @@ def remove_overlapping_waters(modeller, report, decisions=None, *, o_o_min_nm: f
     plan["remove"] = sorted(set(plan["remove"]) | set(ic["remove"]))
     info = {"removed": len(plan["remove"]), "min_oo_before_nm": plan["min_oo_nm"], "n_overlap_pairs": plan["n_pairs"],
             "removed_on_ions": n_ion_w, "ion_water_min_nm": ic["min_by_ion"], "n_ions": len(ions)}
+    n_relocated = 0
     if ic["ion_ion"]:
-        report.add(Gate("water overlaps", NEEDS_HUMAN,
-                        f"有 {len(ic['ion_ion'])} 對離子彼此重疊（最近 {min(x[2] for x in ic['ion_ion']):.3f} nm < {ION_ION_MIN_NM}），"
-                        "刪水無法修復；請重新建模（溶劑化與加離子是隨機的，重建通常就會不同）。",
-                        options=["重新建模"], evidence=info))
-        return info
+        # D-158: an ion–ion overlap can't be fixed by removing a water.  General build-stage repair (the water-declash
+        # principle applied to ions): relocate one ion of each overlapping pair to a free water site that clears every
+        # ion; that water donates its place and is removed.  Ion count, net charge and ionic strength are unchanged.
+        relo = plan_ion_declash(xyz[ion_idx], xyz[o_idx], box, used_waters=plan["remove"])
+        if relo["unresolved"]:
+            report.add(Gate("water overlaps", NEEDS_HUMAN,
+                            f"有 {len(relo['unresolved'])} 對離子彼此重疊，且盒內找不到可安置的水位（最近 "
+                            f"{relo['min_ion_ion_nm']:.3f} nm < {ION_ION_MIN_NM}）；水盒太擠，請重新建模或加大 padding。",
+                            options=["重新建模", "md.padding_nm 調大"],
+                            evidence={**info, "ions_relocated": len(relo["moves"]), "unresolved_pairs": len(relo["unresolved"])}))
+            return info
+        from openmm import Vec3, unit
+        pos = list(modeller.positions)
+        for ion_i, _w, new_xyz in relo["moves"]:
+            pos[ion_idx[ion_i]] = Vec3(*new_xyz) * unit.nanometer
+        modeller.positions = pos
+        plan["remove"] = sorted(set(plan["remove"]) | {w for _i, w, _x in relo["moves"]})
+        n_relocated = len(relo["moves"])
+        info["removed"] = len(plan["remove"]); info["ions_relocated"] = n_relocated; info["min_ion_ion_nm"] = relo["min_ion_ion_nm"]
     if plan["unresolvable"]:
         report.add(Gate("water overlaps", NEEDS_HUMAN,
                         f"有 {len(plan['unresolvable'])} 處水重疊無法只靠刪水修復（可能水與溶質嵌在一起，最近 "
@@ -441,16 +524,20 @@ def remove_overlapping_waters(modeller, report, decisions=None, *, o_o_min_nm: f
     modeller.delete([waters[i] for i in plan["remove"]])
     on_ion = (f"其中 {n_ion_w} 個貼在離子上（最近 " + "、".join(f"{k}–O {v:.3f}" for k, v in ic["min_by_ion"].items())
               + " nm；離子保留，電荷與鹽濃度不變）；") if n_ion_w else ""
+    reloc_txt = (f"另把 {n_relocated} 顆彼此重疊的離子（最近 {info['min_ion_ion_nm']:.3f} nm < {ION_ION_MIN_NM}）"
+                 f"移到空的水位（離子數、淨電荷、鹽濃度不變）；") if n_relocated else ""
     oo_txt = f"最近 O–O {plan['min_oo_nm']:.3f} nm < {o_o_min_nm} nm" if plan["min_oo_nm"] is not None else "水與水之間沒有重疊"
     report.add(Gate("water overlaps", AUTO_FIXED,
-                    f"移除 {len(plan['remove'])} 個重疊的水（{oo_txt}）；{on_ion}"
-                    f"OpenMM 溶劑化偶爾把水放得幾乎重疊，最小化壓不下去、MD 一開始就 NaN；刪掉多餘的一個水是標準建模步驟，"
-                    f"不改力場與蛋白。", evidence=info, diff=[f"waters: -{len(plan['remove'])}"]))
+                    f"移除 {len(plan['remove'])} 個重疊的水（{oo_txt}）；{on_ion}{reloc_txt}"
+                    f"OpenMM 溶劑化偶爾把水放得幾乎重疊、或把兩顆離子放得太近，最小化壓不下去、MD 一開始就 NaN；刪多餘的水、"
+                    f"把重疊的離子移到別的水位都是標準建模去碰撞步驟，不改力場與蛋白。",
+                    evidence=info, diff=[f"waters: -{len(plan['remove'])}"] + ([f"ions_relocated: {n_relocated}"] if n_relocated else [])))
     if decisions:
         decisions.record("build.solvate", "declash waters", info,
-                         f"移除 {len(plan['remove'])} 個重疊水（{oo_txt}；{n_ion_w} 個貼在離子上）。原因：OpenMM "
-                         "addSolvent／addMembrane 偶爾放出幾乎重合的水（O–O 可低到 0.18 nm，正常約 0.28），"
-                         "最小化後仍是亞穩態、MD 前幾步力爆成 NaN（Linux 與 Windows 皆會，依建構而定）。刪多餘水是標準去碰撞步驟。",
+                         f"移除 {len(plan['remove'])} 個重疊水（{oo_txt}；{n_ion_w} 個貼在離子上）"
+                         + (f"；重新安置 {n_relocated} 顆重疊離子" if n_relocated else "")
+                         + "。原因：OpenMM addSolvent／addMembrane 偶爾放出幾乎重合的水（O–O 可低到 0.18 nm，正常約 0.28）"
+                         "或把兩顆離子放得比接觸離子對還近，最小化後仍是亞穩態、MD 前幾步力爆成 NaN。刪多餘水、移開重疊離子都是標準去碰撞步驟。",
                          kind="auto_fixed")
     return info
 
