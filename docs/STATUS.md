@@ -3,6 +3,19 @@
 ## 當前事實（2026-11-07 第七個 session，session_016gcJz6aoRW5kLP9Jzbi7kj）
 - **對外發行最新仍為 a17**；main 為開發中 a20。單一能力現況看 `docs/CAPABILITIES.md`（D-136，`tools/capability_manifest.py --check` 在 CI 驗證），本檔保留為歷史。
 
+- **11/08 第三批（同一 session）＋全專案結構審查**：
+  - **D-155 清除遺留示範**：`docked_BEN`／`trypsin_demo`（苯甲脒—胰蛋白酶）這組假資料在教學專案裡從未出現、造成誤解，已把使用者會看到的示範（`tools/gui_preview.py` build_demo／build_e2e、`tools/theme_preview.py`）全改真實教學案例一 hsieh2024（1VKX＋六個藜芽代謝物同時對接）。`report_template.py` **刻意保留**苯甲脒共結晶並加說明：`test_report_template` 要求涵蓋每種圖，其中 `pose_rmsd`（對共結晶 pose 的 RMSD）結構上需共結晶，教學案例沒有；它已標「合成示範資料」可區分。見 DECISIONS D-155。
+  - **(A) 容器驗收基線**：全套 `pytest` **exit 0、只有 skip 無 failure**（100% 綠）。審查另跑：圖涵蓋 `test_report_template`、i18n 四語 `test_i18n_coverage`、圖表版面 `test_figure_rules`/`test_docking_figs`/`test_figure_text`、穩定性 `test_gui_stability`/`test_gui_theme_connection`/`test_gui_worker`/`test_winjob`、授權 `test_license*`/`test_stamp`、簽發端 repo `md-digital-signature` 全套——**皆綠**。
+  - **審查結論（結構健全，有測試強制）**：
+    1. **報告圖表↔解釋模板**：61 種圖每種都有四語 title/caption/read；`figure_block` 對缺 FIG 的 kind 會 KeyError（強制每張渲染圖都有解釋）；`test_report_template` 斷言 61 種圖全被示範渲染（`set(FIG)−rendered=∅`）。無孤兒圖。
+    2. **四語系切換**：`test_i18n_coverage` 掃 139 個 `md20/**` 檔無漏 ja/ko；新 GUI 骨架標籤全四語 tuple；gui-preview 對四語每頁截圖驗執行期切換。
+    3. **圖表可讀性（D-89）**：圖例一律移到繪圖區右側軸外（`legend_outside` 在 `_save` 自動呼叫，`test_figure_rules` 斷言 `legend.x0≥axes.x1` 絕不蓋資料）；x 軸永遠遞增；每序列一色、超過色盤改線型（疊圖可分辨）；密集序列（>40 點）自動不畫標記（折線與標記不互蓋）；熱圖 colorbar 自動避讓；3D 是 GUI 互動分子檢視非 matplotlib 軸。
+    4. **斷線/閃退**：`connection.py` 重連 JS（visibilitychange/online/focus）＋心跳 20/90s（撐過背景節流與 OpenMM 佔 GIL）＋`tune_heartbeat`（永不阻斷啟動），皆接進 `app.py`（每頁注入 CONNECTION_JS、啟動調心跳）；`jsonio.replace_retry` 處理 Windows 檔案共享；D-103 計算獨立子程序、關 GUI 不中斷。`stability()` CI 自檢：計算中切四語不停/不重啟/不重複。
+    5. **流程結構**：四階段【準備→對接→模擬→分析】由上到下＝前到後（摺疊/篩選在對接前，MD 系統建立在對接後因需選定姿勢）；DECISION_KEYS 28 鍵含 `metal_carboxylate`。
+  - **安全憑證（推送前確認，使用者 11/08 要求）**：驗證端 `md20/util/license.py` 為 RSA-PSS（SHA-256）純驗證、TRUSTED_KEYS 只從套件內 `owner_pub.pem`、**無任何 env/設定/參數後門**（`os` 僅用於機器指紋與原子寫檔，無 `getenv` 跳過旗標）；竄改與翻位元簽章一律被拒（`md-digital-signature/tests/test_vectors.py` 證實）；測試向量金鑰非受信任公鑰故無法解鎖產品；**私鑰不在任何 repo**（兩端 `check_no_private_keys.py` 綠，只有公鑰）。**誠實限制**：md20 原始碼公開，此層是「門檻＋證據」（每個產出蓋授權 id）非不可破防拷；讓檢查難以剝除的編譯/加密發行層（D-128 第四層 Cython＋AES-256-GCM）**尚未完成**。
+  - **(B) 真實路徑仍交 CI**：D-152 鋅 restrain 真機防塌陷、D-154 的 heavy[metal] 其餘、漏斗 ΔG°、多重複 mdtraj，待這輪 CI（含 gui-preview 四語截圖、report-template 圖涵蓋）確認。
+  - **(C) 未決**：鋅擬合/OH⁻ 路徑競爭羧基塌陷不擋（D-152 後續）；D-128 第四層加密發行未做；D-72 筆電實測；autonomy 計算預算數字（擁有者）。
+
 - **11/08 第二批（CI 回饋後）**：查 6b4ca2e CI → 修 macOS pure-python（D-148，`MD20_DATA_DIR` 隔離，原本測試會刪使用者真實目錄）、漏斗樣本不足優雅 withhold（D-149）。GUI frontend-design 重做（D-146）＋連線穩定性（D-147）已推，待 CI gui-preview 與筆電確認。
 - **鋅誠實更正（D-150）**：D-133/D-145 的配位水路徑 **CI 證明不足**——Glu106 羧基仍塌到 Zn 1.74 Å（點電荷模型對帶電羧基的根本限制，與第四位點開放無關；真實 CA II 的 Glu106 不直接配位）。`test_bonded_zinc_ca2` 標 xfail(strict)，0.03 nm 門檻未放寬。解法（排除競爭羧基非鍵／質子化 Glu106／MCPB 全殼層／對這類位點發 NEEDS_HUMAN，建議先做後者）屬科學模型變更，**待使用者決定**。
 - 本 session 做了「Evidence-Driven Repair」R1–R8 第一輪（D-130 重做、D-133～D-138）。**(A)** 容器 1259 passed、50 skipped。**(B)** 真實路徑全部交 CI（尚無結果）：鋅新模型（heavy-metal）、每條重複的真實 mdtraj 分析、串流持續性、指紋重用。**(C)** 見下方各條未決與 HANDOFF §0。
