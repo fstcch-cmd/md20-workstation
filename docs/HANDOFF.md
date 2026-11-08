@@ -16,6 +16,10 @@
 > - **R7 D-136**：`docs/capabilities.json`＋`docs/CAPABILITIES.md`（`--check` 進 CI）；`md20/__init__.py` 版本、學生文件 a19→a17 據實。
 > - **R8 D-137**：`md20/autonomy/` 行動帳本與控制器，**預設只提建議**，未接入執行路徑。
 >
+> **11/08 續（同一 session，使用者「都做」）：** D-139（CI 修正）、D-140 漏斗 ΔG°（預設關閉；轉預設的條件見 D-140／spec §6.5：`test_nacl_funnel` 綠＋筆電 3PTB 與實驗差 ≤ 8 kJ/mol）、D-141 OH⁻、D-142、D-143（`md20 autonomy policy set` 只能由擁有者執行）、D-144。
+> 下一步：查 CI（heavy-metal、openmm-stack 的 `test_nacl_funnel` 與 OH⁻ 兩個新測試）；若 `test_nacl_funnel` 在建 Context 時失敗，先查 CustomCentroidBondForce 的 x1..z2 變數與右側定義（D-140 未驗證假設）。
+> 未決：漏斗 spec §5 五個審查問題、ΔRMSF 多重比較校正方法、單一系統多重複的共同基底（D-142）、自主執行的預算數字（擁有者）、傘狀窗口延長的 binding 公開 API（D-143）。
+>
 > **下一個 session 第一件事：** 單次查 CI（指令見使用者提示）。重點：heavy-metal（D-133 是否轉綠：4 個鍵、Glu 羧基不在 2.6 Å 內、平均偏差 < 0.03 nm）；openmm-stack 三 OS 的真實 mdtraj 分析（多重複、串流持續性、指紋）；pure-python 的 `capability_manifest --check`。紅了在同一 commit 修並附 DECISIONS。
 >
 > **仍待做（開發者自排）：** D-130 未彙總的觀測量（ΔRMSF 殘基 CI、水合、DSSP、PCA 盆地、DCCM、tICA/MSM、膜指標、平衡圖逐條列）；binding 把 `recorder=` 接到 `plan_refinement`（D-137 hook）；舊版結果「重新評估並回寫」動作（D-134 未決）；膜-only 分析寫指紋；capabilities 在 CI 結果出來後更新狀態。

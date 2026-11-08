@@ -86,6 +86,8 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 | [安裝程式（Windows install.ps1、macOS install.sh、環境檔、啟動檔、doctor）](#installer) | yes | yes | partial | none | v0.1.0a17 (older code) | stale |
 | [分析快取指紋與原子替換（R4，D-135）](#analysis_cache) | yes | yes | no | none | unreleased (main only) | unverified |
 | [有界自主行動帳本（R8，D-137）](#autonomy_ledger) | yes | yes | no | none | unreleased (main only) | unverified |
+| [漏斗約束與解析標準態 ΔG°（A8，D-140）](#funnel_standard_state) | yes | yes | no | none | unreleased (main only) | unverified |
+| [金屬配位水的 OH⁻ 選項（D-141）](#metal_water_hydroxide) | yes | yes | no | none | unreleased (main only) | unverified |
 
 <a id="docking_vina"></a>
 ## 分子對接（AutoDock Vina：independent／simultaneous、盒子、redocking、拒絕代碼）
@@ -504,7 +506,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 **支援的系統類型**：任何 MD 工作流程（SMD／傘狀採樣不隨重複數變）
 
 **限制**：
-- D-130：Workflow.analyse 分析每一條重複並彙總（mean／SD／t 區間、k/n；n=1 不給重複間不確定性）；ΔRMSF 殘基 CI、水合、DSSP、PCA 盆地比例、DCCM、tICA/MSM、膜指標仍只用代表重複；真實 mdtraj 路徑待 CI
+- D-130／D-142：每條重複都分析並彙總（RMSD 等、ΔRMSF Welch 區間、水合位點、DSSP、PCA 低谷佔比、DCCM、tICA/MSM 逐條資格、膜指標）；n=1 不給重複間不確定性；真實 mdtraj 路徑待 CI
 - 重複計畫與預設 3 條（D-131）合入 main 後尚未有 CI 結果
 - 每條從同一個建好的系統開始、各自 seed（2026+1000×條序）；不是從同一平衡結構分出
 
@@ -515,6 +517,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 | `tests/test_queue_replicas.py` | unit | `ci.yml:pure-python` |
 | `tests/test_replica_plan.py` | unit | `ci.yml:pure-python` |
 | `tests/test_replica_analysis.py` | synthetic | `ci.yml:pure-python` |
+| `tests/test_replica_observables.py` | synthetic | `ci.yml:pure-python` |
 
 **狀態**：implemented=`partial`｜synthetic_tested=`yes`｜real_engine_tested=`no`｜scientifically_benchmarked=`none`｜released_installer=`v0.1.0a17 (older code)`
 
@@ -960,19 +963,22 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 
 `autonomy_ledger`
 
-**實作**：`md20/autonomy/controller.py`、`md20/autonomy/ledger.py`
+**實作**：`md20/autonomy/controller.py`、`md20/autonomy/ledger.py`、`md20/autonomy/cli.py`、`md20/autonomy/executors.py`、`md20/sampling/reassess.py`
 
 **支援的系統類型**：補窗、延長、加重複、重新分析的提案
 
 **限制**：
-- 預設只提建議：沒有使用者核准的計算預算與政策檔就不執行任何動作
-- 尚未接入 binding／GUI 執行路徑
+- 沒有擁有者以 `md20 autonomy policy set` 寫入的政策（核准者、允許動作、預算）就只提建議、不執行
+- 傘狀窗口層級延長尚未接上 binding 公開 API
+- 尚無真實 OpenMM 整合測試
 
 **測試**：
 
 | 檔案 | 類型 | CI job |
 |---|---|---|
 | `tests/test_autonomy.py` | unit | `ci.yml:pure-python` |
+| `tests/test_autonomy_usable.py` | unit | `ci.yml:pure-python` |
+| `tests/test_reassess.py` | unit | `ci.yml:pure-python` |
 
 **狀態**：implemented=`yes`｜synthetic_tested=`yes`｜real_engine_tested=`no`｜scientifically_benchmarked=`none`｜released_installer=`unreleased (main only)`
 
@@ -981,3 +987,60 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 **benchmark 範圍**：none
 
 **已發行安裝程式**：unreleased (main only)（D-13x，2026-11-07 新增）
+
+<a id="funnel_standard_state"></a>
+## 漏斗約束與解析標準態 ΔG°（A8，D-140）
+
+`funnel_standard_state`
+
+**實作**：`md20/sampling/funnel.py`、`md20/sampling/binding.py::run_binding`
+
+**支援的系統類型**：單一配體從口袋拉離（restraint: funnel）
+
+**限制**：
+- 預設關閉（restraint: none）：真實引擎與筆電 3PTB 驗證前不改預設
+- 只有漏斗結果可做親和力排序；徑向 1 M ΔG° 標為近似
+- 約束作用在配體質心，長配體為近似
+
+**測試**：
+
+| 檔案 | 類型 | CI job |
+|---|---|---|
+| `tests/test_funnel.py` | unit | `ci.yml:pure-python` |
+| `tests/test_binding_integration.py` | real_engine | `ci.yml:openmm-stack` |
+
+**狀態**：implemented=`yes`｜synthetic_tested=`yes`｜real_engine_tested=`no`｜scientifically_benchmarked=`none`｜released_installer=`unreleased (main only)`
+
+**最後已知結果**：`unverified`，commit `-`，證據 。依據：只有容器純 Python 測試；尚無 CI 結果
+
+**benchmark 範圍**：none
+
+**已發行安裝程式**：unreleased (main only)（2026-11-08 新增）
+
+<a id="metal_water_hydroxide"></a>
+## 金屬配位水的 OH⁻ 選項（D-141）
+
+`metal_water_hydroxide`
+
+**實作**：`md20/build/metal.py`、`md20/build/metal.py::hydroxide_template_xml`
+
+**支援的系統類型**：bonded 金屬位點，晶體有一個第一配位殼水，且提供擬合的 site_water 參數
+
+**限制**：
+- 預設仍為中性水；沒有擬合電荷時 NEEDS_HUMAN，不憑空給電荷
+- LJ 沿用 ff14SB 羥基型態（未擬合）
+
+**測試**：
+
+| 檔案 | 類型 | CI job |
+|---|---|---|
+| `tests/test_metal_hydroxide.py` | unit | `ci.yml:pure-python` |
+| `tests/test_metal_integration.py` | real_engine | `ci.yml:heavy[metal]` |
+
+**狀態**：implemented=`yes`｜synthetic_tested=`yes`｜real_engine_tested=`no`｜scientifically_benchmarked=`none`｜released_installer=`unreleased (main only)`
+
+**最後已知結果**：`unverified`，commit `-`，證據 。依據：只有容器純 Python 測試；尚無 CI 結果
+
+**benchmark 範圍**：none
+
+**已發行安裝程式**：unreleased (main only)（2026-11-08 新增）

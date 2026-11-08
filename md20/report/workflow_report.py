@@ -1222,8 +1222,12 @@ def _binding(doc: Doc, wf, vals, f, goal) -> str:
     ok_dg = {n: _claim_of(r, "dG_standard")["eligible"] for n, r in b.items()}
     not_qual = tx(("不作為 ΔG°（取樣評估未通過或缺漏）", "not a ΔG° (sampling assessment failed or missing)",
                    "ΔG° として扱わない（取得評価が不合格または欠落）", "ΔG°로 쓰지 않음(샘플링 평가 미통과 또는 누락)"), L)
+    # D-140: a qualifying ΔG° without the funnel treatment is the 1 M radial approximation — marked, never a ranking value
+    ok_rank = {n: _claim_of(r, "affinity_ranking")["eligible"] for n, r in b.items()}
+    approx = tx(("（徑向近似，不用於排序）", " (radial approximation, not for ranking)", "（動径近似、順位付けには使わない）",
+                 " (방사 근사, 순위에 쓰지 않음)"), L)
     trs = [[_esc(n), pm(r.get("delta_pmf_kj_mol"), r.get("delta_pmf_err_kj_mol")),
-            (pm(r.get("dG_standard_kj_mol"), r.get("dG_err_kj_mol")) if ok_dg[n] else
+            ((pm(r.get("dG_standard_kj_mol"), r.get("dG_err_kj_mol")) + ("" if ok_rank[n] else approx)) if ok_dg[n] else
              (not_qual if r.get("dG_standard_kj_mol") is not None else tx(("不輸出", "not reported", "出力しない", "출력 안 함"), L))),
             _fmt(r.get("dG_standard_kcal_mol"), 1) if (r.get("dG_standard_kcal_mol") is not None and ok_dg[n]) else "—",
             _fmt(r.get("r_min_nm"), 3), _fmt(r.get("max_force"), 0), _fmt(r.get("work"), 1),
@@ -1336,12 +1340,12 @@ def _binding_figures(doc: Doc, name: str, r: dict) -> str:
                                            ticks=[f"{c:.2f}" for c in o.get("centers") or []], xlabel="Window centre (nm)", ylabel="Window centre (nm)"),
                                 "overlap_matrix", FT.classify_overlap(name, o, asm), name)
     if pm.get("convergence"):
-        out += doc.figure_block(FG.pmf_convergence(pm["convergence"], doc.figdir / f"pmf_conv_{name}.png"), "pmf_convergence",
+        out += doc.figure_block(FG.pmf_convergence(pm["convergence"], doc.figdir / f"pmf_conv_{name}.png", cv=pm.get("cv")), "pmf_convergence",
                                 FT.classify_convergence(name, pm["convergence"], asm), name)
     if pm.get("grid_nm") and pm.get("pmf_radial_kj_mol"):
         g, W = pm["grid_nm"], pm["pmf_radial_kj_mol"]
         err = pm.get("err_kj_mol")
-        out += doc.figure_block(FG.pmf(g, W, err, doc.figdir / f"pmf_{name}.png"), "pmf",
+        out += doc.figure_block(FG.pmf(g, W, err, doc.figdir / f"pmf_{name}.png", cv=pm.get("cv")), "pmf",
                                 FT.classify_pmf(g, W, err, name) + FT.classify_assessment(name, asm), name)
     elif figs.get("pmf"):
         out += doc.figure_block(figs["pmf"]["png"], "pmf", [], name)

@@ -281,7 +281,12 @@ def smd_contacts_map(sc: dict, path: Path, max_rows: int = 30) -> str | None:
     return _save(fig, path)
 
 
-def pmf(grid, W, err, path: Path) -> str | None:
+def cv_axis_label(cv: str | None) -> str:
+    """D-140: the funnel PMF is along the axial projection z, not the radial COM distance."""
+    return "Axial position along the exit axis, z (nm)" if cv and "axial" in str(cv) else "Ligand–pocket distance (nm)"
+
+
+def pmf(grid, W, err, path: Path, cv: str | None = None) -> str | None:
     if grid is None or len(grid) < 3:
         return None
     plt = _plt()
@@ -293,7 +298,7 @@ def pmf(grid, W, err, path: Path) -> str | None:
         ax.fill_between(g, W - e, W + e, color=PALETTE[0], alpha=0.2, lw=0)
     i = int(np.nanargmin(W))
     ax.plot([g[i]], [W[i]], "o", color=PALETTE[1], ms=4)
-    ax.set_xlabel("Ligand–pocket distance (nm)")
+    ax.set_xlabel(cv_axis_label(cv))
     ax.set_ylabel("PMF (kJ mol$^{-1}$)")
     return _save(fig, path)
 
@@ -477,7 +482,7 @@ def fingerprint_plot(fp: dict, t, path: Path, top_n: int = 25) -> str | None:
     return _save(fig, path)
 
 
-def pmf_convergence(conv: dict, path: Path) -> str | None:
+def pmf_convergence(conv: dict, path: Path, cv: str | None = None) -> str | None:
     curves = [(k, v) for k, v in sorted(conv.items()) if isinstance(v, dict) and v.get("grid_nm")]
     if len(curves) < 2:
         return None
@@ -485,7 +490,7 @@ def pmf_convergence(conv: dict, path: Path) -> str | None:
     fig, ax = plt.subplots(figsize=(6.4, 2.6))
     for (k, v), c in zip(curves, ["#c9d3dc", "#9aa5b1", "#4d6170", PALETTE[0]]):
         ax.plot(v["grid_nm"], v["pmf_kj_mol"], color=c, lw=1.3 if k == "1.00" else 1.0, label=f"{float(k):.0%} of samples")
-    ax.set_xlabel("Ligand–pocket distance (nm)")
+    ax.set_xlabel(cv_axis_label(cv))
     ax.set_ylabel("PMF (kJ mol$^{-1}$)")
     ax.legend(fontsize=7)
     return _save(fig, path)
