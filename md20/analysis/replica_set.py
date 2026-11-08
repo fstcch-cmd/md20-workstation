@@ -57,6 +57,8 @@ _T975 = {1: 12.7062, 2: 4.3027, 3: 3.1824, 4: 2.7764, 5: 2.5706, 6: 2.4469, 7: 2
          20: 2.0860, 21: 2.0796, 22: 2.0739, 23: 2.0687, 24: 2.0639, 25: 2.0595, 26: 2.0555, 27: 2.0518, 28: 2.0484,
          29: 2.0452, 30: 2.0423, 40: 2.0211, 50: 2.0086, 60: 2.0003, 80: 1.9901, 100: 1.9840, 120: 1.9799}
 _T975_INF = 1.95996
+NO_CV_REASON = "差值型、帶正負號或比例型的量不適用 CV；看信賴區間與正負號一致的重複數 k／n"
+SCHEMA_REVISION = "1.1"             # D-142: dssp, dccm, hydration, basins, clusters, tica_msm, membrane aggregated per replica
 
 
 def t_critical_975(df: int) -> float:
@@ -87,9 +89,11 @@ def _finite(v) -> float | None:
     return x if math.isfinite(x) else None
 
 
-def between_replica_stats(items: Iterable[tuple[str, float]]) -> dict:
+def between_replica_stats(items: Iterable[tuple[str, float]], *, cv: bool = True, cv_reason: str = "") -> dict:
     """Mean, sample SD (ddof = 1), SEM and Student-t 95 % CI of one value per replica; ``items`` = (run_id, value).
-    Values stay attached to their run_id.  n = 1 -> SD and CI are None and ``between_replica`` says why."""
+    Values stay attached to their run_id.  n = 1 -> SD and CI are None and ``between_replica`` says why.
+    ``cv=False`` (D-144, D-142): difference-type, signed or proportion observables have no meaningful coefficient of
+    variation; ``divergent`` stays None and ``divergent_reason`` says so (use the CI and sign consistency instead)."""
     per = [(str(rid), _finite(v)) for rid, v in items]
     skipped = [rid for rid, v in per if v is None]
     per = [(rid, v) for rid, v in per if v is not None]
@@ -103,6 +107,8 @@ def between_replica_stats(items: Iterable[tuple[str, float]]) -> dict:
     vals = np.array([v for _, v in per], float)
     out["mean"] = float(vals.mean())
     out["min"], out["max"] = float(vals.min()), float(vals.max())
+    if not cv:
+        out["divergent_reason"] = cv_reason or NO_CV_REASON
     if n == 1:
         out["between_replica"] = {"status": "unavailable", "reason": UNAVAILABLE_SINGLE}
         return out
@@ -112,7 +118,9 @@ def between_replica_stats(items: Iterable[tuple[str, float]]) -> dict:
     out.update({"sd": sd, "sem": sem,
                 "ci95": {"low": out["mean"] - t * sem, "high": out["mean"] + t * sem, "t": t, "df": n - 1,
                          "half_width": t * sem, "method": "Student-t on per-replica values, n-1 df"}})
-    if abs(out["mean"]) > 1e-12:
+    if not cv:
+        out["divergent"], out["divergent_reason"] = None, cv_reason or NO_CV_REASON
+    elif abs(out["mean"]) > 1e-12:
         out["cv"] = sd / abs(out["mean"])
         out["divergent"] = bool(out["cv"] > CV_DIVERGENT)
     else:
@@ -277,12 +285,487 @@ def _contact_occupancy(reps: list[dict], ligand: str) -> dict | None:
             "n_residues_total": len(out_rows)}
 
 
+# ================================================================================================ D-142
+# Observables that used only the representative replica before (docs/specs/replicas.md §2, §7).  Input per replica:
+# ``extended`` (extended.json dict), ``membrane`` (membrane_metrics.json dict or metrics["membrane"]), ``membrane_report``
+# (analysis/membrane_report.json).  Missing fields give {"status": "unavailable", "reason": ...}; nothing is invented.
+# Difference-type, signed and proportion quantities carry no CV / "divergent" label (D-144): the CI and the number of
+# replicas with the same sign (k of n) are used instead.
+HYDRATION_MATCH_NM = 0.2              # two water sites of different replicas are "the same site" within this distance
+HYDRATION_MIN_REPLICAS_REPRODUCED = 2  # a site seen in only one replica is "not reproduced"
+DCCM_LONG_RANGE_SEP = 5               # residue index separation of a "long-range" pair
+DCCM_STRONG = 0.5                     # |mean correlation| of a strong pair
+DCCM_REPLICA_MIN = 0.3                # a strong pair is "reproducible" if every replica has |C| >= this with the same sign
+DCCM_MAX_STORED = 500                 # larger matrices are summarised, not stored element by element
+BASIN_RANGE_INCONSISTENT = 0.25       # empirical starting value: a basin whose share spans more than this across replicas
+BASIN_MATCH_BINS = 2.0                # basins of different replicas match within this many landscape bins
+ROUND = 3
+
+
+def _unavail(reason: str, **kw) -> dict:
+    return {"status": "unavailable", "reason": reason, **kw}
+
+
+def _bstatus(n: int) -> dict:
+    return ({"status": "unavailable", "reason": UNAVAILABLE_NONE} if n == 0 else
+            {"status": "unavailable", "reason": UNAVAILABLE_SINGLE} if n == 1 else
+            {"status": "ok", "reason": ("n < %d：區間很寬，只供參考" % MIN_REPLICAS) if n < MIN_REPLICAS else ""})
+
+
+def sign_consistency(items: Iterable[tuple[str, float]]) -> dict:
+    """Number of replicas whose value has the same sign as the replica mean (zero counts for neither)."""
+    vals = [(str(r), _finite(v)) for r, v in items]
+    vals = [(r, v) for r, v in vals if v is not None]
+    n = len(vals)
+    if not n:
+        return {"k": 0, "n": 0, "sign": None, "consistent": None}
+    m = float(np.mean([v for _, v in vals]))
+    sg = (m > 0) - (m < 0)
+    k = sum(1 for _, v in vals if sg != 0 and ((v > 0) - (v < 0)) == sg)
+    return {"k": k, "n": n, "sign": sg, "consistent": bool(sg != 0 and k == n)}
+
+
+def t_critical_975_float(df: float) -> float:
+    """t(0.975, df) for a non-integer df (Welch–Satterthwaite): linear in 1/df between the neighbouring integers."""
+    df = max(1.0, float(df))
+    lo = int(math.floor(df))
+    if abs(df - lo) < 1e-9:
+        return t_critical_975(lo)
+    hi = lo + 1
+    a, b = t_critical_975(lo), t_critical_975(hi)
+    w = (1 / df - 1 / hi) / (1 / lo - 1 / hi)
+    return b + (a - b) * w
+
+
+def _ext_block(reps: list[dict], name: str, ligand: str | None = None):
+    """(have, missing): replicas whose extended.json has the block, and why the others do not."""
+    have, missing = [], []
+    for r in reps:
+        ext = r.get("extended")
+        if not isinstance(ext, dict) or not ext:
+            missing.append({"run_id": r["run_id"], "reason": "沒有 extended.json"})
+            continue
+        src = (((ext.get("ligands") or {}).get(ligand) or {}) if ligand else ext)
+        blk = src.get(name)
+        if not isinstance(blk, dict) or not blk:
+            err = ((src.get("errors") if ligand else ext.get("errors")) or {}).get(name)
+            missing.append({"run_id": r["run_id"], "reason": f"extended.json 沒有 {name}" + (f"（{err}）" if err else "")})
+            continue
+        have.append((r, blk))
+    return have, missing
+
+
+def _fold(labels) -> list[str]:
+    from .traj import residue_keys
+    return residue_keys([str(x) for x in labels])
+
+
+def _stack_stats(M: np.ndarray) -> dict:
+    """Per-column mean, sample SD and t CI of a replicas x items matrix."""
+    n = M.shape[0]
+    out = {"n": n, "mean": M.mean(0).round(4).tolist(), "sd": None, "ci95_low": None, "ci95_high": None,
+           "between_replica": _bstatus(n)}
+    if n >= 2:
+        sd = M.std(0, ddof=1)
+        half = t_critical_975(n - 1) * sd / math.sqrt(n)
+        out.update({"sd": sd.round(4).tolist(), "ci95_low": (M.mean(0) - half).round(4).tolist(),
+                    "ci95_high": (M.mean(0) + half).round(4).tolist()})
+    return out
+
+
+# ------------------------------------------------------------------------------------------------ DSSP
+def _dssp(reps: list[dict]) -> dict:
+    have, missing = _ext_block(reps, "dssp")
+    if not have:
+        return _unavail("沒有任何重複有 DSSP 結果", missing=missing)
+    n = len(have)
+    overall = {}
+    for c in ("H", "E", "C"):
+        items = []
+        for r, b in have:
+            fr = (b.get("fraction") or {}).get(c)
+            if isinstance(fr, list) and fr:
+                items.append((r["run_id"], float(np.mean(fr))))
+        if items:
+            overall[c] = between_replica_stats(items, cv=False, cv_reason="比例型量不適用 CV；看標準差與信賴區間")
+    labs = [_fold(b.get("residues") or []) for _, b in have]
+    common = [x for x in labs[0] if all(x in set(l) for l in labs[1:])] if all(labs) else []
+    out = {"status": "ok", "n": n, "missing": missing, "overall_fraction": overall,
+           "estimand": "per replica: time-mean fraction of frames in H/E/C (display frames); per residue: fraction of frames in H or E; "
+                       "then mean/SD/t-CI across replicas",
+           "estimand_zh": "每條重複：H／E／C 的幀比例（顯示用抽樣幀）與逐殘基 H、E 比例；再跨重複算平均、標準差與 t 區間",
+           "between_replica": _bstatus(n), "per_residue": {}}
+    if len(common) < 5:
+        out["per_residue_status"] = _unavail("各重複共同的殘基少於 5 個，或缺逐殘基資料", n_common=len(common))
+        return out
+    for c in ("H", "E"):
+        rows, ids = [], []
+        for (r, b), lab in zip(have, labs):
+            arr = (b.get("per_residue") or {}).get(c)
+            if not isinstance(arr, list) or len(arr) != len(lab):
+                continue
+            pos = {x: i for i, x in enumerate(lab)}
+            rows.append([float(arr[pos[x]]) for x in common])
+            ids.append(r["run_id"])
+        if not rows:
+            continue
+        st = _stack_stats(np.array(rows, float))
+        sd = st["sd"]
+        worst = []
+        if sd is not None:
+            order = np.argsort(-np.array(sd))[:5]
+            worst = [{"residue": common[i], "mean": st["mean"][i], "sd": sd[i]} for i in order if sd[i] > 0]
+        out["per_residue"][c] = {**st, "residues": common, "run_ids": ids, "least_reproducible": worst}
+    return out
+
+
+# ------------------------------------------------------------------------------------------------ DCCM
+def _dccm(reps: list[dict]) -> dict:
+    have, missing = _ext_block(reps, "dccm")
+    have = [(r, b) for r, b in have if b.get("matrix")]
+    if not have:
+        return _unavail("沒有任何重複有 DCCM 矩陣", missing=missing)
+    n = len(have)
+    labs = [_fold(b.get("residues") or []) for _, b in have]
+    if not all(labs):
+        return _unavail("DCCM 缺殘基標籤，無法對齊重複", missing=missing)
+    common = [x for x in labs[0] if all(x in set(l) for l in labs[1:])]
+    N = len(common)
+    if N < DCCM_LONG_RANGE_SEP + 2:
+        return _unavail("各重複共同的殘基太少，無法彙總 DCCM", n_common=N, missing=missing)
+    mats = []
+    for (r, b), lab in zip(have, labs):
+        pos = {x: i for i, x in enumerate(lab)}
+        idx = [pos[x] for x in common]
+        mats.append(np.asarray(b["matrix"], float)[np.ix_(idx, idx)])
+    C = np.array(mats)
+    mean = C.mean(0)
+    iu = np.triu_indices(N, k=DCCM_LONG_RANGE_SEP)
+    per_rep = [(r["run_id"], float(np.abs(C[i][iu]).mean())) for i, (r, _) in enumerate(have)]
+    out = {"status": "ok", "n": n, "missing": missing, "n_residues": N, "residues": common if N <= DCCM_MAX_STORED else None,
+           "estimand": "element-wise mean and sample SD of each replica's Cα cross-correlation matrix (common residues); long-range "
+                       f"pairs have residue index separation >= {DCCM_LONG_RANGE_SEP}",
+           "estimand_zh": f"各重複的 Cα 互相關矩陣逐元素取平均與樣本標準差（共同殘基）；遠距離＝殘基序號相差 ≥ {DCCM_LONG_RANGE_SEP}",
+           "between_replica": _bstatus(n),
+           "long_range": {"mean_abs_correlation": between_replica_stats(per_rep), "n_pairs": int(len(iu[0]))},
+           "thresholds": {"strong": DCCM_STRONG, "replica_min": DCCM_REPLICA_MIN, "min_separation": DCCM_LONG_RANGE_SEP}}
+    lr_mean = mean[iu]
+    strong = np.abs(lr_mean) >= DCCM_STRONG
+    if n >= 2:
+        sd = C.std(0, ddof=1)
+        out["long_range"]["mean_element_sd"] = round(float(sd[iu].mean()), 4)
+        sgn = np.sign(lr_mean)
+        same = (np.sign(C[:, iu[0], iu[1]]) == sgn[None, :]) & (np.abs(C[:, iu[0], iu[1]]) >= DCCM_REPLICA_MIN)
+        repro = same.all(0) & strong
+        out["long_range"].update({"n_strong_pairs": int(strong.sum()), "n_strong_reproducible": int(repro.sum()),
+                                  "reproducible_definition": f"|mean| >= {DCCM_STRONG} and, in every replica, the same sign with |C| >= {DCCM_REPLICA_MIN}"})
+        order = np.argsort(-np.abs(lr_mean))[:10]
+        out["long_range"]["top_pairs"] = [
+            {"i": common[iu[0][o]], "j": common[iu[1][o]], "mean": round(float(lr_mean[o]), 3),
+             "sd": round(float(sd[iu[0][o], iu[1][o]]), 3),
+             "sign_k": int((np.sign(C[:, iu[0][o], iu[1][o]]) == sgn[o]).sum()), "sign_n": n,
+             "divergent": None, "divergent_reason": NO_CV_REASON} for o in order]
+        if N <= DCCM_MAX_STORED:
+            out["mean"], out["sd"] = mean.round(2).tolist(), sd.round(2).tolist()
+    else:
+        out["long_range"]["n_strong_pairs"] = int(strong.sum())
+        out["long_range"]["n_strong_reproducible"] = None
+        out["long_range"]["reproducible_reason"] = UNAVAILABLE_SINGLE
+        if N <= DCCM_MAX_STORED:
+            out["mean"], out["sd"] = mean.round(2).tolist(), None
+    return out
+
+
+# ------------------------------------------------------------------------------------------------ clusters, PCA basins
+def _clusters(reps: list[dict]) -> dict:
+    have, missing = _ext_block(reps, "clusters")
+    have = [(r, b) for r, b in have if b.get("populations")]
+    if not have:
+        return _unavail("沒有任何重複有分群結果", missing=missing)
+    n = len(have)
+    return {"status": "ok", "n": n, "missing": missing, "between_replica": _bstatus(n),
+            "identity_matched": False,
+            "note": "clusters are defined inside each replica (own RMSD matrix); cluster labels are NOT matched across replicas, so only "
+                    "label-free numbers are aggregated. Shares per cluster across replicas need the common PCA basin shares.",
+            "note_zh": "分群是每條重複各自做的，群編號不對應，所以只彙總與編號無關的數（群數、最大群占比）；逐群占比要看共同基底的低谷佔比。",
+            "n_clusters": between_replica_stats([(r["run_id"], b.get("n_clusters", len(b["populations"]))) for r, b in have]),
+            "largest_cluster_share": between_replica_stats([(r["run_id"], max(b["populations"])) for r, b in have])}
+
+
+def pca_basin_shares(cb: dict | None, system: str, *, within_comparable: bool = True) -> dict:
+    """Basin shares of the replicas of ``system`` on the COMMON PCA basis (analysis_common.json).  Basins of different replicas are
+    matched by position on the shared axes (within BASIN_MATCH_BINS landscape bins, greedy by population); each replica's frames
+    (the stored uniform subsample of its projection) are then assigned to the nearest matched basin centre, so a replica without
+    that basin still gets its real share.  Without a common basis, or when the replicas' conditions differ, the shares are not
+    comparable and the result says so."""
+    if not isinstance(cb, dict) or cb.get("status") != "ok":
+        return {"status": "not_comparable",
+                "reason": "沒有共同基底：每條重複各自做 PCA，軸不同，低谷佔比不能互相比較（只有 ≥ 2 個系統時才會建立共同基底）",
+                "reason_en": "no common basis: each replica has its own PCA axes, so basin shares are not comparable"}
+    if not within_comparable:
+        return {"status": "not_comparable", "reason": "同一系統的重複之間條件不同或無法確認，低谷佔比不能彙總"}
+    labels = cb.get("trajectory_labels") or {}
+    names = [n for n, l in labels.items() if l.get("system") == system and n in (cb.get("per_system") or {})]
+    if not names:
+        return _unavail("共同基底裡沒有這個系統的重複")
+    xe, ye = np.asarray(cb["xedges"], float), np.asarray(cb["yedges"], float)
+    tol = BASIN_MATCH_BINS * max(float(xe[1] - xe[0]), float(ye[1] - ye[0]))
+    cand = []
+    for n in names:
+        for b in ((cb["per_system"][n].get("landscape") or {}).get("basins") or []):
+            cand.append((float(b[3]) if len(b) > 3 else 0.0, n, np.array(b[:2], float)))
+    cand.sort(key=lambda x: -x[0])
+    groups: list[dict] = []
+    for pop, n, xy in cand:
+        best, bd = None, None
+        for g in groups:
+            d = float(np.linalg.norm(g["xy"] - xy))
+            if n not in g["members"] and d <= tol and (bd is None or d < bd):
+                best, bd = g, d
+        if best is None:
+            groups.append({"xy": xy.copy(), "members": {n: pop}})
+        else:
+            best["members"][n] = pop
+            best["xy"] = (best["xy"] * (len(best["members"]) - 1) + xy) / len(best["members"])
+    if not groups:
+        return _unavail("各重複的地形都沒有低谷", n_replicas=len(names))
+    centres = np.array([g["xy"] for g in groups])
+    shares = {}
+    for n in names:
+        P = np.asarray(cb["per_system"][n].get("projection") or [], float)
+        if P.ndim != 2 or len(P) < 20:
+            continue
+        lab = np.argmin(((P[:, None, :2] - centres[None]) ** 2).sum(-1), axis=1)
+        shares[n] = (np.bincount(lab, minlength=len(groups)) / len(P)).tolist()
+    n_rep = len(shares)
+    if n_rep == 0:
+        return _unavail("共同基底裡沒有可用的投影（幀數不足）")
+    basins = []
+    for gi, g in enumerate(groups):
+        items = [(labels[n]["run_id"], shares[n][gi]) for n in shares]
+        st = between_replica_stats(items, cv=False, cv_reason="比例型量不適用 CV；看各條占比的範圍")
+        rng = (st["max"] - st["min"]) if st["max"] is not None else None
+        basins.append({"basin": gi + 1, "xy": [round(float(v), 3) for v in g["xy"]], "own_basin_in_replicas": len(g["members"]),
+                       "share": st, "range": None if rng is None or n_rep < 2 else round(rng, 3),
+                       "inconsistent": None if n_rep < 2 else bool(rng > BASIN_RANGE_INCONSISTENT)})
+    basins.sort(key=lambda b: -(b["share"]["mean"] or 0))
+    incons = [b["basin"] for b in basins if b["inconsistent"]]
+    return {"status": "ok", "n": n_rep, "between_replica": _bstatus(n_rep), "match_tolerance": round(tol, 3),
+            "estimand": "per replica: share of its stored projection frames nearest to each matched basin centre on the common PCA axes; "
+                        "then mean/SD/t-CI across replicas",
+            "estimand_zh": "共同 PCA 軸上，每條重複的投影幀離各低谷中心最近的比例；再跨重複算平均、標準差與 t 區間",
+            "basins": basins, "inconsistent_basins": incons, "range_threshold": BASIN_RANGE_INCONSISTENT,
+            "interpretation": ("各條重複的低谷佔比差異大：這是取樣到的分布，未收斂。" if incons else
+                               "各條重複的低谷佔比一致（範圍在門檻內）；仍不保證自由能地形已收斂。") if n_rep >= 2 else UNAVAILABLE_SINGLE}
+
+
+def attach_basin_shares(agg: dict, cb: dict | None, *, within_comparable: bool = True) -> dict:
+    """Write the basin shares into an aggregate (``structure.pca_basins``) and its flags."""
+    res = pca_basin_shares(cb, agg.get("system", ""), within_comparable=within_comparable)
+    agg.setdefault("structure", {})["pca_basins"] = res
+    agg["flags"] = [f for f in agg.get("flags", []) if f != "unconverged:pca_basins"]
+    if res.get("inconsistent_basins"):
+        agg["flags"].append("unconverged:pca_basins")
+    return agg
+
+
+# ------------------------------------------------------------------------------------------------ tICA / MSM (never pooled)
+def _tica_msm(reps: list[dict]) -> dict:
+    have, missing = _ext_block(reps, "tica")
+    if not have:
+        return _unavail("沒有任何重複有 tICA／MSM 結果", missing=missing)
+    rows = []
+    for r, b in have:
+        m = b.get("msm") or {}
+        ok = b.get("status") == "ok"
+        el = m.get("eligibility") if ok else None
+        ts = [v for v in (b.get("timescales_ns") or []) if v is not None]
+        rows.append({"run_id": r["run_id"], "tica_status": b.get("status"), "reason": b.get("reason"),
+                     "lag_ns": b.get("lag_ns"), "msm_eligibility": el, "msm_reason": m.get("reason"),
+                     "its_flat": m.get("its_flat") if el == "exploratory" else None, "transitions": m.get("transitions"),
+                     "trajectory_ns": m.get("trajectory_ns"),
+                     "qualifies": bool(el == "exploratory"),
+                     "slowest_timescale_ns": ts[0] if (ts and el == "exploratory") else None})
+    n = len(rows)
+    k = sum(1 for x in rows if x["qualifies"])
+    flat = sum(1 for x in rows if x["qualifies"] and x["its_flat"])
+    return {"status": "ok", "n": n, "missing": missing, "pooled": False,
+            "note": "trajectories are never pooled into one rate: each replica is qualified on its own (D-105: enough transitions, "
+                    "connected, slowest process shorter than a third of the run). No mean timescale or rate is reported.",
+            "note_zh": "不把各條軌跡合併估計速率：每條各自檢查資格（D-105：轉換次數夠、連通、最慢過程短於模擬的三分之一）；不報平均時間尺度或速率。",
+            "qualifies_k": k, "qualifies_n": n, "its_flat_k": flat, "its_flat_n": k, "per_replica": rows,
+            "between_replica": _bstatus(n),
+            "rate_reportable": bool(k >= MIN_REPLICAS and flat == k),
+            "rate_reason": ("" if (k >= MIN_REPLICAS and flat == k) else
+                            f"{n} 條中 {k} 條合格（至少需要 {MIN_REPLICAS} 條都合格且時間尺度對延遲時間持平），不報速率")}
+
+
+# ------------------------------------------------------------------------------------------------ hydration sites
+def _hydration(reps: list[dict], ligand: str) -> dict:
+    have, missing = _ext_block(reps, "hydration", ligand)
+    ok = []
+    for r, b in have:
+        if b.get("status") == "ok":
+            ok.append((r["run_id"], b.get("sites") or []))
+        else:
+            missing.append({"run_id": r["run_id"], "reason": f"hydration 狀態是 {b.get('status')}（沒有水分子或幀數不足）"})
+    if not ok:
+        return _unavail("沒有任何重複有水合位點結果", missing=missing)
+    n = len(ok)
+    cand = sorted(((s.get("occupancy", 0.0), rid, np.array(s["xyz_nm"], float), s) for rid, ss in ok for s in ss if s.get("xyz_nm")),
+                  key=lambda x: -x[0])
+    groups: list[dict] = []
+    for occ, rid, xyz, s in cand:
+        best, bd = None, None
+        for g in groups:
+            d = float(np.linalg.norm(g["xyz"] - xyz))
+            if rid not in g["members"] and d <= HYDRATION_MATCH_NM and (bd is None or d < bd):
+                best, bd = g, d
+        if best is None:
+            groups.append({"xyz": xyz.copy(), "members": {rid: s}})
+        else:
+            best["members"][rid] = s
+            best["xyz"] = (best["xyz"] * (len(best["members"]) - 1) + xyz) / len(best["members"])
+    sites = []
+    for g in groups:
+        det = g["members"]
+        k = len(det)
+        st = between_replica_stats([(rid, s.get("occupancy")) for rid, s in det.items()], cv=False,
+                                   cv_reason="占有率是比例型量，不適用 CV")
+        if n == 1:
+            status = "unavailable"
+        else:
+            status = "reproduced" if k >= HYDRATION_MIN_REPLICAS_REPRODUCED else "not_reproduced"
+        sites.append({"xyz_nm": [round(float(v), 3) for v in g["xyz"]], "detected_k": k, "detected_n": n, "status": status,
+                      "occupancy_among_detecting": st,
+                      "mean_density_ratio": round(float(np.mean([s.get("density_ratio", 0.0) for s in det.values()])), 2),
+                      "spread_nm": round(float(max(np.linalg.norm(np.array(s["xyz_nm"]) - g["xyz"]) for s in det.values())), 3)})
+    sites.sort(key=lambda x: (-x["detected_k"], -(x["occupancy_among_detecting"]["mean"] or 0)))
+    return {"status": "ok", "n": n, "missing": missing, "between_replica": _bstatus(n),
+            "match_tolerance_nm": HYDRATION_MATCH_NM,
+            "matching": f"greedy by occupancy: a site joins the nearest existing group within {HYDRATION_MATCH_NM} nm (group centroid) "
+                        "that has no site from the same replica yet; positions are in each replica's own superposed frame",
+            "matching_zh": f"依占有率由高到低貪婪配對：與最近、且還沒有同一條重複位點的群組相距 ≤ {HYDRATION_MATCH_NM} nm 就歸為同一位點；"
+                           "座標在各重複各自的疊合座標系中",
+            "estimand": "per replica site occupancy (fraction of frames with a water O within the site radius), for the replicas in which "
+                        "the site was detected (density >= the detection ratio); a replica that did not detect it has no occupancy value, "
+                        "not zero",
+            "estimand_zh": "位點占有率只在偵測到該位點的重複裡有值（密度達偵測門檻）；沒偵測到的重複不是 0，而是沒有值",
+            "sites": sites[:15], "n_sites_total": len(sites),
+            "n_reproduced": sum(1 for s in sites if s["status"] == "reproduced"),
+            "n_not_reproduced": sum(1 for s in sites if s["status"] == "not_reproduced")}
+
+
+# ------------------------------------------------------------------------------------------------ membrane
+def _membrane(reps: list[dict]) -> dict:
+    per = []
+    for r in reps:
+        mem = r.get("membrane")
+        if not isinstance(mem, dict) or not mem:
+            mem = (r["metrics"] or {}).get("membrane")
+        if isinstance(mem, dict) and mem and mem.get("status") != "SKIPPED":
+            per.append((r, mem))
+    if not per:
+        return _unavail("沒有任何重複有膜指標", missing=[{"run_id": r["run_id"], "reason": "沒有 membrane_metrics.json"} for r in reps])
+    n = len(per)
+    out = {"status": "ok", "n": n, "between_replica": _bstatus(n), "observables": {}, "solutes": {},
+           "estimand": "per replica: second-half mean of bilayer thickness, area per lipid, core water; then mean/SD/t-CI across replicas",
+           "estimand_zh": "每條重複：膜厚、單脂面積、疏水核心水數在後半段的平均；再跨重複彙總"}
+
+    def put(key, items, unit, zh, **kw):
+        if items:
+            out["observables"][key] = {"unit": unit, "label_zh": zh, **between_replica_stats(items, **kw)}
+    put("dpp_mean_nm", [(r["run_id"], m["dpp_mean_nm"]) for r, m in per if m.get("dpp_mean_nm") is not None], "nm", "磷酸頭基間距（膜厚）")
+    put("apl_mean_nm2", [(r["run_id"], m["apl_mean_nm2"]) for r, m in per if m.get("apl_mean_nm2") is not None], "nm²", "單脂面積")
+    cw = [(r["run_id"], float(np.mean(m["core_water"][len(m["core_water"]) // 2:]))) for r, m in per if m.get("core_water")]
+    put("core_water", cw, "molecules", "疏水核心的水分子數")
+    names = sorted({k for _, m in per for k in (m.get("insertion") or {})})
+    for nm in names:
+        have = [(r, m["insertion"][nm]) for r, m in per if nm in (m.get("insertion") or {})]
+        out["solutes"][nm] = {
+            "n": len(have),
+            "mean_com_depth_nm": between_replica_stats([(r["run_id"], d.get("mean_com_depth_nm")) for r, d in have], cv=False,
+                                                      cv_reason="插入深度帶正負號（相對頭基平面），不適用 CV"),
+            "mean_deepest_nm": between_replica_stats([(r["run_id"], d.get("mean_deepest_nm")) for r, d in have], cv=False,
+                                                    cv_reason="插入深度帶正負號（相對頭基平面），不適用 CV"),
+            "crossed_centre": binary_summary([(r["run_id"], bool(d.get("crossed_centre"))) for r, d in have])}
+    acc = [(r["run_id"], (m.get("acceptance") or {}).get("status") == "PASS") for r, m in per if m.get("acceptance")]
+    if acc:
+        out["acceptance_pass"] = binary_summary(acc)
+    scd_have = [(r, r.get("membrane_report") or {}) for r, _ in per]
+    scd_have = [(r, d["scd"]) for r, d in scd_have if isinstance(d.get("scd"), dict) and d["scd"]]
+    if scd_have:
+        keys = sorted({k for _, d in scd_have for k in d})
+        out["scd"] = {"n": len(scd_have), "unit": "S_CD", "order_parameter": {
+            k: between_replica_stats([(r["run_id"], d[k]) for r, d in scd_have if k in d], cv=False,
+                                     cv_reason="序參數帶正負號，不適用 CV") for k in keys},
+            "note_zh": "序參數 S_CD 逐碳原子，每條重複一個值，跨重複算平均與區間"}
+    else:
+        out["scd"] = _unavail("沒有序參數（粗粒化或沒有脂質尾端原子名稱）")
+    return out
+
+
+# ------------------------------------------------------------------------------------------------ apo–complex ΔRMSF
+def delta_rmsf_between_replicas(ref_name: str, ref: dict | None, other_name: str, other: dict | None,
+                                comparability: dict | None = None, *, top: int = 10) -> dict:
+    """Per-residue ΔRMSF = mean(other replicas) − mean(ref replicas) with a Welch t 95 % CI (Welch–Satterthwaite df) from the
+    PER-REPLICA RMSF values of both sides (``per_residue.rmsf_ca_A`` of the two replica sets).  n per side is stated.  A side with
+    fewer than 2 replicas gives "unavailable" (no interval).  Residues are matched by name+number with protonation variants folded.
+    Refused when ``comparability`` says the systems are not comparable.  "Different" means the CI excludes 0 for that residue; with
+    N residues about 5 % of them exclude 0 by chance alone (no multiple-comparison correction is applied; the expected count is
+    reported)."""
+    if comparability is not None and not comparability.get("comparable"):
+        return {"status": "not_comparable", "differences": comparability.get("differences"), "unknown": comparability.get("unknown"),
+                "ref": ref_name, "other": other_name}
+    if not ref or not other or not ref.get("per_replica") or not other.get("per_replica"):
+        return _unavail("至少一邊沒有逐殘基 RMSF", ref=ref_name, other=other_name)
+    n1, n2 = len(ref["per_replica"]), len(other["per_replica"])
+    base = {"ref": ref_name, "other": other_name, "n_ref": n1, "n_other": n2, "method": "Welch t, 95 % CI, Welch–Satterthwaite df",
+            "multiple_comparisons": "not corrected"}
+    if n1 < 2 or n2 < 2:
+        return {**base, "status": "unavailable",
+                "reason": f"ΔRMSF 的重複間區間要兩邊各至少 2 條（目前 {ref_name} {n1} 條、{other_name} {n2} 條）；不給區間",
+                "between_replica": {"status": "unavailable", "reason": UNAVAILABLE_SINGLE}}
+    ra, rb = _fold(ref["residues"]), _fold(other["residues"])
+    pb = {k: i for i, k in enumerate(rb)}
+    keys = [k for k in ra if k in pb]
+    if len(keys) < 5:
+        return {**base, "status": "insufficient", "n_common": len(keys)}
+    ia = [ra.index(k) for k in keys]
+    ib = [pb[k] for k in keys]
+    A = np.array([np.asarray(v, float)[ia] for v in ref["per_replica"].values()])        # n1 x R
+    B = np.array([np.asarray(v, float)[ib] for v in other["per_replica"].values()])
+    d = B.mean(0) - A.mean(0)
+    v1, v2 = A.var(0, ddof=1) / n1, B.var(0, ddof=1) / n2
+    se = np.sqrt(v1 + v2)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        df = np.where(se > 0, (v1 + v2) ** 2 / (v1 ** 2 / (n1 - 1) + v2 ** 2 / (n2 - 1)), n1 + n2 - 2)
+    tcrit = np.array([t_critical_975_float(x) for x in df])
+    lo, hi = d - tcrit * se, d + tcrit * se
+    excl = (lo > 0) | (hi < 0)
+    other_dev = B - A.mean(0)                                                            # each other replica vs the ref mean
+    sgn = np.sign(d)
+    sign_k = ((np.sign(other_dev) == sgn[None, :]) & (sgn[None, :] != 0)).sum(0)
+    rows = [{"residue": keys[i], "delta_A": round(float(d[i]), 3), "ci95_low": round(float(lo[i]), 3), "ci95_high": round(float(hi[i]), 3),
+             "ci_excludes_zero": bool(excl[i]), "sign_k": int(sign_k[i]), "sign_n": n2} for i in range(len(keys))]
+    sig = [r for r in rows if r["ci_excludes_zero"]]
+    top_up = sorted(sig, key=lambda r: -r["delta_A"])[:top]
+    top_down = sorted(sig, key=lambda r: r["delta_A"])[:top]
+    return {**base, "status": "ok", "n_common": len(keys), "unit": "Å", "residues": rows,
+            "n_ci_excludes_zero": len(sig), "expected_false_positives": round(0.05 * len(keys), 1),
+            "most_flexible": [r for r in top_up if r["delta_A"] > 0], "most_rigidified": [r for r in top_down if r["delta_A"] < 0],
+            "divergent": None, "divergent_reason": NO_CV_REASON,
+            "between_replica": _bstatus(min(n1, n2)),
+            "reading": "差值的區間不含 0 才稱「不同」；殘基很多時約 5 % 會因機率而不含 0，未做多重比較校正。"}
+
+
 # ------------------------------------------------------------------------------------------------ the aggregate
 def aggregate_replica_set(replicas: list[dict], *, system: str = "", n_requested: int | None = None) -> dict:
     """``replicas`` = one dict per run of this system, in replica order::
 
         {"run_id", "replica_index"?, "status"?, "reason"?, "excluded_reason"?, "analysis_status"?,
-         "metrics": metrics.json content or None, "descendants"?: {"pulls": n, "windows": m}}
+         "metrics": metrics.json content or None, "descendants"?: {"pulls": n, "windows": m},
+         "extended"?: extended.json content, "membrane"?: membrane_metrics.json content, "membrane_report"?: membrane_report.json}
 
     Returns the ``md20.replica_set/1`` dict.  Never raises on missing data: what cannot be computed is "unavailable"
     with a reason."""
@@ -292,9 +775,13 @@ def aggregate_replica_set(replicas: list[dict], *, system: str = "", n_requested
         entry = {"run_id": str(r.get("run_id")), "replica_index": r.get("replica_index", i), "status": r.get("status"),
                  "analysed": ok, "reason": why, "descendants": dict(r.get("descendants") or {}),
                  "analysis_manifest": r.get("analysis_manifest"), "extended_file": r.get("extended_file")}
+        ext = r.get("extended") if isinstance(r.get("extended"), dict) else {}
+        entry["extended_blocks"] = sorted(k for k, v in ext.items() if isinstance(v, dict) and v and k not in ("errors", "ligands"))
+        entry["extended_errors"] = dict(ext.get("errors") or {})
         reps_all.append(entry)
         if ok:
-            analysed.append({"run_id": entry["run_id"], "metrics": r["metrics"]})
+            analysed.append({"run_id": entry["run_id"], "metrics": r["metrics"], "extended": r.get("extended"),
+                             "membrane": r.get("membrane"), "membrane_report": r.get("membrane_report")})
         else:
             excluded.append({"run_id": entry["run_id"], "status": r.get("status"), "reason": why})
     n = len(analysed)
@@ -302,7 +789,8 @@ def aggregate_replica_set(replicas: list[dict], *, system: str = "", n_requested
                  "concatenation_note": "replica boundaries are never joined: event durations, persistence and transitions "
                                        "are computed inside one replica and only their per-replica results are combined",
                  "n_requested": n_requested, "n_listed": len(reps_all), "n_analysed": n, "min_recommended": MIN_REPLICAS,
-                 "replicas": reps_all, "excluded": excluded, "observables": {}, "ligands": {}, "per_residue": {}}
+                 "replicas": reps_all, "excluded": excluded, "observables": {}, "ligands": {}, "per_residue": {},
+                 "schema_revision": SCHEMA_REVISION, "structure": {}, "membrane": None}
     flags: list[str] = []
     if n == 0:
         flags.append("no_analysed_replica")
@@ -326,6 +814,10 @@ def aggregate_replica_set(replicas: list[dict], *, system: str = "", n_requested
     rm = _per_residue_rmsf(analysed)
     if rm:
         out["per_residue"]["rmsf_ca_A"] = rm
+    out["structure"] = {"dssp": _dssp(analysed), "dccm": _dccm(analysed), "clusters": _clusters(analysed),
+                        "tica_msm": _tica_msm(analysed),
+                        "pca_basins": pca_basin_shares(None, system)}       # replaced by attach_basin_shares when a common basis exists
+    out["membrane"] = _membrane(analysed)
     names = sorted({ln for r in analysed for ln in (r["metrics"].get("ligands") or {})})
     for ln in names:
         reps_l = [r for r in analysed if ln in (r["metrics"].get("ligands") or {})]
@@ -353,6 +845,7 @@ def aggregate_replica_set(replicas: list[dict], *, system: str = "", n_requested
         co = _contact_occupancy(reps_l, ln)
         if co:
             lig["contact_occupancy"] = co
+        lig["hydration"] = _hydration(reps_l, ln)
         out["ligands"][ln] = lig
     out["flags"] = flags
     return out

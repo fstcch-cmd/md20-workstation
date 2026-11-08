@@ -87,14 +87,22 @@ def _water_oxygens(topology_pdb: Path | str) -> list[int]:
     return out
 
 
-def analyse_membrane_run(run_dir: Path | str, build_manifest: dict, *, label: str = "", decisions=None) -> dict:
+MEMBRANE_ANALYSIS_VERSION = "2026-11-08.1"      # D-142: bump when the membrane-only outputs change meaning (part of its cache fingerprint)
+
+
+def analyse_membrane_run(run_dir: Path | str, build_manifest: dict, *, label: str = "", decisions=None,
+                         out_dir: Path | str | None = None) -> dict:
     """Membrane metrics for one run (all three membrane types).  Writes analysis/membrane_metrics.json and, when no
-    general analysis wrote one, analysis/metrics.json with the same content (the workflow and the report read it)."""
+    general analysis wrote one, analysis/metrics.json with the same content (the workflow and the report read it).
+    ``out_dir`` (D-142): write into a staging directory instead; paths stored in the result still name the final
+    ``analysis/`` location, because the staged files are swapped in by ``fingerprint.commit_staging``."""
     import mdtraj as md
     from .stream import production_info, production_topology, remap_indices
     run_dir = Path(run_dir)
     adir = run_dir / "analysis"
     adir.mkdir(parents=True, exist_ok=True)
+    wdir = Path(out_dir) if out_dir else adir
+    wdir.mkdir(parents=True, exist_ok=True)
     mem = build_manifest.get("membrane") or (build_manifest.get("assembly") or {}).get("membrane") or {}
     top_pdb = build_manifest.get("topology_pdb")
     info = production_info(run_dir)
@@ -118,13 +126,13 @@ def analyse_membrane_run(run_dir: Path | str, build_manifest: dict, *, label: st
     s.update({"label": label, "type": plan.get("type"), "created_at": now_iso()})
     # the report figures read the schema of analysis/membrane_report.py (analysis.summaries[system]["membrane_file"])
     try:
-        s["membrane_file"] = str(_report_summary(traj, adir, heads, waters, groups, plan))
+        s["membrane_file"] = str(adir / _report_summary(traj, wdir, heads, waters, groups, plan).name)
     except Exception as exc:  # noqa: BLE001 — the acceptance above stands; the report then has no membrane figures
         s["membrane_file_error"] = f"{type(exc).__name__}: {exc}"
         if decisions is not None:
             decisions.record("analysis.membrane", "report summary", "failed",
                              f"膜的報告摘要沒有產生（{type(exc).__name__}: {exc}）；平衡驗收與 membrane_metrics.json 不受影響。", kind="auto")
-    atomic_write_json(s, adir / "membrane_metrics.json")
+    atomic_write_json(s, wdir / "membrane_metrics.json", backup=out_dir is None)
     if decisions is not None and s.get("acceptance"):
         g = s["acceptance"]
         decisions.record("analysis.membrane", "membrane equilibration", g["status"], g["explanation"],
@@ -167,22 +175,42 @@ def _report_summary(traj, adir: Path, heads: list, waters: list, groups: dict, p
     s = report_summary(time_ns=np.asarray(traj.time, float) / 1000.0, box=box, head_xyz=xyz[:, heads], composition=comp,
                        temperature_k=plan.get("temperature_k"), mtype=plan.get("type") or "bilayer", density_z=dens, **kw)
     p = adir / "membrane_report.json"
-    atomic_write_json(s, p)
+    atomic_write_json(s, p, backup=False)
     return p
 
 
-def membrane_only_analysis(run_dir: Path | str, build_manifest: dict, *, label: str = "", decisions=None) -> dict:
+def membrane_fingerprint_extra(build_manifest: dict) -> dict:
+    """What the membrane-only analysis depends on beyond the trajectory (D-142): the membrane plan and head-group atoms of the
+    build manifest, the water oxygens, the solute groups and this module's version.  Goes into ``analysis_fingerprint(extra=...)``."""
+    mem = build_manifest.get("membrane") or (build_manifest.get("assembly") or {}).get("membrane") or {}
+    from ..workflow import manifest_ligands
+    return {"kind": "membrane_only", "membrane_analysis_version": MEMBRANE_ANALYSIS_VERSION,
+            "membrane_plan": mem.get("plan") or {}, "head_atom_indices": sorted(int(i) for i in (mem.get("head_atom_indices") or [])),
+            "solute_groups": {l["name"]: sorted(int(i) for i in (l.get("heavy_atom_indices") or [])) for l in manifest_ligands(build_manifest)}}
+
+
+def membrane_only_analysis(run_dir: Path | str, build_manifest: dict, *, label: str = "", decisions=None,
+                           fingerprint: dict | None = None, provenance: dict | None = None) -> dict:
     """Surface (B) and bilayer (C) systems have no receptor, so the protein analyses (backbone RMSD, pocket contacts)
-    do not apply; this writes metrics.json from the membrane analysis and returns an analysis_manifest-like summary."""
+    do not apply; this writes metrics.json from the membrane analysis and returns an analysis_manifest-like summary.
+
+    D-142 (D-135 open item): with a ``fingerprint`` (analysis/fingerprint.analysis_fingerprint with the membrane extras) the outputs
+    are staged and swapped in with the manifest written last, the manifest carries the fingerprint and the output hashes, and the
+    previous complete result is kept under analysis/prev/.  A manifest without a fingerprint (older versions) is "legacy" and
+    ``Workflow._reuse_analysis_manifest`` recomputes it - the analysis only, never the MD."""
+    from .fingerprint import begin_staging, commit_staging
     run_dir = Path(run_dir)
-    s = analyse_membrane_run(run_dir, build_manifest, label=label, decisions=decisions)
     adir = run_dir / "analysis"
+    st = begin_staging(run_dir) if fingerprint is not None else None
+    s = analyse_membrane_run(run_dir, build_manifest, label=label, decisions=decisions, out_dir=st)
     metrics = {"n_frames": s.get("n_frames", 0), "membrane": s}
-    atomic_write_json(metrics, adir / "metrics.json")
+    atomic_write_json(metrics, (st or adir) / "metrics.json", backup=st is None)
     summary = {"status": "PASS", "kind": "membrane", "metrics_file": str(adir / "metrics.json"),
                "membrane_metrics_file": str(adir / "membrane_metrics.json"), "n_frames": s.get("n_frames", 0),
                **({"membrane_file": s["membrane_file"]} if s.get("membrane_file") else {}),
                "figures": [], "ligands": {}, "membrane_acceptance": s.get("acceptance"), "created_at": now_iso()}
+    if fingerprint is not None:
+        return commit_staging(run_dir, st, summary, fingerprint=fingerprint, provenance=provenance)
     atomic_write_json(summary, adir / "analysis_manifest.json")
     return summary
 

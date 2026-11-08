@@ -65,12 +65,12 @@ figure{margin:1rem 0}figure img{border:1px solid var(--line)}
 .tag{display:inline-block;font-size:.72rem;padding:0 .4rem;border-radius:3px;border:1px solid var(--line);color:var(--muted);margin-left:.3rem}
 .tag.changed{border-color:var(--warn);color:var(--warn)}.tag.caution{border-color:var(--bad);color:var(--bad)}
 .methods{font-family:Georgia,"Noto Serif TC",serif;font-size:.95rem;background:#fff;border:1px solid var(--line);padding:1rem 1.2rem}
-details{margin:.6rem 0}summary{cursor:pointer;color:var(--accent)}pre{font-size:.75rem;white-space:pre-wrap}
+details{margin:.6rem 0}summary{cursor:pointer;color:var(--accent)}details.fold{border:1px solid var(--line);border-radius:4px;padding:.2rem .8rem;background:#fff}details.fold>summary{padding:.3rem 0}pre{font-size:.75rem;white-space:pre-wrap}
 .muted{color:var(--muted)}.warn{color:var(--warn)}
 .figblock{border:1px solid var(--line);border-radius:4px;padding:.8rem 1rem;margin:1.2rem 0;background:#fff}
 .figblock img{border:none;max-width:720px;width:100%;display:block;margin:0 auto}.figtext p{margin:.35rem 0;font-size:.9rem}.figtext b{color:var(--ink)}
 .figtext ul{margin:.2rem 0 .2rem 1.1rem;padding:0}.figtext li{margin:.15rem 0;font-size:.9rem}
-@media print{body{max-width:none;margin:1cm}h2{page-break-after:avoid}figure,table{page-break-inside:avoid}details{display:none}}
+@media print{body{max-width:none;margin:1cm}h2{page-break-after:avoid}figure,table{page-break-inside:avoid}details:not(.fold){display:none}}
 """
 
 H = {  # fixed headings and labels
@@ -925,29 +925,7 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
                      tx(("主鏈 RMSD 平均（Å）", "Mean backbone RMSD (Å)", "主鎖 RMSD の平均（Å）", "주사슬 RMSD 평균 (Å)"), L),
                      tx(("配體（最後 20 % 的口袋 RMSD）", "Ligand (pocket RMSD, last 20 %)", "リガンド（最後の 20 % のポケット RMSD）", "리간드 (마지막 20 %의 포켓 RMSD)"), L), ""],
                     trs, ("各系統的模擬結果摘要", "Summary of the simulated systems", "各系のシミュレーション結果のまとめ", "시스템별 시뮬레이션 결과 요약"), {3})
-    # equilibration acceptance per system and stage (from the stage records of the first replica)
-    acc_rows = []
-    for key, c in cases.items():
-        r = runs.get(key, {})
-        if not r.get("run_ids"):
-            continue
-        try:
-            from ..project import Run
-            rdir = Run(wf.project.case(c["case_id"]), r["run_ids"][0]).dir
-        except Exception:  # noqa: BLE001
-            continue
-        for stg in ("nvt", "npt", "production"):
-            acc = (load_json(rdir / "stages" / stg / f"{stg}_complete.json", {}) or {}).get("acceptance") or {}
-            for chk in acc.get("checks") or []:
-                vals = ", ".join(f"{k} {v}" for k, v in chk.items() if k not in {"check", "ok"})
-                acc_rows.append([_esc(key), _esc(stg.upper() if stg != "production" else tx(("正式模擬", "production", "本計算", "본 시뮬레이션"), L)),
-                                 _esc(chk.get("check")), (tx(("通過", "pass", "合格", "통과"), L) if chk.get("ok") else
-                                                          f"<b class=warn>{_esc(tx(('未通過', 'fail', '不合格', '미통과'), L))}</b>"), _esc(vals)])
-    if acc_rows:
-        out += doc.table([tx(system, L), tx(("階段", "Stage", "段階", "단계"), L), tx(("驗收項目", "Check", "合否の項目", "검수 항목"), L),
-                          tx(("結果", "Result", "結果", "결과"), L), tx(("數值", "Values", "数値", "수치"), L)], acc_rows,
-                         ("平衡與正式模擬的驗收檢查（溫度與密度）", "Acceptance checks of equilibration and production (temperature and density)",
-                          "平衡化と本計算の合否チェック（温度と密度）", "평형화와 본 시뮬레이션의 검수 (온도와 밀도)"))
+    out += _acceptance_html(doc, wf, cases, runs)       # D-142: every replica, not only the first
     comp = ana.get("comparison") or {}
     start = len(doc.collected)
     ext = {key: load_json(s_.get("extended_file"), {}) for key, s_ in sums.items() if s_.get("extended_file")}
@@ -955,8 +933,9 @@ def _md(doc: Doc, wf, vals, f, goal) -> str:
     eq = _equil_figures(doc, wf, cases, runs)
     if eq:
         out += _sub(doc, "平衡過程的品質", "Equilibration quality", "平衡化の品質", "평형화 품질") + eq
-    from .replica_section import replica_html            # D-130: every replica, mean ± SD, CI, k of n, the n = 1 note
+    from .replica_section import replica_html, delta_rmsf_html   # D-130: every replica, mean ± SD, CI, k of n, the n = 1 note
     out += replica_html(doc, wf, sums)
+    out += delta_rmsf_html(doc, comp)                    # D-142: apo–complex ΔRMSF with the between-replica Welch CI
     if metrics:
         disp = {key: {v: u for u, v in (c.get("ligand_map") or {}).items()} for key, c in cases.items()}
         out += _md_figures(doc, sums, metrics, ext, disp)
@@ -982,33 +961,116 @@ def _sub(doc: Doc, zh: str, en: str, ja: str = "", ko: str = "") -> str:
     return f"<h3>{_esc(doc.t((zh, en, ja, ko)))}</h3>"
 
 
-def _equil_figures(doc: Doc, wf, cases: dict, runs: dict) -> str:
-    """Equilibration quality of every system: minimisation ladder, stage logs with their acceptance checks, overview,
-    replica overlay (the same figures as the per-run reports, now in the project report)."""
+def _replica_runs(wf, c: dict, r: dict) -> list[dict]:
+    """Every replica of one system that has a run directory: run id, directory and the status in its run.json."""
     from ..project import Run
-    out = ""
-    for key, c in cases.items():
-        r = runs.get(key, {})
-        if not r.get("run_ids"):
-            continue
+    out = []
+    try:
+        case = wf.project.case(c["case_id"])
+    except Exception:  # noqa: BLE001
+        return out
+    for rid in r.get("run_ids") or []:
         try:
-            case = wf.project.case(c["case_id"])
-            rdir = Run(case, r["run_ids"][0]).dir
+            rdir = Run(case, rid).dir
         except Exception:  # noqa: BLE001
             continue
-        mn = load_json(rdir / "stages" / "minimize" / "minimize_complete.json", {})
-        png = ((mn.get("figures") or {}).get("png"))
-        if png:
-            out += doc.figure_block(png, "minimization", FT.classify_minimization(mn.get("energies_kj_mol") or [], key), key)
-        for stg in ("nvt", "npt", "production"):
-            comp = load_json(rdir / "stages" / stg / f"{stg}_complete.json", {})
-            png = (comp.get("figures") or {}).get("png")
-            rows = [{"stage": stg.upper(), **x} for x in ((comp.get("acceptance") or {}).get("checks") or [])]
+        out.append({"run_id": rid, "dir": rdir, "case": case, "status": (load_json(rdir / "run.json", {}) or {}).get("status") or "—"})
+    return out
+
+
+_STAGES = ("nvt", "npt", "production")
+
+
+def _stage_checks(rdir: Path, stg: str) -> list[dict] | None:
+    """The acceptance checks recorded for one stage of one run; None when the stage has no record."""
+    comp = load_json(rdir / "stages" / stg / f"{stg}_complete.json", None)
+    if not isinstance(comp, dict):
+        return None
+    return list((comp.get("acceptance") or {}).get("checks") or [])
+
+
+def _acceptance_html(doc: Doc, wf, cases: dict, runs: dict) -> str:
+    """D-142: equilibration and production acceptance of EVERY replica (the first replica only before).  A compact table (one row
+    per replica, one cell per stage: passed/total and the failed checks) is always visible; the per-check list sits in a fold.
+    A replica that is not COMPLETE is listed with its status, never dropped."""
+    L = doc.lang
+    system = ("系統", "System", "系", "시스템")
+    stage_name = {"nvt": "NVT", "npt": "NPT", "production": tx(("正式模擬", "production", "本計算", "본 시뮬레이션"), L)}
+    rows, detail = [], []
+    n_rep = 0
+    for key, c in cases.items():
+        for rr in _replica_runs(wf, c, runs.get(key, {})):
+            n_rep += 1
+            cells = [_esc(key), _esc(rr["run_id"]), _esc(rr["status"])]
+            for stg in _STAGES:
+                checks = _stage_checks(rr["dir"], stg)
+                if checks is None:
+                    cells.append("—")
+                    continue
+                bad = [x for x in checks if not x.get("ok")]
+                cells.append(f"{len(checks) - len(bad)}/{len(checks)} " + (_esc(tx(("通過", "pass", "合格", "통과"), L)) if not bad else
+                             f"<b class=warn>{_esc(tx(('未通過', 'fail', '不合格', '미통과'), L))}：{_esc(', '.join(str(x.get('check')) for x in bad))}</b>"))
+                for chk in checks:
+                    vals = ", ".join(f"{k} {v}" for k, v in chk.items() if k not in {"check", "ok"})
+                    detail.append([_esc(key), _esc(rr["run_id"]), _esc(stage_name[stg]),
+                                   _esc(chk.get("check")), (tx(("通過", "pass", "合格", "통과"), L) if chk.get("ok") else
+                                                            f"<b class=warn>{_esc(tx(('未通過', 'fail', '不合格', '미통과'), L))}</b>"), _esc(vals)])
+            rows.append(cells)
+    if not rows:
+        return ""
+    head = [tx(system, L), tx(("重複（run）", "Replica (run)", "反復（run）", "반복(run)"), L), tx(("MD 狀態", "MD status", "MD の状態", "MD 상태"), L)] + \
+           [stage_name[x] for x in _STAGES]
+    out = doc.table(head, rows,
+                    ("每條重複的平衡與正式模擬驗收（通過數／檢查數；未通過的項目列出）。沒有完成的重複照實列出狀態。",
+                     "Acceptance of equilibration and production for every replica (checks passed / checks; failed checks named). A replica that did not finish is listed with its status.",
+                     "各反復の平衡化と本計算の合否（合格数／チェック数、不合格の項目名つき）。完了していない反復も状態つきで載せています。",
+                     "각 반복의 평형화와 본 시뮬레이션 검수(통과 수／검사 수, 미통과 항목 표시). 끝나지 않은 반복도 상태와 함께 싣습니다."))
+    if detail:
+        fold = doc.table([tx(system, L), tx(("重複（run）", "Replica (run)", "反復（run）", "반복(run)"), L), tx(("階段", "Stage", "段階", "단계"), L),
+                          tx(("驗收項目", "Check", "合否の項目", "검수 항목"), L), tx(("結果", "Result", "結果", "결과"), L),
+                          tx(("數值", "Values", "数値", "수치"), L)], detail,
+                         ("平衡與正式模擬的驗收檢查明細（溫度與密度）", "Acceptance checks in detail (temperature and density)",
+                          "平衡化と本計算の合否チェックの詳細（温度と密度）", "평형화와 본 시뮬레이션 검수 상세 (온도와 밀도)"))
+        out += (f"<details class=fold{' open' if n_rep <= 1 else ''}><summary>{_esc(tx(('逐項檢查明細', 'Checks in detail', '項目ごとの詳細', '항목별 상세'), L))}"
+                f" ({len(detail)})</summary>{fold}</details>")
+    return out
+
+
+def _equil_figures(doc: Doc, wf, cases: dict, runs: dict) -> str:
+    """Equilibration quality of every system and EVERY replica (D-142): minimisation ladder, stage logs with their acceptance checks,
+    overview, replica overlay.  A system with one replica is shown as before; with several, each replica gets its own fold labelled
+    with its run id and MD status (the first one open), so the section stays short and no replica is missing."""
+    out = ""
+    L = doc.lang
+    for key, c in cases.items():
+        reps = _replica_runs(wf, c, runs.get(key, {}))
+        if not reps:
+            continue
+        many = len(reps) > 1
+        for ri, rr in enumerate(reps):
+            rdir, rid = rr["dir"], rr["run_id"]
+            tag = f"{key} {rid}" if many else key
+            body = ""
+            mn = load_json(rdir / "stages" / "minimize" / "minimize_complete.json", {})
+            png = ((mn.get("figures") or {}).get("png"))
             if png:
-                out += doc.figure_block(png, "equil_quality", FT.classify_equil(rows, f"{key} {stg.upper()}"), f"{key} {stg.upper()}")
-        ov = rdir / "figures" / "run_overview.png"
-        if ov.is_file():
-            out += doc.figure_block(ov, "equil_quality", [], f"{key} overview")
+                body += doc.figure_block(png, "minimization", FT.classify_minimization(mn.get("energies_kj_mol") or [], tag), tag)
+            for stg in _STAGES:
+                comp = load_json(rdir / "stages" / stg / f"{stg}_complete.json", {})
+                png = (comp.get("figures") or {}).get("png")
+                rows = [{"stage": stg.upper(), **x} for x in ((comp.get("acceptance") or {}).get("checks") or [])]
+                if png:
+                    body += doc.figure_block(png, "equil_quality", FT.classify_equil(rows, f"{tag} {stg.upper()}"), f"{tag} {stg.upper()}")
+            ov = rdir / "figures" / "run_overview.png"
+            if ov.is_file():
+                body += doc.figure_block(ov, "equil_quality", [], f"{tag} overview")
+            if not many:
+                out += body
+            elif body:
+                out += (f"<details class=fold{' open' if ri == 0 else ''}><summary>{_esc(tag)} ({_esc(rr['status'])})</summary>{body}</details>")
+            else:
+                out += f"<p class=muted>{_esc(tag)} ({_esc(rr['status'])}): " + _esc(tx(("沒有平衡過程的圖。", "no equilibration figures.", "平衡化の図はありません。", "평형화 그림이 없습니다."), L)) + "</p>"
+        case = reps[0]["case"]
         rep = next(iter(sorted(case.dir.rglob("production_replicas.png"))), None) if hasattr(case, "dir") else None
         if rep:
             out += doc.figure_block(rep, "replicas", [], key)

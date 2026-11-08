@@ -202,7 +202,7 @@ def test_failed_acceptance_becomes_a_gate_card(tmp_path, monkeypatch):
     atomic_write_json({"topology_pdb": "t.pdb"}, case.build_dir / "build_manifest.json")
     acc = {"name": "membrane equilibration", "status": "AUTO_FIXED", "advisory": True, "explanation": "未通過", "options": []}
 
-    def fake(run_dir, bm, label="", decisions=None):
+    def fake(run_dir, bm, label="", decisions=None, **kw):
         (run_dir / "analysis").mkdir(parents=True, exist_ok=True)
         atomic_write_json({"n_frames": 3}, run_dir / "analysis" / "metrics.json")
         return {"status": "PASS", "metrics_file": str(run_dir / "analysis" / "metrics.json"), "membrane_acceptance": acc}

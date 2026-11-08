@@ -1712,7 +1712,8 @@ class Workflow:
         """The ONE place that decides whether a stored per-run analysis can be reused.
         With a fingerprint (D-135, R4): only when every input, selection, protocol, schema and threshold is unchanged
         and the referenced files are present; a legacy manifest (no fingerprint) is recomputed — never the MD.
-        Without one (membrane-only analysis, which writes no fingerprint): the pre-D-135 rule, a PASS manifest."""
+        D-142: the membrane-only analysis writes a fingerprint as well, so its legacy manifests (PASS, no fingerprint) are recomputed
+        too.  Only a caller that passes no fingerprint at all keeps the pre-D-135 rule (a PASS manifest)."""
         man = load_json(run_dir / "analysis" / "analysis_manifest.json", {})
         if fp is None:
             return (man if man.get("status") == "PASS" else None), None
@@ -1734,10 +1735,14 @@ class Workflow:
         top = load_json(case.build_dir / "build_manifest.json", {}).get("topology_pdb")
         membrane = bool((self.cfg.get("md") or {}).get("membrane"))
         bm = load_json(case.build_dir / "build_manifest.json", {})
-        fp = None
-        if not self.membrane_only_type():
-            from .analysis.fingerprint import analysis_fingerprint
-            g0 = {l["name"]: l["heavy_atom_indices"] for l in manifest_ligands(bm) if l.get("heavy_atom_indices")}
+        from .analysis.fingerprint import analysis_fingerprint
+        g0 = {l["name"]: l["heavy_atom_indices"] for l in manifest_ligands(bm) if l.get("heavy_atom_indices")}
+        if self.membrane_only_type():
+            # D-142: cases B and C get a fingerprint too (membrane plan, head atoms, solute groups, module version in `extra`)
+            from .analysis.membrane_run import membrane_fingerprint_extra
+            fp = analysis_fingerprint(run_dir, top, ligand_groups=g0 or None, metal_indices=None, ligand_charges=None, membrane=True,
+                                      extra=membrane_fingerprint_extra(bm))
+        else:
             fp = analysis_fingerprint(run_dir, top, ligand_groups=g0 or None, metal_indices=metal_indices_from_manifest(bm),
                                       ligand_charges=manifest_ligand_charges(bm), membrane=membrane)
         man, cache = self._reuse_analysis_manifest(run_dir, fp, label)
@@ -1745,7 +1750,8 @@ class Workflow:
             if self.membrane_only_type():
                 # cases B and C have no receptor: membrane analysis only (analysis/membrane_run.py)
                 from .analysis.membrane_run import membrane_only_analysis
-                man = membrane_only_analysis(run_dir, bm, label=label, decisions=self.dec)
+                man = membrane_only_analysis(run_dir, bm, label=label, decisions=self.dec, fingerprint=fp,
+                                             provenance={"reason": (cache or {}).get("reason"), "changed": (cache or {}).get("changed")})
             else:
                 groups = {l["name"]: l["heavy_atom_indices"] for l in manifest_ligands(bm) if l.get("heavy_atom_indices")}
                 man = analyse_run(run_dir, top, label=label, ligand_groups=groups or None, metal_indices=metal_indices_from_manifest(bm),
@@ -1779,6 +1785,7 @@ class Workflow:
         from .engine.replica_plan import configured_replicas
         out = {}
         metrics = {}
+        aggs: dict[str, dict] = {}
         analysed_ids: dict[str, list[str]] = {}
         for key, r in runs.items():
             case = self.project.case(r["case_id"])
@@ -1801,6 +1808,11 @@ class Workflow:
                     rec["manifest"] = man
                     rec["analysis_status"] = man.get("status")
                     rec["metrics"] = load_json(man["metrics_file"], {}) if man.get("metrics_file") else None
+                    # D-142: the per-replica extended.json / membrane files feed the cross-replica aggregation of DSSP, DCCM,
+                    # hydration, basins, tICA/MSM and the membrane metrics (a file that cannot be read stays absent: "unavailable")
+                    for fk, rk in (("extended_file", "extended"), ("membrane_metrics_file", "membrane"), ("membrane_file", "membrane_report")):
+                        fp_ = man.get(fk)
+                        rec[rk] = (load_json(fp_, None) if fp_ and Path(fp_).is_file() else None)
                     if not rec["metrics"]:
                         rec["reason"] = "分析沒有產生 metrics.json，不納入彙總。"
                 except Exception as exc:  # noqa: BLE001 — one failing replica must not hide the others; it is kept with its reason
@@ -1820,6 +1832,7 @@ class Workflow:
                 system=key, n_requested=configured_replicas(self.cfg)[0])
             agg_path = self.dir / f"analysis_replicas_{safe_name(key)}.json"
             atomic_write_json(agg, agg_path, backup=False)
+            aggs[key] = {"agg": agg, "path": agg_path}
             fig = None
             try:
                 from .report.replica_figs import replica_overlay
@@ -1867,8 +1880,36 @@ class Workflow:
             cb = self._common_basis(runs, cmp_ok, analysed_ids)
             if cb:
                 comp["common_basis_file"] = cb
+        self._replica_cross_system(aggs, comp, cmp_ok)
         self._mark("analysis", summaries=out, comparison=comp)
         return {"summaries": out, "comparison": comp}
+
+    def _replica_cross_system(self, aggs: dict, comp: dict, cmp_ok: dict | None) -> None:
+        """D-142: what needs more than one system or the common basis, computed from the per-replica aggregates.
+        (1) apo–complex ΔRMSF per residue with a between-replica Welch CI (refused when the systems are not comparable);
+        (2) PCA basin shares of each system's replicas on the common basis (``structure.pca_basins``; without a common basis they
+        stay "not comparable").  The replica-set files are rewritten with (2).  Analysis only; never touches MD."""
+        from .analysis.replica_set import attach_basin_shares, delta_rmsf_between_replicas
+        within = (cmp_ok or {}).get("within_system") or {}
+        cb = load_json(comp["common_basis_file"], {}) if comp.get("common_basis_file") else None
+        for key, v in aggs.items():
+            attach_basin_shares(v["agg"], cb, within_comparable=bool(within.get(key, {}).get("comparable", True)))
+            atomic_write_json(v["agg"], v["path"], backup=False)
+        order = sorted(aggs, key=lambda k: (not k.lower().startswith("apo"), k))
+        if len(order) > 1 and cmp_ok is not None:
+            ref = order[0]
+            pairs = {}
+            for k in order[1:]:
+                pairs[k] = delta_rmsf_between_replicas(ref, (aggs[ref]["agg"].get("per_residue") or {}).get("rmsf_ca_A"),
+                                                       k, (aggs[k]["agg"].get("per_residue") or {}).get("rmsf_ca_A"), cmp_ok)
+            res = {"schema": "md20.delta_rmsf_replicas/1", "ref": ref, "pairs": pairs}
+            path = self.dir / "analysis_delta_rmsf_replicas.json"
+            atomic_write_json(res, path, backup=False)
+            comp["delta_rmsf_replicas_file"] = str(path)
+            comp["delta_rmsf_replicas"] = {k: {kk: vv for kk, vv in p.items() if kk != "residues"} for k, p in pairs.items()}
+            self.dec.record("analysis.compare", "delta_rmsf_replicas", {k: p.get("status") for k, p in pairs.items()},
+                            f"apo–複合物的逐殘基 ΔRMSF 改用各條重複的 RMSF 做 Welch t 區間（參考系統 {ref}）；"
+                            "任一邊少於 2 條、或系統不可比時不給區間。未做多重比較校正，報告寫明預期的偶然數量。", kind="auto")
 
     def _comparability(self, runs: dict, analysed_ids: dict | None = None) -> dict:
         """D-106 (F10): may these runs be compared at all?  Conditions from run.json and the build manifests, of EVERY
