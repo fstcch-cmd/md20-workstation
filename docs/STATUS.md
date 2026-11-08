@@ -2,6 +2,9 @@
 
 ## 當前事實（2026-11-07 第七個 session，session_016gcJz6aoRW5kLP9Jzbi7kj）
 - **對外發行最新仍為 a17**；main 為開發中 a20。單一能力現況看 `docs/CAPABILITIES.md`（D-136，`tools/capability_manifest.py --check` 在 CI 驗證），本檔保留為歷史。
+
+- **11/08 第二批（CI 回饋後）**：查 6b4ca2e CI → 修 macOS pure-python（D-148，`MD20_DATA_DIR` 隔離，原本測試會刪使用者真實目錄）、漏斗樣本不足優雅 withhold（D-149）。GUI frontend-design 重做（D-146）＋連線穩定性（D-147）已推，待 CI gui-preview 與筆電確認。
+- **鋅誠實更正（D-150）**：D-133/D-145 的配位水路徑 **CI 證明不足**——Glu106 羧基仍塌到 Zn 1.74 Å（點電荷模型對帶電羧基的根本限制，與第四位點開放無關；真實 CA II 的 Glu106 不直接配位）。`test_bonded_zinc_ca2` 標 xfail(strict)，0.03 nm 門檻未放寬。解法（排除競爭羧基非鍵／質子化 Glu106／MCPB 全殼層／對這類位點發 NEEDS_HUMAN，建議先做後者）屬科學模型變更，**待使用者決定**。
 - 本 session 做了「Evidence-Driven Repair」R1–R8 第一輪（D-130 重做、D-133～D-138）。**(A)** 容器 1259 passed、50 skipped。**(B)** 真實路徑全部交 CI（尚無結果）：鋅新模型（heavy-metal）、每條重複的真實 mdtraj 分析、串流持續性、指紋重用。**(C)** 見下方各條未決與 HANDOFF §0。
 - **11/08 續（同一 session）**：使用者回覆「都做」。D-139 修 c014e8b CI 紅燈（鋅只鍵結第一配位殼水；授權 cg 測試不再真的跑 Martini → openmm-stack 90 分鐘逾時；Windows CRLF／路徑；pose-screen 斷言與 D-98 一致）。
   D-140 漏斗約束與解析標準態（**預設關閉**，只有漏斗結果可排序；徑向 ΔG° 標為近似）；D-141 金屬水 OH⁻（只在有擬合電荷時）；D-142 重複彙總補完；D-143 自主執行入口（**沒有擁有者政策就不執行**）與舊結果重新評估；D-144 門檻校準（PCA／分群一致性改用時間前後半）。

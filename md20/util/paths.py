@@ -10,7 +10,16 @@ _APP = "MD20"
 
 
 def app_data_dir() -> Path:
-    """Per-user writable directory for MD20 settings, doctor reports and caches."""
+    """Per-user writable directory for MD20 settings, doctor reports and caches.
+
+    MD20_DATA_DIR overrides the location on every OS (portable installs, and test isolation so a test never writes to
+    or deletes the real user directory — D-148; macOS ignored XDG_DATA_HOME/LOCALAPPDATA, so a doctor test there
+    unlinked the user's own doctor_report.json).  This only moves where files live; it is NOT a licence switch — a
+    licence record anywhere is still accepted only if it carries a valid owner-key signature (util/license.py), so
+    moving or planting the file grants nothing.  No env var or path ever bypasses signature verification."""
+    override = os.environ.get("MD20_DATA_DIR")
+    if override:
+        return Path(override) / _APP
     if sys.platform.startswith("win"):
         base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
         return Path(base) / _APP

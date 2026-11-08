@@ -621,7 +621,8 @@
     "580cbff／58d81bc 在 heavy-metal CI 失敗（58d81bc：HIS119:ND1 2.36 Å 對 r0 2.02 Å；GLU106 OE1 塌陷到 Zn 1.74 Å）。D-133 改為保留晶體配位水作第四個鍵結配位（模型變更，使用者授權），門檻未放寬；新模型尚無 CI 結果",
     "電荷沿用力場；未擬合的諧和鍵/角",
     "不得因此重新分類為基礎設施問題：這是科學／模型失敗",
-    "鋅水以中性 TIP3P 表示，未提供 OH⁻ 模型；配體佔據配位水位置時 NEEDS_HUMAN"
+    "鋅水以中性 TIP3P 表示，未提供 OH⁻ 模型；配體佔據配位水位置時 NEEDS_HUMAN",
+    "D-150：點電荷模型下帶電第二殼層羧基（如 CA II Glu106）塌向鋅，配位水佔位無法阻止；bonded 鍵長對這類位點不可信"
    ],
    "tests": [
     {
@@ -650,7 +651,7 @@
     "status": "fail",
     "commit": "580cbff",
     "evidence_url": "https://github.com/fstcch-cmd/md20-workstation/actions/runs/42374500293",
-    "basis": "heavy[metal] 在 580cbff 與 58d81bc 失敗（test_bonded_zinc_ca2）；D-133 修正後待 CI",
+    "basis": "heavy[metal] xfail(strict)：Glu106 羧基塌陷未解（D-150），待使用者決定模型路徑",
     "changed_since_evidence": []
    },
    "benchmark_scope": "none",

@@ -51,6 +51,7 @@ def snapshot(root: Path) -> dict:
 @pytest.fixture
 def doctor(tmp_path, monkeypatch):
     """A doctor benchmark record in a throw-away app-data folder."""
+    monkeypatch.setenv("MD20_DATA_DIR", str(tmp_path / "appdata"))   # D-148: isolate on every OS, incl. macOS
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "xdg"))
 
@@ -539,3 +540,17 @@ def test_legacy_result_gets_a_reanalysis_proposal_and_samples_check(tmp_path):
     shutil.rmtree(kit.wf_dir / "binding")
     inp2 = inputs_for_workflow(kit.wf_dir)[0]
     assert inp2.reanalysis == {"available": False}
+
+
+def test_md20_data_dir_overrides_app_data_on_every_os_and_is_not_a_licence_switch(tmp_path, monkeypatch):
+    """D-148: the override that isolates tests from the real user directory works regardless of sys.platform, and it
+    only moves where files live — it never makes an unsigned licence valid (verification is signature-based)."""
+    import importlib
+    from md20.util import paths as P
+    monkeypatch.setenv("MD20_DATA_DIR", str(tmp_path / "d"))
+    for plat in ("darwin", "win32", "linux"):
+        monkeypatch.setattr(P.sys, "platform", plat)
+        assert P.app_data_dir() == tmp_path / "d" / "MD20"
+    monkeypatch.delenv("MD20_DATA_DIR")
+    monkeypatch.setattr(P.sys, "platform", "darwin")
+    assert P.app_data_dir() == P.Path.home() / "Library" / "Application Support" / "MD20"

@@ -26,6 +26,7 @@ from ..util import atomic_write_json, load_json, now_iso, DecisionLog
 from ..analysis.plots import PALETTE, _mpl, _save
 from .windows import plan_windows, KB_KJ_MOL_K
 from .pmf import pmf_from_windows
+from ._mdh_legacy import SamplingQualityError
 from . import funnel as FN
 from .funnel import V0_NM3  # standard-state volume per molecule (1 M) in nm³  (re-exported: tests import it from here)
 
@@ -1049,8 +1050,28 @@ def run_binding(system_xml: Path | str, topology_pdb: Path | str, start_state_xm
     write_coverage("DONE")
     centers = sorted(samples)
     # ------------------------------------------------------------------ PMF + ΔG
-    pres = pmf_from_windows(samples, force_constant_kj_mol_nm2=dict(ks), temperature_k=cfg.temperature_k,
-                            out_dir=out, n_bootstrap=100)
+    windows_meta = [{"center_nm": c, "k": ks[c], "n": int(len(samples[c])), "mean_nm": float(samples[c].mean()),
+                     "sd_nm": float(samples[c].std())} for c in centers]
+    try:
+        pres = pmf_from_windows(samples, force_constant_kj_mol_nm2=dict(ks), temperature_k=cfg.temperature_k,
+                                out_dir=out, n_bootstrap=100)
+    except SamplingQualityError as exc:
+        # D-149: too few finite samples / too few windows → the PMF cannot be estimated.  A teaching run that was cut
+        # short (short production, a laptop that did not reach enough frames) must not crash the pipeline: withhold
+        # ΔG° and PMF with the reason, so the report and assessment show "cannot be computed" rather than an error.
+        cv_label = "axial_projection_z" if funnel_geom is not None else "com_distance_radial"
+        res = BindingResult(status="NEEDS_HUMAN", d_bound_nm=d0, smd=smd, windows=windows_meta,
+                            pmf={"method": "withheld", "cv": cv_label, "dG_withheld": str(exc),
+                                 "quality": {"sampling_sufficient": False},
+                                 "coverage": {"n_windows": len(samples)}})
+        res.caveats = [
+            f"取樣不足，無法計算 PMF 與 ΔG°：{exc}。這一條拉離的有限樣本數低於下限，"
+            "通常是 production 太短或窗口太少。請延長每個窗口的取樣或增加窗口後重跑；本結果不產生自由能數值。"]
+        res.condition = {"cv": cv_label, "funnel_restraint": funnel_geom is not None,
+                         "standard_state": (FN.STANDARD_STATE_FUNNEL if funnel_geom is not None else FN.STANDARD_STATE_RADIAL)}
+        from .assessment import assess_pmf
+        res.assessment = assess_pmf(res.pmf, dG_withheld=str(exc), has_dG=False)
+        return res
     res = BindingResult(status="PASS", d_bound_nm=d0, smd=smd, windows=[{"center_nm": c, "k": ks[c], "n": int(len(samples[c])),
                         "mean_nm": float(samples[c].mean()), "sd_nm": float(samples[c].std()), "added": c in added,
                         "manual": c in manual} for c in centers])

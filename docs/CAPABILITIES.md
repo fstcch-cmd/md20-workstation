@@ -294,6 +294,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 - 電荷沿用力場；未擬合的諧和鍵/角
 - 不得因此重新分類為基礎設施問題：這是科學／模型失敗
 - 鋅水以中性 TIP3P 表示，未提供 OH⁻ 模型；配體佔據配位水位置時 NEEDS_HUMAN
+- D-150：點電荷模型下帶電第二殼層羧基（如 CA II Glu106）塌向鋅，配位水佔位無法阻止；bonded 鍵長對這類位點不可信
 
 **測試**：
 
@@ -305,7 +306,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 
 **狀態**：implemented=`yes`｜synthetic_tested=`yes`｜real_engine_tested=`failing`｜scientifically_benchmarked=`none`｜released_installer=`v0.1.0a17`
 
-**最後已知結果**：`fail`，commit `580cbff`，證據 https://github.com/fstcch-cmd/md20-workstation/actions/runs/42374500293。依據：heavy[metal] 在 580cbff 與 58d81bc 失敗（test_bonded_zinc_ca2）；D-133 修正後待 CI
+**最後已知結果**：`fail`，commit `580cbff`，證據 https://github.com/fstcch-cmd/md20-workstation/actions/runs/42374500293。依據：heavy[metal] xfail(strict)：Glu106 羧基塌陷未解（D-150），待使用者決定模型路徑
 
 **benchmark 範圍**：none
 
