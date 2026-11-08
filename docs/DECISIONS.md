@@ -5,7 +5,14 @@
 
 ---
 
-## 2026-11-08
+## 2026-11-09
+### D-159　放寬 openmm-stack 步驟逾時 90→120 分(Windows 真機套件頂到 90 分邊界;非測試失敗)
+- **CI 證據**(53b48f3,D-158 那輪):除 openmm-stack(windows)外全綠(pose-screen、openmm-stack ubuntu/macos、heavy、pure-python 全 OS、installer、paper-docking 都 ✅)。Windows openmm-stack 的「Full test suite incl. real OpenMM」步驟顯示 **`1154 passed, 5 skipped, 1 xfailed, 0 failed`**——**測試全過**——但套件跑了 **5399.56 秒 = 1:29:59**,步驟 90 分逾時在套件完成後一秒觸發,整步被判失敗。
+- **根因**:Windows 的真機 runner 比 Linux/macOS 慢很多,真 OpenMM 全套本來就要約 90 分,步驟逾時設 90 分邊界太緊。**不是程式 bug,也與 D-158 無關**(D-158 的離子重新安置幾何成本可忽略,且 pose-screen/其他 OS 全綠)。
+- **決定**:`.github/workflows/ci.yml` 的 openmm-stack「Full test suite」步驟逾時 90→120 分;job 層逾時(170)仍為上界。純 CI 設定修正,不碰程式。
+- **證據**:Windows 本輪 1154 passed/0 failed(逾時前已印出);放寬後應舒適通過。待新 CI 確認。
+- **相關檔案**:`.github/workflows/ci.yml`。
+
 ### D-158　離子重疊改為「建模階段去碰撞重新安置」(通則,非單一個案補丁;使用者 2026-11-08 要求)
 - **現象**：`test_pose_md_screen_3ptb`(heavy[pose-screen])在 f1ef4df 失敗;上一輪 a9d6cf0 PASSED。根因不是程式邏輯,而是 **OpenMM `addSolvent` 加離子時不檢查離子彼此最小間距**:它隨機把水換成離子以達鹽濃度並中和,偶爾把兩顆離子換到相鄰水位(< 0.22 nm,比接觸離子對 Na–Cl≈0.28 還近),靜電力爆成 NaN。刪水救不了(兩個都是離子)。這是**所有需加鹽的全原子系統都會遇到的通則問題**,非 3PTB／pose-screen 特有。
 - **否決的做法**：原本(D-115)碰到離子-離子重疊就 NEEDS_HUMAN「重新建模」。我一度想用「重試 addSolvent 幾次」——使用者正確指出那是**為單一個案打補丁、重擲骰子治標**,不保證成功、每次重做整個溶劑化。使用者要求:解法必須是**通則**、服務未來多場域,不是為單案新增流程。

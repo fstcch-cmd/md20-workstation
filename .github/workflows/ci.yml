@@ -94,9 +94,12 @@ jobs:
         run: '"$MAMBA_EXE" run -n md20 md20 doctor --seconds 5 || true'
       - name: Full test suite incl. real OpenMM
         shell: bash -el {0}
-        # all three OS run the same suite (~20–30 min); MD20_HEAVY tests run in the parallel `heavy` jobs below.
-        # A step timeout (unlike the job timeout) still lets the failure-log step post pytest.log.
-        timeout-minutes: 90
+        # all three OS run the same suite; MD20_HEAVY tests run in the parallel `heavy` jobs below.  Linux/macOS take
+        # ~20–45 min, but the Windows real-OpenMM runners are much slower: on 53b48f3 Windows passed all 1154 tests but
+        # the step took 1:29:59 and the 90 min limit fired one breath before the suite finished (D-159).  120 min gives
+        # Windows headroom; the job timeout (170) still bounds it.  A step timeout (unlike the job timeout) still lets
+        # the failure-log step post pytest.log.
+        timeout-minutes: 120
         env: { MD20_STACK: "1" }   # the full stack is expected here: a missing core package is a FAILURE, not a skip
         run: |
           set -o pipefail
