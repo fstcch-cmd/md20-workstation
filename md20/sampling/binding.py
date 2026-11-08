@@ -60,8 +60,8 @@ class BindingConfig:
     spectator_hold_nm: float = 0.3         # free within ±0.3 nm of their bound distance to the pocket anchor
     # D-140 (A8): "none" = COM-distance CV, 1 M radial integral (approximate, not for ranking);
     # "funnel" = axial CV z + funnel restraint + analytic standard-state correction (docs/specs/binding_funnel_restraints.md).
-    # Default "none" for every tier: see DECISIONS D-140 (the real-engine path is unvalidated; switch after CI + 3PTB).
-    restraint: str = "none"
+    # D-151 (user 2026-11-08): funnel is the default (ranking-grade ΔG°); the workflow sets "none" for the classroom tier.
+    restraint: str = "funnel"
     funnel_r_cyl_nm: float = FN.DEFAULTS["r_cyl_nm"]
     funnel_r_cone_nm: float = FN.DEFAULTS["r_cone_nm"]
     funnel_z_cc_nm: float | None = None    # None = automatic (pocket exit + ligand radius + 0.3 nm)
@@ -461,7 +461,9 @@ def finished_result(out_dir: Path | str, cfg: "BindingConfig") -> "BindingResult
     chart) reopens the sampling."""
     manifest = load_json(Path(out_dir) / "binding_manifest.json", {})
     prev = manifest.get("result") or {}
-    stored = {**BindingConfig().to_dict(), **(manifest.get("config") or {})}   # fields added later keep old results valid
+    cfg_stored = dict(manifest.get("config") or {})
+    cfg_stored.setdefault("restraint", "none")   # D-151: a result written before the funnel default was radial — never
+    stored = {**BindingConfig().to_dict(), **cfg_stored}   # reopen/return it as a funnel result; other new fields keep old results valid
     if manifest.get("status") == "PASS" and prev.get("status") == "PASS" and manifest.get("config") and stored == cfg.to_dict():
         known = {f.name for f in fields(BindingResult)}
         return BindingResult(**{k: v for k, v in prev.items() if k in known})

@@ -12,21 +12,21 @@ from md20.build.receptor import prepare_receptor
 from md20.build.assemble import assemble_system
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "D-150：點電荷 bonded 金屬模型的根本限制。CI（job 128597205386，c014e8b/6b4ca2e）證明 CA II 的 GLU106:OE1 仍塌到 "
-    "Zn 1.74 Å（20/20 幀），即使 D-133 的配位水已佔住第四配位（HOH402:O 1.935 Å）、D-145 已修好水氫的 NaN。"
-    "塌陷是 Zn²⁺ 與帶負電羧基之間 12-6＋點電荷排斥不足，與第四位點是否開放無關；配位水佔位無法阻止它。"
-    "這需要使用者決定模型路徑（見 DECISIONS D-150：排除競爭羧基非鍵＋維持距離／質子化 Glu106／MCPB 全殼層參數化），"
-    "屬科學模型變更，超出目前鋅授權（調 Zn–N 參數＋配位水）。門檻 0.03 nm 與 GLU 回歸斷言維持不放寬。"
-    "修好後本測試會 xpass，strict 會讓 CI 轉紅提醒移除本標記。")
-)
 def test_bonded_zinc_ca2(pdb_ca2, tmp_path):
     import openmm as mm
     from openmm import app, unit, XmlSerializer
     rman = prepare_receptor(pdb_ca2, tmp_path / "rec", keep_hetero={"ZN"}, human_choices={"hetero groups": "移除"})
     assert rman["status"] != "NEEDS_HUMAN", rman.get("gates")
-    res = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys", padding_nm=1.0, metal_policy={"ZN": "bonded"})
+    # D-152: CA II's Glu106 is a second-shell carboxylate that collapses onto Zn in a point-charge model (CI: 1.74 Å),
+    # so a plain bonded request stops at the competing-carboxylate gate instead of building a collapsing model.
+    gated = assemble_system(rman["receptor_pdb"], [], tmp_path / "gated", padding_nm=1.0, metal_policy={"ZN": "bonded"})
+    assert gated.status == "NEEDS_HUMAN" and "competing carboxylate" in str(gated.gates)
+    # the user chooses to restrain it: exclude the Zn–carboxylate nonbonded pair and add a flat-bottom lower wall at
+    # the crystal distance.  Now the model builds, and the carboxylate no longer collapses.
+    res = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys", padding_nm=1.0, metal_policy={"ZN": "bonded"},
+                          metal_carboxylate={"ZN": "restrain"})
     assert res.status != "NEEDS_HUMAN", res.gates
+    assert res.restraints["metals"].get("competing_carboxylate_walls", 0) >= 1
     plans = res.restraints["metals"]["plans"]
     zn = [p for p in plans if p["key"].startswith("ZN")]
     assert len(zn) == 1 and zn[0]["action"] == "bonded", plans
@@ -35,7 +35,7 @@ def test_bonded_zinc_ca2(pdb_ca2, tmp_path):
     assert len(p["bonds"]) == 4, p["bonds"]
     assert sum(1 for b in p["bonds"] if b.get("water")) == 1, p["bonds"]
     assert set(p["variants"].values()) <= {"HID", "HIE"} and len(p["variants"]) == 3
-    assert res.restraints["metals"]["exclusions"] == 4
+    assert res.restraints["metals"]["exclusions"] >= 4   # 3 His + water, plus the restrained Glu106 carboxylate (D-152)
     assert res.restraints["metals"]["exclusions_13"] >= 6 and res.restraints["metals"]["angles_mdx"] >= 6   # CE1/CD2 per His
     qm = p["qm_input"]                                                       # QM small-model input for the upgrade path
     assert qm["status"] == "PASS" and qm["charge"] == 2 and qm["multiplicity"] == 1 and len(qm["residues"]) == 3
@@ -83,7 +83,8 @@ def test_bonded_zinc_ca2(pdb_ca2, tmp_path):
     diag = {"bonds_mean_A": {k: round(float(np.mean(v)) * 10, 3) for k, v in traces.items()},
             "r0_A": {b["label"]: round(b["r0_nm"] * 10, 3) for b in p["bonds"]},
             "nonbonded_within_3A": {k: [len(v), round(float(np.mean(v)) * 10, 2)] for k, v in sorted(crowd.items())}}
-    # D-133 regression: before the site water was kept, GLU106 OE1 sat 1.74 Å from Zn in every frame (CI 128427389578)
+    # D-152 regression: Glu106 OE1 collapsed onto Zn (1.74 Å, every frame) under the plain bonded model; with the
+    # user's restrain decision (nonbonded exclusion + lower wall at the crystal distance) it must no longer collapse
     assert not any(k.startswith("GLU") and (":OE" in k or ":OD" in k) and v[1] < 2.6 for k, v in diag["nonbonded_within_3A"].items()), diag
     for b in p["bonds"]:
         tr = np.array(traces[b["label"]])

@@ -37,6 +37,72 @@ STEP_LABELS = {"receptor_input": ("受體來源", "Receptor source", "受容体�
                "binding": ("結合自由能（SMD 與傘狀採樣）", "Binding free energy", "結合自由エネルギー", "결합 자유 에너지"),
                "report": ("報告", "Report", "レポート", "보고서")}
 STEP_LABEL = {k: v[0] for k, v in STEP_LABELS.items()}       # Chinese only, kept for older callers
+
+# D-153: the workflow page shows the whole pipeline skeleton top-to-bottom in four phases (preparation → docking →
+# simulation → analysis), so "top to bottom" always reads "first to last".  Conditional steps that this case does not
+# use (folding when no peptide, screening when off, docking for an apo-only run) are shown greyed as "not used", and
+# steps not reached yet as "not started" — the order never jumps.  Each tuple: (phase key, label, [step keys]).
+STEP_PHASES = [
+    ("prepare", ("準備", "Preparation", "準備", "준비"),
+     ["receptor_input", "receptor_docking", "fold", "screen_library", "screen_docking", "screen_selection"]),
+    ("dock", ("對接", "Docking", "ドッキング", "도킹"), ["docking", "pose_selection"]),
+    ("simulate", ("模擬", "Simulation", "シミュレーション", "시뮬레이션"), ["md_cases", "md_runs"]),
+    ("analyse", ("分析", "Analysis", "解析", "분석"), ["analysis", "binding", "report"]),
+]
+PHASE_STEP_LABELS = {  # the skeleton's own labels; md_cases renamed so it is not mistaken for up-front preparation
+    "receptor_input": ("受體來源", "Receptor source", "受容体の入手元", "수용체 출처"),
+    "receptor_docking": ("受體整理", "Receptor preparation", "受容体の準備", "수용체 준비"),
+    "fold": ("胜肽摺疊", "Peptide folding", "ペプチドの折りたたみ", "펩타이드 접힘"),
+    "screen_library": ("高通量篩選：化合物庫", "Screening: library", "スクリーニング：ライブラリ", "스크리닝: 라이브러리"),
+    "screen_docking": ("高通量篩選：快速對接", "Screening: fast docking", "スクリーニング：高速ドッキング", "스크리닝: 빠른 도킹"),
+    "screen_selection": ("高通量篩選：選化合物", "Screening: selection", "スクリーニング：選択", "스크리닝: 선택"),
+    "docking": ("分子對接", "Molecular docking", "分子ドッキング", "분자 도킹"),
+    "pose_selection": ("姿勢選擇", "Pose selection", "ポーズの選択", "포즈 선택"),
+    "md_cases": ("MD 系統建立", "MD system building", "MD系の構築", "MD 계 구축"),
+    "md_runs": ("分子動力學", "Molecular dynamics", "分子動力学", "분자동역학"),
+    "analysis": ("軌跡分析", "Trajectory analysis", "トラジェクトリ解析", "궤적 분석"),
+    "binding": ("結合自由能", "Binding free energy", "結合自由エネルギー", "결합 자유 에너지"),
+    "report": ("報告", "Report", "レポート", "보고서"),
+}
+NOT_STARTED = ("尚未開始", "Not started", "未開始", "시작 안 함")
+NOT_USED = ("未使用", "Not used", "未使用", "사용 안 함")
+
+
+def _case_uses_step(wf, key: str) -> bool:
+    """D-153 (pure-ish): does THIS case use a conditional step?  Non-conditional steps are always used."""
+    cfg = getattr(wf, "cfg", {}) or {}
+    ligs = cfg.get("ligands") or []
+    systems = (cfg.get("md") or {}).get("systems") or ["apo", "docked_single"]
+    docks = bool(ligs) and (any(s != "apo" for s in systems) or (cfg.get("docking") or {}).get("always"))
+    if key == "fold":
+        return any(l.get("fold") for l in ligs)
+    if key.startswith("screen"):
+        return bool(cfg.get("screen"))
+    if key in ("docking", "pose_selection"):
+        return docks
+    if key == "binding":
+        return bool((cfg.get("binding") or {}).get("enabled"))
+    return True
+
+
+def phase_rows(wf, *, lang: str = "zh") -> list[dict]:
+    """The four-phase skeleton for the workflow page: one row per phase header and per step, always in order.
+    Each step row: {kind:"step", key, label, state (done status | "not_started" | "not_used"), status_label, at}."""
+    steps = wf.state().get("steps", {}) if hasattr(wf, "state") else {}
+    rows: list[dict] = []
+    for _pk, plabel, keys in STEP_PHASES:
+        rows.append({"kind": "phase", "label": pick(plabel, lang)})
+        for key in keys:
+            done = steps.get(key)
+            if done and done.get("status"):
+                state, status_label, at = done["status"], None, done.get("at")
+            elif not _case_uses_step(wf, key):
+                state, status_label, at = "not_used", pick(NOT_USED, lang), None
+            else:
+                state, status_label, at = "not_started", pick(NOT_STARTED, lang), None
+            rows.append({"kind": "step", "key": key, "label": pick(PHASE_STEP_LABELS[key], lang),
+                         "state": state, "status_label": status_label, "at": (at or "").replace("T", " ")[:19]})
+    return rows
 SRC_RECEPTOR = ("受體", "Receptor", "受容体", "수용체")
 SRC_ASSEMBLY = ("組裝", "Assembly", "組み立て", "조립")
 SRC_LIGAND = ("配體", "Ligand", "リガンド", "리간드")

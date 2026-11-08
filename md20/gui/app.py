@@ -18,7 +18,7 @@ from . import theme
 from .connection import CONNECTION_JS, tune_heartbeat
 from ..docking.screen import echart_screen, echart_ranking
 from .views import (gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html,
-                    coverage_targets, coverage_chart, coverage_summary, replica_card)
+                    coverage_targets, coverage_chart, coverage_summary, replica_card, phase_rows)
 from .content import t
 from ..i18n import pick, colon, paren, LANGS, LANG_NAMES, QUASAR_LANG
 from .gate_text import gate_title, gate_general, option_text
@@ -816,11 +816,8 @@ def workflow_page(project: str, name: str):
             report_btn = ui.button(t("open_report", L),
                                    on_click=lambda: ui.navigate.to(f"/report/{project}/{name}?lang={lang()}", new_tab=True)).props("outline")
         _binding_panel(wf, project, name)
-        steps = ui.table(columns=[{"name": k, "label": l, "field": k, "align": "left",
-                                   **({"style": "white-space: normal; max-width: 560px"} if k == "message" else {})}
-                                  for k, l in (("step", t("step", L)), ("status", t("status", L)), ("at", t("time", L)),
-                                               ("message", t("message", L)))],
-                         rows=[], row_key="key").props("dense flat").props(no_data()).classes("w-full md20-card")
+        # D-153: the pipeline skeleton in four phases, top-to-bottom = first-to-last (views.phase_rows)
+        steps = ui.column().classes("w-full md20-card gap-0").style("padding:14px 18px")
         ui.label(t("poses", L)).classes("font-semibold")
         poses = ui.table(columns=[{"name": k, "label": l, "field": k, "align": "left"} for k, l in
                                   (("entry", _("配體", "Ligand", "リガンド", "리간드")), ("rank", _("名次", "Rank", "順位", "순위")),
@@ -1047,6 +1044,7 @@ def workflow_page(project: str, name: str):
         scr_sig = {"v": None}
         cov_sig = {"v": None}
         time_sig = {"v": None}
+        step_sig = {"v": None}
 
         def refresh():
             job = RUNNER.get(wf)
@@ -1057,9 +1055,26 @@ def workflow_page(project: str, name: str):
             render_confirm()
             m = pick(snap["message"], L)                  # the runner's own messages are (zh, en, ja, ko) tuples
             msg.set_content(f"```\n{m}\n```" if m else "")
-            steps.rows = [{**r, "step": pick(STEP_TEXT.get(r.get("key"), r["step"]), L),
-                           "status": pick(STATUS_TEXT.get(r["status"], r["status"]), L),
-                           "at": (r.get("at") or "").replace("T", " ")[:19]} for r in snap["steps"]]
+            prows = phase_rows(wf, lang=L)
+            psig = [(r["kind"], r.get("key"), r.get("state"), r["label"]) for r in prows]
+            if psig != step_sig["v"]:
+                step_sig["v"] = psig
+                steps.clear()
+                with steps:
+                    for r in prows:
+                        if r["kind"] == "phase":
+                            ui.label(r["label"]).classes("md20-section").style("margin:12px 0 4px")
+                        else:
+                            mod, glyph = theme.gate_state(r["state"] if r["state"] in STATUS_TEXT else None)
+                            faint = r["state"] in ("not_started", "not_used")
+                            sl = r["status_label"] or pick(STATUS_TEXT.get(r["state"], r["state"]), L)
+                            with ui.row().classes("items-center gap-2 w-full").style("padding:3px 0 3px 10px"
+                                                  + ("; opacity:.5" if faint else "")):
+                                ui.html(f'<span class="md20-glyph" aria-hidden="true">{"○" if faint else glyph}</span>')
+                                ui.label(r["label"]).classes("text-sm").style("min-width:220px")
+                                ui.label(sl).classes("text-xs text-gray-500")
+                                if r["at"]:
+                                    ui.label(r["at"]).classes("text-xs text-gray-500")
             rows = pose_table(wf, L)
             for r in rows:
                 r["key"] = f"{r['entry']}-{r['rank']}"

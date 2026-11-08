@@ -162,6 +162,33 @@ def test_teaching_tier_runs_the_windows_it_requires(tmp_path):
     assert wf._binding_config({}).window_prod_ps == 50.0
 
 
+def test_funnel_restraint_is_the_default_for_teaching_and_research_not_classroom(tmp_path):
+    """D-151 (user 2026-11-08): the ranking-grade funnel ΔG° is the default for teaching/research; classroom stays on
+    the radial approximation; an explicit binding.config.restraint always wins."""
+    wf = _wf(tmp_path / "f")
+    for tier in ("teaching", "research"):
+        wf.cfg["md"]["tier"] = tier
+        assert wf._binding_config({}).restraint == "funnel", tier
+    wf.cfg["md"]["tier"] = "classroom"
+    assert wf._binding_config({}).restraint == "none"
+    wf.cfg["md"]["tier"] = "teaching"                         # explicit choice overrides the default, either way
+    assert wf._binding_config({"config": {"restraint": "none"}}).restraint == "none"
+    assert wf._binding_config({"config": {"restraint": "funnel"}}).restraint == "funnel"
+
+
+def test_a_result_from_before_the_funnel_default_is_not_reopened_as_funnel(tmp_path):
+    """D-151: finished_result must treat a stored radial result (no `restraint` in its manifest config) as radial, so
+    the new funnel default does not silently relabel or re-run it as a funnel result."""
+    from md20.sampling.binding import finished_result, BindingConfig
+    from md20.util import atomic_write_json
+    out = tmp_path / "bind"; out.mkdir()
+    legacy = {k: v for k, v in BindingConfig().to_dict().items() if k != "restraint"}   # pre-D-151 manifest
+    atomic_write_json({"status": "PASS", "config": legacy, "result": {"status": "PASS", "dG_standard_kj_mol": -20.0}},
+                      out / "binding_manifest.json")
+    assert finished_result(out, BindingConfig(restraint="funnel")) is None    # funnel request ≠ stored radial → reopen
+    assert finished_result(out, BindingConfig(restraint="none")) is not None  # radial request matches the stored radial
+
+
 def test_oversized_box_is_a_notice_not_a_block(tmp_path):
     """D-56 (REVIEW #6): a box over 40 Å is flagged in state["advisories"] and shown as a card; the run is not blocked."""
     from md20.gui.views import gate_cards

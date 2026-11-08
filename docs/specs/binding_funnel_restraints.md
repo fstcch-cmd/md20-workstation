@@ -77,7 +77,7 @@ K_b = π R_cyl² ∫_site exp[−β (W(z) − W_bulk)] dz（site = W 回到 W_bu
 | `funnel_k` | 4000 | 側向與 z 下限牆的彈簧常數 k_f（kJ/mol/nm²） |
 | `funnel_z_min_nm` | −0.2 | z 下限牆 |
 
-**預設為 `none`（所有 tier）。** 規格 §3.4 原寫「teaching／research 預設 funnel」；實作時改為預設關閉，理由與切換條件在 DECISIONS D-140。切換前使用者以 `binding.config.restraint: funnel` 明確開啟。
+**預設（D-151，使用者 2026-11-08 授權）：teaching／research 預設 `funnel`、classroom 預設 `none`**（回到 §3.4 原意）。使用者在 `binding.config.restraint` 明確指定時以其為準。舊的徑向結果（manifest 無 restraint 欄位）一律視為徑向，不被新預設誤判（finished_result）。
 
 ### 6.2 公式（單位：長度 nm，能量 kJ/mol，kT = k_B T）
 - 軸與座標：c = 口袋 anchor 質心（活的），**u** = 起始結合態 (配體質心 − c)／‖…‖（最小映像）。z = (x − c)·u；ρ = ‖(x − c) − z·u‖。z₀ = ‖x₀ − c‖。

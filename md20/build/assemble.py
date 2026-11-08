@@ -586,7 +586,7 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
                     metal_params: dict | None = None, solvent: str = "explicit", ions: dict | None = None,
                     ligand_metal: str | None = None, accept_geometry: bool = False,
                     membrane: dict | None = None, smd_box: dict | None = None,
-                    metal_water_state: dict | None = None) -> BuildResult:
+                    metal_water_state: dict | None = None, metal_carboxylate: dict | None = None) -> BuildResult:
     """`smd_box` (D-99) = {"pull_nm", "margin_nm", "allowance_nm", "ligands": [names] | None}: the case will be pulled
     (SMD/umbrella), so the water box is sized with the SMD box rule before solvation instead of a fixed padding.
     `metal_water_state` (D-141) = {site key or element: "water" | "hydroxide"}: protonation of the metal-bound water.
@@ -626,7 +626,7 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
     from .receptor import METAL_SITE_WATERS
     site_waters = Path(receptor_pdb).parent / METAL_SITE_WATERS if receptor_pdb is not None else None
     metal_plans = apply_metal_policy(modeller, ff, metal_policy, ph=ph, metal_params=metal_params,
-                                     qm_dir=out_dir / "metal_qm", water_state=metal_water_state,
+                                     qm_dir=out_dir / "metal_qm", water_state=metal_water_state, carboxylate=metal_carboxylate,
                                      site_waters=site_waters if site_waters and site_waters.is_file() else None) \
         if receptor_pdb is not None else []
     for g in site_gates(metal_plans):

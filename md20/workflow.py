@@ -181,7 +181,7 @@ def example_config(screen: bool = False) -> dict:
 # keys that hold *human decisions* written back by gates/GUI (never re-derivable); re-running `pipeline run` from
 # the student's original file must not silently discard them
 DECISION_KEYS: tuple[tuple[str, ...], ...] = (
-    ("pose_choices",), ("human_choices",), ("structure_override",), ("metal_policy",), ("metal_params",), ("metal_water_state",), ("peptide_policy",),
+    ("pose_choices",), ("human_choices",), ("structure_override",), ("metal_policy",), ("metal_params",), ("metal_water_state",), ("metal_carboxylate",), ("peptide_policy",),
     ("docking", "skip_redock"), ("box", "allow_blind"), ("binding", "manual_windows"),
     ("screen", "select"), ("screen", "next_mode"), ("screen", "allow_partial"), ("md_confirmed",), ("ligand_metal",),
     ("multi_ligand",), ("md", "long_run_confirmed"), ("md", "long_run"),
@@ -1370,6 +1370,7 @@ class Workflow:
                        exclude_chains=set(self.cfg["receptor"].get("exclude_chains", [])),
                        metal_policy=self.cfg.get("metal_policy") or None,
                        metal_water_state=self.cfg.get("metal_water_state") or None,
+                       metal_carboxylate=self.cfg.get("metal_carboxylate") or None,
                        peptide_policy=self.cfg.get("peptide_policy") or None,
                        metal_params=self._metal_params(), solvent=self._solvent(screen),
                        box_shape=self.cfg.get("md", {}).get("box_shape", "dodecahedron"),
@@ -1997,6 +1998,16 @@ class Workflow:
             self.dec.record("workflow.binding", "window length", f"{min_w:.0f} ps（equil {user_cfg['window_equil_ps']:.0f} ps）",
                             f"{tier} 等級要輸出 ΔG° 需每個 window ≥ {min_w:.0f} ps；未在 binding.config 指定時自動採用此長度"
                             "（每個 window 的算力約為 classroom 的 10 倍以上）。", kind="auto")
+        # D-151 (使用者 2026-11-08 授權預設開啟)：teaching／research 預設以漏斗約束＋解析標準態算 ΔG°（唯一可排序的
+        # 標準態，規格 §3.4 原意）；classroom 用徑向近似、只示範流程不輸出可排序 ΔG°。使用者在 binding.config.restraint
+        # 明確指定時以其為準（並照常接受評估）。
+        if "restraint" not in user_cfg:
+            user_cfg["restraint"] = "none" if tier == "classroom" else "funnel"
+            if user_cfg["restraint"] == "funnel":
+                self.dec.record("workflow.binding", "結合約束方式", "漏斗（預設）",
+                                f"{tier} 等級預設以漏斗約束＋解析標準態計算 ΔG°（唯一可用於親和力排序的標準態，D-140／D-151）；"
+                                "拉離會延伸到漏斗錐＋圓柱、窗口沿軸向 z。若只要快速示範、不需可排序 ΔG°，"
+                                "可設 binding.config.restraint: none（徑向 1 M 近似）。", kind="auto")
         cfg = BindingConfig(**user_cfg)
         return cfg
 

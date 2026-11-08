@@ -6,6 +6,35 @@
 ---
 
 ## 2026-11-08
+### D-153　流程頁步驟表改為四階段完整骨架：由上到下＝前到後（使用者 2026-11-08）
+- **問題**：使用者指出 UI 步驟表由上到下看起來順序怪——「建模」排在對接後面像顛倒、條件步驟（折疊／高通量）沒跑到就不顯示讓骨架跳。
+- **查證**：實際執行順序正確（高通量篩選、胜肽折疊都在對接前；MD 系統建立在對接後，因為要用選定姿勢組裝，是必然）。問題在呈現，不在執行順序。
+- **決定**（使用者選「分四階段＋完整骨架」）：workflow 頁步驟表改為四階段【準備→對接→模擬→分析】固定完整骨架（`views.STEP_PHASES`／`phase_rows`）；未跑到的步驟標「尚未開始」、本案例用不到的條件步驟（無胜肽則折疊、未開篩選、apo-only 則對接）標「未使用」並灰階；「建模」改名「MD 系統建立」並歸入「模擬」階段，不再被誤認為前期準備。狀態用形狀＋顏色（●通過／◐已自動修正／○灰）。
+- **理由**：固定骨架讓「由上到下＝前到後」永遠成立、順序穩定、流程一目了然；改名消除「建模在對接後很奇怪」的認知落差。不動執行順序（動了會破壞「對接完才能用姿勢建 MD 系統」）。
+- **測試**：`tests/test_phase_steps.py`（5 項：完整有序骨架、改名、未使用判定、apo-only、已完成狀態）。真機套用由 CI gui-preview。
+- **相關檔案**：`md20/gui/views.py`（STEP_PHASES／PHASE_STEP_LABELS／phase_rows／_case_uses_step）、`md20/gui/app.py`（workflow 頁改用骨架渲染）、`tests/test_phase_steps.py`、`docs/specs/gui_design.md`。
+
+### D-152　鋅競爭羧基閘門（使用者授權選項 D）：偵測到金屬旁未配位帶電羧基就 NEEDS_HUMAN，不建會塌陷的模型
+- **背景**：D-150 列出鋅塌陷的解法選項，使用者 2026-11-08「依照你建議開發」＝採選項 D（寧可擋也不要猜）。
+- **決定**：
+  - `find_sites` 偵測 bonded 金屬 COMPETING_COO_A（4.5 Å）內、未配位、帶電的 GLU/ASP 羧基氧（OE1/OE2/OD1/OD2；GLH/ASH 中性不算），存 `site["competing_carboxylates"]`。
+  - `plan_site`：policy 為 `bonded` 且有競爭羧基且使用者未決定 → NEEDS_HUMAN 閘門「competing carboxylate」，四語選項：restrain（排除該羧基與金屬非鍵＋平底下限約束維持晶體距離）／coordinate（確認直接配位）／質子化為中性變體／keep_nonbonded／accept（接受塌陷，僅示範不可用）。
+  - 使用者選 restrain → `add_metal_forces` 排除 Zn–羧基氧非鍵（移除點電荷塌陷驅動力）＋加 flat-bottom 下限牆（`k·step(r0−r)(r0−r)²`，只擋更近、晶體距離為界）。決定鍵 `metal_carboxylate` 串過 assemble_system／build_case／workflow，加入 DECISION_KEYS。
+- **理由**：選項 D 把「會塌陷的壞模型」變成明確三態閘門，符合產品哲學且可純邏輯測試；restrain 是使用者知情選擇（非我自動猜），排除非鍵移除吸引源比單純加約束可靠。
+- **被否決**：預設自動 restrain（科學模型變更不該自動，且 k 未經筆電校準）；放寬門檻（不做）。
+- **測試**：`tests/test_metal_competing_carboxylate.py`（6 項純邏輯：偵測範圍、預設閘門、restrain 生成排除＋下限牆、accept 警告、decision 解析、無羧基不受影響）；`test_bonded_zinc_ca2` 移除 D-150 的 xfail，改為驗證「預設發閘門」＋「restrain 後建模跑 MD、Glu106 不再塌到 2.6 Å 內」（真機交 CI heavy[metal]）。
+- **未決（待 CI heavy[metal] 證實）**：restrain 的排除＋下限牆是否在真機真的防止塌陷；若 CI 仍紅，下一步考慮下限牆 k 校準或質子化路徑（選項 B）。coordinate 路徑目前仍以非鍵處理（真正納入鍵結需 metal_params 的 M–O 參數，未完整）。
+- **相關檔案**：`md20/build/metal.py`（find_sites／plan_site／carboxylate_for／add_metal_forces／COMPETING_COO_A／CARBOXYLATE_O／K_COO_WALL）、`md20/build/assemble.py`、`md20/build/pipeline.py`、`md20/workflow.py`（DECISION_KEYS＋build_case 呼叫）、`tests/test_metal_competing_carboxylate.py`、`tests/test_metal_integration.py`、`docs/specs/metal_sites.md`。
+
+### D-151　漏斗 ΔG° 轉為預設開啟（使用者 2026-11-08「預設開啟」）：teaching／research 預設 funnel、classroom 徑向
+- **背景**：D-140 當初預設關閉（真機未驗證）。使用者授權預設開啟，回到規格 §3.4 原意。
+- **決定**：`BindingConfig.restraint` 預設 `"none"`→`"funnel"`；`Workflow._binding_config` 依 tier 設預設（teaching／research → funnel，classroom → none），使用者在 `binding.config.restraint` 明確指定時以其為準。向後相容：`finished_result` 對缺 `restraint` 欄位的舊 manifest 一律視為徑向（`cfg_stored.setdefault("restraint","none")`），避免新預設把舊的徑向結果誤當漏斗結果返回或重跑。
+- **理由**：漏斗＋解析標準態是唯一可排序的 ΔG°；CI `test_nacl_funnel` part 1（力能量鏡像）已通過，樣本不足路徑已 D-149 優雅 withhold。
+- **被否決**：全 tier 都開（classroom 只示範流程、不需可排序 ΔG°，維持徑向較快）。
+- **測試**：`test_funnel_restraint_is_the_default_for_teaching_and_research_not_classroom`、`test_a_result_from_before_the_funnel_default_is_not_reopened_as_funnel`，並更新 D-140 的三個預設相關測試。
+- **未決**：漏斗預設開啟後 teaching／research 的結合計算會較慢（拉離更遠、沿軸向窗口）；筆電實測時間待 D-72。
+- **相關檔案**：`md20/sampling/binding.py`（restraint 預設、finished_result 向後相容）、`md20/workflow.py`（_binding_config tier 預設）、`tests/test_workflow_gates.py`、`tests/test_funnel.py`、`docs/specs/binding_funnel_restraints.md`。
+
 ### D-150　鋅 bonded 模型的根本限制（CI 證偽 D-133 的因果假設）：配位水佔位無法阻止 Glu106 塌陷，交使用者決定模型路徑
 - **證據**：heavy[metal] job（c014e8b run 42389077410、6b4ca2e run 42434941771，job 128597205386）：`test_bonded_zinc_ca2` 的結構斷言全過、D-145 修好 NaN、MD 跑完 90 s，但 **GLU106:OE1 平均距 Zn 1.74 Å（20/20 幀）**，HOH402:O 鍵在 1.935 Å，三個 His 鍵長 2.12–2.19 Å。即鋅現在是 His₃＋水＋Glu106 的六配位，Glu 以最短距離塞入。
 - **判定（模型不足，非程式缺陷）**：D-133 假設「開放的第四位點被 Glu106 佔據，加配位水佔位即可推開」。CI 證偽：配位水已佔第四位點，Glu106 仍塌到 1.74 Å。真因是 **Zn²⁺ 與帶負電羧基之間在 12-6＋點電荷下排斥不足**，與第四位點是否開放無關。真實 CA II 的 Glu106 不直接配位鋅（OE 到 Zn 約 3.9 Å，與 Thr199／鋅水形成氫鍵網路）；1.74 Å 是力場假象。

@@ -47,6 +47,9 @@
 ### 4f. D-150：根本限制（CI 證偽 D-133 的因果假設）
 配位水佔位（D-133）與水氫角（D-145）修好了 NaN 與配位數，但 **CI 證明 Glu106 羧基仍塌到 Zn 1.74 Å**：這是點電荷 bonded 模型對帶電第二殼層羧基的塌陷，與第四位點是否開放無關。`test_bonded_zinc_ca2` 已標 xfail(strict)。解法（排除競爭羧基非鍵＋維持距離／質子化 Glu106／MCPB 全殼層／對這類位點發 NEEDS_HUMAN）屬科學模型變更，待使用者決定（DECISIONS D-150）。
 
+### 4g. D-152：競爭羧基閘門（使用者授權選項 D）
+bonded 金屬 4.5 Å 內有未配位帶電羧基（GLU/ASP OE/OD）→ NEEDS_HUMAN「competing carboxylate」，選項 restrain（排除金屬–羧基非鍵＋平底下限約束維持晶體距離）／coordinate／質子化／keep_nonbonded／accept。決定鍵 `metal_carboxylate`。這把 D-150 的塌陷從「靜默壞模型」變成明確閘門。restrain 真機效果待 CI heavy[metal]。
+
 ### 4d. D-133 結果（2026-11-07）
 - **證據**：CI job 128427389578（`58d81bc`）診斷：GLU106:OE1 距 Zn **1.74 Å**（20/20 幀）、CD 2.48 Å；三個 Zn–N 全部被拉長（2.30／2.25／2.36 Å，r0 2.03／2.04／2.02）。
   是附近帶負電的羧基，不是溶劑水，塌陷到開放的第四位點（12-6 點電荷下 Zn²⁺–O⁻ 沒有足夠排斥）。H1 成立；H2 加大 k 也無法阻止整個位點被拉走，H3 不是主因。

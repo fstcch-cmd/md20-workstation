@@ -40,6 +40,9 @@ DONORS = {("HIS", "NE2"): "N", ("HIS", "ND1"): "N", ("CYS", "SG"): "S", ("ASP", 
 HIS_NAMES = {"HIS", "HID", "HIE", "HIP"}
 CYS_NAMES = {"CYS", "CYM", "CYX"}
 CUTOFF_A = {"N": 2.45, "O": 2.6, "S": 2.6}
+COMPETING_COO_A = 4.5                 # D-152: look this far for a non-coordinating carboxylate that would collapse
+CARBOXYLATE_O = {"GLU": ("OE1", "OE2"), "ASP": ("OD1", "OD2")}   # anionic only (GLH/ASH are neutral, no collapse)
+K_COO_WALL = 2 * 100.0 * 4.184 * 100  # D-152: lower-wall k for a restrained competing carboxylate (≈ K_BOND scale)
 WATER = {"HOH", "WAT", "TIP3", "SOL"}
 # D-139: first-shell metal–water(O) target distances (Å), Harding, Acta Cryst D 62:678 (2006) Table / Harding 2001;
 # a crystal water is bonded to a `bonded` site only within target + WATER_SHELL_TOL_A (2.6 Å stays the detection
@@ -68,6 +71,12 @@ SCEE, SCNB = 1.2, 2.0                # Amber 1-4 scaling (electrostatics, LJ)
 def policy_for(key: str, policy: dict | None) -> str | None:
     p = policy or {}
     return p.get(key) or p.get(key.split(":")[0])
+
+
+def carboxylate_for(key: str, cfg: dict | None) -> str | None:
+    """D-152: `metal_carboxylate` decision for a site (restrain / coordinate / accept); None = not decided → gate."""
+    v = policy_for(key, cfg)
+    return None if v is None else str(v).strip().lower()
 
 
 def water_state_for(key: str, cfg: dict | None) -> str | None:
@@ -113,8 +122,21 @@ def find_sites(atoms: list[dict], *, metals: set[str] | None = None) -> list[dic
                 donors.append(rec)
             elif not a.get("is_protein"):
                 foreign.append(rec)
+        # D-152: anionic carboxylate O of a non-coordinating GLU/ASP within COMPETING_COO_A but outside the
+        # coordination cutoff.  In a point-charge model these collapse onto the metal (CI: CA II Glu106 OE1 → Zn
+        # 1.74 Å), so a bonded site that has one is stopped for the user's decision (plan_site) rather than built.
+        donor_idx = {r["index"] for r in donors}
+        competing = []
+        for j in np.where((d > 0.5) & (d <= COMPETING_COO_A))[0]:
+            a = atoms[int(j)]
+            if int(a["index"]) in donor_idx or not a.get("is_protein"):
+                continue
+            if _base(a["resname"]) in CARBOXYLATE_O and a["name"] in CARBOXYLATE_O[_base(a["resname"])]:
+                competing.append({"index": a["index"], "name": a["name"], "resname": a["resname"], "chain": a["chain"],
+                                  "resseq": a["resseq"], "distance_A": round(float(d[j]), 2)})
         sites.append({"key": f"{m['resname'].upper()}:{m['chain']}{m['resseq']}", "metal_index": m["index"],
-                      "metal_xyz": list(map(float, m["xyz"])), "donors": donors, "waters": waters, "foreign": foreign})
+                      "metal_xyz": list(map(float, m["xyz"])), "donors": donors, "waters": waters, "foreign": foreign,
+                      "competing_carboxylates": competing})
     return sites
 
 
@@ -195,7 +217,7 @@ def choose_hydroxide_h(metal_xyz, o_xyz, h_xyzs) -> int:
 
 
 def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params: dict | None = None,
-              residue_atoms: dict | None = None, water_state: str | None = None) -> dict:
+              residue_atoms: dict | None = None, water_state: str | None = None, carboxylate: str | None = None) -> dict:
     """Decide what to do with one metal site → {status, action, bonds, angles, variants, gate, why}.
 
     `params` (metal_params spec for this site) replaces the crystal-geometry constants with fitted ones
@@ -349,6 +371,37 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
         caveats.append("bonded_open：配位水不加回，該配位位置開放；附近帶負電的基團可能塌陷到金屬上（D-133 診斷），只在配體要佔該位置時使用。")
     elif len(donors) < 4 and not site_w:
         caveats.append(f"只有 {len(donors)} 個配位原子且晶體沒有記錄配位水：開放位點可能被溶劑水、配體或附近帶負電基團佔據。")
+    # D-152: a non-coordinating anionic carboxylate near a bonded metal collapses onto it in a point-charge model
+    # (CI: CA II Glu106 → Zn 1.74 Å).  Stop for the user's decision rather than build a model that will collapse;
+    # `bonded_open`/hydroxide handle their own open-site case above, so this guards the plain `bonded` water model.
+    comp = [c for c in (site.get("competing_carboxylates") or [])]
+    if comp and policy == "bonded":
+        if carboxylate is None:
+            names = "、".join(f"{c['resname']}{c['resseq']}:{c['name']}（{c['distance_A']} Å）" for c in comp)
+            out.update(status=NEEDS_HUMAN, gate_name=f"competing carboxylate {key}", competing_carboxylates=comp,
+                       why=f"{key} 旁有未配位的帶電羧基（{names}）。點電荷力場下 Zn²⁺ 與羧基之間排斥不足，MD 中羧基會塌到金屬上"
+                           "（CI 實測 CA II 的 Glu106 塌到 1.74 Å），產生非物理的配位。程式不自動處理，請你決定：",
+                       options=[f"metal_carboxylate: {{{key}: restrain}}（排除該羧基與金屬的非鍵作用，並以平底下限約束維持晶體距離；維持結構，須標註）",
+                                f"metal_carboxylate: {{{key}: coordinate}}（確認該羧基確實直接配位金屬 → 改以 bonded 鍵結，需晶體距離支持）",
+                                f"該殘基若在金屬微環境質子化，請改用中性變體（GLH／ASH）後重建（需 pKa 證據）",
+                                f"metal_policy: {{{key}: keep_nonbonded}}（整個金屬用非鍵離子模型＋位置約束，不建鍵）",
+                                f"metal_carboxylate: {{{key}: accept}}（接受塌陷，僅示範，結果不可用於結構或能量）"])
+            return out
+        if carboxylate == "restrain":
+            out["competing_carboxylates"] = comp
+            out["competing_restraints"] = [{"metal": site["metal_index"], "donor": c["index"],
+                                            "r0_nm": round(c["distance_A"] / 10.0, 4), "k": K_COO_WALL,
+                                            "label": f"{c['resname']}{c['resseq']}:{c['name']}"} for c in comp]
+            caveats.append(f"依使用者選擇（metal_carboxylate: restrain），{len(comp)} 個鄰近帶電羧基氧（"
+                           + "、".join(f"{c['resname']}{c['resseq']}:{c['name']}" for c in comp)
+                           + "）與金屬的非鍵作用已排除，並以平底下限約束維持其晶體距離，防止點電荷塌陷（D-152）。"
+                           "這是結構維持的近似，不是真實配位；若該羧基其實直接配位金屬，應改用 coordinate。")
+        elif carboxylate == "accept":
+            caveats.append("警告：使用者選擇接受鄰近帶電羧基的塌陷（metal_carboxylate: accept）。金屬位點幾何將非物理，"
+                           "此結果只能示範流程，不可用於結構或能量分析（D-152）。")
+        elif carboxylate == "coordinate":
+            caveats.append("使用者確認鄰近羧基直接配位金屬（metal_carboxylate: coordinate）：目前仍以非鍵處理，"
+                           "若要真正納入鍵結請在 metal_params 提供該羧基的 M–O 參數（D-152 未完整，仍可能塌陷）。")
     out.update(status=AUTO_FIXED, action="bonded", bonds=bonds, angles=angles, variants=variants, caveats=caveats,
                why=f"{key} 依使用者設定建立鍵結模型：{geom}（" + "、".join(b["label"] + f" {b['r0_nm'] * 10:.2f} Å" for b in bonds)
                    + "）" + (f"；配位殘基質子化改為 " + "、".join(f"{k}→{v}" for k, v in variants.items()) if variants else "")
@@ -585,7 +638,7 @@ def register_hydroxide_template(forcefield, xml: str, path=None) -> str | None:
 
 def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float = 7.4,
                        metal_params: dict | None = None, qm_dir=None, site_waters=None,
-                       water_state: dict | None = None) -> list[dict]:
+                       water_state: dict | None = None, carboxylate: dict | None = None) -> list[dict]:
     """Edit the receptor Modeller in place (remove metals / reprotonate coordinating residues) and return the
     final per-site plans with indices valid for the edited topology (ligands/solvent are appended later,
     so receptor indices stay valid in the assembled system).  `water_state` = `metal_water_state` (D-141)."""
@@ -600,7 +653,8 @@ def apply_metal_policy(modeller, forcefield, policy: dict | None, *, ph: float =
 
     def plan_for(s, xyz_of=None, residue_atoms=None):
         return plan_site(s, policy_for(s["key"], policy), xyz_of, params=policy_for(s["key"], metal_params),
-                         residue_atoms=residue_atoms, water_state=water_state_for(s["key"], water_state))
+                         residue_atoms=residue_atoms, water_state=water_state_for(s["key"], water_state),
+                         carboxylate=carboxylate_for(s["key"], carboxylate))
 
     atoms, sites = snapshot()
     if not sites:
@@ -877,5 +931,26 @@ def add_metal_forces(system, plans: list[dict], positions_nm, topology=None) -> 
             f.addParticle(i, [float(v) for v in pos[i]])
             info["restrained_metals"].append(p["key"])
         system.addForce(f)
+    # D-152: a competing carboxylate the user chose to restrain — exclude its nonbonded interaction with the metal
+    # (removes the point-charge collapse driving force) and add a flat-bottom lower wall at the crystal distance
+    # (holds the geometry, leaves it free to move away).  User-chosen, recorded in the plan; never automatic.
+    coo = [(p["metal_index"], r) for p in plans for r in (p.get("competing_restraints") or [])]
+    if coo:
+        nb = [fo for fo in system.getForces() if isinstance(fo, mm.NonbondedForce)]
+        cnb = [fo for fo in system.getForces() if isinstance(fo, mm.CustomNonbondedForce)]
+        wall = mm.CustomBondForce("k_coo*step(r0-r)*(r0-r)^2")   # lower wall only: no force when r ≥ r0
+        wall.addPerBondParameter("r0"); wall.addPerBondParameter("k_coo")
+        wall.setName("msw_competing_carboxylate_walls")
+        for m, r in coo:
+            wall.addBond(m, r["donor"], [r["r0_nm"], r["k"]])
+            for fo in nb:
+                fo.addException(m, r["donor"], 0.0, 0.1, 0.0, True); info["exclusions"] += 1
+            for fo in cnb:
+                try:
+                    fo.addExclusion(m, r["donor"])
+                except Exception:  # noqa: BLE001
+                    pass
+        system.addForce(wall)
+        info["competing_carboxylate_walls"] = len(coo)
     return info
 
