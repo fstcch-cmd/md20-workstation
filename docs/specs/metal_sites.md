@@ -50,6 +50,12 @@
 ### 4g. D-152：競爭羧基閘門（使用者授權選項 D）
 bonded 金屬 4.5 Å 內有未配位帶電羧基（GLU/ASP OE/OD）→ NEEDS_HUMAN「competing carboxylate」，選項 restrain（排除金屬–羧基非鍵＋平底下限約束維持晶體距離）／coordinate／質子化／keep_nonbonded／accept。決定鍵 `metal_carboxylate`。這把 D-150 的塌陷從「靜默壞模型」變成明確閘門。restrain 真機效果待 CI heavy[metal]。
 
+### 4h. D-165：擬合參數／OH⁻ 路徑的競爭羧基（D-152 後續）
+D-154 曾把 §4g 閘門縮到純 bonded 水模型；D-165 補上擬合與 OH⁻ 路徑，**只在擬合來源「證明涵蓋」該羧基時放行**（`metal_params.carboxylate_coverage`）：
+- 涵蓋依據：`covers_residues`（`"A:106"`／`"GLU106"`／`"106"`，任何來源，json 可寫在檔案內）＝使用者聲明 QM 小模型／MCPB 模型含該殘基；mcpb 的 PDB 含該羧基氧；json 的 `charges` 含該殘基該氧。hessian 檔不記殘基，只認 `covers_residues`。
+- 全涵蓋 → 不擋，`why`／caveats／`evidence.carboxylate_coverage` 記依據；未涵蓋或讀不出來 → NEEDS_HUMAN `competing carboxylate <位點>`，選項 restrain／納入 QM／MCPB 模型重擬合並列入 `covers_residues`／質子化為中性（GLH／ASH）／keep_nonbonded／accept（擬合路徑無 coordinate）。
+- 決定鍵仍是 `metal_carboxylate`，restrain 仍是排除非鍵＋下限牆（§4g）。不改力場、不自動 restrain、不放寬門檻。純 bonded 水模型行為不變。[純邏輯測試已驗證；真機交 CI heavy[metal]]
+
 ### 4d. D-133 結果（2026-11-07）
 - **證據**：CI job 128427389578（`58d81bc`）診斷：GLU106:OE1 距 Zn **1.74 Å**（20/20 幀）、CD 2.48 Å；三個 Zn–N 全部被拉長（2.30／2.25／2.36 Å，r0 2.03／2.04／2.02）。
   是附近帶負電的羧基，不是溶劑水，塌陷到開放的第四位點（12-6 點電荷下 Zn²⁺–O⁻ 沒有足夠排斥）。H1 成立；H2 加大 k 也無法阻止整個位點被拉走，H3 不是主因。

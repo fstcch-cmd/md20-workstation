@@ -25,6 +25,7 @@ STRUCTURE_OVERRIDE = {"resolution": "resolution", "R-free": "r_free", "ligand oc
                       "pocket occupancy": "pocket"}
 _METAL_OPT = re.compile(r"metal_policy:\s*\{\s*([A-Za-z0-9:]+)\s*:\s*(bonded_open|bonded|keep_nonbonded|remove)\s*\}")
 _WATER_STATE_OPT = re.compile(r"metal_water_state:\s*\{\s*([A-Za-z0-9:]+)\s*:\s*(water|hydroxide)\s*\}")
+_CARBOXYLATE_OPT = re.compile(r"metal_carboxylate:\s*\{\s*([A-Za-z0-9:]+)\s*:\s*(restrain|coordinate)\s*\}")
 _LOCATIONS = {"intracellular": "intracellular", "extracellular-membrane": "extracellular-membrane", "secreted": "secreted"}
 
 
@@ -75,6 +76,13 @@ def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) ->
         if m:
             return _act(option, [{"path": ["metal_water_state", m.group(1)], "value": m.group(2)}], "md_cases")
         return None            # "metal_policy: {…: bonded}" is handled by the generic metal_policy rule above
+    # D-152/D-165 competing carboxylate: restrain / coordinate are decisions the program carries out (one click);
+    # accept stays a typed config edit (it makes the result unusable), refit / protonate are work outside the program
+    if name.startswith("competing carboxylate "):
+        m = _CARBOXYLATE_OPT.search(option)
+        if m:
+            return _act(option, [{"path": ["metal_carboxylate", m.group(1)], "value": m.group(2)}], "md_cases")
+        return None            # "metal_policy: {…: keep_nonbonded}" is handled by the generic metal_policy rule above
     # imported charges refused at build time: keep the fitted bonds/angles, drop the charges for that site
     if name.startswith("metal charges ") and gate.get("status") == "NEEDS_HUMAN":
         key = name.split(" ", 2)[2]

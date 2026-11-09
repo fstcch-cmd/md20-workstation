@@ -12,6 +12,7 @@ Structure:
 Options are translated by exact text or by prefix; anything not listed is shown as written.
 """
 from __future__ import annotations
+import re
 
 from ..i18n import pick
 
@@ -981,3 +982,59 @@ OPTIONS.update({
         "metal_params에 site_water 블록(RESP 전하와 M-O 결합 매개변수) 제공"),
 })
 PREFIX.append(("metal_water_state: {", ("Water state of the metal-bound water:", "金属に結合した水の状態：", "금속에 결합한 물의 상태:")))
+
+
+# D-152/D-165 uncoordinated charged carboxylate next to a bonded metal (md20/build/metal.py plan_site, docs/specs/metal_sites.md §4g)
+GATES.update({
+    "competing carboxylate": (
+        ("金屬旁未配位的帶電羧基", "Charged carboxylate next to the metal, not coordinated", "金属の近くにある配位していない荷電カルボキシル基",
+         "금속 옆의 배위하지 않은 전하 카르복실기"),
+        ("金屬附近有一個沒有配位、帶負電的 Glu 或 Asp 羧基。點電荷力場裡 Zn²⁺ 對它的排斥不足，模擬中它會塌到金屬上，變成不存在的配位"
+         "（實測 CA II 的 Glu106 塌到 1.74 Å）。使用擬合參數或氫氧根時，只有擬合時納入該殘基的模型才算涵蓋它；"
+         "參數來源沒有列出它、或程式讀不出來時，程式不猜，停在這裡由你決定。",
+         "A negatively charged Glu or Asp carboxylate sits near the metal without being coordinated. In a point-charge force field the "
+         "Zn2+ does not repel it enough, so during the simulation it collapses onto the metal and forms a coordination that does not exist "
+         "(CA II Glu106 collapsed to 1.74 A in testing). With fitted parameters or a hydroxide, only a fit that included this residue "
+         "covers it. If the parameter source does not list it, or the program cannot read the source, the program does not guess and stops here.",
+         "金属の近くに、配位していない負電荷の Glu または Asp のカルボキシル基があります。点電荷の力場では Zn2+ との反発が足りず、"
+         "シミュレーション中に金属へ崩れ込み、実在しない配位ができます（CA II の Glu106 が試験で 1.74 Å まで崩れました）。"
+         "フィッティングしたパラメータや水酸化物イオンを使う場合でも、その残基をフィッティングに含めたモデルだけが対象になります。"
+         "パラメータの出典に記載がない、または読み取れないときは、推測せずここで止まります。",
+         "금속 근처에 배위하지 않은 음전하 Glu 또는 Asp 카르복실기가 있습니다. 점전하 역장에서는 Zn2+의 반발이 부족해 "
+         "시뮬레이션 중 금속 위로 무너져 실제로 없는 배위가 생깁니다(시험에서 CA II Glu106이 1.74 Å까지 무너짐). "
+         "피팅 매개변수나 수산화 이온을 써도 그 잔기를 피팅에 포함한 모델만 해당합니다. "
+         "매개변수 출처에 없거나 읽을 수 없으면 추측하지 않고 여기서 멈춥니다.")),
+})
+
+OPTIONS.update({
+    "把該殘基納入 QM 小模型或 MCPB 模型重新擬合，並在 metal_params 以 covers_residues 列出該殘基（或讓參數檔含它的電荷）": (
+        "Include the residue in the QM cluster or MCPB model, refit, and list it under covers_residues in metal_params (or give its charges in the parameter file)",
+        "その残基を QM 小モデルまたは MCPB モデルに含めて再フィッティングし、metal_params の covers_residues に載せる（またはパラメータファイルに電荷を入れる）",
+        "그 잔기를 QM 소모델 또는 MCPB 모델에 포함해 다시 피팅하고 metal_params의 covers_residues에 기재(또는 매개변수 파일에 전하 포함)"),
+    "該殘基若在金屬微環境質子化，請改用中性變體（GLH／ASH）後重建（需 pKa 證據）": (
+        "If the residue is protonated in the metal environment, switch to the neutral variant (GLH / ASH) and rebuild (needs pKa evidence)",
+        "その残基が金属の環境でプロトン化しているなら、中性の変種（GLH／ASH）に替えて作り直す（pKa の根拠が必要）",
+        "그 잔기가 금속 환경에서 양성자화되어 있다면 중성 변이체(GLH/ASH)로 바꿔 다시 구성(pKa 근거 필요)"),
+})
+
+_CARBOXYLATE_VALUES = {
+    "restrain": ("Hold it in place: drop its non-bonded interaction with the metal and add a lower distance wall at the crystal distance (labelled in the report)",
+                 "位置を保つ：金属との非結合相互作用を外し、結晶の距離に下限の壁を置く（レポートに明記）",
+                 "위치 유지: 금속과의 비결합 상호작용을 빼고 결정 거리에 하한 벽을 둠(보고서에 표시)"),
+    "coordinate": ("Confirm that it really coordinates the metal (needs support from the crystal distance)",
+                   "実際に金属へ配位していることを確認する（結晶の距離による裏づけが必要）",
+                   "실제로 금속에 배위함을 확인(결정 거리의 뒷받침 필요)"),
+    "accept": ("Accept the collapse (demonstration only, not usable for structure or energy)",
+               "崩れを受け入れる（デモ専用、構造やエネルギーには使えません）",
+               "무너짐을 수용(시연 전용, 구조·에너지에는 사용 불가)"),
+}
+_orig_option_text = option_text
+
+
+def option_text(option: str, lang: str) -> str:    # noqa: F811
+    """Adds the `metal_carboxylate: {site: value}` options (D-165) to the generic lookup."""
+    if option.startswith("metal_carboxylate: {"):
+        m = re.match(r"metal_carboxylate:\s*\{\s*([A-Za-z0-9:]+)\s*:\s*(\w+)\s*\}", option)
+        if m and m.group(2) in _CARBOXYLATE_VALUES:
+            return pick((option, *_CARBOXYLATE_VALUES[m.group(2)]), lang)
+    return _orig_option_text(option, lang)
