@@ -1065,7 +1065,7 @@ def mbar_pmf_1d(
     solver_protocol: Any = None,
     with_overlap: bool = True,
 ) -> dict[str, Any]:
-    """`with_overlap=False` (D-162): skip the overlap matrix and per-window histograms (bootstrap replicates never
+    """`with_overlap=False` (D-168): skip the overlap matrix and per-window histograms (bootstrap replicates never
     read them; the O(N*K^2) overlap + eigen-decomposition was computed and thrown away for every replicate).
     `initial_f_k`: warm start (bootstrap replicates start from the base solution; D-62).  `solver_protocol`:
     passed to pymbar when given (e.g. "robust" after the base solve needed a fallback).  A pymbar that does not
@@ -1233,7 +1233,7 @@ def _moving_block_resample(
     block_length = max(1, min(int(block_length), n))
     n_blocks = int(math.ceil(n / block_length))
     starts = rng.integers(0, n, size=n_blocks)
-    # D-162: one fancy-index instead of a Python loop over blocks (same RNG draw, identical output)
+    # D-168: one fancy-index instead of a Python loop over blocks (same RNG draw, identical output)
     indices = (starts[:, None] + np.arange(block_length)[None, :]) % n
     return x[indices.reshape(-1)[:n]]
 
@@ -1270,7 +1270,7 @@ def bootstrap_pmf_1d(
     prefer_mbar: bool = True,
     n_jobs: int = 1,
 ) -> dict[str, Any]:
-    """`n_jobs` (D-162): >1 solves the replicates in a process pool (default 1 = off).  Resampling is done in the
+    """`n_jobs` (D-168): >1 solves the replicates in a process pool (default 1 = off).  Resampling is done in the
     parent in the serial order, so the result does not depend on n_jobs."""
     eq_lists = [_finite_1d(x, min_samples=20) for x in equilibrated_sample_lists]
     prepared_uncorr = []

@@ -6,6 +6,42 @@
 ---
 
 ## 2026-11-09
+### D-168　MBAR / WHAM bootstrap 加速（保守版；已實作、待 CI 真 pymbar 驗證）
+日期：2026-11-09
+
+## 決定
+科學定義不變（moving-block 重抽、每個重複重新估計 PMF、2.5/97.5 百分位當 CI）。只做不改結果的加速：
+1. `_moving_block_resample` 向量化（一次 fancy index 取代逐 block 的 Python 迴圈）。RNG 抽取次數與順序不變，輸出逐位元相同。
+2. 重複不再計算用不到的東西：`mbar_pmf_1d(..., with_overlap=False)` 略過 `compute_overlap()`（O(N·K²) + 特徵分解）與逐窗口直方圖；基本解仍照舊計算並保留重疊矩陣（D-113）。
+3. 重抽樣迴圈抽成模組層級 `_bootstrap_replicate`，並新增 `bootstrap_pmf_1d(..., n_jobs=1)`：>1 時用 process pool（spawn，不用 fork，避免 GUI 多執行緒死鎖）平行解各重複。重抽樣仍在父行程依序進行，所以結果與 n_jobs 無關（測試證明）。預設關閉；pool 建不起來時退回序列，結果相同。
+4. 原有 D-62 的 f_k 暖啟動與 robust protocol 維持不變（先前已做，不是新工作）。
+
+## 被否決／無效的做法
+- **WHAM 暖啟動（initial_f_k）**：實作後量測，重複的迭代次數與冷啟動相近（約 700-1000 次，有時更多）。WHAM 的定點迭代是線性收斂、停止條件看步長，起點近一點省不了多少。已移除，避免無益的複雜度。
+- 預先算好 reduced potential 再只做索引：重抽樣後 x_n 是連續座標，u_kn 每次都不同，無法只靠索引；WHAM 格點上的 u_kl 雖是常數但相對迭代成本可忽略。
+- 改用牛頓法／Anderson 加速 WHAM：會改變迭代軌跡，屬另開題目，未做。
+- 執行緒平行：`redirect_stdout`／logging handler 為全域狀態，多執行緒會互相覆蓋，故用行程。
+- `bootstrap_binding_sigma`：只是對每條曲線跑 `radial_pmf`（numpy 小陣列），不是熱點，未改。
+
+## 證據／測試（tests/test_bootstrap_speed.py）
+- 向量化重抽樣與舊 block 迴圈逐位元相同（多種 block 長度，含 > n）。
+- MBAR（numpy 替身）bootstrap 曲線與「舊重複迴圈」參考實作一致，atol 1e-10 kJ/mol；基本解同。
+- 重複只呼叫 1 次 compute_overlap（基本解）。
+- WHAM bootstrap 曲線與參考一致，atol 1e-12。
+- n_jobs=2 與 n_jobs=1 曲線一致，atol 1e-12。
+- 計時只印出（`-s` 可見），不當斷言。
+
+## 誠實的速度結論
+容器內（numpy 替身 MBAR、27 窗口、10 重複）量不到明顯加速：替身的自洽迭代主導成本，重疊矩陣只佔一小部分；WHAM 路徑同樣無差。真 pymbar 下略過 overlap 的省下量、以及 n_jobs>1 的實際加速倍數，**只能在 CI／使用者機器驗證**。n_jobs 的預期收益是接近核心數倍（重複彼此獨立），但 Windows spawn 有每行程匯入 numpy/pymbar 的固定成本。
+
+## 相關檔案
+md20/sampling/_mdh_legacy.py（`mbar_pmf_1d`、`estimate_pmf_1d`、`_moving_block_resample`、`_bootstrap_replicate`、`bootstrap_pmf_1d`）、tests/test_bootstrap_speed.py。
+
+## 未決
+- `n_jobs` 尚未接到 `pmf_from_windows` / GUI / 設定（目前只在 `bootstrap_pmf_1d` 參數）；要不要暴露、預設值，待使用者決定。
+- 真 pymbar 的 `initial_f_k` 暖啟動實際省多少迭代，需在 CI 記錄 `quality["solver"]["timing_s"]`。
+- 自適應停止 bootstrap（σ 收斂即停）仍未決（見 umbrella_adaptive.md）。
+
 ### D-167　起草 LLM 規則檔範本 `docs/llm/MD20_LLM_GUIDE.md`（end-user 版，草案，待審）
 - **背景**：D-161 規格 §4 定義每次連線交給 LLM 的規則檔，第八個 session 提議但未起草。使用者 2026-11-09「全做」。
 - **決定**：只起草 end-user 版範本，依規格 §4 的五塊（角色、硬規則、能力地圖與動作、除錯步驟、報告誠實與寫作規範）加隱私連線一節。動作表明確標示「規劃中，尚未實作」，對應規格 §12 的 L1–L2。全文自身遵守 `writing_style.md`。
@@ -82,41 +118,17 @@
 - 檔案：`environment/*.yml`、`.github/workflows/ci.yml`、`tests/test_env_lock.py`、`docs/specs/supply_chain.md`。
 - 未決：(a) 拿到 CI 的 `lock-<OS>` artifact 後，把其餘套件依實際版本改成 `==` 並縮小 PENDING_UNPINNED；(b) 是否讓安裝程式直接用 `micromamba create -f <lock>`（需 lock 檔入庫，且每 OS×GPU 一份）；(c) pip 套件（meeko、gemmi）雜湊鎖定（`pip install --require-hashes`）；(d) osx-64 覆蓋；(e) 已安裝的舊環境不會被改動（`install -f` 補齊時才會受新釘選影響，可能降級或升級 openmm，需 CI installer job 觀察）。
 
-### D-162　MBAR / WHAM bootstrap 加速（保守版；已實作、待 CI 真 pymbar 驗證）
-日期：2026-11-09
+### D-162　簽發端 `MD20-Signer.cmd` 誤用 Python 2（MGLTools）修正（使用者筆電實測回報）
+- **現象**：使用者雙擊私人 repo `md-digital-signature` 的 `MD20-Signer.cmd`,報 `MGLTools-1.5.7\python.exe: No module named pip` 與 `SyntaxError: Non-ASCII character '\xe6' ... no encoding declared`。兩者都是 **Python 2** 的徵狀。
+- **根因**：原 .cmd 邏輯是「先設 `PY=python`,只有 `where python` 失敗才改 `py`」。使用者 PATH 上有 MGLTools-1.5.7 的 `python.exe`(Python 2),`where python` 會成功 → 一直用到 Python 2。signer_gui.py 是 Python 3(f-string/type hint),Python 2 解析第一行中文 docstring 時因無編碼宣告先爆 SyntaxError。
+- **決定/修法**(簽發端 repo,無程式邏輯變更、純啟動器與編碼):
+  - `MD20-Signer.cmd`:改成**優先 `py -3`**(官方啟動器,不受 PATH 順序影響);無 py 啟動器才退用 `python` 且**必須確認主版本為 3**,否則明確報「你的 PATH 可能只有 Python 2(MGLTools)」並中止。用 `setlocal enabledelayedexpansion`＋`!VER!` 避免括號區塊的展開坑。
+  - `MD20-Signer.command`(macOS):同理優先 `python3`,退用 `python` 時以 `sys.version_info[0]==3` 檢核。
+  - `gui/signer_gui.py`:第一行加 `# -*- coding: utf-8 -*-`(保險;真正保護靠 .cmd 選對直譯器,因 Python 2 仍會在 f-string 等語法 parse 時失敗)。
+- **證據**:`python3 -m py_compile gui/signer_gui.py` OK;簽發端 78 passed;`tools/check_no_private_keys.py` 綠(repo 內只有公鑰)。
+- **安全**:純啟動器修正,未動簽章/驗證邏輯,無後門、無私鑰。
+- **相關**:簽發端 commit(見該 repo),本 repo 僅此決策紀錄。
 
-## 決定
-科學定義不變（moving-block 重抽、每個重複重新估計 PMF、2.5/97.5 百分位當 CI）。只做不改結果的加速：
-1. `_moving_block_resample` 向量化（一次 fancy index 取代逐 block 的 Python 迴圈）。RNG 抽取次數與順序不變，輸出逐位元相同。
-2. 重複不再計算用不到的東西：`mbar_pmf_1d(..., with_overlap=False)` 略過 `compute_overlap()`（O(N·K²) + 特徵分解）與逐窗口直方圖；基本解仍照舊計算並保留重疊矩陣（D-113）。
-3. 重抽樣迴圈抽成模組層級 `_bootstrap_replicate`，並新增 `bootstrap_pmf_1d(..., n_jobs=1)`：>1 時用 process pool（spawn，不用 fork，避免 GUI 多執行緒死鎖）平行解各重複。重抽樣仍在父行程依序進行，所以結果與 n_jobs 無關（測試證明）。預設關閉；pool 建不起來時退回序列，結果相同。
-4. 原有 D-62 的 f_k 暖啟動與 robust protocol 維持不變（先前已做，不是新工作）。
-
-## 被否決／無效的做法
-- **WHAM 暖啟動（initial_f_k）**：實作後量測，重複的迭代次數與冷啟動相近（約 700-1000 次，有時更多）。WHAM 的定點迭代是線性收斂、停止條件看步長，起點近一點省不了多少。已移除，避免無益的複雜度。
-- 預先算好 reduced potential 再只做索引：重抽樣後 x_n 是連續座標，u_kn 每次都不同，無法只靠索引；WHAM 格點上的 u_kl 雖是常數但相對迭代成本可忽略。
-- 改用牛頓法／Anderson 加速 WHAM：會改變迭代軌跡，屬另開題目，未做。
-- 執行緒平行：`redirect_stdout`／logging handler 為全域狀態，多執行緒會互相覆蓋，故用行程。
-- `bootstrap_binding_sigma`：只是對每條曲線跑 `radial_pmf`（numpy 小陣列），不是熱點，未改。
-
-## 證據／測試（tests/test_bootstrap_speed.py）
-- 向量化重抽樣與舊 block 迴圈逐位元相同（多種 block 長度，含 > n）。
-- MBAR（numpy 替身）bootstrap 曲線與「舊重複迴圈」參考實作一致，atol 1e-10 kJ/mol；基本解同。
-- 重複只呼叫 1 次 compute_overlap（基本解）。
-- WHAM bootstrap 曲線與參考一致，atol 1e-12。
-- n_jobs=2 與 n_jobs=1 曲線一致，atol 1e-12。
-- 計時只印出（`-s` 可見），不當斷言。
-
-## 誠實的速度結論
-容器內（numpy 替身 MBAR、27 窗口、10 重複）量不到明顯加速：替身的自洽迭代主導成本，重疊矩陣只佔一小部分；WHAM 路徑同樣無差。真 pymbar 下略過 overlap 的省下量、以及 n_jobs>1 的實際加速倍數，**只能在 CI／使用者機器驗證**。n_jobs 的預期收益是接近核心數倍（重複彼此獨立），但 Windows spawn 有每行程匯入 numpy/pymbar 的固定成本。
-
-## 相關檔案
-md20/sampling/_mdh_legacy.py（`mbar_pmf_1d`、`estimate_pmf_1d`、`_moving_block_resample`、`_bootstrap_replicate`、`bootstrap_pmf_1d`）、tests/test_bootstrap_speed.py。
-
-## 未決
-- `n_jobs` 尚未接到 `pmf_from_windows` / GUI / 設定（目前只在 `bootstrap_pmf_1d` 參數）；要不要暴露、預設值，待使用者決定。
-- 真 pymbar 的 `initial_f_k` 暖啟動實際省多少迭代，需在 CI 記錄 `quality["solver"]["timing_s"]`。
-- 自適應停止 bootstrap（σ 收斂即停）仍未決（見 umbrella_adaptive.md）。
 
 ### D-161　LLM 編排與智慧化輔助納入範圍（更正 10-31「AI 連接器出範圍」；使用者 2026-11-09 指示，規格待審查）
 - **北極星願景(使用者 2026-11-09 定為終極目標)**：讓完全不懂分子模擬的外行人,用任何語言、用說的,透過 LLM 對話就自動接管整個程式、前中後深度參與、產出專案報告——「用說的就能做完整的分子模擬」。四條設計真相:教學版是驗證專家迴圈的正確路徑;外行人無法判斷對錯故閘門/誠實報告最重要(最該防的失敗=漂亮自信的報告讓人過度相信);「自動接管」是在有界自主框架(autonomy.md)內、仍會停下升級;「完整」=誠實假說 + 需要哪些濕實驗,不是定論真實世界問題。見規格 §0。

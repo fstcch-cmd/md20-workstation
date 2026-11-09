@@ -1,6 +1,6 @@
-"""D-162: bootstrap speed-ups must not change the scientific result.
+"""D-168: bootstrap speed-ups must not change the scientific result.
 
-Reference = the pre-D-162 replicate loop (python block loop, cold WHAM, overlap computed), re-implemented here.
+Reference = the pre-D-168 replicate loop (python block loop, cold WHAM, overlap computed), re-implemented here.
 MBAR uses the numpy stand-in from test_mbar_bootstrap (real pymbar runs in the openmm-stack CI).
 Tolerances: resampling, WHAM and MBAR replicate curves are asserted equal to the reference at atol 1e-10..1e-12 kJ/mol.
 Timing is printed, never asserted."""
@@ -23,7 +23,7 @@ def _old_resample(x, block_length, rng):
 
 
 def _reference_boot(eq, centers, k, T, n, seed, prefer_mbar, bins=200):
-    """Pre-D-162 replicate loop: cold WHAM, overlap always computed, per-block python loop."""
+    """Pre-D-168 replicate loop: cold WHAM, overlap always computed, per-block python loop."""
     lists = [mdh._finite_1d(x, min_samples=20) for x in eq]
     gs = [mdh._fallback_statistical_inefficiency(x) for x in lists]
     blocks = [max(1, int(math.ceil(g))) for g in gs]
@@ -84,7 +84,7 @@ def test_replicates_skip_the_overlap_matrix(monkeypatch):
 
 
 def test_wham_bootstrap_matches_reference():
-    """WHAM path (no warm start: measured to save nothing, D-162) is unchanged apart from the vectorised resampling."""
+    """WHAM path (no warm start: measured to save nothing, D-168) is unchanged apart from the vectorised resampling."""
     centers, eq = _eq(_windows(lo=0.2, hi=0.8, n=400))
     base, ref = _reference_boot(eq, centers, 1000.0, 300.0, 4, 5, False, bins=80)
     new = mdh.bootstrap_pmf_1d(eq, centers, 1000.0, 300.0, n_bootstrap=4, seed=5, bins=80, prefer_mbar=False)
