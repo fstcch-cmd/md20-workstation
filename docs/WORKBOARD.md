@@ -4,12 +4,13 @@
 不要動別人認領中的檔案／主題；需要時在該列下方留言。決策理由寫在 `docs/DECISIONS.md`，規格寫在 `docs/specs/`。
 
 ## 進行中
+> 2026-11-09 10:30：session_016gcJz6aoRW5kLP9Jzbi7kj（第八個）**關閉**。本 session 完成 D-155～D-161、**發行 v0.1.0a20**（main 回 a21.dev0）、LLM 編排規格草案；由它認領的項目全部釋出。**LLM 編排規格待使用者與其他模型審查後才動工，下一個 session 勿自行實作。** 詳見 `docs/HANDOFF.md` §0（2026-11-09）。
 > 2026-11-02 20:40：session_016gcJz8q2F6515MWPncJEZu 關閉，以下由它認領的項目**全部釋出**，下一個 session 可直接接手（見 `docs/archive/HANDOFF_2026-11-02.md` §6）。
-> 新增待辦：MBAR bootstrap 加速（承諾使用者，未開始）；發行 v0.1.0a3（等 617658e CI）。
+> 新增待辦：MBAR bootstrap 加速（承諾使用者，未開始）。
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
-| **Evidence-Driven Repair R1–R8 第一輪**：完成 D-130（重做）、D-133～D-138，已合併 main（見 HANDOFF §0 第七個 session）；待 CI 驗證真實路徑；11/08 續做 D-139～D-144 全部合併；剩餘：漏斗轉預設（待驗證）、預算（擁有者）、窗口延長 API | 使用者 11/07 23:01 | session_016gcJz6aoRW5kLP9Jzbi7kj | 2026-11-07 23:25 | 授權第 3 層 D-128 已於第六個 session 完成 |
+| **（已釋出）Evidence-Driven Repair R1–R8＋11/08–11/09 收尾**：完成 D-130（重做）、D-133～D-144；11/09 續 D-155～D-159（清假示範、CI 修正、離子去碰撞通則、timeout）、**D-160 發行 v0.1.0a20**、D-161 LLM 編排規格草案。剩餘：LLM 規格待審、漏斗轉預設（待驗證）、預算（擁有者）、D-128 加密層、鋅配體配位參數化 | 使用者 11/07 23:01 | session_016gcJz6aoRW5kLP9Jzbi7kj（已關閉 11/09） | 2026-11-07 23:25 | 授權第 3 層 D-128 已於第六個 session 完成 |
 | **授權與數位簽章（第 2–4 層）**：D-124 LICENSE 已完成；D-125 簽章授權開發中（分支 agent/license-gate，未推）；簽發端移到私人 repo `md-digital-signature`；第 3、4 層待做 | 使用者 11/07 21:50–22:11 | session_016gcJz8q8wadWxHb24EMCKt | 2026-11-07 21:55 | 私鑰永不進 repo；第 4 層需使用者建 Secret |
 | **第五個 session（主 session＋Sonnet 子代理）：D-111～D-123 已整合並一次 push**（使用者：push 不要太頻繁，批次推送）；ac5fba5 CI 已跑完，紅燈全在已修範圍。28e87aa 已證實：膜 case B Windows／macOS PASSED（D-102），case C water overlaps 閘門＋bilayer→declashed（D-104）。下一項：micromamba／conda 鎖版（supply_chain §2） | 使用者 11/07（開發順序由開發者決定） | session_016gcJz8q8wadWxHb24EMCKt | 2026-11-07 19:06 | 勿動 md20/sampling/assessment.py 的 mbar_overlap、md20/docking/vina_cli.py |
 | **GUI 穩定性（D-103）：計算改獨立子程序、狀態與進度從檔案讀回、GUI 重開接回；補 D-102 漏掉的 water overlaps 四語說明**；D-103～D-110 全部已推（a20）：GUI 穩定性、建膜即時 3D、分析工具箱、系統比較、證據矩陣、CI 修紅、runner 移除、拒絕理由四語。**驗證點 ac5fba5**（勿再 push，讓 openmm-stack 三 OS／heavy 跑完）。待授權：P1A 自動補窗、A8 漏斗約束（屬協定變更）、藍圖第 2–4 階段（需工作站＋計算預算）。待筆電：D-72、URI 數值、D-103 關主控台存活 | 使用者 11/07 | session_016gcJz7pQmKkZzkUxg6SqVs | 2026-11-07 17:35 | 勿動 md20/gui/worker.py、md20/gui/logic.py 的 Runner/ProcessJob |

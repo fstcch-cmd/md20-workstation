@@ -5,6 +5,28 @@
 
 ## 0. 新 session 第一步
 
+> **2026-11-09 第八個 session（session_016gcJz6aoRW5kLP9Jzbi7kj，Opus 4.8）交接。使用者 11/09 10:13 指示收尾、關閉 session。**
+>
+> **第一步照舊：`git pull`，讀 `docs/STATUS.md` 開頭（已更新到 11/09）、本 §0、`docs/DECISIONS.md` 最上面（D-161→D-155）。兩個 repo 都要 add_repo＋clone（md20-workstation 驗證端＋私人 md-digital-signature 簽發端）。**
+>
+> **本 session 做了（全部已 push 到 main，HEAD 見 `git log`）：**
+> - **v0.1.0a20 已發行（D-160）**：使用者 11/08 授權「CI 全綠後直接 release」。main 現為 **a21.dev0**。發行機制與**代理封鎖建 tag 的繞法**（推 `release/v0.1.0a20` 分支＋`gh workflow run release-windows.yml -f tag=v0.1.0a20`，由 workflow 自己的 token 建 tag）記在 D-160 與 STATUS。發行頁已存在、Windows/macOS 乾淨安裝驗證通過。
+> - **D-155** 清遺留假示範（docked_BEN/trypsin_demo）；**D-156/D-157** CI 測試修正（np.trapezoid、Vina 資產暫時性網路錯誤 skip）；**D-158 離子去碰撞通則**（`assemble.plan_ion_declash`，使用者明確要通則非單案，真機 pose-screen 已過）；**D-159** openmm-stack timeout 90→120 分。
+> - **D-161 LLM 編排規格（`docs/specs/llm_orchestration.md`，草案）**：含北極星願景（外行人用任何語言、用說的做完整分子模擬）、五原則、前中後三階段、一核心多轉接頭、兩種 build、碰核心一律本地模型、檔案存取、報告雙形式。11/09 補 §5 BYO-key 連接風險同意閘＋三條登入路徑。
+>
+> **⚠ LLM 編排規格是草案，未實作。** 照使用者規則：**規格先給使用者與其他模型審查、收到回饋後才動工**。新 session 不要自行開始實作 LLM 編排;先等使用者回饋,並把回饋採納/不採納記進該規格檔。
+>
+> **下一步候選（使用者尚未指派，等回饋）：**
+> - LLM 編排規格的審查回饋 → 記進 `docs/specs/llm_orchestration.md` 並視情況修正。
+> - `docs/llm/MD20_LLM_GUIDE.md` 規則檔範本（§4 提到，交給 LLM 當 instructions）— 本 session 提議未起草。
+> - 筆電：使用者雙擊 Install-a20 ＋自己發真實授權後，協助確認 license 狀態（本 session 已備妥沙盒 .cmd 與 Word 手冊 `MD20_使用手冊_v0.1.0a20.docx`）。
+>
+> **仍待做（承前，使用者決定或開發者自排）：** D-128 加密發行層；鋅配體直接配位參數化（目前只有 D-53 距離約束後備）、鋅擬合/OH⁻ 競爭羧基塌陷（D-150/D-152 未決、科學模型變更待使用者決定）；受體長 loop 自動處理；漏斗 ΔG° 預設關閉待 CI＋筆電驗證（D-140）；D-72 筆電實測；autonomy 計算預算數字（擁有者）。
+>
+> **安全紅線（不可退讓，本 session 再次確認）：** 私鑰永不進任何 repo/log/對話；驗證端無 env/設定/參數後門；不要為了測試方便換公鑰或加旁路（本 session 一度嘗試被安全分類器正確擋下、已撤）。推送要批次（一輪 CI 跑完再推）。查 CI 用單次 `gh run view`/`gh run list`,不要 sleep 迴圈輪詢。
+>
+> ---
+>
 > **2026-11-07 第七個 session（session_016gcJz6aoRW5kLP9Jzbi7kj，Opus 5.5 主 session＋5 個 Sonnet 子代理）交接。**
 >
 > **做了（全部在 main，已審查合併；push 狀態見最後一個 commit 訊息與 `git status`）：** 規格 `docs/specs/evidence_driven_repair_prompt.md` R1–R8 第一輪。

@@ -1,5 +1,19 @@
 # MD20 單機教學版 — 狀態報告
 
+## 當前事實（2026-11-09 第八個 session，session_016gcJz6aoRW5kLP9Jzbi7kj；收尾交接）
+- **對外發行最新＝v0.1.0a20**（2026-11-09 發行，prerelease）。main 為開發中 **a21.dev0**。能力現況看 `docs/CAPABILITIES.md`（D-136）。
+- **已發行 v0.1.0a20（D-160，使用者 11/08 授權「CI 全綠後直接 release 最新版」）**：commit A `c1b4c58`（版本 0.1.0a20＋manifest）、commit B `d2b680e`（main 碰回 a21.dev0）。**環境代理封鎖建 tag**（`git push` tag 與 `gh api git/refs`、`git/tags` 皆 403），繞法＝推分支 `release/v0.1.0a20` 指向 commit A ＋ `gh workflow run release-windows.yml --ref release/v0.1.0a20 -f tag=v0.1.0a20`，由 release workflow 在 runner 上用自己的 GITHUB_TOKEN 建 tag 並發佈。**release workflow 已在乾淨 Windows／macOS 實際解壓安裝驗證通過才發佈**。發行頁 https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a20 。
+- **本 session（11/09）做的（全部已 push 到 main）**：
+  - **D-155** 清除遺留 `docked_BEN`／`trypsin_demo` 假示範，`gui_preview.py` 改真實教學案例 hsieh2024（1VKX＋六藜芽代謝物）；`report_template.py` 刻意保留苯甲脒共結晶並加說明（pose_rmsd 結構上需共結晶）。
+  - **D-156** `test_funnel.py:471` `np.trapezoid`→`FN.trapz`（CI numpy 無 trapezoid；D-154 修了產品碼漏了這測試）。
+  - **D-157** `test_pinned_vina_assets_exist` 對暫時性網路錯誤（503/504/Timeout）skip、404 仍 fail。
+  - **D-158 離子去碰撞通則（非單一個案）**：`assemble.plan_ion_declash` 純函式把與其他離子重疊的離子搬到空水位、必要時移除供位水，純 numpy/PBC；織進 `remove_overlapping_waters`，AUTO_FIXED（除非無解才 NEEDS_HUMAN）。`tests/test_ion_declash.py` 6 純幾何測試綠；真機 heavy[pose-screen] 已證實通過。**這是使用者明確要的「通則、服務未來多場域」而非 addSolvent 重試的單案補丁。**
+  - **D-159** openmm-stack「Full test suite」step timeout 90→120 分（Windows 1154 測試全過但 1:29:59 逾時）。
+  - **D-161 LLM 編排納入範圍（含北極星願景）＋規格 `docs/specs/llm_orchestration.md`（草案）**：多輪腦力激盪確立「LLM 當常駐生資專家，編排＋診斷＋報告，疊在確定性引擎上」；五條不可違反原則、前中後三階段、一核心多轉接頭、license 分級＋兩種 build、碰核心一律本地模型、檔案存取三法、報告 canonical＋LLM 敘述槽（守 writing_style.md）。11/09 補 §5：**BYO-key 連接風險同意閘（§5.2）＋三條登入路徑（§5.1，澄清聊天訂閱≠API 金鑰）**。**全份為草案，待使用者與其他模型審查後才動工，尚未實作。**
+- **驗收狀態**：11/08 全專案結構審查結論仍成立（報告圖↔解釋模板無孤兒、四語切換、圖表可讀性 D-89、斷線/閃退、流程結構皆綠且有測試強制，見下方 11/07 區塊）。即時圖表＋3D 即時顯示本 session 確認正常（D-94 iframe 修正經 chromium render 驗證）。容器全套 pytest exit 0（只 skip 無 fail）。
+- **安全（維持不變、不可退讓）**：私鑰永不進任何 repo/log/對話；驗證端無任何 env/設定/參數後門；本 session 一度想做的「換測試公鑰解鎖」測試授權被安全分類器正確擋下、已撤除，只走真實金鑰流程。簽發端 GUI（`md-digital-signature/gui/signer_gui.py`，擁有者自己發鑰）已推。
+- **仍未做（交接）**：見本檔「11/07」區塊 (C) 各項；加上 LLM 編排規格待審、`docs/llm/MD20_LLM_GUIDE.md` 規則檔範本未起草、D-72 筆電實測、D-128 加密發行層、鋅配體直接配位參數化。
+
 ## 當前事實（2026-11-07 第七個 session，session_016gcJz6aoRW5kLP9Jzbi7kj）
 - **對外發行最新仍為 a17**；main 為開發中 a20。單一能力現況看 `docs/CAPABILITIES.md`（D-136，`tools/capability_manifest.py --check` 在 CI 驗證），本檔保留為歷史。
 
