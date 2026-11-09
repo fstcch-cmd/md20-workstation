@@ -1,9 +1,9 @@
-# MD20 base environment (all platforms).  Pin exact versions after first successful lock on each OS.
+# MD20 base environment (all platforms).  D-163: packages with CI-recorded versions are pinned exactly (==); the rest await a CI-produced lock (docs/_pending/D-163.md, tests/test_env_lock.py PENDING_UNPINNED).
 name: md20
 channels: [conda-forge]
 dependencies:
   - python=3.11
-  - numpy>=1.26
+  - numpy==2.4.6      # D-163: exact (CI openmm-stack 5a3fa37 / d879f2b evidence, DECISIONS "NaN" observation)
   - pandas>=2
   - openpyxl          # Excel compound libraries (HTS screen)
   - scipy
@@ -16,7 +16,7 @@ dependencies:
   - mdtraj
   - parmed
   - pymbar>=4
-  - openff-toolkit>=0.16
+  - openff-toolkit==0.18.0   # D-163: exact (same CI evidence)
   - openff-nagl
   - openff-nagl-models
   - lxml               # needed by openmmforcefields (pip install does not pull it)

@@ -281,6 +281,59 @@ def mcpb_residue_map(pdb_text: str) -> dict:
     return out
 
 
+# ================================================================================ D-165 carboxylate coverage
+def _residue_tokens(c: dict) -> set[str]:
+    """Spellings by which a user may name a residue in `covers_residues`: "A:106", "GLU106", "106" (case-insensitive)."""
+    return {f"{c['chain']}:{c['resseq']}".upper(), f"{c['resname']}{c['resseq']}".upper(), str(c["resseq"]).upper()}
+
+
+def carboxylate_coverage(spec: dict | None, comp: list[dict]) -> dict:
+    """D-165 (pure; reads only the spec's own files): does the fitted-parameter source cover each competing carboxylate?
+
+    A fitted model "covers" a carboxylate only when the source states or shows it was part of the fit:
+      * any source: `covers_residues` in the spec (json: also inside the file/data) lists the residue
+        ("A:106", "GLU106" or "106") — the user's explicit statement that the QM small model / MCPB model contained it;
+      * mcpb: the carboxylate O atom appears in the MCPB PDB (`pdb`);
+      * json: the file/data gives charges for that atom (`charges: {"A:106": {"OE1": q}}`).
+    A hessian cluster file does not say which residues it was built from, so only the explicit list counts.
+    Anything the program cannot read or does not find is *not covered* (寧可擋也不要猜): returns
+      {"covered": [labels], "uncovered": [labels], "all_covered": bool, "basis": {label: why}, "unreadable": reason|None}."""
+    spec = spec or {}
+    explicit: set[str] = set()
+    atoms_seen: set[tuple[str, str]] = set()          # (residue token, atom name) known to be in the model
+    unreadable = None
+    try:
+        data = {}
+        if spec.get("source") == "json":
+            import json
+            data = json.loads(Path(spec["file"]).read_text(encoding="utf-8")) if spec.get("file") else spec.get("data") or {}
+        for t in list(spec.get("covers_residues") or []) + list(data.get("covers_residues") or []):
+            explicit.add(str(t).strip().upper())
+        for rid, qs in (data.get("charges") or {}).items():
+            if isinstance(qs, dict):
+                for n in qs:
+                    atoms_seen.add((str(rid).upper(), str(n)))
+        if spec.get("source") == "mcpb" and spec.get("pdb"):
+            for (resseq, name) in mcpb_residue_map(Path(spec["pdb"]).read_text(encoding="utf-8", errors="ignore")):
+                atoms_seen.add((str(resseq), name))
+    except (ValueError, KeyError, OSError, TypeError, AttributeError) as exc:
+        unreadable = f"讀取擬合參數來源失敗：{exc}"
+    covered, uncovered, basis = [], [], {}
+    for c in comp:
+        label = f"{c['resname']}{c['resseq']}:{c['name']}"
+        toks = _residue_tokens(c)
+        if toks & explicit:
+            covered.append(label); basis[label] = "covers_residues 明列該殘基"
+        elif f"{c['chain']}:{c['resseq']}".upper() in {r for r, n in atoms_seen if n == c["name"]}:
+            covered.append(label); basis[label] = "參數檔的電荷表含該羧基氧"
+        elif (str(c["resseq"]), c["name"]) in atoms_seen and spec.get("source") == "mcpb":
+            covered.append(label); basis[label] = "MCPB PDB 含該羧基氧"
+        else:
+            uncovered.append(label)
+    return {"covered": covered, "uncovered": uncovered, "all_covered": bool(comp) and not uncovered,
+            "basis": basis, "unreadable": unreadable}
+
+
 # ============================================================================================== site_water
 SITE_WATER_KEYS = {"state", "charges", "metal_charge", "bond", "angles", "angle_MOH", "residue", "O_atom", "H_atom"}
 

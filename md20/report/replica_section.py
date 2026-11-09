@@ -283,6 +283,16 @@ def structure_html(doc, agg: dict, key: str) -> str:
                               f"Strongest long-range pairs. {lr.get('n_strong_pairs', 0)} strong pairs; {lr.get('n_strong_reproducible')} have the same sign with |C| ≥ {d['thresholds']['replica_min']} in every replica.",
                               f"相関が最も強い遠距離ペア。強い相関のペアは {lr.get('n_strong_pairs', 0)} 個で、全反復で同符号かつ |C| ≥ {d['thresholds']['replica_min']} のものは {lr.get('n_strong_reproducible')} 個です。",
                               f"상관이 가장 강한 원거리 쌍. 강한 쌍 {lr.get('n_strong_pairs', 0)}개 중 모든 반복에서 같은 부호이고 |C| ≥ {d['thresholds']['replica_min']}인 것은 {lr.get('n_strong_reproducible')}개."), {1})
+        if d.get("mean"):
+            from .replica_figs import dccm_replicas
+            from .figure_text import S
+            png = dccm_replicas(d["mean"], d.get("sd"), doc.figdir / f"md_dccm_replicas_{key}.png", ticks=d.get("residues"))
+            nsr = lr.get("n_strong_reproducible")
+            fnd = [S("note", f"{key}：{d['n']} 條重複的 DCCM 平均。遠距離的強相關對 {lr.get('n_strong_pairs', 0)} 個，每條重複都同號的有 {nsr if nsr is not None else '不可得（單一軌跡）'} 個。",
+                     f"{key}: DCCM averaged over {d['n']} replicas. {lr.get('n_strong_pairs', 0)} strong long-range pairs; {nsr if nsr is not None else 'not available (single trajectory)'} keep the same sign in every replica.",
+                     f"{key}：{d['n']} 本の反復で平均した DCCM。遠距離の強い相関ペアは {lr.get('n_strong_pairs', 0)} 個で、全反復で同符号のものは {nsr if nsr is not None else '算出不可（単一の軌跡）'} 個です。",
+                     f"{key}: 반복 {d['n']}개로 평균한 DCCM. 원거리 강한 상관 쌍 {lr.get('n_strong_pairs', 0)}개 중 모든 반복에서 같은 부호인 것은 {nsr if nsr is not None else '계산 불가(단일 궤적)'}개.")]
+            out += doc.figure_block(png, "dccm_replicas", fnd, key)
     else:
         na.append((T("DCCM", "DCCM", "DCCM", "DCCM"), _unavail_reason(d)))
     # ---- PCA basin shares (common basis only) and clusters
@@ -405,6 +415,15 @@ def delta_rmsf_html(doc, comp: dict) -> str:
         for tag, lst in (("up", p.get("most_flexible") or []), ("down", p.get("most_rigidified") or [])):
             for x in lst[:6]:
                 rows.append([_esc(x["residue"]), f"{x['delta_A']:+.2f}", f"[{x['ci95_low']:+.2f}, {x['ci95_high']:+.2f}]", _esc(_kn(L, x["sign_k"], x["sign_n"]))])
+        if p.get("residues"):
+            from .replica_figs import delta_rmsf_replicas
+            from .figure_text import S
+            png = delta_rmsf_replicas(p["residues"], doc.figdir / f"md_delta_rmsf_replicas_{other}.png", label=other)
+            fnd = [S("note", f"{other} 對 {ref}：{p['n_common']} 個殘基中 {p['n_ci_excludes_zero']} 個的區間不含 0，單憑機率預期約 {p['expected_false_positives']} 個。未做多重比較校正。",
+                     f"{other} versus {ref}: the interval excludes 0 for {p['n_ci_excludes_zero']} of {p['n_common']} residues; about {p['expected_false_positives']} are expected by chance. No multiple-comparison correction.",
+                     f"{other} と {ref}：{p['n_common']} 残基中 {p['n_ci_excludes_zero']} 個で区間が 0 を含みません。偶然だけでも約 {p['expected_false_positives']} 個が見込まれます。多重比較の補正はありません。",
+                     f"{other} 대 {ref}: {p['n_common']}개 잔기 중 {p['n_ci_excludes_zero']}개에서 구간이 0을 포함하지 않으며, 우연만으로도 약 {p['expected_false_positives']}개가 예상됩니다. 다중 비교 보정은 없습니다.")]
+            out += doc.figure_block(png, "delta_rmsf_replicas", fnd, other)
         if rows:
             out += doc.table([T("殘基", "Residue", "残基", "잔기"), T("ΔRMSF 差值（Å）", "ΔRMSF (Å)", "ΔRMSF の差（Å）", "ΔRMSF 차이(Å)"), T("95 % 信賴區間（Welch）", "95 % CI (Welch)", "95 % 信頼区間（Welch）", "95 % 신뢰구간(Welch)"),
                               T("方向一致的重複", "Replicas with the same direction", "方向が一致した反復", "방향이 일치한 반복")], rows,

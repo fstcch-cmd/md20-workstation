@@ -102,7 +102,8 @@ def test_fitted_zinc_params_json_ca2(pdb_ca2, tmp_path):
     good.write_text(json.dumps({"bonds": {"N": {"k_kcal_A2": 80.0}}, "angles": {"default": {"k_kcal_rad2": 35.0}},
                                 "charges": {"metal": 2.0}}))
     res = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys", padding_nm=1.0, metal_policy={"ZN": "bonded"},
-                          metal_params={"ZN": {"source": "json", "file": str(good)}})
+                          metal_params={"ZN": {"source": "json", "file": str(good)}},
+                          metal_carboxylate={"ZN": "restrain"})   # D-165: the test json does not cover Glu106
     assert res.status != "NEEDS_HUMAN", res.gates
     p = next(p for p in res.restraints["metals"]["plans"] if p["key"].startswith("ZN"))
     assert p["source"] == "json" and all(abs(b["k"] - 80.0 * 418.4) < 1e-6 for b in p["bonds"])
@@ -116,7 +117,8 @@ def test_fitted_zinc_params_json_ca2(pdb_ca2, tmp_path):
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps({"bonds": {"N": {"k_kcal_A2": 80.0, "r0_A": 2.6}}, "angles": {"default": {"k_kcal_rad2": 35.0}}}))
     res2 = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys2", padding_nm=1.0, metal_policy={"ZN": "bonded"},
-                           metal_params={"ZN": {"source": "json", "file": str(bad)}})
+                           metal_params={"ZN": {"source": "json", "file": str(bad)}},
+                           metal_carboxylate={"ZN": "restrain"})
     assert res2.status == "NEEDS_HUMAN"
     g = next(g for g in res2.gates["gates"] if g["name"].startswith("metal ZN"))
     assert "與晶體" in g["explanation"] and any("幾何鍵結模型" in o for o in g["options"])
@@ -137,7 +139,8 @@ def test_hydroxide_site_water_with_fitted_params_ca2(pdb_ca2, tmp_path):
     f = tmp_path / "zn_oh.json"
     f.write_text(json.dumps(_OH_TEST_JSON))
     res = assemble_system(rman["receptor_pdb"], [], tmp_path / "sys", padding_nm=1.0, metal_policy={"ZN": "bonded"},
-                          metal_params={"ZN": {"source": "json", "file": str(f)}}, metal_water_state={"ZN": "hydroxide"})
+                          metal_params={"ZN": {"source": "json", "file": str(f)}}, metal_water_state={"ZN": "hydroxide"},
+                          metal_carboxylate={"ZN": "restrain"})   # D-165: the test json does not cover Glu106
     assert res.status != "NEEDS_HUMAN", res.gates
     p = next(p for p in res.restraints["metals"]["plans"] if p["key"].startswith("ZN"))
     assert p["water_mode"] == "hydroxide" and p["source"] == "json" and len(p["bonds"]) == 4
