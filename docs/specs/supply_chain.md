@@ -1,6 +1,6 @@
 # 供應鏈與可重現性：外部執行檔與環境版本
 
-狀態：Vina 執行檔 **[已實作・純 Python 測試；真實下載交 CI]**（D-114）；micromamba **[已實作・純 Python 測試；待 CI installer job 驗證]**（D-117）；conda 環境鎖版 **[未做]**。
+狀態：Vina 執行檔 **[已實作・純 Python 測試；真實下載交 CI]**（D-114）；micromamba **[已實作・純 Python 測試；待 CI installer job 驗證]**（D-117）；conda 環境鎖版 **[部分・純 Python 測試；待 CI 解環境]**（D-163：有證據的 openmm／numpy／openff-toolkit 已 `==`，其餘待 CI lock）。
 
 ## 1. AutoDock Vina 執行檔（Windows；Linux/macOS 用 conda 的 `vina` Python 套件）
 - **只用一個釘選版本**：`vina_cli.PINNED_VERSION = "v1.2.7"`。同一班學生一定拿到同一版（D-114 以前：先問 GitHub releases API 拿最新版，被限流才退回 v1.2.5，同一班可能混用兩版）。
@@ -17,6 +17,13 @@
 - 已存在的 micromamba 不重抓、不替換、不驗證。
 - 升級步驟：改兩個腳本的版本號 → 下載五個資產自算 sha256、與官方 `.sha256` 比對 → 更新兩個腳本的雜湊 → `pytest tests/test_installer_pins.py` → 看 `installer-windows`／`installer-macos` job 綠燈 → DECISIONS 新增條目。
 - 狀態：容器內只驗證字串與假 `curl` 的 bash 邏輯；真實下載與 PowerShell 5.1 路徑待 CI。
+
+## 2b. conda 環境鎖版（D-163；進行中）
+- 已精確釘選：`openmm==8.6.1`（四個 gpu yml）、`numpy==2.4.6`、`openff-toolkit==0.18.0`（base.yml），證據是 DECISIONS 中 CI openmm-stack 紀錄；`openmmforcefields==0.15.1` 見 D-95。`python=3.11`、`cuda-version=12.4` 為家族層級釘選。
+- 其餘套件**沒有 repo 內證據就不猜**，列在 `tests/test_env_lock.py::PENDING_UNPINNED`（只能縮小），等 CI 產生。
+- CI `openmm-stack` 的 `lock-<OS>` artifact（`micromamba env export --explicit` 與 `pip freeze`，檔頭記 OS／gpu_yml／commit，保留 90 天）是各 OS 的候選 lock；**不自動 commit**，人工審查後提交。涵蓋 win-64、osx-arm64、linux-64；osx-64 無 runner，待補。
+- `tests/test_env_lock.py` 守住：installer 與 CI 同一組環境檔與 pip 行、有證據的套件為 `==`、未釘選清單不增加。
+- 詳見 `docs/_pending/D-163.md`。
 
 ## 3. 還沒做
 - conda 環境檔多為 `>=`，Linux/macOS 的 `vina>=1.2.5` 與 Windows 執行檔的版本可能不同；需要 lock 檔（每個 OS×GPU 一份，例如 `conda-lock`／`micromamba env export --explicit` 的 `@EXPLICIT` 檔含 sha256）與 CI 產生／比對流程。`pip install` 的 `openmmforcefields==0.15.1`、`meeko~=0.5`、`gemmi` 也沒有雜湊鎖定。這是 micromamba 釘選之外最大的重現性缺口，未動。
