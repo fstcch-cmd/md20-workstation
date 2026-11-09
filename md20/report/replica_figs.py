@@ -67,3 +67,57 @@ def replica_overlay(metrics_by_run: dict[str, dict], path: Path, *, label: str =
                          ("" if n >= BAND_MIN_REPLICAS else " — single trajectory, no between-replica band"), fontsize=10)
     fig.tight_layout()
     return FG._save(fig, Path(path).with_suffix(".png"))
+
+
+def delta_rmsf_replicas(rows: list[dict], path, *, label: str = "") -> str | None:
+    """Per-residue ΔRMSF (other − ref) with the between-replica Welch 95 % CI as a band (D-164).  ``rows`` are the
+    ``residues`` entries of ``delta_rmsf_between_replicas`` (residue, delta_A, ci95_low, ci95_high, ci_excludes_zero).
+    Residues whose interval excludes 0 are marked; no multiple-comparison correction is applied (the caption says so)."""
+    from . import figures as FG
+    if not rows or len(rows) < 3:
+        return None
+    d = np.array([r["delta_A"] for r in rows], float)
+    lo = np.array([r["ci95_low"] for r in rows], float)
+    hi = np.array([r["ci95_high"] for r in rows], float)
+    sig = np.array([bool(r.get("ci_excludes_zero")) for r in rows])
+    x = np.arange(len(rows))
+    plt = FG._plt()
+    fig, ax = plt.subplots(figsize=(6.8, 2.8))
+    st = FG.series_style(f"{label} delta".strip() or "delta")
+    ax.fill_between(x, lo, hi, color="#808080", alpha=0.25, lw=0, label="95 % CI (Welch)")
+    ax.plot(x, d, color=st["color"], lw=1.0, label="ΔRMSF")
+    if sig.any():
+        ax.scatter(x[sig], d[sig], s=14, color="#b8433f", zorder=3, label="CI excludes 0")
+    ax.axhline(0, color="#1f2933", lw=0.6)
+    ax.set_xlabel("Residue index (common residues)")
+    ax.set_ylabel("ΔRMSF (Å)")
+    ax.legend(fontsize=7)
+    fig.tight_layout()
+    return FG._save(fig, Path(path).with_suffix(".png"))
+
+
+def dccm_replicas(mean, sd, path, *, ticks=None) -> str | None:
+    """Two panels: element-wise mean DCCM over replicas (diverging colours, -1 to 1) and element-wise sample SD over
+    replicas (single colour ramp, 0 up to the largest SD).  ``sd`` is None for one replica; then only the mean is drawn."""
+    from . import figures as FG
+    M = np.asarray(mean, float)
+    if M.ndim != 2 or M.shape[0] < 3 or M.shape[0] != M.shape[1]:
+        return None
+    S = None if sd is None else np.asarray(sd, float)
+    plt = FG._plt()
+    fig, axes = plt.subplots(1, 1 if S is None else 2, figsize=(5.2 if S is None else 9.6, 4.2), squeeze=False)
+    panels = [(M, "RdBu_r", -1.0, 1.0, "Mean correlation")]
+    if S is not None:
+        panels.append((S, "viridis", 0.0, max(float(np.nanmax(S)), 0.1), "SD across replicas"))
+    for ax, (A, cmap, vmin, vmax, lab) in zip(axes[0], panels):
+        im = ax.imshow(A, cmap=cmap, vmin=vmin, vmax=vmax, origin="lower", aspect="auto")
+        fig.colorbar(im, ax=ax, label=lab)
+        if ticks:
+            idx = np.arange(len(ticks)) if len(ticks) <= 12 else np.linspace(0, len(ticks) - 1, 8).astype(int)
+            ax.set_xticks(idx, [ticks[i] for i in idx], fontsize=6, rotation=90)
+            ax.set_yticks(idx, [ticks[i] for i in idx], fontsize=6)
+        ax.set_xlabel("Residue")
+        ax.set_ylabel("Residue")
+        ax.set_title(lab, fontsize=9)
+    fig.tight_layout()
+    return FG._save(fig, Path(path).with_suffix(".png"))

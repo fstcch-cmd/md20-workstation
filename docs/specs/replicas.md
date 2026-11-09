@@ -81,7 +81,7 @@
 - **報告（`md20/report/replica_section.py`，四語）**：MD 區加「獨立重複的彙總」：說明重複的定義與後代不算；每條重複的表（狀態、是否納入、RMSD 後半段平均與單條 SE、配體口袋 RMSD 與是否留在口袋、排除原因）；跨重複表（觀測量、n、平均 ± SD、t 區間、k／n、備註）；接觸占有率前 10 名；疊圖；n = 1 時寫「不可得」、不印 SD 與區間；不一致與排除會進該節的解讀。方法段與限制段的重複數改讀實際條數（`configured_or_actual`），不再把沒寫 `md.replicas` 讀成 1。
 - **限制（誠實）**：
   - §2 表其餘項目（ΔRMSF 區間、水合、DSSP、PCA 低谷佔比、DCCM、tICA／MSM、膜指標）已在 D-142 補完，見 §8。
-  - `engine/replicas.aggregate_replicas`（平衡階段的重複彙總）在 n = 1 時 SD 寫成 0.0，與本節「n = 1 不給不確定性」不一致，尚未改。
+  - 更正（D-164）：`engine/replicas.aggregate_replicas` 在 n = 1 時 SD 已是 `null` 並寫 `sd_unavailable`，原寫「SD 寫成 0.0、尚未改」的描述過時。
   - 證據矩陣（`report/evidence.py`）仍讀 `md.get("replicas") or 1`，由另一個代理處理。
   - 真實 mdtraj／OpenMM 路徑沒有在容器內跑，只用偽分析輸出測邏輯，真實路徑交給 CI。
 - 測試：`tests/test_replica_analysis.py`。
@@ -105,4 +105,10 @@
 - **平衡過程與驗收表**（`report/workflow_report.py::_acceptance_html`／`_equil_figures`）：每條重複一列（run id、MD 狀態、NVT／NPT／正式模擬的「通過數／檢查數」與未通過的項目名）；逐項明細與平衡圖放在 `<details class=fold>`（多條時每條一個，第一條展開）。沒完成的重複照列狀態。只有一條時版面不變。列印時 `details` 不展開（CSS 既有規則），所以重點在永遠可見的緊湊表。
 - **膜-only 分析快取（D-135 未決項）**：`membrane_only_analysis(fingerprint=…)` 輸出先寫暫存區，`commit_staging` 換入並最後寫清單（含指紋、輸出雜湊、`prev/` 備份）；指紋 `extra` = 膜計畫、頭基原子、溶質群、`MEMBRANE_ANALYSIS_VERSION`。`_reuse_analysis_manifest` 對膜-only 也用指紋：舊清單（PASS 但無指紋）→ `legacy` 重算，**只重算分析、不重跑 MD**，舊結果留在 `analysis/prev/`。
 - 測試：`tests/test_replica_observables.py`。
-- **限制**：位點配對是貪婪、依序的，緊鄰的兩個位點可能被錯配（0.2 nm 是沿用單條內合併距離）；各重複的疊合參考不同（各自的第一幀），所以位點座標一致也需要各條從同一個姿勢起步。共同基底只在 ≥ 2 個系統時建立，單一系統的多條重複目前沒有可比的低谷佔比（`not_comparable`）。DCCM 平均矩陣沒有出圖（存在彙總檔）。tICA／MSM 不合併是刻意的；「合併增加資料」的做法（原規格表）改為不採用，見 DECISIONS D-142。
+- **限制**：位點配對是貪婪、依序的，緊鄰的兩個位點可能被錯配（0.2 nm 是沿用單條內合併距離）；各重複的疊合參考不同（各自的第一幀），所以位點座標一致也需要各條從同一個姿勢起步。共同基底只在 ≥ 2 個系統時建立，單一系統的多條重複目前沒有可比的低谷佔比（`not_comparable`）。DCCM 平均矩陣原本沒有出圖，D-164 補上（見下）。tICA／MSM 不合併是刻意的；「合併增加資料」的做法（原規格表）改為不採用，見 DECISIONS D-142。
+
+## 9. D-164：兩張跨重複圖（不新增計算）
+- `delta_rmsf_replicas`（`report/replica_figs.py::delta_rmsf_replicas`）：逐殘基 ΔRMSF（複合物重複平均 − apo 重複平均）加 Welch t 95 % 區間灰帶，區間不含 0 的殘基標紅點。圖說與解讀明講**未做多重比較校正**、約 5 % 殘基單憑機率會不含 0。多重比較校正方法仍未決，不自選。
+- `dccm_replicas`（`report/replica_figs.py::dccm_replicas`）：左為各重複 DCCM 逐元素平均，右為逐元素樣本 SD；n = 1 只畫平均。只在彙總檔存了矩陣時出圖（≤ 500 殘基）。不遮蔽任何元素，因為判斷「各條同號」需要每條矩陣，彙總檔沒有存。
+- 報告位置：ΔRMSF 圖接在 `delta_rmsf_html` 的表之前；DCCM 圖接在 `structure_html` 的 DCCM 表之後。範本由 `tools/report_template.py::_replica_demo` 的合成重複渲染。
+- 盤點結論：§2 表的其餘項目（水合、DSSP、PCA 低谷佔比、tICA／MSM、膜指標、平衡驗收逐條列）在 D-142 已完成，沒有再補。決策見 `docs/_pending/D-164.md`。

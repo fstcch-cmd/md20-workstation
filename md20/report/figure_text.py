@@ -766,6 +766,28 @@ FIG.update({
                  "대각선 근처의 상관은 사슬에서 이웃한 잔기에서 옵니다. 대각선에서 먼 강한 상관은 영역 사이의 협동 운동을 나타냅니다. "
                  "결합 전후를 비교하면 리간드의 영향을 받는 장거리 연동을 찾을 수 있습니다."),
     },
+    "delta_rmsf_replicas": {
+        "title": ("逐殘基 ΔRMSF 與重複間信賴區間", "Per-residue ΔRMSF with the between-replica interval", "残基ごとの ΔRMSF と反復間の信頼区間", "잔기별 ΔRMSF와 반복 간 신뢰구간"),
+        "caption": ("兩個系統各殘基 RMSF 的差（重複平均相減），灰色帶是 Welch t 的 95 % 信賴區間，紅點是區間不含 0 的殘基。沒有做多重比較校正。",
+                    "Difference in RMSF per residue between two systems (difference of replica means). The grey band is the Welch t 95 % interval and red dots mark residues whose interval excludes 0. No multiple-comparison correction is applied.",
+                    "2 つの系の残基ごとの RMSF の差（反復平均の差）です。灰色の帯は Welch の t による 95 % 信頼区間で、赤い点は区間が 0 を含まない残基です。多重比較の補正は行っていません。",
+                    "두 시스템의 잔기별 RMSF 차이(반복 평균의 차)입니다. 회색 띠는 Welch t의 95 % 신뢰구간이고 빨간 점은 구간이 0을 포함하지 않는 잔기입니다. 다중 비교 보정은 하지 않았습니다."),
+        "read": ("帶子不含 0 的殘基才稱兩個系統「不同」。殘基很多時，單憑機率就會有約 5 % 的殘基不含 0，所以少數孤立的紅點不足以下結論。連續幾個殘基一起偏離 0，比單點更可信。",
+                 "Only residues whose band excludes 0 are called different between the systems. With many residues, about 5 % exclude 0 by chance alone, so a few isolated red dots do not support a conclusion. Several neighbouring residues moving away from 0 together are more convincing than a single one.",
+                 "帯が 0 を含まない残基だけを、2 つの系で異なると呼びます。残基が多いと、偶然だけで約 5 % が 0 を含まなくなるため、孤立した少数の赤い点だけでは結論できません。単独の点より、隣り合う複数の残基がそろって 0 から離れているほうが信頼できます。",
+                 "띠가 0을 포함하지 않는 잔기만 두 시스템에서 다르다고 부릅니다. 잔기가 많으면 우연만으로도 약 5 %가 0을 포함하지 않으므로, 떨어진 몇 개의 빨간 점만으로는 결론을 낼 수 없습니다. 이웃한 여러 잔기가 함께 0에서 벗어나면 한 잔기보다 더 믿을 만합니다."),
+    },
+    "dccm_replicas": {
+        "title": ("DCCM 的重複平均與重複間標準差", "DCCM mean and between-replica SD", "DCCM の反復平均と反復間の標準偏差", "DCCM의 반복 평균과 반복 간 표준편차"),
+        "caption": ("左圖是各重複 Cα 互相關矩陣逐元素的平均，右圖是同一個元素在重複之間的樣本標準差。",
+                    "Left: element-wise mean of the Cα correlation matrices of the replicas. Right: sample SD of the same element across replicas.",
+                    "左は各反復の Cα 相関行列を要素ごとに平均したもの、右は同じ要素の反復間の標本標準偏差です。",
+                    "왼쪽은 각 반복의 Cα 상관 행렬을 원소별로 평균한 것이고, 오른쪽은 같은 원소의 반복 간 표본 표준편차입니다."),
+        "read": ("平均圖裡顏色深、標準差圖裡顏色淺的位置，是各條重複都看到的相關。平均圖有顏色、標準差圖也很亮的位置，只出現在部分重複，不要當成穩定的耦合。",
+                 "A dark colour in the mean panel with a pale colour in the SD panel is a correlation every replica shows. A coloured spot in the mean panel that is also bright in the SD panel appears in only some replicas and should not be read as stable coupling.",
+                 "平均の図で色が濃く、標準偏差の図で色が薄い位置は、どの反復でも見える相関です。平均の図で色が付き、標準偏差の図でも明るい位置は、一部の反復にしか現れないため、安定した連動とは読まないでください。",
+                 "평균 그림에서 색이 진하고 표준편차 그림에서 색이 연한 위치는 모든 반복에서 보이는 상관입니다. 평균 그림에 색이 있고 표준편차 그림에서도 밝은 위치는 일부 반복에만 나타나므로 안정적인 연동으로 읽지 마세요."),
+    },
     "fingerprint": {
         "title": ("作用指紋", "Interaction fingerprint", "相互作用フィンガープリント", "상호작용 지문"),
         "caption": ("每個殘基與配體在每一幀的作用類型，分為離子、極性與疏水。",
