@@ -15,8 +15,10 @@ CI = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
 # conda specs with exact versions backed by repo evidence (DECISIONS: CI openmm-stack 5a3fa37/d879f2b runs)
 PINNED = {"numpy": "2.4.6", "openff-toolkit": "0.18.0"}
-# family pins that are intentionally minor-level (python 3.11 is the supported interpreter; cuda-version is the driver family)
-FAMILY = {"python": "3.11", "cuda-version": "12.4"}
+# family pins that are intentionally minor-level (python 3.11 is the supported interpreter).
+# D-172: cuda-version is intentionally NOT pinned — conda matches the driver's __cuda and picks an openmm build to fit,
+# so students on different NVIDIA drivers each get a working GPU build without forcing a driver update.
+FAMILY = {"python": "3.11"}
 # D-171: openmm is a RANGE, not exact — 8.6.1 dropped CUDA<12.9 builds, so pinning it exactly forces every student
 # onto a very new NVIDIA driver.  A range lets conda pick a build whose cuda-version fits the student's driver
 # (CI reproducibility moves to a lock file).  This is intentional, not "awaiting a lock", so it is excluded from both.
@@ -99,20 +101,15 @@ def test_ci_exports_explicit_lock_per_os_without_auto_commit():
     assert "git commit" not in CI and "git push" not in CI
 
 
-def test_cuda_version_is_consistent_across_ymls_driver_module_and_family():
-    """D-170 回歸守衛（第九個 session 補，peer 建議）：openmm 的 CUDA 綁定散在環境檔與
-    md20/env/drivers.py 兩處，當初 12.4→12.9 的漂移是到 a21 Windows verify 才爆。這個測試
-    把三處綁在一起，任何一處忘了一起改就在本機先紅。"""
+def test_cuda_version_is_not_pinned_and_driver_floors_are_defined():
+    """D-172 回歸守衛（承第九個 session 的 D-170 守衛，隨 D-172 更新）：cuda-version 刻意
+    不釘選——conda 依驅動的 __cuda 挑對應的 openmm GPU 建置，學生各種驅動都能用而不必更新。
+    若有人把 cuda-version 釘回環境檔，本測試先紅；同時確認 drivers.py 的驅動底線表仍可用。"""
     allv = _all()
-    cuda_ymls = {f: v for f, v in allv.get("cuda-version", {}).items()}
-    # 兩個 cuda 環境檔都要釘 cuda-version，且彼此一致、等於 FAMILY
-    assert set(cuda_ymls) >= {"linux-cuda.yml", "windows-cuda.yml"}, cuda_ymls
-    fam = FAMILY["cuda-version"]
-    for fname, spec in cuda_ymls.items():
-        assert spec in ("=" + fam, "==" + fam), (fname, spec, fam)
-    # drivers.py 的 MD20_CUDA 必須與環境檔一致，且其驅動底線有定義
+    # cuda 環境檔不得釘 cuda-version（釘了就會把舊/新驅動的學生擋在外面，正是 D-170 的坑）
+    assert "cuda-version" not in allv, ("cuda-version should not be pinned (D-172)", allv.get("cuda-version"))
+    # drivers.py 的 MD20_CUDA 仍是一個有定義驅動底線的 CUDA 版本（給 GUI/doctor 的更新建議用）
     from md20.env import drivers
-    assert drivers.MD20_CUDA == fam, (drivers.MD20_CUDA, fam)
-    assert fam in drivers.CUDA_MIN_DRIVER, (fam, sorted(drivers.CUDA_MIN_DRIVER))
-    win_floor, linux_floor = drivers.CUDA_MIN_DRIVER[fam]
+    assert drivers.MD20_CUDA in drivers.CUDA_MIN_DRIVER, (drivers.MD20_CUDA, sorted(drivers.CUDA_MIN_DRIVER))
+    win_floor, linux_floor = drivers.CUDA_MIN_DRIVER[drivers.MD20_CUDA]
     assert win_floor and linux_floor  # 兩個平台的驅動底線都要給，否則學生無從判斷要不要更新驅動

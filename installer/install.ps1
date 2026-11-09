@@ -79,22 +79,20 @@ $Base = Join-Path $Here "..\environment\base.yml"
 $GpuYml = Join-Path $Here ("..\environment\windows-" + ($(if ($Gpu -eq "cpu") {"opencl"} else {$Gpu})) + ".yml")
 $Prefix = Join-Path $Root "envs\md20"
 if ($Gpu -eq "cuda") {
-  # pick cuda-version from what the installed driver supports (nvidia-smi "CUDA Version: X.Y")
+  # D-172: do NOT pin cuda-version.  windows-cuda.yml leaves it free, so conda reads the driver's real __cuda
+  # (via nvidia-smi) and picks an openmm build whose cuda-version fits.  If the user forces -Cuda, honour it.
   $smi = (& nvidia-smi 2>$null | Out-String)
   $m = [regex]::Match($smi, "CUDA Version:\s*([0-9]+\.[0-9]+)")
-  if ($m.Success) {
-    $drv = [double]$m.Groups[1].Value
-    if ($drv -lt 11.8) { Write-Host "!! 驅動只支援 CUDA $drv（< 11.8）：改用 OpenCL。更新 NVIDIA 驅動後可重跑本安裝器改用 CUDA。"; $Gpu = "opencl"; $env:CONDA_OVERRIDE_CUDA = "12.4"; $GpuYml = Join-Path $Here "..\environment\windows-opencl.yml" }
-    else {
-      $cv = if ($Cuda) { $Cuda } elseif ($drv -lt 12.0) { "11.8" } elseif ($drv -ge 12.4) { "12.4" } else { $m.Groups[1].Value }
-      $tmpYml = Join-Path $Root "windows-cuda-$cv.yml"
-      (Get-Content $GpuYml) -replace "cuda-version=[0-9.]+", "cuda-version=$cv" | Set-Content -Encoding UTF8 $tmpYml
-      $GpuYml = $tmpYml
-      Write-Host "驅動支援 CUDA $drv → 使用 cuda-version=$cv"
-    }
+  if ($m.Success) { Write-Host ("驅動支援 CUDA " + $m.Groups[1].Value + " → 由 conda 依驅動挑對應的 OpenMM GPU 建置（cuda-version 不釘死）") }
+  if ($Cuda) {
+    $tmpYml = Join-Path $Root "windows-cuda-$Cuda.yml"
+    $lines = (Get-Content $GpuYml) + "  - cuda-version=$Cuda"
+    $lines | Set-Content -Encoding UTF8 $tmpYml
+    $GpuYml = $tmpYml
+    Write-Host "（手動指定 -Cuda $Cuda）"
   }
 }
-if ($Gpu -ne "cuda") { $env:CONDA_OVERRIDE_CUDA = "12.4" }   # win-64 openmm builds are CUDA-linked; override the virtual package
+if ($Gpu -ne "cuda") { $env:CONDA_OVERRIDE_CUDA = "12.9" }   # win-64 openmm builds are CUDA-linked; fake a modern __cuda so the OpenCL/CPU build solves
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "tmp") | Out-Null
 $env:TMP = Join-Path $Root "tmp"; $env:TEMP = $env:TMP; $env:PIP_CACHE_DIR = Join-Path $Root "pipcache"
 # Package cache vs. Windows 260-character paths (D-38).  micromamba caches as <pkgs>\https\conda.anaconda.org\conda-forge\

@@ -73,12 +73,13 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"   # native stderr must not throw (Actions prepends Stop)
-          $mm = "$env:RUNNER_TEMP\MD20\micromamba.exe"; $env:MAMBA_ROOT_PREFIX = "$env:RUNNER_TEMP\MD20"; $env:CONDA_OVERRIDE_CUDA = "12.7"
-          foreach ($cv in "12.4", "11.8") {
-            $y = "$env:RUNNER_TEMP\cuda-$cv.yml"
-            (Get-Content $env:RUNNER_TEMP\MD20\app\environment\windows-cuda.yml) -replace "cuda-version=[0-9.]+", "cuda-version=$cv" | Set-Content $y
-            & $mm create --dry-run -y -p "$env:RUNNER_TEMP\cudatest" -f $env:RUNNER_TEMP\MD20\app\environment\base.yml -f $y
-            if ($LASTEXITCODE -ne 0) { Write-Host "CUDA $cv environment does not solve (D-36)"; exit 1 }
+          $mm = "$env:RUNNER_TEMP\MD20\micromamba.exe"; $env:MAMBA_ROOT_PREFIX = "$env:RUNNER_TEMP\MD20"
+          # D-172: windows-cuda.yml no longer pins cuda-version — conda matches the driver's __cuda and picks an openmm
+          # build to fit.  Verify the env solves for representative NVIDIA drivers (12.7 = the user's laptop, 12.9 = new).
+          foreach ($cu in "12.9", "12.7") {
+            $env:CONDA_OVERRIDE_CUDA = $cu
+            & $mm create --dry-run -y -p "$env:RUNNER_TEMP\cudatest" -f $env:RUNNER_TEMP\MD20\app\environment\base.yml -f $env:RUNNER_TEMP\MD20\app\environment\windows-cuda.yml
+            if ($LASTEXITCODE -ne 0) { Write-Host "CUDA (__cuda=$cu) environment does not solve (D-36)"; exit 1 }
           }
       - name: Installed program works without the unzipped folder
         shell: cmd

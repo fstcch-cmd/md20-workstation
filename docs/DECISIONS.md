@@ -16,6 +16,7 @@
 - **證據**：容器全套 pytest（含 env_lock/driver 新測試）；真實 Windows CUDA 解算交 `release-windows.yml` verify（a22 重發，cuda-version 12.4/11.8 迴圈在放寬 openmm 下應可解）。
 - **發行**：a21 已發（D-170，內建正式金鑰但 CUDA 12.9），由 a22 取代；a21 建議與 a20 一併刪（擁有者操作）。
 - **給第九個 session（D-163）**：openmm 不再精確 pin，請改用 CI lock 檔保重現，並讓 env-lock 漂移測試涵蓋 CUDA 路徑。
+- **補充（同日，a22 第一次 verify 仍失敗後）**：只放寬 openmm 還不夠——a22 的 Windows verify 仍紅,因為 `release-windows.yml` 與 `install.ps1` **硬釘 cuda-version=12.4** 去解,而 8.5–8.6 的 openmm 在 conda-forge 沒有「cuda-version 剛好＝12.4」的建置(但實際安裝用 `CONDA_OVERRIDE_CUDA=12.4` 不釘 cuda-version 卻成功——證明有 cuda-version≤12.4 的建置,只是不等於 12.4)。**決定:根本不釘 cuda-version**,讓 conda 依驅動 `__cuda` 自己挑。改動:`environment/{windows,linux}-cuda.yml` 移除 `cuda-version=12.4`;`install.ps1` cuda 路徑不再塞 cuda-version(保留 `-Cuda` 手動覆寫),非 cuda 路徑 `CONDA_OVERRIDE_CUDA` 改 12.9;`release-windows.yml` verify 改為在 `__cuda=12.9/12.7` 下直接解未釘選的 env;`test_env_lock.py` 的 cuda-version 移出 FAMILY、第九個 session 的一致性測試改為斷言「cuda-version 不得釘選」。
 
 ### D-171　env-lock 漂移測試補 CUDA 路徑（D-163 強化；D-170 漂移的回歸守衛，peer session 建議）
 - **背景**：D-170 把 CUDA 12.4→12.9 時，openmm 的 CUDA 綁定散在 `environment/*cuda*.yml` 與 `md20/env/drivers.py` 兩處，漂移到 a21 的 Windows verify 才爆。D-163 的 `test_env_lock.py` 當時沒涵蓋 CUDA 路徑（WORKBOARD 上 D-170 session 明確建議補）。
