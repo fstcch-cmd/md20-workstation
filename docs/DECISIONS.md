@@ -6,6 +6,15 @@
 ---
 
 ## 2026-11-09
+### D-173　修復：D-172 重寫 release-windows.yml 時誤刪 D-166 的 compiled_core，導致全平台 pure-python CI 紅
+- **背景**：D-172（收回 cuda pin）重寫 `release-windows.yml` 的 package 步驟時，一併移除了 D-166 加入的 `compiled_core` 輸入與 opt-in 編譯步驟。D-166 的 `tests/test_build_protected.py::test_release_workflow_compiled_core_defaults_false` 斷言該輸入存在，於是在**所有 OS×版本的 pure-python**（及連帶跑 collection 的 openmm-stack／heavy(workflow)）job 失敗——即 ba17bd2 的 CI 大面積紅。
+- **真因確認**：容器全套本機重現＝`1 failed, 1488 passed`，唯一 failed 正是上述測試；非科學或 collection 損壞。
+- **決定**：把 `compiled_core` 輸入（type boolean、default false）與雙步驟（預設 source＝D-172 後的 git archive 不變、opt-in 才編譯核心）**重新放回** package 區，**不碰** D-172 在 verify／install.ps1／環境檔的 cuda 解釘（那些在別的 job／檔，與 package 步驟無關）。預設發行行為與 D-172 後一致。
+- **教訓**：兩個 session 同時改同一個 workflow 檔，merge 不衝突不代表語意不衝突；跨 session 改共用 workflow 時要 grep 既有 opt-in 區塊再動。
+- **證據／測試**：`tests/test_build_protected.py` 8 項綠；容器全套預期回到 0 failed（本 commit 後重跑確認）。
+- **相關檔案**：`.github/workflows/release-windows.yml`。
+- **未決**：無（純回復）。compiled_core 的端到端仍待 opt-in 發行 run（承 D-166）。
+
 ### D-172　改為放寬 openmm pin（範圍）而非升 CUDA；收回 D-170 的 12.9 連鎖（使用者筆電 CUDA 12.7 實裝失敗後，使用者選「放寬 pin」）
 - **現象**：a21（D-170，CUDA 12.9）在使用者筆電實裝失敗。安裝器偵測「驅動支援 CUDA 12.7」→ 仍依舊邏輯選 `cuda-version=12.4` → 撞 `openmm==8.6.1`（需 ≥12.9）→ `install.ps1` 直接崩，未退 OpenCL。
 - **根因再認識**：D-170 把 CUDA 升到 12.9 可讓 CI 過，但代價是**所有驅動 <12.9 的學生（含使用者自己的 12.7）GPU 全部失效、得更新驅動**。對「學生各種筆電」的教學工具門檻太高。真正的病灶只是 **`openmm==8.6.1` 精確鎖（D-163）丟了 CUDA<12.9 的建置**。

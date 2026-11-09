@@ -9,6 +9,10 @@ on:
   workflow_dispatch:
     inputs:
       tag: { description: "release tag, e.g. v0.1.0a1", required: true }
+      compiled_core:
+        description: "D-166: compile core modules with Cython and ship without their .py source (opt-in; default off = source release unchanged)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -28,13 +32,36 @@ jobs:
         run: |
           tag="${{ github.event.inputs.tag }}"; [ -n "$tag" ] || tag="${GITHUB_REF_NAME}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      - name: "Build ZIP (git archive applies .gitattributes, *.cmd keep CRLF)"
+      - name: "Build ZIP (source; default — git archive applies .gitattributes, *.cmd keep CRLF)"
+        if: ${{ inputs.compiled_core != true }}
         run: |
           tag="${{ steps.v.outputs.tag }}"
           git archive --format=zip --prefix="MD20-$tag/" -o "MD20-Windows-$tag.zip" HEAD
           cp "MD20-Windows-$tag.zip" "MD20-macOS-$tag.zip"     # same files; both installers are inside (D-66)
           sha256sum "MD20-Windows-$tag.zip" "MD20-macOS-$tag.zip" > SHA256SUMS.txt
           unzip -l "MD20-Windows-$tag.zip" | grep -E "Install-MD20.cmd|installer/install.ps1|environment/base.yml"
+          cat SHA256SUMS.txt
+      - name: "Build ZIP (compiled core; D-166 opt-in — Cython-compile core, drop its .py, no encryption/keys)"
+        if: ${{ inputs.compiled_core == true }}
+        run: |
+          tag="${{ steps.v.outputs.tag }}"
+          python -m pip install --upgrade "cython>=3" setuptools wheel
+          stage="stage/MD20-$tag"
+          mkdir -p "$stage"
+          git archive HEAD | tar -x -C "$stage"            # clean shipped tree (.gitattributes applied)
+          python tools/build_protected.py --root "$stage"  # fail closed: missing Cython raises, failing the job
+          python - <<'PY'
+          from pathlib import Path
+          from tools import build_protected as bp
+          stage = Path("stage")/next(p.name for p in Path("stage").iterdir())
+          removed = bp.strip_sources(stage, bp.plan_build())
+          assert removed, "compiled_core: no .py was removed, compiled artifacts likely absent (fail closed)"
+          print("stripped", len(removed), "core .py from shipped tree")
+          PY
+          ( cd stage && zip -r -q "../MD20-Windows-$tag.zip" "MD20-$tag" )
+          cp "MD20-Windows-$tag.zip" "MD20-macOS-$tag.zip"
+          sha256sum "MD20-Windows-$tag.zip" "MD20-macOS-$tag.zip" > SHA256SUMS.txt
+          ! unzip -l "MD20-Windows-$tag.zip" | grep -E "md20/util/license.py" || (echo "license.py still in ZIP, compiled_core failed" && exit 1)
           cat SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with: { name: md20-windows-zip, path: "MD20-*.zip\nSHA256SUMS.txt" }

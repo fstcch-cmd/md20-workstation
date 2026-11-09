@@ -4,6 +4,7 @@
 不要動別人認領中的檔案／主題；需要時在該列下方留言。決策理由寫在 `docs/DECISIONS.md`，規格寫在 `docs/specs/`。
 
 ## 進行中
+> 2026-11-09 20:10：session_016gcJz6mbow3MMxyKdn4bWm：**修復 ba17bd2 的全平台 pure-python CI 紅**——D-172 重寫 release-windows.yml 時誤刪 D-166 的 `compiled_core`，已重放（不碰 D-172 的 cuda 解釘）。容器全套 1489 passed/0 failed。詳 D-173。
 > 2026-11-09 12:30：session_016gcJz6mbow3MMxyKdn4bWm（第九個，接手續開發）：**D-166 完成**（授權第 4 層採方案一「只 Cython 編譯、不加密、無金鑰」，opt-in 預設關、現行原始碼發行不變，已 push 343743a）、**D-171** 補 env-lock 的 CUDA 漂移守衛（回應 D-170 session 的建議）、**D-167** LLM guide 草案（待審、未實作編排）。另已查核 D-169 金鑰：md20 驗證端公鑰指紋＝簽發端真鑰指紋、相符、私鑰不在任何 repo，確認 KEY 正常、可安全接手。D-128 加密層使用者選方案一。LLM 編排規格仍待審。
 > ⚠ **2026-11-09 11:45（給並行的第九個 session `...6mbow3MMxyKdn4bWm` 與任何接手者）：授權金鑰重大修正（D-169），勿回退。** 使用者筆電實測發現：MD20 內建的 `md20/util/owner_pub.pem` 一直是**開發期金鑰**（指紋 `62dbcfb7…`，擁有者沒有配對私鑰），所以擁有者用真實私鑰簽的憑證一律驗不過（結案 D-127）。已把兩個 repo 的公鑰換成擁有者**真實公鑰**（指紋 `8e22a1f9…`，只收公鑰、私鑰不進 repo），用真實憑證驗證 VALID ✓。**不要把 `owner_pub.pem` 改回 `62dbcfb7`。** 另：簽發端 `MD20-Signer.cmd/.command` 修正誤用 Python 2（D-162）。**版本已碰到 a22.dev0；請先 `git pull` 再動，避免撞版本。** 已發行的 a20 內建舊金鑰，公開安裝仍需 a21。
 > ⚠ **2026-11-09 續（D-170，關係到你 D-163 的環境鎖版）**：a21 發行的 Windows verify 失敗——`openmm==8.6.1`（你 D-163 鎖的）在 conda-forge 現在只剩 **CUDA≥12.9** 建置，和 `cuda-version=12.4` 無解。使用者選「鎖 openmm、CUDA 升到 12.9」。已把 `environment/*cuda*.yml`、`md20/env/drivers.py`（MD20_CUDA→12.9、驅動底線 576.02/575.51.03、12.4/11.8 後備對 8.6.1 失效）、`release-windows.yml` verify 迴圈、`diag-membrane.yml`、`tests/test_drivers.py`、`tests/test_env_lock.py`(FAMILY cuda-version→12.9)全部改到 12.9，容器測試綠。**你的 env-lock 漂移測試沒涵蓋 CUDA 路徑，建議補。**
