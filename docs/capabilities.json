@@ -7,8 +7,8 @@
     "note": "清單內容對應此 commit 的樹；CI 證據對應下方 evidence_baseline 的 commit，兩者不同時看各功能的 last_known_result.status（stale = 證據之後程式或測試有改過）。"
   },
   "versions": {
-    "package_version": "0.1.0a22.dev0",
-    "latest_published_release": "v0.1.0a21",
+    "package_version": "0.1.0a23.dev0",
+    "latest_published_release": "v0.1.0a22",
     "published_releases": [
       "v0.1.0a1",
       "v0.1.0a2",
@@ -27,7 +27,8 @@
       "v0.1.0a16",
       "v0.1.0a17",
       "v0.1.0a20",
-      "v0.1.0a21"
+      "v0.1.0a21",
+      "v0.1.0a22"
     ],
     "never_published": [
       "v0.1.0a5",

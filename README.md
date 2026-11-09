@@ -6,7 +6,7 @@
 > 本 repo 公開只是為了執行持續整合（CI）測試，**公開不等於授權**。未取得 HCC Lab 簽發的授權檔，不得安裝、執行、修改或散布（見 [LICENSE](LICENSE)）。
 > This repository is public only so its CI can run. Public is not a licence: without a licence file signed by HCC Lab you may not install, run, modify or distribute it ([LICENSE](LICENSE)).
 
-**已發行的最新版本：[v0.1.0a21](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a21)**（2026-11-09，教學預覽版，Windows 與 macOS）。main 分支為開發中的 a22；a18、a19 從未發行（內容併入 a20，見 DECISIONS）。
+**已發行的最新版本：[v0.1.0a22](https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a22)**（2026-11-09，教學預覽版，Windows 與 macOS）。main 分支為開發中的 a23；a18、a19 從未發行（內容併入 a20，見 DECISIONS）。
 
 MD20 讓學生在自己的筆電上，從分子對接一路做到分子動力學與結合自由能，最後得到一份可以直接讀的報告。
 安裝環境、修 PDB、建拓撲、平衡驗收、畫圖、寫方法段落都由程式完成。程式每做一個自動決定，都會記下理由；遇到需要人判斷的地方就停下來，列出可以選的做法。
