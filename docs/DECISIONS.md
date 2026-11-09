@@ -6,6 +6,18 @@
 ---
 
 ## 2026-11-09
+### D-163　內建 `owner_pub.pem` 換成擁有者真實公鑰（結案 D-127；使用者筆電實測：正常核發憑證卻驗不過）
+- **現象**：使用者用簽發端 GUI 以自己的私鑰簽出 `*.md20license`,安裝到 MD20 卻報「授權檔的簽章不正確（檔案被改過、損毀，或不是 HCC Lab 簽發）／沒有安裝這份授權檔」。
+- **根因（結案 D-127）**：MD20 內建的 `md20/util/owner_pub.pem` 是**開發期產生的金鑰**(指紋 `62dbcfb7…`),擁有者手上**沒有**它配對的私鑰。`docs/CAPABILITIES.md` 早標「擁有者需確認持有與 owner_pub.pem 成對的私鑰（D-127 未決）」。使用者用自己 keygen 出來的真實私鑰(公鑰指紋 `8e22a1f9…`)簽章,對不上內建的開發公鑰 → 驗證正確地拒絕。**不是格式 bug**:簽發與驗證的 canonical（`sort_keys`,`separators=(",",":")`,`ensure_ascii=False`）、DOMAIN、PSS/MGF1-SHA256 完全一致,且 `sign_payload` 簽後自我驗證。
+- **證據（換金鑰前先驗，未白發）**：用 md20 真實 `license.signature_ok` 驗使用者提供的真實憑證 `TED_20261109_112055.md20license`——對內建開發金鑰＝BAD（完全重現錯誤）、對使用者真實公鑰＝VALID ✓。換檔後從內建 `owner_pub.pem` 讀入也 VALID ✓。
+- **決定/修法**：把擁有者提供的**公鑰**(`8e22a1f9…`,RSA-3072,`BEGIN PUBLIC KEY`,可安全外流)替換:
+  - md20 `md20/util/owner_pub.pem`
+  - 簽發端 `md-digital-signature/public_keys/owner_rsa.pub.pem`
+  兩邊指紋一致＝`8e22a1f9…`。**私鑰全程不經手、不進任何 repo**(只收公鑰);兩端 `check_no_private_keys.py` 綠。
+- **驗證**：md20 授權/戳記測試 133 passed／17 skipped;簽發端 78 passed。
+- **待辦**：**已安裝的 MD20(含 a20)內建的是舊開發公鑰**,必須重發一版帶新公鑰的 md20,舊安裝才會認使用者的憑證(或暫時替換安裝目錄內 `owner_pub.pem` 供本機測試——那是裝入擁有者自己的真實公鑰,非驗證旁路)。D-127 自此結案。
+- **相關檔案**：`md20/util/owner_pub.pem`、`md-digital-signature/public_keys/owner_rsa.pub.pem`、`docs/CAPABILITIES.md`（D-127 註記）。
+
 ### D-162　簽發端 `MD20-Signer.cmd` 誤用 Python 2（MGLTools）修正（使用者筆電實測回報）
 - **現象**：使用者雙擊私人 repo `md-digital-signature` 的 `MD20-Signer.cmd`,報 `MGLTools-1.5.7\python.exe: No module named pip` 與 `SyntaxError: Non-ASCII character '\xe6' ... no encoding declared`。兩者都是 **Python 2** 的徵狀。
 - **根因**：原 .cmd 邏輯是「先設 `PY=python`,只有 `where python` 失敗才改 `py`」。使用者 PATH 上有 MGLTools-1.5.7 的 `python.exe`(Python 2),`where python` 會成功 → 一直用到 Python 2。signer_gui.py 是 Python 3(f-string/type hint),Python 2 解析第一行中文 docstring 時因無編碼宣告先爆 SyntaxError。
