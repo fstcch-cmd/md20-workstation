@@ -74,7 +74,17 @@ md20/sampling/_mdh_legacy.py（`mbar_pmf_1d`、`estimate_pmf_1d`、`_moving_bloc
 - **相關檔案**：`docs/llm/MD20_LLM_GUIDE.md`、`docs/specs/llm_orchestration.md` §4（加指向）。
 - **未決**：規則檔語言（繁中或英文或雙語）；第 4 節故障樣式表的完整度；「同一問題三次即停」的次數是否合適；這些隨 D-161 審查一起回饋。
 
-### D-166　授權第 4 層（編譯/加密發行層）：暫停實作，待使用者在三方案中選擇
+### D-166　授權第 4 層發行保護：採方案一「只做 Cython 編譯、不加密」（使用者 2026-11-09 選定）
+- **更新（2026-11-09，使用者選方案一）**：原條目（下方保留）列三方案並暫停。使用者選「只做 Cython 編譯、不加密」。據此實作、**不碰任何金鑰、不加密、不做執行期解密、不動態 exec**，因此也不需要任何 GitHub Secret。
+- **實作**：`tools/build_protected.py` — `CORE_MODULES` 明列核心模組（授權驗證 `util/license.py`、戳記、`workflow` 閘門串接、`build/assemble|metal|metal_params|pipeline`、`sampling/binding|funnel|_mdh_legacy`；刻意不含 i18n/report/gui/cli/advisor 與各 package `__init__.py`）。`plan_build`（純函式，決定編譯與移除清單、永不編譯 `__init__.py`）、`verify_modules_exist`、`strip_sources`（只有編譯產物 .pyd/.so 已存在才移除對應 .py，fail-safe）、`compile_core`（lazy import Cython，缺則丟 RuntimeError＝fail closed，就地 build_ext inplace）。
+- **發行整合（opt-in，預設不變）**：`release-windows.yml` 加 `compiled_core` 輸入（type boolean、**default false**）。false＝現行 `git archive` 原始碼發行逐位元不變；true＝裝 Cython、對乾淨出貨樹編譯核心、移除核心 .py、改打包 staging 樹，並斷言 `md20/util/license.py` 不在 ZIP。
+- **誠實定位**：編譯成 C 擴充比讀 .py 難得多，但**不是不可破**（擴充仍可逆向）。真正的護城河是「出貨 build 不含核心原始碼」這件事（D-128 §6），編譯是手段不是加密。驗證邏輯（`license.py`）內容完全不變，只是改以編譯形式出貨。
+- **被否決（重申）**：自寫「金鑰拆分＋執行期解密＋動態 exec」載入器（形狀同惡意混淆載入器，安全分類器正確擋下，不重寫）；加密層（方案二商用工具／方案三擱置未採）。
+- **證據／測試**：`tests/test_build_protected.py` 8 項純邏輯（核心清單都存在、永不編譯 __init__、每模組編譯＋移除、strip 只在有產物時移除且支援 .pyd/.so、無 Cython 時 fail closed、workflow `compiled_core` 預設 false、工具內無 AES/encrypt/getenv/exec）。**真實 Cython 編譯與乾淨機安裝交 opt-in 發行 run（本輪未跑）**。
+- **相關檔案**：`tools/build_protected.py`、`.github/workflows/release-windows.yml`、`tests/test_build_protected.py`、`docs/specs/licensing.md`（第 4 層）。
+- **未決**：compiled_core 的端到端（真編譯＋乾淨機 `Install-MD20.cmd` 仍可跑）需 opt-in 發行 run 驗證；是否把其他層（analysis 等）納入核心清單；compiled build 的 import 與 package-data 行為真機確認。
+
+### D-166（原條目，保留）　授權第 4 層（編譯/加密發行層）：暫停實作，待使用者在三方案中選擇
 - **日期**：2026-11-09
 - **背景**：D-128 規劃「Cython 編譯核心＋AES-256-GCM 加密＋執行期解密」以提高剝除授權檢查的成本。使用者 2026-11-09「全做」，本 session 指派子代理實作。
 - **發生的事**：子代理在起草「執行期 import hook：從加密 bundle 讀取、用拆分遮罩後重組的金鑰解密核心模組原始碼再 `exec()`」的自訂載入器時，被安全分類器中斷。原因不是某個寫法選錯，而是該機制本身（金鑰拆散藏檔＋執行期還原＋動態解密後執行程式碼）在形狀上與惡意混淆載入器高度相近。換變數名或拆法重試仍是同一模式，故不重試。worktree 乾淨、無 commit、未碰 release workflow／tag／`license.py`、未涉及任何真實金鑰。
