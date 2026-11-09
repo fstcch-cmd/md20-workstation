@@ -6,6 +6,15 @@
 ---
 
 ## 2026-11-09
+### D-171　env-lock 漂移測試補 CUDA 路徑（D-163 強化；D-170 漂移的回歸守衛，peer session 建議）
+- **背景**：D-170 把 CUDA 12.4→12.9 時，openmm 的 CUDA 綁定散在 `environment/*cuda*.yml` 與 `md20/env/drivers.py` 兩處，漂移到 a21 的 Windows verify 才爆。D-163 的 `test_env_lock.py` 當時沒涵蓋 CUDA 路徑（WORKBOARD 上 D-170 session 明確建議補）。
+- **決定**：新增 `test_cuda_version_is_consistent_across_ymls_driver_module_and_family`，把三處綁在一起——(1) `linux-cuda.yml`／`windows-cuda.yml` 都釘 `cuda-version` 且彼此一致、等於 `FAMILY["cuda-version"]`；(2) `drivers.MD20_CUDA` 等於同一值；(3) `drivers.CUDA_MIN_DRIVER` 對該 CUDA 有 Windows／Linux 兩個驅動底線。任何一處忘了一起改，本機就紅，不必等 CI／發行。
+- **理由**：純測試強化、不碰環境版本與科學行為；把「分散在多檔的同一事實」用測試釘住，正是 D-163「防漂移」的本意。
+- **被否決**：改動環境版本或 drivers 值（那是 D-170 的範圍，已對齊，不動）。
+- **證據／測試**：`tests/test_env_lock.py` 6 項（新增 1）本機綠。
+- **相關檔案**：`tests/test_env_lock.py`。
+- **未決**：拿到 CI explicit lock artifact 後縮小 `PENDING_UNPINNED`（承 D-163）。
+
 ### D-170　CUDA 目標 12.4→12.9（openmm 8.6.1 上游只剩 CUDA≥12.9 建置；a21 發行 verify 失敗後修；使用者選「鎖 openmm、CUDA 跟升」）
 - **現象**：觸發 a21 發行(`release-windows.yml`)時 `verify-windows` 的「CUDA 環境可解(dry run, D-36)」步驟失敗:`openmm ==8.6.1 需要 cuda-version ≥12.9/13,但環境指定 cuda-version =12.4 → 無解`。verify 失敗就不發,所以 a21 沒發出去(tag 未建)。macOS 與 CPU 安裝本身通過。
 - **根因**：**D-163(第九個 session)把兩個 CUDA 環境檔鎖成 `openmm==8.6.1` ＋ `cuda-version=12.4`**。conda-forge 的 openmm 8.6.1 win-64 建置現在只對應 CUDA 12.9/13(a20 發行時 20 小時前還解得出,之後上游變動)。精確鎖死後 solver 沒有退路。a20(D-163 之前,openmm 未精確鎖)其 CUDA 版應仍可解。
