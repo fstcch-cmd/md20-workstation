@@ -6,17 +6,127 @@
 ---
 
 ## 2026-11-09
-### D-163　內建 `owner_pub.pem` 換成擁有者真實公鑰（結案 D-127；使用者筆電實測：正常核發憑證卻驗不過）
+### D-169　內建 `owner_pub.pem` 換成擁有者真實公鑰（結案 D-127；使用者筆電實測：正常核發憑證卻驗不過）
 - **現象**：使用者用簽發端 GUI 以自己的私鑰簽出 `*.md20license`,安裝到 MD20 卻報「授權檔的簽章不正確（檔案被改過、損毀，或不是 HCC Lab 簽發）／沒有安裝這份授權檔」。
 - **根因（結案 D-127）**：MD20 內建的 `md20/util/owner_pub.pem` 是**開發期產生的金鑰**(指紋 `62dbcfb7…`),擁有者手上**沒有**它配對的私鑰。`docs/CAPABILITIES.md` 早標「擁有者需確認持有與 owner_pub.pem 成對的私鑰（D-127 未決）」。使用者用自己 keygen 出來的真實私鑰(公鑰指紋 `8e22a1f9…`)簽章,對不上內建的開發公鑰 → 驗證正確地拒絕。**不是格式 bug**:簽發與驗證的 canonical（`sort_keys`,`separators=(",",":")`,`ensure_ascii=False`）、DOMAIN、PSS/MGF1-SHA256 完全一致,且 `sign_payload` 簽後自我驗證。
 - **證據（換金鑰前先驗，未白發）**：用 md20 真實 `license.signature_ok` 驗使用者提供的真實憑證 `TED_20261109_112055.md20license`——對內建開發金鑰＝BAD（完全重現錯誤）、對使用者真實公鑰＝VALID ✓。換檔後從內建 `owner_pub.pem` 讀入也 VALID ✓。
-- **決定/修法**：把擁有者提供的**公鑰**(`8e22a1f9…`,RSA-3072,`BEGIN PUBLIC KEY`,可安全外流)替換:
-  - md20 `md20/util/owner_pub.pem`
-  - 簽發端 `md-digital-signature/public_keys/owner_rsa.pub.pem`
-  兩邊指紋一致＝`8e22a1f9…`。**私鑰全程不經手、不進任何 repo**(只收公鑰);兩端 `check_no_private_keys.py` 綠。
+- **決定/修法**：把擁有者提供的**公鑰**(`8e22a1f9…`,RSA-3072,`BEGIN PUBLIC KEY`,可安全外流)替換 md20 `md20/util/owner_pub.pem` 與簽發端 `md-digital-signature/public_keys/owner_rsa.pub.pem`(兩邊指紋一致＝`8e22a1f9…`)。**私鑰全程不經手、不進任何 repo**(只收公鑰);兩端 `check_no_private_keys.py` 綠。
 - **驗證**：md20 授權/戳記測試 133 passed／17 skipped;簽發端 78 passed。
 - **待辦**：**已安裝的 MD20(含 a20)內建的是舊開發公鑰**,必須重發一版帶新公鑰的 md20,舊安裝才會認使用者的憑證(或暫時替換安裝目錄內 `owner_pub.pem` 供本機測試——那是裝入擁有者自己的真實公鑰,非驗證旁路)。D-127 自此結案。
-- **相關檔案**：`md20/util/owner_pub.pem`、`md-digital-signature/public_keys/owner_rsa.pub.pem`、`docs/CAPABILITIES.md`（D-127 註記）。
+- **相關檔案**：`md20/util/owner_pub.pem`、`md-digital-signature/public_keys/owner_rsa.pub.pem`。
+- **編號更正**：本條原寫 D-163,與並行第九個 session 的 D-163(conda 鎖版)撞號,改為 D-169。
+
+### D-168　MBAR / WHAM bootstrap 加速（保守版；已實作、待 CI 真 pymbar 驗證）
+日期：2026-11-09
+
+## 決定
+科學定義不變（moving-block 重抽、每個重複重新估計 PMF、2.5/97.5 百分位當 CI）。只做不改結果的加速：
+1. `_moving_block_resample` 向量化（一次 fancy index 取代逐 block 的 Python 迴圈）。RNG 抽取次數與順序不變，輸出逐位元相同。
+2. 重複不再計算用不到的東西：`mbar_pmf_1d(..., with_overlap=False)` 略過 `compute_overlap()`（O(N·K²) + 特徵分解）與逐窗口直方圖；基本解仍照舊計算並保留重疊矩陣（D-113）。
+3. 重抽樣迴圈抽成模組層級 `_bootstrap_replicate`，並新增 `bootstrap_pmf_1d(..., n_jobs=1)`：>1 時用 process pool（spawn，不用 fork，避免 GUI 多執行緒死鎖）平行解各重複。重抽樣仍在父行程依序進行，所以結果與 n_jobs 無關（測試證明）。預設關閉；pool 建不起來時退回序列，結果相同。
+4. 原有 D-62 的 f_k 暖啟動與 robust protocol 維持不變（先前已做，不是新工作）。
+
+## 被否決／無效的做法
+- **WHAM 暖啟動（initial_f_k）**：實作後量測，重複的迭代次數與冷啟動相近（約 700-1000 次，有時更多）。WHAM 的定點迭代是線性收斂、停止條件看步長，起點近一點省不了多少。已移除，避免無益的複雜度。
+- 預先算好 reduced potential 再只做索引：重抽樣後 x_n 是連續座標，u_kn 每次都不同，無法只靠索引；WHAM 格點上的 u_kl 雖是常數但相對迭代成本可忽略。
+- 改用牛頓法／Anderson 加速 WHAM：會改變迭代軌跡，屬另開題目，未做。
+- 執行緒平行：`redirect_stdout`／logging handler 為全域狀態，多執行緒會互相覆蓋，故用行程。
+- `bootstrap_binding_sigma`：只是對每條曲線跑 `radial_pmf`（numpy 小陣列），不是熱點，未改。
+
+## 證據／測試（tests/test_bootstrap_speed.py）
+- 向量化重抽樣與舊 block 迴圈逐位元相同（多種 block 長度，含 > n）。
+- MBAR（numpy 替身）bootstrap 曲線與「舊重複迴圈」參考實作一致，atol 1e-10 kJ/mol；基本解同。
+- 重複只呼叫 1 次 compute_overlap（基本解）。
+- WHAM bootstrap 曲線與參考一致，atol 1e-12。
+- n_jobs=2 與 n_jobs=1 曲線一致，atol 1e-12。
+- 計時只印出（`-s` 可見），不當斷言。
+
+## 誠實的速度結論
+容器內（numpy 替身 MBAR、27 窗口、10 重複）量不到明顯加速：替身的自洽迭代主導成本，重疊矩陣只佔一小部分；WHAM 路徑同樣無差。真 pymbar 下略過 overlap 的省下量、以及 n_jobs>1 的實際加速倍數，**只能在 CI／使用者機器驗證**。n_jobs 的預期收益是接近核心數倍（重複彼此獨立），但 Windows spawn 有每行程匯入 numpy/pymbar 的固定成本。
+
+## 相關檔案
+md20/sampling/_mdh_legacy.py（`mbar_pmf_1d`、`estimate_pmf_1d`、`_moving_block_resample`、`_bootstrap_replicate`、`bootstrap_pmf_1d`）、tests/test_bootstrap_speed.py。
+
+## 未決
+- `n_jobs` 尚未接到 `pmf_from_windows` / GUI / 設定（目前只在 `bootstrap_pmf_1d` 參數）；要不要暴露、預設值，待使用者決定。
+- 真 pymbar 的 `initial_f_k` 暖啟動實際省多少迭代，需在 CI 記錄 `quality["solver"]["timing_s"]`。
+- 自適應停止 bootstrap（σ 收斂即停）仍未決（見 umbrella_adaptive.md）。
+
+### D-167　起草 LLM 規則檔範本 `docs/llm/MD20_LLM_GUIDE.md`（end-user 版，草案，待審）
+- **背景**：D-161 規格 §4 定義每次連線交給 LLM 的規則檔，第八個 session 提議但未起草。使用者 2026-11-09「全做」。
+- **決定**：只起草 end-user 版範本，依規格 §4 的五塊（角色、硬規則、能力地圖與動作、除錯步驟、報告誠實與寫作規範）加隱私連線一節。動作表明確標示「規劃中，尚未實作」，對應規格 §12 的 L1–L2。全文自身遵守 `writing_style.md`。
+- **理由**：規則檔是規格審查的一部分，有實際文字比較好審；起草文件不等於實作編排，不違反「審查後才動工」。
+- **被否決**：同時起草 developer 版（依賴 D-128 兩種 build 與 developer 授權分級，尚未完成也未審，先不寫）；寫成英文（repo 文件與審查者以繁中為主，本地模型如千問可讀繁中；待審查決定是否另出英文版）。
+- **證據**：純文件，無程式改動。
+- **相關檔案**：`docs/llm/MD20_LLM_GUIDE.md`、`docs/specs/llm_orchestration.md` §4（加指向）。
+- **未決**：規則檔語言（繁中或英文或雙語）；第 4 節故障樣式表的完整度；「同一問題三次即停」的次數是否合適；這些隨 D-161 審查一起回饋。
+
+### D-166　授權第 4 層（編譯/加密發行層）：暫停實作，待使用者在三方案中選擇
+- **日期**：2026-11-09
+- **背景**：D-128 規劃「Cython 編譯核心＋AES-256-GCM 加密＋執行期解密」以提高剝除授權檢查的成本。使用者 2026-11-09「全做」，本 session 指派子代理實作。
+- **發生的事**：子代理在起草「執行期 import hook：從加密 bundle 讀取、用拆分遮罩後重組的金鑰解密核心模組原始碼再 `exec()`」的自訂載入器時，被安全分類器中斷。原因不是某個寫法選錯，而是該機制本身（金鑰拆散藏檔＋執行期還原＋動態解密後執行程式碼）在形狀上與惡意混淆載入器高度相近。換變數名或拆法重試仍是同一模式，故不重試。worktree 乾淨、無 commit、未碰 release workflow／tag／`license.py`、未涉及任何真實金鑰。
+- **技術實話**：離線分發的教學版沒有伺服器可問，執行期解密金鑰必然在用戶端某處；此層永遠只是提高剝除成本、非不可破，與 `licensing.md §7` 既有誠實限制一致。而要真的能跑就必然需要「還原金鑰＋動態載入」，正落在易被判為可疑的範圍。
+- **決定**：暫停第 4 層實作，三方案交使用者選：(1) 只做 Cython 編譯、不加密（風險可控、剝除成本提升有限、文件誠實標示）；(2) 改用現成商用保護方案（金鑰注入與反剝除交給業界工具，非自寫 loader；需指定工具與評估跨平台）；(3) 擱置 D-128，維持現狀（授權為「門檻＋證據」，蓋授權 id，非防拷）。開發者傾向 1 或 3：教學版威脅模型下，自寫加密 loader 的代價大於它擋得住的；真正護城河是規格 §6「出貨 build 不含核心原始碼」，靠編譯而非加密。
+- **被否決**：自寫金鑰拆分＋動態 exec 的加密載入器（安全分類器正確擋下，且維運與誤判成本高）。
+- **相關檔案**：無（未落地任何程式）；設計見 `docs/specs/licensing.md`、D-128、D-160。
+- **未決**：使用者選 1／2／3；若選 2 須指定工具；無 Secret 需現在建立（加密步驟尚無程式）。
+
+### D-165　擬合參數／OH⁻ 路徑的競爭羧基閘門（D-152 後續；使用者授權「全做」）
+- **日期**：2026-11-09
+- **背景**：D-154 為避免誤擋，把 D-152 的競爭羧基閘門縮到純 bonded 水模型（`not params and mode == "water"`）。結果擬合參數（`metal_params`）與 OH⁻ 路徑即使旁邊有未配位的帶電羧基（CA II 的 Glu106）也靜默通過；擬合只對「它擬合過的殘基」負責，沒被納入的羧基仍是標準力場點電荷，塌陷風險不變。這是 D-154 列的未決。
+- **決定**（採「寧可擋也不猜」，不改力場、不自動 restrain、不放寬門檻）：
+  - 擬合／OH⁻ 路徑偵測到競爭羧基（帶電 GLU/ASP、未配位、COMPETING_COO_A 內）時，用純函式 `metal_params.carboxylate_coverage(spec, comp)` 判斷擬合來源是否涵蓋它：
+    - 任何來源：spec（json 也可寫在檔案／data 內）的 `covers_residues`（`"A:106"`／`"GLU106"`／`"106"`）明列該殘基，是使用者對「QM 小模型／MCPB 模型含它」的明確聲明；
+    - mcpb：MCPB PDB 含該羧基氧（殘基號＋原子名）；
+    - json：參數檔 `charges` 有該殘基該羧基氧的電荷；
+    - hessian：fchk／hess 不記殘基，只認 `covers_residues`。
+  - 全部涵蓋 → 不擋；`why` 與 caveats 寫「已被擬合參數來源涵蓋（依據）…MD 後仍須檢查距離」，證據放 `evidence.carboxylate_coverage`。
+  - 有未涵蓋、或來源讀不出來（資訊不足）→ NEEDS_HUMAN `competing carboxylate <key>`，選項：restrain／納入 QM 小模型或 MCPB 模型重新擬合並列入 `covers_residues`／質子化為中性變體（GLH／ASH）／keep_nonbonded／accept。擬合路徑不提供 coordinate（沒有該羧基的 M–O 參數）。
+  - 沿用決定鍵 `metal_carboxylate`（已在 `DECISION_KEYS`）；選 restrain 時沿用 D-152 的排除非鍵＋下限牆；accept 只加警告。純 bonded 水模型的行為不變。
+  - GUI：`competing carboxylate` 閘門補四語（en／zh／ja／ko）標題與說明（D-152 當時漏了）、`metal_carboxylate: {…}` 選項翻譯；restrain／coordinate 是一鍵決定，accept 與重新擬合維持文字提示（accept 會讓結果不可用，不做按鈕）。
+- **理由**：擬合模型是否含該殘基是可檢查的事實，不是推測；能證明才放行，證明不了就停。放行只代表「該殘基有被擬合處理」，不代表 MD 一定守住，所以仍標註須檢查距離。
+- **被否決**：(1) 擬合路徑自動 restrain（科學模型變更，k 未校準）；(2) 放寬門檻或改力場參數；(3) 只要有 `metal_params` 就視為涵蓋（正是 D-154 的漏洞）；(4) 從 hessian cluster 的元素組成推測含不含羧基（不可靠）。
+- **證據／測試**：`tests/test_metal_competing_carboxylate.py` 新增 7 項純邏輯（擬合未涵蓋→閘門；`covers_residues` 三種寫法／json 電荷表／MCPB PDB 涵蓋→放行並記理由；hessian 單獨、讀不到、電荷指到別的氧或別的殘基→閘門；使用者 restrain／accept 照舊；OH⁻ 路徑同理；幾何水模型不變）；`tests/test_gate_actions.py` 一項（一鍵 restrain、accept／重擬合不做按鈕、三語非空）。`test_i18n_coverage` 通過。
+- **對 heavy[metal] CI 的影響**：`test_metal_integration.py` 的 `test_fitted_zinc_params_json_ca2`（含壞 r0 的第二次建模）與 `test_hydroxide_site_water_with_fitted_params_ca2` 用 CA II 3KS3 與測試 json（不含 Glu106），新閘門會擋；已在這三次 `assemble_system` 帶入 `metal_carboxylate={"ZN": "restrain"}`（誠實：測試 json 並未涵蓋 Glu106，不偽稱 covers_residues）。斷言（3／4 個 msw_metal_bonds、電荷、OHM 殘基）不受 restrain 影響（下限牆是另一個 Force）。`test_hydroxide_without_parameters_…` 無 params，行為不變。restrain 真機效果已於 D-154 通過。
+- **相關檔案**：`md20/build/metal.py`（plan_site）、`md20/build/metal_params.py`（carboxylate_coverage）、`md20/gui/gate_text.py`、`md20/gui/actions.py`、`tests/test_metal_competing_carboxylate.py`、`tests/test_gate_actions.py`、`tests/test_metal_integration.py`、`docs/specs/metal_sites.md`。
+- **未決**：(1) 若 `covers_residues` 涵蓋但使用者同時設了 `metal_carboxylate: restrain`，目前涵蓋即放行、restrain 不套用（涵蓋時要不要仍套用由使用者決定）；(2) `covers_residues` 是使用者聲明，程式無法驗證 QM 模型真含該殘基（hessian）；(3) 涵蓋後 MD 是否真的守住待真機。
+
+### D-164　D-130／D-142 剩餘缺口：先盤點，再補兩張跨重複圖（逐殘基 ΔRMSF 區間圖、DCCM 平均與標準差圖）
+- 日期：2026-11-09
+- **盤點（事實）**：任務清單列的缺口（ΔRMSF 殘基 CI、水合、DSSP、PCA 盆地、DCCM、tICA／MSM、膜指標、平衡圖逐條列）在 D-142 已經全部做完，彙總程式在 `md20/analysis/replica_set.py`，報告表格在 `md20/report/replica_section.py`，平衡驗收逐條列在 `workflow_report._acceptance_html`。盤點時重新對照程式與規格 §8，沒有找到還缺的彙總。`engine/replicas.aggregate_replicas` 在 n = 1 時 SD 已是 `null` 並寫 `sd_unavailable`（規格 §7 限制裡「寫成 0.0」的描述過時，已更正）。
+- **真正剩下的**：D-142 未決 (4) DCCM 平均矩陣沒有出圖；ΔRMSF 只有表格（只列區間不含 0 的前幾名），沒有逐殘基的全貌。這次補這兩張圖，數字全部來自既有彙總檔，不新增計算、不改門檻、不改科學定義。
+- **決定**：
+  - 新圖種 `delta_rmsf_replicas`：x 為共同殘基序，y 為 ΔRMSF，灰色帶是 Welch t 95 % 區間，區間不含 0 的殘基標紅點。圖說與解讀明講「沒有做多重比較校正」，並說明單憑機率約 5 % 的殘基會不含 0，孤立的紅點不足以下結論。
+  - 新圖種 `dccm_replicas`：左為各重複逐元素平均，右為逐元素樣本 SD。只有一條重複時只畫平均，不畫 SD（不造出不存在的離散）。
+  - 兩張圖的「在本專案」句只陳述既有數字（強相關對數、每條同號的對數；區間不含 0 的殘基數與偶然預期數），不新增門檻。
+  - 報告：`delta_rmsf_html`、`structure_html` 在各自表格之後呼叫 `doc.figure_block`；繪圖函式放在 `md20/report/replica_figs.py`。
+  - 範本 `tools/report_template.py` 新增 `_replica_demo`：為 apo 與複合物各產生 3 條合成重複，寫出彙總檔與 ΔRMSF 檔，讓兩張圖都被渲染。
+- **理由**：D-142 把 DCCM 平均與 SD 只存在 JSON，使用者看不到哪些相關是各條都有、哪些只是某一條；ΔRMSF 表只列顯著殘基，看不出區間的整體寬度與是否成片偏離。圖補的是呈現，不是新的統計。
+- **被否決**：
+  - 在 DCCM 平均圖上把「各條不同號」的元素遮成灰：需要每條重複的矩陣才能判斷，彙總檔只存平均與 SD；用 |mean| 與 SD 的比值遮蔽等於自訂一個門檻。改為並排畫平均與 SD，讓讀者自己看。
+  - 為 ΔRMSF 自選多重比較校正（Bonferroni／BH FDR）並以校正後的結果畫圖：校正方法是未決，不由程式自選；圖與文字都標「未校正」。
+  - 為 PCA 盆地、tICA／MSM、水合、膜指標另畫跨重複圖：已有表格與 k／n，圖沒有增加資訊；tICA／MSM 刻意不合併軌跡（D-142），不畫速率。
+- **證據／測試**：`tests/test_replica_figures.py`（3 項：ΔRMSF 圖標出區間不含 0 的殘基、殘基過少回 None、DCCM 圖有／無 SD）；`tests/test_report_template.py` 要求每種圖都被渲染；`tests/test_figure_text.py` 要求四語與規格登記（`docs/specs/report_language.md` 已加兩行）；`tests/test_i18n_coverage.py`。真實 mdtraj 路徑沒有在容器內跑，交給 CI。
+- **相關檔案**：`md20/report/replica_figs.py`、`md20/report/replica_section.py`、`md20/report/figure_text.py`、`tools/report_template.py`、`docs/specs/replicas.md`（§8 加圖、更正 §7 過時的限制）、`docs/specs/report_language.md`、`tests/test_replica_figures.py`。
+- **未決**：(1) ΔRMSF 多重比較校正方法（Bonferroni、Holm、BH FDR 或不校正只標示）待使用者決定，目前一律「未校正」。(2) 單一系統的多條重複沒有可比的 PCA 低谷佔比（需要共同基底），是否為單一系統建立重複專用共同基底待使用者決定。(3) 位點配對距離 0.2 nm、DCCM 強相關 0.5／重複下限 0.3、低谷佔比範圍 0.25 都是經驗起始值，待真實資料驗證。(4) 兩張新圖在真實資料上的版面（殘基數很多時的 x 軸、DCCM 超過 500 殘基不存矩陣因此不出圖）待 CI／筆電確認。
+
+### D-163　conda 環境版本鎖定第一步：有證據的套件精確釘選、CI 產出各 OS 候選 lock、測試防漂移（REVIEW #19 剩餘；supply_chain §2/§3）
+日期：2026-11-09　（待併入 `docs/DECISIONS.md` 最上方；本 worktree 不改該檔）
+
+- 決定：
+  1. **精確釘選（`==`）**：`openmm==8.6.1`（四個 gpu yml）、`numpy==2.4.6`、`openff-toolkit==0.18.0`（base.yml）。證據：DECISIONS「`5a3fa37` openmm-stack Windows NaN 觀察」記載 CI 三 OS 兩次執行皆為 OpenMM 8.6.1、numpy 2.4.6、openff-toolkit 0.18.0；`tests/test_smd_box_sizing.py` 也引用 openmm 8.6.1 原始碼。`python=3.11`、`cuda-version=12.4` 維持家族層級釘選（刻意）。`openmmforcefields==0.15.1` 早已精確（D-95）。
+  2. **沒有證據的不猜**：pandas、openpyxl、scipy、cryptography、psutil、matplotlib-base、plotly、rdkit、pdbfixer、mdtraj、parmed、pymbar、openff-nagl、openff-nagl-models、lxml、pdb2pqr、gemmi、propka、nicegui（只知 3.19 minor）、pytest、pip、ambertools、vina、`meeko~=0.5` → 保留原狀，**待 CI 產生**。`tests/test_env_lock.py::PENDING_UNPINNED` 列出它們，清單只能縮小。（`gemmi==0.6.5`／`scipy==1.13.1` 只出現在摺疊引擎的獨立環境，不是主環境，不採用。）
+  3. **CI**：`openmm-stack` 既有的「Export explicit lock file」步驟加檔頭註解（OS、arch、gpu_yml、commit；`#` 開頭在 `@EXPLICIT` 檔內合法）與 `retention-days: 90`；仍是 `|| true`、`if: always()`，不影響 job 結果與時間（不新增 job）。artifact `lock-<OS>` 內有 `md20-lock-<OS>.txt` 與 `md20-pip-<OS>.txt`。**不自動 commit 回 repo**，由人下載、審查後提交到 `environment/locks/`（尚未建立）。
+  4. **測試** `tests/test_env_lock.py`（5 項）：有證據的套件在所有 yml 皆為 `==`；未釘選清單與實際相符且不增加；installer 與 CI 用同一組環境檔；pip 行（`openmmforcefields==0.15.1 meeko~=0.5 gemmi`）在 ps1、sh、ci 相同；CI 匯出 lock 且不含 git commit/push。
+- 理由：CI 已驗證的組合就是學生該得到的；精確釘選讓「CI 綠」與「學生安裝」不再因上游新版而分岔。只釘有證據的，避免釘到從未在 CI 解過的組合而讓三 OS 變紅。
+- 被否決：
+  - 憑記憶／推測填其餘版本（可能不可解，讓 CI 紅燈）。
+  - 現在手寫 explicit lock 檔（容器無網路，無法產生 URL 與雜湊）。
+  - 新增專門產 lock 的 workflow（要再建一次完整環境，變慢又貴；既有 job 已建好環境）。
+  - 讓 CI 自動 commit lock（私人 repo 計費、且未經審查的 lock 不該直接進 main）。
+- 風險／未驗證：容器無網路，**`==` 釘選能否在四個平台解出**待 CI（尤其 `openmm==8.6.1` + `cuda-version=12.4` 在 windows-cuda 真實 GPU 路徑；CI 只跑 windows-opencl／macos／linux-cuda 三組，windows-cuda 只有 installer 的 dry-run 解環境）。osx-64 與 linux-aarch64 沒有 CI runner（macos-latest 為 arm64）→ 無法追溯，需另開 job 或使用者本機 `micromamba env export --explicit`。若解不出來，回退該行並改以 CI 實際解出的版本為準。
+- 檔案：`environment/*.yml`、`.github/workflows/ci.yml`、`tests/test_env_lock.py`、`docs/specs/supply_chain.md`。
+- 未決：(a) 拿到 CI 的 `lock-<OS>` artifact 後，把其餘套件依實際版本改成 `==` 並縮小 PENDING_UNPINNED；(b) 是否讓安裝程式直接用 `micromamba create -f <lock>`（需 lock 檔入庫，且每 OS×GPU 一份）；(c) pip 套件（meeko、gemmi）雜湊鎖定（`pip install --require-hashes`）；(d) osx-64 覆蓋；(e) 已安裝的舊環境不會被改動（`install -f` 補齊時才會受新釘選影響，可能降級或升級 openmm，需 CI installer job 觀察）。
 
 ### D-162　簽發端 `MD20-Signer.cmd` 誤用 Python 2（MGLTools）修正（使用者筆電實測回報）
 - **現象**：使用者雙擊私人 repo `md-digital-signature` 的 `MD20-Signer.cmd`,報 `MGLTools-1.5.7\python.exe: No module named pip` 與 `SyntaxError: Non-ASCII character '\xe6' ... no encoding declared`。兩者都是 **Python 2** 的徵狀。
@@ -28,6 +138,7 @@
 - **證據**:`python3 -m py_compile gui/signer_gui.py` OK;簽發端 78 passed;`tools/check_no_private_keys.py` 綠(repo 內只有公鑰)。
 - **安全**:純啟動器修正,未動簽章/驗證邏輯,無後門、無私鑰。
 - **相關**:簽發端 commit(見該 repo),本 repo 僅此決策紀錄。
+
 
 ### D-161　LLM 編排與智慧化輔助納入範圍（更正 10-31「AI 連接器出範圍」；使用者 2026-11-09 指示，規格待審查）
 - **北極星願景(使用者 2026-11-09 定為終極目標)**：讓完全不懂分子模擬的外行人,用任何語言、用說的,透過 LLM 對話就自動接管整個程式、前中後深度參與、產出專案報告——「用說的就能做完整的分子模擬」。四條設計真相:教學版是驗證專家迴圈的正確路徑;外行人無法判斷對錯故閘門/誠實報告最重要(最該防的失敗=漂亮自信的報告讓人過度相信);「自動接管」是在有界自主框架(autonomy.md)內、仍會停下升級;「完整」=誠實假說 + 需要哪些濕實驗,不是定論真實世界問題。見規格 §0。

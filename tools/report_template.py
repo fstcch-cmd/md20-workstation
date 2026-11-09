@@ -374,10 +374,44 @@ def _long_run_demo(root: Path, wf, st: dict, rng) -> None:
     atomic_write_json(m, Path(s["metrics_file"]))
 
 
+def _replica_demo(root: Path, st: dict, rng) -> None:
+    """D-164: three synthetic replicas per system so the template shows the replica-set figures (DCCM mean and SD, ΔRMSF with CI)."""
+    from md20.analysis.replica_set import aggregate_replica_set, delta_rmsf_between_replicas
+    from md20.util.jsonio import atomic_write_json
+    summ = st["steps"]["analysis"]["summaries"]
+    aggs = {}
+    for key in ("apo", "docked_BEN"):
+        m0 = json.loads(Path(summ[key]["metrics_file"]).read_text(encoding="utf-8"))
+        res = list(m0["rmsf_residues"])
+        n = len(res)
+        reps = []
+        for i in range(3):
+            m = {k: v for k, v in m0.items() if k != "ligands"}
+            bump = np.zeros(n)
+            if key != "apo":
+                bump[n // 3: n // 3 + max(3, n // 12)] = 0.5                 # a flexible loop in the complex only
+            m["rmsf_ca_A"] = (np.asarray(m0["rmsf_ca_A"], float) + bump + rng.normal(0, 0.06, n)).tolist()
+            A = rng.normal(size=(n, 6)) + np.sin(np.arange(n) / 6.0)[:, None] * 2.0
+            reps.append({"run_id": f"{key}_r{i + 1}", "replica_index": i, "status": "COMPLETE", "metrics": m,
+                         "extended": {"schema": "md20.extended/3", "errors": {}, "dccm": {"matrix": np.corrcoef(A).tolist(), "residues": res}}})
+        agg = aggregate_replica_set(reps, system=key, n_requested=3)
+        path = root / f"analysis_replicas_{key}.json"
+        atomic_write_json(agg, path, backup=False)
+        summ[key]["replica_set_file"] = str(path)
+        aggs[key] = agg
+    pair = delta_rmsf_between_replicas("apo", aggs["apo"]["per_residue"]["rmsf_ca_A"], "docked_BEN",
+                                       aggs["docked_BEN"]["per_residue"]["rmsf_ca_A"], {"comparable": True})
+    dpath = root / "analysis_delta_rmsf_replicas.json"
+    atomic_write_json({"schema": "md20.delta_rmsf_replicas/1", "ref": "apo", "pairs": {"docked_BEN": pair}}, dpath, backup=False)
+    comp = st["steps"]["analysis"].setdefault("comparison", {})
+    comp["delta_rmsf_replicas_file"] = str(dpath)
+
+
 def subsystems(root: Path, wf, st: dict, rng) -> None:
     """D-82: fold, membrane, long run and coarse-grained data, so the template shows F43–F57."""
     from md20.build import martini as MA
     _fold_demo(root, wf, st, rng)
+    _replica_demo(root, st, rng)
     mem = _membrane_demo(root, wf, st, rng)
     st["steps"]["analysis"]["summaries"]["surface_MEL"] = {"status": "PASS", "membrane_file": mem["file"]}
     wf.cfg.setdefault("md", {})["membrane"] = {"type": "surface", "lipids": "mammalian"}

@@ -151,9 +151,15 @@ jobs:
             ~/.local/share/MD20/doctor/*
           if-no-files-found: ignore
       - name: Export explicit lock file (exact package URLs of the environment that passed)
+        # D-163: candidate lock for this OS.  Header lines start with '#' (valid in an @EXPLICIT file); never committed automatically.
         if: always()
         shell: bash
-        run: '"$MAMBA_EXE" env export -n md20 --explicit > md20-lock-${{ runner.os }}.txt 2>/dev/null || true; "$MAMBA_EXE" run -n md20 pip freeze > md20-pip-${{ runner.os }}.txt 2>/dev/null || true'
+        run: |
+          {
+            echo "# MD20 candidate lock (D-163) os=${{ runner.os }} arch=${{ runner.arch }} gpu_yml=${{ matrix.gpu_yml }} commit=${{ github.sha }}"
+            "$MAMBA_EXE" env export -n md20 --explicit 2>/dev/null
+          } > md20-lock-${{ runner.os }}.txt || true
+          "$MAMBA_EXE" run -n md20 pip freeze > md20-pip-${{ runner.os }}.txt 2>/dev/null || true
       - name: Upload lock files
         if: always()
         uses: actions/upload-artifact@v4
@@ -161,6 +167,7 @@ jobs:
           name: lock-${{ runner.os }}
           path: md20-*-${{ runner.os }}.txt
           if-no-files-found: ignore
+          retention-days: 90
 
   heavy:
     # MD20_HEAVY tests split into parallel Ubuntu jobs (consultation §5 Q2): in one job a single slow test (3PTB

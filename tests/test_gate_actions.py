@@ -189,3 +189,18 @@ def test_advisory_gate_keeps_clickable_options():
     acts, manual = gate_actions(g, step="docking_preflight", ligand="PEP")
     assert [a["patch"][0]["value"] for a in acts] == ["intracellular", "extracellular-membrane"] and manual == ["改設計：縮短為帶電核心"]
     assert gate_actions({**g, "advisory": False}, step="docking_preflight", ligand="PEP") == ([], [])
+
+
+def test_competing_carboxylate_gate_has_one_click_restrain_and_four_languages():
+    """D-165: restrain / coordinate are buttons, accept and refit stay hints; the gate and its options exist in all four languages."""
+    from md20.gui import actions, gate_text
+    gate = {"name": "competing carboxylate ZN:A262", "status": "NEEDS_HUMAN", "evidence": {}}
+    opt = "metal_carboxylate: {ZN:A262: restrain}（排除該羧基與金屬的非鍵作用）"
+    a = actions._option_action(gate, opt, step="md_cases", ligand=None)
+    assert a and a["patch"] == [{"path": ["metal_carboxylate", "ZN:A262"], "value": "restrain"}]
+    assert actions._option_action(gate, "metal_carboxylate: {ZN:A262: accept}（接受）", step="md_cases", ligand=None) is None
+    assert actions._option_action(gate, "把該殘基納入 QM 小模型或 MCPB 模型重新擬合，並在 metal_params 以 covers_residues 列出該殘基（或讓參數檔含它的電荷）",
+                                  step="md_cases", ligand=None) is None
+    for lang in ("en", "ja", "ko"):
+        assert gate_text.gate_title(gate["name"], lang) != gate["name"] and gate_text.gate_general(gate["name"], lang)
+        assert gate_text.option_text(opt, lang) != opt

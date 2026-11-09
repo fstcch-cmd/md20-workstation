@@ -5,4 +5,4 @@
 name: md20
 channels: [conda-forge]
 dependencies:
-  - openmm>=8.1
+  - openmm==8.6.1   # D-163: exact (CI openmm-stack evidence)

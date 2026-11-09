@@ -372,23 +372,43 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
     elif len(donors) < 4 and not site_w:
         caveats.append(f"只有 {len(donors)} 個配位原子且晶體沒有記錄配位水：開放位點可能被溶劑水、配體或附近帶負電基團佔據。")
     # D-152: a non-coordinating anionic carboxylate near a bonded metal collapses onto it in a point-charge model
-    # (CI: CA II Glu106 → Zn 1.74 Å).  Stop for the user's decision rather than build a model that will collapse;
-    # `bonded_open`/hydroxide handle their own open-site case above, so this guards the plain `bonded` water model.
-    # D-152: only the plain table-based bonded water model gates on a competing carboxylate.  A fitted-parameter site
-    # (params) or a hydroxide site (mode) has had its charges/environment handled by QM/MCPB, so its collapse, if any,
-    # is the fitted model's responsibility — not this gate (a caveat still flags it below).
+    # (CI: CA II Glu106 → Zn 1.74 Å).  Stop for the user's decision rather than build a model that will collapse.
+    # D-165: the fitted-parameter and hydroxide paths are no longer waved through (D-154): they pass only when the
+    # fitted source demonstrably covers that carboxylate (carboxylate_coverage); not covered / cannot tell → gate.
     comp = [c for c in (site.get("competing_carboxylates") or [])]
-    if comp and policy == "bonded" and not params and mode == "water":
+    cov = None
+    cov_note = ""
+    if comp and policy == "bonded" and params:
+        from .metal_params import carboxylate_coverage
+        cov = carboxylate_coverage(params, comp)
+        out.setdefault("evidence", {})["carboxylate_coverage"] = cov
+        if cov["all_covered"]:
+            cov_note = ("鄰近帶電羧基（" + "、".join(f"{l}（{cov['basis'][l]}）" for l in cov["covered"])
+                        + "）已被擬合參數來源涵蓋，不另擋閘門（D-165）；塌陷風險由該擬合模型負責，MD 後仍須檢查其與金屬的距離。")
+            caveats.append(cov_note)
+    gate_it = bool(comp) and policy == "bonded" and ((not params and mode == "water") or (params and not cov["all_covered"]))
+    if gate_it:
         if carboxylate is None:
             names = "、".join(f"{c['resname']}{c['resseq']}:{c['name']}（{c['distance_A']} Å）" for c in comp)
+            if params:
+                miss = "、".join(cov["uncovered"])
+                why_gate = (f"{key} 旁有未配位的帶電羧基（{names}），而擬合參數來源沒有涵蓋：{miss}"
+                            + (f"（{cov['unreadable']}）" if cov.get("unreadable") else "")
+                            + "。擬合的鍵與電荷只對它擬合過的殘基負責；沒被納入的羧基仍是標準力場的點電荷，"
+                              "在 Zn²⁺ 旁會塌到金屬上（CI 實測 CA II 的 Glu106 塌到 1.74 Å）。程式無法判斷擬合模型是否含它時一律停下，請你決定：")
+            else:
+                why_gate = (f"{key} 旁有未配位的帶電羧基（{names}）。點電荷力場下 Zn²⁺ 與羧基之間排斥不足，MD 中羧基會塌到金屬上"
+                            "（CI 實測 CA II 的 Glu106 塌到 1.74 Å），產生非物理的配位。程式不自動處理，請你決定：")
+            opts = [f"metal_carboxylate: {{{key}: restrain}}（排除該羧基與金屬的非鍵作用，並以平底下限約束維持晶體距離；維持結構，須標註）"]
+            if params:
+                opts.append("把該殘基納入 QM 小模型或 MCPB 模型重新擬合，並在 metal_params 以 covers_residues 列出該殘基（或讓參數檔含它的電荷）")
+            else:
+                opts.append(f"metal_carboxylate: {{{key}: coordinate}}（確認該羧基確實直接配位金屬 → 改以 bonded 鍵結，需晶體距離支持）")
+            opts += ["該殘基若在金屬微環境質子化，請改用中性變體（GLH／ASH）後重建（需 pKa 證據）",
+                     f"metal_policy: {{{key}: keep_nonbonded}}（整個金屬用非鍵離子模型＋位置約束，不建鍵）",
+                     f"metal_carboxylate: {{{key}: accept}}（接受塌陷，僅示範，結果不可用於結構或能量）"]
             out.update(status=NEEDS_HUMAN, gate_name=f"competing carboxylate {key}", competing_carboxylates=comp,
-                       why=f"{key} 旁有未配位的帶電羧基（{names}）。點電荷力場下 Zn²⁺ 與羧基之間排斥不足，MD 中羧基會塌到金屬上"
-                           "（CI 實測 CA II 的 Glu106 塌到 1.74 Å），產生非物理的配位。程式不自動處理，請你決定：",
-                       options=[f"metal_carboxylate: {{{key}: restrain}}（排除該羧基與金屬的非鍵作用，並以平底下限約束維持晶體距離；維持結構，須標註）",
-                                f"metal_carboxylate: {{{key}: coordinate}}（確認該羧基確實直接配位金屬 → 改以 bonded 鍵結，需晶體距離支持）",
-                                f"該殘基若在金屬微環境質子化，請改用中性變體（GLH／ASH）後重建（需 pKa 證據）",
-                                f"metal_policy: {{{key}: keep_nonbonded}}（整個金屬用非鍵離子模型＋位置約束，不建鍵）",
-                                f"metal_carboxylate: {{{key}: accept}}（接受塌陷，僅示範，結果不可用於結構或能量）"])
+                       why=why_gate, options=opts)
             return out
         if carboxylate == "restrain":
             out["competing_carboxylates"] = comp
@@ -408,7 +428,7 @@ def plan_site(site: dict, policy: str | None, xyz_of: dict | None = None, params
     out.update(status=AUTO_FIXED, action="bonded", bonds=bonds, angles=angles, variants=variants, caveats=caveats,
                why=f"{key} 依使用者設定建立鍵結模型：{geom}（" + "、".join(b["label"] + f" {b['r0_nm'] * 10:.2f} Å" for b in bonds)
                    + "）" + (f"；配位殘基質子化改為 " + "、".join(f"{k}→{v}" for k, v in variants.items()) if variants else "")
-                   + "（配位的 Cys 去質子化、His 以未配位的氮帶氫）。" + fitted)
+                   + "（配位的 Cys 去質子化、His 以未配位的氮帶氫）。" + fitted + cov_note)
     return out
 
 

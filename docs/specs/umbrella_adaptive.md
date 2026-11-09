@@ -99,6 +99,7 @@ WHAM 與 MBAR 改為接受**每個 window 各自的 k**（`_mdh_legacy._k_column
 ## PMF 估計的效能與範圍檢查（D-62）
 - bootstrap 重抽樣以基本 MBAR 解的 f_k 暖啟動；基本解需要備援求解法時，重抽樣直接用 robust protocol。計時記在 `quality["solver"]["timing_s"]`。
 - PMF 有限值必須涵蓋最低到最高 window 平均（±1 bin）；MBAR 沒涵蓋改用 WHAM（記 `quality["pmf_truncated"]`），都沒涵蓋則 `converged=False`。
+- D-168：重抽樣向量化、重複略過重疊矩陣、`bootstrap_pmf_1d(n_jobs=)` 可選平行（預設關）；結果與舊路徑一致（見 docs/_pending/D-168.md，WHAM 暖啟動經量測無益已不採用）。
 - 未決：自適應停止 bootstrap（σ 收斂即停）是否採用。
 - 預設拉離速度 0.005 nm ps⁻¹（D-63）：依據是 SMD 耗散功（做功 − 全範圍 PMF 平台）；0.01 時 3PTB 耗散約 100 kT。
 - ΔPMF 井深需 PMF 末端持平（尾段至最外側 window 平均，變化 ≤ 1 kT），否則不輸出 ΔG°（D-65）。

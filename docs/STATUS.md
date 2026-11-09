@@ -1,5 +1,18 @@
 # MD20 單機教學版 — 狀態報告
 
+## 當前事實（2026-11-09 第九個 session，session_016gcJz6mbow3MMxyKdn4bWm）
+- **對外發行最新＝v0.1.0a20**（prerelease）。main 為開發中 **a21.dev0**，本 session 新增 D-168～D-167。能力現況看 `docs/CAPABILITIES.md`。
+- **本 session 以五個 Sonnet 子代理平行開發、主 session 審查後整合（merge）一次推上**：
+  - **D-168** MBAR/WHAM bootstrap 加速（保守版）：向量化重抽（逐位元相同）、重複略過未用的 overlap 矩陣與直方圖、可選 `n_jobs` 行程平行（預設關閉、結果與 n_jobs 無關）。WHAM 暖啟動量測後無益已移除。容器量不到加速（numpy 替身），真 pymbar 省下量交 CI。`tests/test_bootstrap_speed.py` 7 項（atol 1e-10～1e-12）。
+  - **D-163** conda 環境鎖版第一步：有 CI 證據的套件精確釘選（`openmm==8.6.1`、`numpy==2.4.6`、`openff-toolkit==0.18.0`；`openmmforcefields==0.15.1` 早已精確）；無證據的保留並列 `PENDING_UNPINNED` 待 CI explicit lock；`tests/test_env_lock.py` 5 項防漂移。`==` 能否四平台解出待 CI。
+  - **D-164** D-130/D-142 剩餘缺口：盤點後確認彙總已於 D-142 做完，只補兩張缺的圖（逐殘基 ΔRMSF＋Welch 95% 區間、DCCM 平均與 SD），數字取自既有彙總、不新增統計；ΔRMSF 標「未校正」。更正 replicas.md §7 過時描述。
+  - **D-165** 擬合/OH⁻ 路徑競爭羧基閘門（D-152 後續）：擬合來源未涵蓋旁邊未配位帶電羧基（如 Glu106）→ NEEDS_HUMAN；涵蓋（covers_residues／MCPB PDB／json 電荷）→ PASS 並記依據。不改力場、不自動 restrain、不放寬門檻。heavy[metal] 三個會被擋的測試已誠實帶入 restrain 決定。
+  - **D-167** 起草 `docs/llm/MD20_LLM_GUIDE.md`（end-user 版，草案）：與 D-161 LLM 編排規格一起待審，**未實作編排**。
+- **D-166（授權第 4 層加密層）暫停、等使用者決定**：子代理實作「金鑰拆分＋執行期解密＋動態 exec」的自訂載入器時被安全分類器正確擋下（形狀同惡意混淆載入器），不重試。三方案待選：只做 Cython 編譯不加密／用現成商用保護方案／擱置 D-128。開發者傾向前者或擱置（真正護城河是「出貨 build 不含核心原始碼」，靠編譯非加密）。細節 D-166。
+- **驗收狀態**：整合樹容器全套 `pytest` **1479 passed、50 skipped、0 failed**（251s）。真機路徑（真 pymbar 加速、`==` 四平台可解、兩張新圖真實版面、擬合/OH⁻ restrain 真機）**全部交 CI**，本 session push 後單次查。
+- **安全（不可退讓、本 session 再確認）**：私鑰永不進任何 repo/log/對話；驗證端無 env/設定/參數後門；D-166 一度想做的自訂加密載入器被擋下、未落地任何程式、未碰 `license.py`、未涉及真實金鑰。
+- **仍未做（交接）**：D-166 加密層待使用者選方案；鋅配體直接配位參數化（D-53 距離約束後備）、鋅 OH⁻ 路徑競爭羧基真機守住與否（D-165 未決）；漏斗 ΔG° 的 D-140 筆電 3PTB 驗收；D-72 筆電實測；`n_jobs` 是否接到 GUI/設定（D-168 未決）；LLM 編排規格與 guide 待審。
+
 ## 當前事實（2026-11-09 第八個 session，session_016gcJz6aoRW5kLP9Jzbi7kj；收尾交接）
 - **對外發行最新＝v0.1.0a20**（2026-11-09 發行，prerelease）。main 為開發中 **a21.dev0**。能力現況看 `docs/CAPABILITIES.md`（D-136）。
 - **已發行 v0.1.0a20（D-160，使用者 11/08 授權「CI 全綠後直接 release 最新版」）**：commit A `c1b4c58`（版本 0.1.0a20＋manifest）、commit B `d2b680e`（main 碰回 a21.dev0）。**環境代理封鎖建 tag**（`git push` tag 與 `gh api git/refs`、`git/tags` 皆 403），繞法＝推分支 `release/v0.1.0a20` 指向 commit A ＋ `gh workflow run release-windows.yml --ref release/v0.1.0a20 -f tag=v0.1.0a20`，由 release workflow 在 runner 上用自己的 GITHUB_TOKEN 建 tag 並發佈。**release workflow 已在乾淨 Windows／macOS 實際解壓安裝驗證通過才發佈**。發行頁 https://github.com/fstcch-cmd/md20-workstation/releases/tag/v0.1.0a20 。

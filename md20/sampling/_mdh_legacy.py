@@ -1063,8 +1063,11 @@ def mbar_pmf_1d(
     x_max: float | None = None,
     initial_f_k: Sequence[float] | None = None,
     solver_protocol: Any = None,
+    with_overlap: bool = True,
 ) -> dict[str, Any]:
-    """`initial_f_k`: warm start (bootstrap replicates start from the base solution; D-62).  `solver_protocol`:
+    """`with_overlap=False` (D-168): skip the overlap matrix and per-window histograms (bootstrap replicates never
+    read them; the O(N*K^2) overlap + eigen-decomposition was computed and thrown away for every replicate).
+    `initial_f_k`: warm start (bootstrap replicates start from the base solution; D-62).  `solver_protocol`:
     passed to pymbar when given (e.g. "robust" after the base solve needed a fallback).  A pymbar that does not
     accept either argument is called without it (the result is the same, only slower)."""
     from pymbar import MBAR
@@ -1140,9 +1143,14 @@ def mbar_pmf_1d(
     pmf[valid] = -np.log(density[valid]) / beta
     pmf[valid] -= np.nanmin(pmf[valid])
 
-    overlap_result = mbar.compute_overlap()
-    overlap_matrix = np.asarray(overlap_result["matrix"], dtype=float)
-    hist = np.vstack([np.histogram(x, bins=edges)[0] for x in samples]).astype(float)
+    if with_overlap:
+        overlap_result = mbar.compute_overlap()
+        overlap_matrix = np.asarray(overlap_result["matrix"], dtype=float)
+        hist = np.vstack([np.histogram(x, bins=edges)[0] for x in samples]).astype(float)
+    else:
+        overlap_result = {"scalar": float("nan"), "eigenvalues": []}
+        overlap_matrix = None
+        hist = None
     return {
         "grid_nm": grid,
         "pmf_kj_mol": pmf,
@@ -1178,6 +1186,7 @@ def estimate_pmf_1d(
     x_max: float | None = None,
     initial_f_k: Sequence[float] | None = None,
     solver_protocol: Any = None,
+    with_overlap: bool = True,
 ) -> dict[str, Any]:
     if prefer_mbar:
         try:
@@ -1191,6 +1200,7 @@ def estimate_pmf_1d(
                 x_max=x_max,
                 initial_f_k=initial_f_k,
                 solver_protocol=solver_protocol,
+                with_overlap=with_overlap,
             )
         except Exception as exc:
             result = stable_wham_1d(
@@ -1223,11 +1233,29 @@ def _moving_block_resample(
     block_length = max(1, min(int(block_length), n))
     n_blocks = int(math.ceil(n / block_length))
     starts = rng.integers(0, n, size=n_blocks)
-    out = []
-    for start in starts:
-        indices = (np.arange(block_length) + int(start)) % n
-        out.append(x[indices])
-    return np.concatenate(out)[:n]
+    # D-168: one fancy-index instead of a Python loop over blocks (same RNG draw, identical output)
+    indices = (starts[:, None] + np.arange(block_length)[None, :]) % n
+    return x[indices.reshape(-1)[:n]]
+
+
+def _bootstrap_replicate(resampled_eq: list, common: dict) -> "np.ndarray | None":
+    """One bootstrap replicate: re-estimate the PMF from the resampled windows (None if it fails or is mis-sized).
+    Module level so a process pool can pickle it."""
+    c = common
+    try:
+        resampled_uncorr = []
+        for x in resampled_eq:
+            g = _fallback_statistical_inefficiency(x)
+            resampled_uncorr.append(subsample_uncorrelated(x, g))
+        result = estimate_pmf_1d(
+            resampled_eq, resampled_uncorr, c["centers_nm"], c["k"], c["temperature_K"],
+            bins=c["bins"], prefer_mbar=c["prefer_mbar"], x_min=c["x_min"], x_max=c["x_max"],
+            initial_f_k=c["warm"], solver_protocol=c["protocol"], with_overlap=False,
+        )
+        pmf = np.asarray(result["pmf_kj_mol"], dtype=float)
+        return pmf if len(pmf) == c["n_grid"] else None
+    except Exception:
+        return None
 
 
 def bootstrap_pmf_1d(
@@ -1240,7 +1268,10 @@ def bootstrap_pmf_1d(
     n_bootstrap: int = 100,
     seed: int = 20260423,
     prefer_mbar: bool = True,
+    n_jobs: int = 1,
 ) -> dict[str, Any]:
+    """`n_jobs` (D-168): >1 solves the replicates in a process pool (default 1 = off).  Resampling is done in the
+    parent in the serial order, so the result does not depend on n_jobs."""
     eq_lists = [_finite_1d(x, min_samples=20) for x in equilibrated_sample_lists]
     prepared_uncorr = []
     block_lengths = []
@@ -1273,35 +1304,33 @@ def bootstrap_pmf_1d(
     rng = np.random.default_rng(int(seed))
     boot_pmfs: list[np.ndarray] = []
     _t1 = _time.perf_counter()
+    common = dict(centers_nm=centers_nm, k=force_constant_kj_mol_nm2, temperature_K=temperature_K, bins=bins,
+                  prefer_mbar=prefer_mbar, x_min=float(grid.min() - half_dx), x_max=float(grid.max() + half_dx),
+                  warm=warm, protocol=protocol, n_grid=len(grid))
 
-    for _ in range(int(n_bootstrap)):
-        resampled_eq = [
-            _moving_block_resample(x, block, rng)
-            for x, block in zip(eq_lists, block_lengths)
-        ]
-        resampled_uncorr = []
-        for x in resampled_eq:
-            g = _fallback_statistical_inefficiency(x)
-            resampled_uncorr.append(subsample_uncorrelated(x, g))
+    def _jobs():
+        # resampling stays in the parent and in the same order as the serial path, so the seed fixes the result
+        # whatever n_jobs is; only the (independent) solves are distributed
+        for _ in range(int(n_bootstrap)):
+            yield [_moving_block_resample(x, block, rng) for x, block in zip(eq_lists, block_lengths)]
+
+    n_jobs = int(n_jobs or 1)
+    if n_jobs > 1 and int(n_bootstrap) > 1:
+        import multiprocessing as _mp
+        from concurrent.futures import ProcessPoolExecutor
+        from functools import partial
         try:
-            result = estimate_pmf_1d(
-                resampled_eq,
-                resampled_uncorr,
-                centers_nm,
-                force_constant_kj_mol_nm2,
-                temperature_K,
-                bins=bins,
-                prefer_mbar=prefer_mbar,
-                x_min=float(grid.min() - half_dx),
-                x_max=float(grid.max() + half_dx),
-                initial_f_k=warm,
-                solver_protocol=protocol,
-            )
-            pmf = np.asarray(result["pmf_kj_mol"], dtype=float)
-            if len(pmf) == len(grid):
-                boot_pmfs.append(pmf)
-        except Exception:
-            continue
+            # spawn, not fork: the caller may be a multi-threaded GUI worker (fork there can deadlock)
+            with ProcessPoolExecutor(max_workers=min(n_jobs, int(n_bootstrap)), mp_context=_mp.get_context("spawn")) as ex:
+                results = list(ex.map(partial(_bootstrap_replicate, common=common), _jobs(), chunksize=4))
+        except Exception:                      # no process pool available (frozen app, sandbox): serial, same result
+            rng = np.random.default_rng(int(seed))
+            results = [_bootstrap_replicate(r, common) for r in _jobs()]
+    else:
+        results = (_bootstrap_replicate(r, common) for r in _jobs())
+    for pmf in results:
+        if pmf is not None:
+            boot_pmfs.append(pmf)
 
     if boot_pmfs:
         arr = np.vstack(boot_pmfs)
