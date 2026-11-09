@@ -6,6 +6,17 @@
 ---
 
 ## 2026-11-09
+### D-162　簽發端 `MD20-Signer.cmd` 誤用 Python 2（MGLTools）修正（使用者筆電實測回報）
+- **現象**：使用者雙擊私人 repo `md-digital-signature` 的 `MD20-Signer.cmd`,報 `MGLTools-1.5.7\python.exe: No module named pip` 與 `SyntaxError: Non-ASCII character '\xe6' ... no encoding declared`。兩者都是 **Python 2** 的徵狀。
+- **根因**：原 .cmd 邏輯是「先設 `PY=python`,只有 `where python` 失敗才改 `py`」。使用者 PATH 上有 MGLTools-1.5.7 的 `python.exe`(Python 2),`where python` 會成功 → 一直用到 Python 2。signer_gui.py 是 Python 3(f-string/type hint),Python 2 解析第一行中文 docstring 時因無編碼宣告先爆 SyntaxError。
+- **決定/修法**(簽發端 repo,無程式邏輯變更、純啟動器與編碼):
+  - `MD20-Signer.cmd`:改成**優先 `py -3`**(官方啟動器,不受 PATH 順序影響);無 py 啟動器才退用 `python` 且**必須確認主版本為 3**,否則明確報「你的 PATH 可能只有 Python 2(MGLTools)」並中止。用 `setlocal enabledelayedexpansion`＋`!VER!` 避免括號區塊的展開坑。
+  - `MD20-Signer.command`(macOS):同理優先 `python3`,退用 `python` 時以 `sys.version_info[0]==3` 檢核。
+  - `gui/signer_gui.py`:第一行加 `# -*- coding: utf-8 -*-`(保險;真正保護靠 .cmd 選對直譯器,因 Python 2 仍會在 f-string 等語法 parse 時失敗)。
+- **證據**:`python3 -m py_compile gui/signer_gui.py` OK;簽發端 78 passed;`tools/check_no_private_keys.py` 綠(repo 內只有公鑰)。
+- **安全**:純啟動器修正,未動簽章/驗證邏輯,無後門、無私鑰。
+- **相關**:簽發端 commit(見該 repo),本 repo 僅此決策紀錄。
+
 ### D-161　LLM 編排與智慧化輔助納入範圍（更正 10-31「AI 連接器出範圍」；使用者 2026-11-09 指示，規格待審查）
 - **北極星願景(使用者 2026-11-09 定為終極目標)**：讓完全不懂分子模擬的外行人,用任何語言、用說的,透過 LLM 對話就自動接管整個程式、前中後深度參與、產出專案報告——「用說的就能做完整的分子模擬」。四條設計真相:教學版是驗證專家迴圈的正確路徑;外行人無法判斷對錯故閘門/誠實報告最重要(最該防的失敗=漂亮自信的報告讓人過度相信);「自動接管」是在有界自主框架(autonomy.md)內、仍會停下升級;「完整」=誠實假說 + 需要哪些濕實驗,不是定論真實世界問題。見規格 §0。
 - **範圍更正**：2026-10-31（`04` 文件）曾把「雲端 NIM／生成化學／AI 模型連接器」移出範圍。使用者 2026-11-09 經多輪腦力激盪，確立一個**不同的、收斂的** LLM 整合方向:不是雲端生成化學黑盒,而是「把 LLM 當成常駐生資專家,編排 + 診斷 + 報告,疊在既有確定性引擎之上」。正式納入範圍。
