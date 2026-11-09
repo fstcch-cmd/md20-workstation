@@ -7,7 +7,7 @@
     "note": "清單內容對應此 commit 的樹；CI 證據對應下方 evidence_baseline 的 commit，兩者不同時看各功能的 last_known_result.status（stale = 證據之後程式或測試有改過）。"
   },
   "versions": {
-    "package_version": "0.1.0a23.dev0",
+    "package_version": "0.1.0a22",
     "latest_published_release": "v0.1.0a22",
     "published_releases": [
       "v0.1.0a1",
