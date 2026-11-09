@@ -9,9 +9,10 @@ What Doctor only *diagnosed* ("driver too old") this module turns into an action
                             (driver installers need administrator rights and a reboot; the student runs the file).
 
 Facts the decisions rest on (NVIDIA CUDA release notes, "CUDA Toolkit and Corresponding Driver Versions"):
-  CUDA 12.4 needs driver ≥ 551.61 (Windows) / 550.54.14 (Linux); 12.0 ≥ 527.41 / 525.60.13; 11.8 ≥ 452.39 / 450.80.02.
-conda-forge openmm for win-64 is CUDA-linked; MD20's installer picks `cuda-version` 12.4 or 11.8 from the driver, so a
-student with an old driver has two honest options: update the driver (this module) or keep it and install the 11.8 build.
+  CUDA 12.9 needs driver ≥ 576.02 (Windows) / 575.51.03 (Linux); 12.4 ≥ 551.61 / 550.54.14; 12.0 ≥ 527.41 / 525.60.13; 11.8 ≥ 452.39 / 450.80.02.
+conda-forge openmm for win-64 is CUDA-linked.  D-170: the pinned openmm 8.6.1 ships ONLY a CUDA≥12.9 build, so there is
+no older-CUDA GPU fallback — a student whose driver cannot reach CUDA 12.9 must update the driver (this module) or run on
+OpenCL/CPU.  (Older CUDA floors stay in the table because driver detection still reports what a driver can run.)
 Network calls take an injectable `fetch` so every rule is testable offline; a lookup failure degrades to the official
 download page, never to a guess.
 """
@@ -26,8 +27,9 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-MD20_CUDA = "12.4"                       # what environment/windows-cuda.yml asks for
+MD20_CUDA = "12.9"                       # what environment/windows-cuda.yml asks for (D-170: openmm 8.6.1 只剩 CUDA≥12.9 建置)
 CUDA_MIN_DRIVER = {                      # CUDA toolkit → minimum driver (windows, linux)
+    "12.9": ("576.02", "575.51.03"),     # D-170: NVIDIA CUDA 12.9 GA release notes
     "12.4": ("551.61", "550.54.14"),
     "12.0": ("527.41", "525.60.13"),
     "11.8": ("452.39", "450.80.02"),
@@ -88,17 +90,19 @@ def cuda_supported_by_driver(driver: str | None, os_name: str = "windows") -> st
     if not d:
         return None
     col = 0 if os_name.startswith("win") else 1
-    for cuda in ("12.4", "12.0", "11.8"):
+    for cuda in ("12.9", "12.4", "12.0", "11.8"):
         if d >= _vtuple(CUDA_MIN_DRIVER[cuda][col]):
             return cuda
     return None
 
 
 def env_cuda_version_for(cuda_supported: str | None) -> str | None:
-    """Which conda `cuda-version` build to install for a driver we are NOT going to update."""
+    """Which conda `cuda-version` build to install for a driver we are NOT going to update.
+    D-170: pinned openmm 8.6.1 ships only CUDA≥12.9 builds, so there is no older-CUDA GPU build to fall back to —
+    a driver that cannot reach 12.9 has no CUDA option (OpenCL/CPU instead) and this returns None."""
     if cuda_supported is None:
         return None
-    return "12.4" if _vtuple(cuda_supported) >= (12, 4) else "11.8"
+    return "12.9" if _vtuple(cuda_supported) >= (12, 9) else None
 
 
 # ----------------------------------------------------------------------------- NVIDIA lookup
@@ -207,12 +211,12 @@ def plan_drivers(hardware: dict, *, resolve=None, os_name: str | None = None) ->
                 p.why = f"驅動 {drv} 支援 CUDA {cuda}，與 MD20 的 OpenMM（cuda-version {MD20_CUDA}）相符；不需要更新。"
             else:
                 p.status = "UPDATE"
-                p.platform_now = "CUDA (cuda-version 11.8)" if cuda else "OpenCL"
+                p.platform_now = f"CUDA (cuda-version {env_v})" if env_v else "OpenCL"
                 p.why = (f"驅動 {drv or '未知'} 最高支援 CUDA {cuda or '< 11.8'}，MD20 預設的 OpenMM 需要 CUDA {MD20_CUDA}"
                          f"（驅動 ≥ {CUDA_MIN_DRIVER[MD20_CUDA][0 if os_name == 'windows' else 1]}）。")
-                p.steps = ["① 一鍵下載最新 WHQL 驅動（官方）→ 執行安裝（需管理員、重開機）→ 重跑安裝器（自動改用 CUDA 12.4）",
+                p.steps = [f"① 一鍵下載最新 WHQL 驅動（官方）→ 執行安裝（需管理員、重開機）→ 重跑安裝器（自動改用 CUDA {MD20_CUDA}）",
                            (f"② 不想動驅動：重跑安裝器加 -Cuda {env_v}（安裝對應此驅動的 OpenMM）" if env_v else
-                            "② 不想動驅動：驅動太舊連 CUDA 11.8 都不支援，只能走 OpenCL 或 CPU")]
+                            "② 不想動驅動：此驅動無法支援 CUDA 12.9（OpenMM 8.6.1 唯一的 CUDA 建置），只能走 OpenCL 或 CPU")]
                 if os_name == "windows" and resolve is not None:
                     hit = resolve(name, windows=win_kind)
                     if hit:

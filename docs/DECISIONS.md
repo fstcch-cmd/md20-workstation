@@ -6,6 +6,19 @@
 ---
 
 ## 2026-11-09
+### D-170　CUDA 目標 12.4→12.9（openmm 8.6.1 上游只剩 CUDA≥12.9 建置；a21 發行 verify 失敗後修；使用者選「鎖 openmm、CUDA 跟升」）
+- **現象**：觸發 a21 發行(`release-windows.yml`)時 `verify-windows` 的「CUDA 環境可解(dry run, D-36)」步驟失敗:`openmm ==8.6.1 需要 cuda-version ≥12.9/13,但環境指定 cuda-version =12.4 → 無解`。verify 失敗就不發,所以 a21 沒發出去(tag 未建)。macOS 與 CPU 安裝本身通過。
+- **根因**：**D-163(第九個 session)把兩個 CUDA 環境檔鎖成 `openmm==8.6.1` ＋ `cuda-version=12.4`**。conda-forge 的 openmm 8.6.1 win-64 建置現在只對應 CUDA 12.9/13(a20 發行時 20 小時前還解得出,之後上游變動)。精確鎖死後 solver 沒有退路。a20(D-163 之前,openmm 未精確鎖)其 CUDA 版應仍可解。
+- **決定(使用者 2026-11-09 選)**：**保留 `openmm==8.6.1`,把 CUDA 目標從 12.4 升到 12.9**(讓 CUDA 跟著 openmm)。後果:GPU 驅動底線提高——**CUDA 12.9 需 NVIDIA 驅動 Windows ≥576.02 / Linux ≥575.51.03**(NVIDIA CUDA 12.9 GA release notes;舊的 12.4 是 551.61/550.54.14)。且 **openmm 8.6.1 沒有可配舊驅動的舊 CUDA 建置**,所以原本 12.4/11.8 的多階後備對 8.6.1 失效:驅動達不到 12.9 的學生只能更新驅動或走 OpenCL/CPU。
+- **改了哪些(與 D-163 同屬環境鎖版,已在看板知會第九個 session)**：
+  - `environment/windows-cuda.yml`、`linux-cuda.yml`:`cuda-version=12.9`(openmm 仍 ==8.6.1);`windows-opencl.yml` 註解的 CONDA_OVERRIDE_CUDA 12.4→12.9。
+  - `md20/env/drivers.py`:`MD20_CUDA="12.9"`、`CUDA_MIN_DRIVER` 加 `"12.9":("576.02","575.51.03")`、`cuda_supported_by_driver` 迴圈加 12.9、`env_cuda_version_for` 改為「≥12.9 才回 12.9,否則 None(無 CUDA 後備)」、UPDATE 訊息與步驟改為更新驅動或 OpenCL/CPU。
+  - `md20/env/platforms.py`:PTX 過舊的建議改為「更新驅動到 12.9 底線或走 OpenCL/CPU」,移除失效的 11.8 後備指令。
+  - `.github/workflows/release-windows.yml`:verify dry-run 迴圈 `"12.4","11.8"` → `"12.9"`;`diag-membrane.yml`:`CONDA_OVERRIDE_CUDA` 12.4→12.9。
+  - 測試:`tests/test_drivers.py`(新階層與 env_cuda_version_for=None 後備)、`tests/test_env_lock.py`(FAMILY cuda-version 12.4→12.9)。
+- **證據**：NVIDIA CUDA 12.9 GA release notes(驅動底線);容器全套 pytest **exit 0**(含更新後的 driver/env_lock);真實 Windows CUDA 解算交 `release-windows.yml` verify(本次重發)。
+- **未決**：driver_floor 的驅動更新建議仍可能把使用者導到 <576.02 的「最新」WHQL(實務上 NVIDIA 最新已 ≥576,測試用 stub 不驗此點);CUDA 13 是否也要納入(目前讓 cuda-version=12.9 固定,未開 13);**第九個 session D-163 的 env-lock 漂移測試未涵蓋 CUDA 路徑,建議補**。
+
 ### D-169　內建 `owner_pub.pem` 換成擁有者真實公鑰（結案 D-127；使用者筆電實測：正常核發憑證卻驗不過）
 - **現象**：使用者用簽發端 GUI 以自己的私鑰簽出 `*.md20license`,安裝到 MD20 卻報「授權檔的簽章不正確（檔案被改過、損毀，或不是 HCC Lab 簽發）／沒有安裝這份授權檔」。
 - **根因（結案 D-127）**：MD20 內建的 `md20/util/owner_pub.pem` 是**開發期產生的金鑰**(指紋 `62dbcfb7…`),擁有者手上**沒有**它配對的私鑰。`docs/CAPABILITIES.md` 早標「擁有者需確認持有與 owner_pub.pem 成對的私鑰（D-127 未決）」。使用者用自己 keygen 出來的真實私鑰(公鑰指紋 `8e22a1f9…`)簽章,對不上內建的開發公鑰 → 驗證正確地拒絕。**不是格式 bug**:簽發與驗證的 canonical（`sort_keys`,`separators=(",",":")`,`ensure_ascii=False`）、DOMAIN、PSS/MGF1-SHA256 完全一致,且 `sign_payload` 簽後自我驗證。

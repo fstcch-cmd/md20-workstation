@@ -16,7 +16,7 @@ CI = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 # conda specs with exact versions backed by repo evidence (DECISIONS: CI openmm-stack 5a3fa37/d879f2b runs)
 PINNED = {"numpy": "2.4.6", "openff-toolkit": "0.18.0", "openmm": "8.6.1"}
 # family pins that are intentionally minor-level (python 3.11 is the supported interpreter; cuda-version is the driver family)
-FAMILY = {"python": "3.11", "cuda-version": "12.4"}
+FAMILY = {"python": "3.11", "cuda-version": "12.9"}
 # no evidence in the repo of an exact version -> waiting for the CI lock artifact
 PENDING_UNPINNED = {
     "pandas", "openpyxl", "scipy", "cryptography", "psutil", "matplotlib-base", "plotly", "rdkit", "pdbfixer",

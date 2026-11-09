@@ -10,12 +10,14 @@ from md20.env.drivers import (plan_drivers, cuda_supported_by_driver, env_cuda_v
 
 # ----------------------------------------------------------------------------- version table
 def test_cuda_level_from_driver_windows_and_linux():
-    assert cuda_supported_by_driver("551.61") == "12.4" and cuda_supported_by_driver("560.94") == "12.4"
+    assert cuda_supported_by_driver("576.02") == "12.9" and cuda_supported_by_driver("580.88") == "12.9"
+    assert cuda_supported_by_driver("576.01") == "12.4" and cuda_supported_by_driver("551.61") == "12.4"
     assert cuda_supported_by_driver("551.60") == "12.0"
     assert cuda_supported_by_driver("527.41") == "12.0" and cuda_supported_by_driver("472.12") == "11.8"
     assert cuda_supported_by_driver("452.38") is None and cuda_supported_by_driver(None) is None
-    assert cuda_supported_by_driver("550.54.14", "linux") == "12.4" and cuda_supported_by_driver("550.54.13", "linux") == "12.0"
-    assert env_cuda_version_for("12.4") == "12.4" and env_cuda_version_for("12.0") == "11.8" and env_cuda_version_for(None) is None
+    assert cuda_supported_by_driver("575.51.03", "linux") == "12.9" and cuda_supported_by_driver("550.54.14", "linux") == "12.4"
+    # D-170: openmm 8.6.1 only ships a CUDA 12.9 build, so only a 12.9-capable driver gets a CUDA env; others fall back
+    assert env_cuda_version_for("12.9") == "12.9" and env_cuda_version_for("12.4") is None and env_cuda_version_for(None) is None
 
 
 def test_wmi_driver_version_conversion():
@@ -39,18 +41,19 @@ def test_plan_old_driver_gives_update_with_download_and_keep_driver_path():
                 "version": "560.94", "name": "GeForce Game Ready Driver", "product": "GeForce GTX 1060"}
     plans = plan_drivers(_hw({"vendor": "NVIDIA", "name": "NVIDIA GeForce GTX 1060", "driver": "456.71"}), resolve=resolve, os_name="windows")
     p = plans[0]
-    assert p.status == "UPDATE" and p.cuda_supported == "11.8" and p.env_cuda_version == "11.8"
+    # D-170: 8.6.1 has no older-CUDA build, so an old driver's keep-driver path is OpenCL/CPU, not a 11.8 GPU build
+    assert p.status == "UPDATE" and p.cuda_supported == "11.8" and p.env_cuda_version is None
     assert p.download_url.startswith("https://us.download.nvidia.com/") and p.package_version == "560.94"
-    assert "11.8" in p.steps[1] and "-Cuda 11.8" in installer_hint(p)
+    assert "OpenCL" in p.steps[1] and "-Gpu opencl" in installer_hint(p)
     assert hits and hits[0][0] == "NVIDIA GeForce GTX 1060"
 
 
 def test_plan_new_driver_is_ok_without_lookup():
     called = []
-    plans = plan_drivers(_hw({"vendor": "NVIDIA", "name": "NVIDIA GeForce RTX 4060 Laptop GPU", "driver": "31.0.15.6094", "source": "wmi"}),
+    plans = plan_drivers(_hw({"vendor": "NVIDIA", "name": "NVIDIA GeForce RTX 4060 Laptop GPU", "driver": "32.0.15.7602", "source": "wmi"}),
                          resolve=lambda *a, **k: called.append(1), os_name="windows")
     p = plans[0]
-    assert p.status == "OK" and p.driver == "560.94" and p.cuda_supported == MD20_CUDA and p.platform_now == "CUDA"
+    assert p.status == "OK" and p.driver == "576.02" and p.cuda_supported == MD20_CUDA and p.platform_now == "CUDA"
     assert not called and installer_hint(p).endswith("install.ps1")
 
 
