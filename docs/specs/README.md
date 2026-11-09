@@ -64,3 +64,4 @@
 | [capabilities.md](capabilities.md) | 單一能力清單 `docs/capabilities.json`／`docs/CAPABILITIES.md`（五種彼此獨立的狀態、測試類型、CI job 分類、已發行安裝程式、版本對齊）與膜診斷驗收器 `tools/validate_membrane_diag.py`（D-136，R7＋R5 膜） | 已實作・純 Python 測試（CI 結果待下一輪） |
 | [thresholds_calibration.md](thresholds_calibration.md) | 經驗門檻校準：重複 CV 提醒的偵測特性、PCA／分群敏感度改用時間前後半（D-144） | 已實作 |
 | [gui_design.md](gui_design.md) | GUI 設計系統（D-146）與連線穩定性（D-147）：tokens、三態閘門、心跳與重連、檔案替換重試 | 已實作，待 CI gui-preview |
+| [llm_orchestration.md](llm_orchestration.md) | LLM 編排與智慧化輔助（D-161）：前（意圖拆解）中（錯誤診斷/指揮修改）後（客製報告）三階段；LLM 叙述 MD20 執行、閘門仍權威；有界表面 vs 護城河；規則檔；一核心多轉接頭（MCP／內建 BYO-key 面板／REST）；授權分級 + 兩種 build + 本地模型碰核心；檔案存取與寫回紀律；報告客製槽 + 遵守 writing_style.md；自我升級迴圈 | **草案，待審查**；更正 10-31「AI 連接器出範圍」 |
