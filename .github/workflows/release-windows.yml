@@ -9,10 +9,6 @@ on:
   workflow_dispatch:
     inputs:
       tag: { description: "release tag, e.g. v0.1.0a1", required: true }
-      compiled_core:
-        description: "D-166: compile core modules with Cython and ship without their .py source (opt-in; default off = source release unchanged)"
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -32,37 +28,13 @@ jobs:
         run: |
           tag="${{ github.event.inputs.tag }}"; [ -n "$tag" ] || tag="${GITHUB_REF_NAME}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      - name: "Build ZIP (source; default — git archive applies .gitattributes, *.cmd keep CRLF)"
-        if: ${{ inputs.compiled_core != true }}
+      - name: "Build ZIP (git archive applies .gitattributes, *.cmd keep CRLF)"
         run: |
           tag="${{ steps.v.outputs.tag }}"
           git archive --format=zip --prefix="MD20-$tag/" -o "MD20-Windows-$tag.zip" HEAD
           cp "MD20-Windows-$tag.zip" "MD20-macOS-$tag.zip"     # same files; both installers are inside (D-66)
           sha256sum "MD20-Windows-$tag.zip" "MD20-macOS-$tag.zip" > SHA256SUMS.txt
           unzip -l "MD20-Windows-$tag.zip" | grep -E "Install-MD20.cmd|installer/install.ps1|environment/base.yml"
-          cat SHA256SUMS.txt
-      - name: "Build ZIP (compiled core; D-166 opt-in — Cython-compile core, drop its .py, no encryption/keys)"
-        if: ${{ inputs.compiled_core == true }}
-        run: |
-          tag="${{ steps.v.outputs.tag }}"
-          python -m pip install --upgrade "cython>=3" setuptools wheel
-          stage="stage/MD20-$tag"
-          mkdir -p "$stage"
-          git archive HEAD | tar -x -C "$stage"            # 乾淨出貨樹（含 .gitattributes 結果）
-          python tools/build_protected.py --root "$stage"  # fail closed：無 Cython 會丟錯、整個 job 失敗
-          python - <<'PY'
-          from pathlib import Path
-          from tools import build_protected as bp
-          stage = Path("stage")/next(p.name for p in Path("stage").iterdir())
-          removed = bp.strip_sources(stage, bp.plan_build())
-          assert removed, "compiled_core：沒有任何 .py 被移除，編譯產物可能沒生出來（fail closed）"
-          print("stripped", len(removed), "core .py from shipped tree")
-          PY
-          ( cd stage && zip -r -q "../MD20-Windows-$tag.zip" "MD20-$tag" )
-          cp "MD20-Windows-$tag.zip" "MD20-macOS-$tag.zip"
-          sha256sum "MD20-Windows-$tag.zip" "MD20-macOS-$tag.zip" > SHA256SUMS.txt
-          # 證明核心 .py 已不在出貨樹（授權驗證改以編譯形式出貨）
-          ! unzip -l "MD20-Windows-$tag.zip" | grep -E "md20/util/license.py" || (echo "license.py 仍在 ZIP，compiled_core 失敗" && exit 1)
           cat SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with: { name: md20-windows-zip, path: "MD20-*.zip\nSHA256SUMS.txt" }
@@ -102,7 +74,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Continue"   # native stderr must not throw (Actions prepends Stop)
           $mm = "$env:RUNNER_TEMP\MD20\micromamba.exe"; $env:MAMBA_ROOT_PREFIX = "$env:RUNNER_TEMP\MD20"; $env:CONDA_OVERRIDE_CUDA = "12.7"
-          foreach ($cv in "12.9") {
+          foreach ($cv in "12.4", "11.8") {
             $y = "$env:RUNNER_TEMP\cuda-$cv.yml"
             (Get-Content $env:RUNNER_TEMP\MD20\app\environment\windows-cuda.yml) -replace "cuda-version=[0-9.]+", "cuda-version=$cv" | Set-Content $y
             & $mm create --dry-run -y -p "$env:RUNNER_TEMP\cudatest" -f $env:RUNNER_TEMP\MD20\app\environment\base.yml -f $y

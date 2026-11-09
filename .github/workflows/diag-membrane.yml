@@ -35,7 +35,7 @@ jobs:
         with: { init-shell: bash, cache-downloads: true }
       - name: Create environment
         shell: bash -el {0}
-        env: { CONDA_OVERRIDE_CUDA: "12.9" }
+        env: { CONDA_OVERRIDE_CUDA: "12.4" }
         run: '"$MAMBA_EXE" create -y -n md20 -f environment/base.yml -f ${{ matrix.gpu_yml }} > env.log 2>&1 || (tail -50 env.log; exit 1)'
       - name: Install md20
         shell: bash -el {0}
@@ -80,7 +80,7 @@ jobs:
         with: { init-shell: bash, cache-downloads: true }
       - name: Create environment
         shell: bash -el {0}
-        env: { CONDA_OVERRIDE_CUDA: "12.9" }
+        env: { CONDA_OVERRIDE_CUDA: "12.4" }
         run: '"$MAMBA_EXE" create -y -n md20 -f environment/base.yml -f ${{ matrix.gpu_yml }} > env.log 2>&1 || (tail -50 env.log; exit 1)'
       - name: Install md20
         shell: bash -el {0}

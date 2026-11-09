@@ -1,8 +1,8 @@
 # Windows + AMD/Intel GPU (OpenCL) or CPU only.
 # conda-forge ships only CUDA-linked openmm builds for win-64, so the installer sets
-# CONDA_OVERRIDE_CUDA=12.9 on machines without an NVIDIA driver; the CUDA plugin simply
+# CONDA_OVERRIDE_CUDA=12.4 on machines without an NVIDIA driver; the CUDA plugin simply
 # fails to load at runtime and OpenCL/CPU are used.  Driver must provide the OpenCL ICD.
 name: md20
 channels: [conda-forge]
 dependencies:
-  - openmm==8.6.1   # D-163: exact (CI openmm-stack evidence)
+  - openmm>=8.5,<8.7   # D-171: range, not exact — let conda pick a build whose cuda-version fits the student's driver (8.6.1 dropped CUDA<12.9). CI pins exact via a lock file.

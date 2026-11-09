@@ -6,7 +6,19 @@
 ---
 
 ## 2026-11-09
+### D-171　改為放寬 openmm pin（範圍）而非升 CUDA；收回 D-170 的 12.9 連鎖（使用者筆電 CUDA 12.7 實裝失敗後，使用者選「放寬 pin」）
+- **現象**：a21（D-170，CUDA 12.9）在使用者筆電實裝失敗。安裝器偵測「驅動支援 CUDA 12.7」→ 仍依舊邏輯選 `cuda-version=12.4` → 撞 `openmm==8.6.1`（需 ≥12.9）→ `install.ps1` 直接崩，未退 OpenCL。
+- **根因再認識**：D-170 把 CUDA 升到 12.9 可讓 CI 過，但代價是**所有驅動 <12.9 的學生（含使用者自己的 12.7）GPU 全部失效、得更新驅動**。對「學生各種筆電」的教學工具門檻太高。真正的病灶只是 **`openmm==8.6.1` 精確鎖（D-163）丟了 CUDA<12.9 的建置**。
+- **決定（使用者 2026-11-09 選「放寬 openmm pin」）**：把五個環境檔的 `openmm==8.6.1` 改為 **`openmm>=8.5,<8.7`**，讓 conda 依學生驅動的 `__cuda` 挑一個有對應 cuda-version 建置的 openmm（12.7 驅動 → 用 cuda-version=12.4 的 8.5.x/8.6.0 建置，GPU 直接可用，不必更新驅動）。**CUDA 目標收回 12.4**（還原 D-170 對 `drivers.py`、`platforms.py`、CI verify 迴圈、`diag-membrane`、`tests/test_drivers.py` 的 12.9 改動）。
+- **CI 重現性**：放棄「散佈環境逐位元重現」，改為散佈環境相容硬體、CI 用 lock 檔保重現（lock 檔待補，記 docs/_pending）。`tests/test_env_lock.py`：openmm 從 `PINNED`（精確）移到新的 `RANGED`（刻意範圍，非待鎖），兩個 pin 測試都排除它，新增 `test_openmm_is_ranged_everywhere_it_appears`。
+- **安裝器強化**：`install.ps1` 建環境若 CUDA solve 失敗，**自動退 OpenCL/CPU 重試一次**再報錯，不再硬崩（D-171）。
+- **改了哪些**：`environment/{windows-cuda,linux-cuda,windows-opencl,macos}.yml`（openmm 範圍）；還原 `md20/env/drivers.py`、`md20/env/platforms.py`、`.github/workflows/{release-windows,diag-membrane}.yml`、`tests/test_drivers.py` 到 D-170 之前（12.4）；`tests/test_env_lock.py`（RANGED）；`installer/install.ps1`（退路）。
+- **證據**：容器全套 pytest（含 env_lock/driver 新測試）；真實 Windows CUDA 解算交 `release-windows.yml` verify（a22 重發，cuda-version 12.4/11.8 迴圈在放寬 openmm 下應可解）。
+- **發行**：a21 已發（D-170，內建正式金鑰但 CUDA 12.9），由 a22 取代；a21 建議與 a20 一併刪（擁有者操作）。
+- **給第九個 session（D-163）**：openmm 不再精確 pin，請改用 CI lock 檔保重現，並讓 env-lock 漂移測試涵蓋 CUDA 路徑。
+
 ### D-170　CUDA 目標 12.4→12.9（openmm 8.6.1 上游只剩 CUDA≥12.9 建置；a21 發行 verify 失敗後修；使用者選「鎖 openmm、CUDA 跟升」）
+- **更正（D-171，2026-11-09）**：本條把 CUDA 升到 12.9 的方向已被 D-171 收回——使用者筆電（CUDA 12.7）實裝才發現這等於強迫所有舊驅動學生更新驅動。改採「放寬 openmm pin（範圍）」，CUDA 目標還原 12.4。本條保留為歷史。
 - **現象**：觸發 a21 發行(`release-windows.yml`)時 `verify-windows` 的「CUDA 環境可解(dry run, D-36)」步驟失敗:`openmm ==8.6.1 需要 cuda-version ≥12.9/13,但環境指定 cuda-version =12.4 → 無解`。verify 失敗就不發,所以 a21 沒發出去(tag 未建)。macOS 與 CPU 安裝本身通過。
 - **根因**：**D-163(第九個 session)把兩個 CUDA 環境檔鎖成 `openmm==8.6.1` ＋ `cuda-version=12.4`**。conda-forge 的 openmm 8.6.1 win-64 建置現在只對應 CUDA 12.9/13(a20 發行時 20 小時前還解得出,之後上游變動)。精確鎖死後 solver 沒有退路。a20(D-163 之前,openmm 未精確鎖)其 CUDA 版應仍可解。
 - **決定(使用者 2026-11-09 選)**：**保留 `openmm==8.6.1`,把 CUDA 目標從 12.4 升到 12.9**(讓 CUDA 跟著 openmm)。後果:GPU 驅動底線提高——**CUDA 12.9 需 NVIDIA 驅動 Windows ≥576.02 / Linux ≥575.51.03**(NVIDIA CUDA 12.9 GA release notes;舊的 12.4 是 551.61/550.54.14)。且 **openmm 8.6.1 沒有可配舊驅動的舊 CUDA 建置**,所以原本 12.4/11.8 的多階後備對 8.6.1 失效:驅動達不到 12.9 的學生只能更新驅動或走 OpenCL/CPU。

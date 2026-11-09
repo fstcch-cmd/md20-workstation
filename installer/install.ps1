@@ -110,11 +110,22 @@ if (($Pkgs.Length + $PkgTail) -ge 260) {
 }
 $env:CONDA_PKGS_DIRS = $Pkgs
 $env:PYTHONUTF8 = "1"   # Traditional-Chinese consoles default to cp950; every md20 text file is UTF-8
-if (Test-Path (Join-Path $Prefix "conda-meta")) {
-  Write-Host "[2/4] 環境已存在，補齊套件 ($Gpu) ..."; & $Mamba install -y -p $Prefix -f $Base -f $GpuYml; Assert-Ok "補齊環境"
-} else {
-  Write-Host "[2/4] 建立環境 ($Gpu) ..."; & $Mamba create -y -p $Prefix -f $Base -f $GpuYml; Assert-Ok "建立環境"
+# D-171: build the env; if the CUDA solve fails (driver's CUDA version has no matching OpenMM GPU build), fall back
+# to OpenCL/CPU once instead of crashing.  With the relaxed openmm range this rarely triggers, but it keeps a student
+# whose driver is too old for any GPU build from being left with a failed install.
+$built = $false
+foreach ($attempt in @("primary", "fallback")) {
+  if (Test-Path (Join-Path $Prefix "conda-meta")) {
+    Write-Host "[2/4] 環境已存在，補齊套件 ($Gpu) ..."; & $Mamba install -y -p $Prefix -f $Base -f $GpuYml
+  } else {
+    Write-Host "[2/4] 建立環境 ($Gpu) ..."; & $Mamba create -y -p $Prefix -f $Base -f $GpuYml
+  }
+  if ($LASTEXITCODE -eq 0) { $built = $true; break }
+  if ($Gpu -ne "cuda") { break }
+  Write-Host "!! CUDA 環境無法解析（驅動的 CUDA 版本配不到可用的 OpenMM GPU 建置）。改用 OpenCL/CPU 重試；更新 NVIDIA 驅動後重跑本安裝器即可改用 CUDA。"
+  $Gpu = "opencl"; $env:CONDA_OVERRIDE_CUDA = "12.4"; $GpuYml = Join-Path $Here "..\environment\windows-opencl.yml"
 }
+if (-not $built) { Assert-Ok "建立環境" }
 Write-Host "[3/4] 安裝 md20 ..."
 & $Mamba run -p $Prefix pip install --no-cache-dir "openmmforcefields==0.15.1" "meeko~=0.5" gemmi -e $Src
 Assert-Ok "安裝 md20"

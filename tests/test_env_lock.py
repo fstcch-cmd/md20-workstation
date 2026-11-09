@@ -14,9 +14,13 @@ SH = (ROOT / "installer" / "install.sh").read_text(encoding="utf-8")
 CI = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
 # conda specs with exact versions backed by repo evidence (DECISIONS: CI openmm-stack 5a3fa37/d879f2b runs)
-PINNED = {"numpy": "2.4.6", "openff-toolkit": "0.18.0", "openmm": "8.6.1"}
+PINNED = {"numpy": "2.4.6", "openff-toolkit": "0.18.0"}
 # family pins that are intentionally minor-level (python 3.11 is the supported interpreter; cuda-version is the driver family)
-FAMILY = {"python": "3.11", "cuda-version": "12.9"}
+FAMILY = {"python": "3.11", "cuda-version": "12.4"}
+# D-171: openmm is a RANGE, not exact — 8.6.1 dropped CUDA<12.9 builds, so pinning it exactly forces every student
+# onto a very new NVIDIA driver.  A range lets conda pick a build whose cuda-version fits the student's driver
+# (CI reproducibility moves to a lock file).  This is intentional, not "awaiting a lock", so it is excluded from both.
+RANGED = {"openmm": ">=8.5,<8.7"}
 # no evidence in the repo of an exact version -> waiting for the CI lock artifact
 PENDING_UNPINNED = {
     "pandas", "openpyxl", "scipy", "cryptography", "psutil", "matplotlib-base", "plotly", "rdkit", "pdbfixer",
@@ -53,9 +57,17 @@ def test_evidence_backed_packages_are_exact_everywhere():
             assert spec in ("=" + ver, "==" + ver), (pkg, fname, spec)
 
 
+def test_openmm_is_ranged_everywhere_it_appears():
+    allv = _all()
+    for pkg, spec in RANGED.items():
+        assert pkg in allv, pkg
+        for fname, s in allv[pkg].items():
+            assert s == spec, (pkg, fname, s)
+
+
 def test_unpinned_list_matches_reality_and_never_grows():
     allv = _all()
-    unpinned = {p for p, d in allv.items() if p not in FAMILY
+    unpinned = {p for p, d in allv.items() if p not in FAMILY and p not in RANGED
                 and any(not s.startswith("==") for s in d.values())}
     assert unpinned == PENDING_UNPINNED, (unpinned ^ PENDING_UNPINNED)
 

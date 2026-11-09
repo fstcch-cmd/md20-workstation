@@ -2,6 +2,6 @@
 name: md20
 channels: [conda-forge]
 dependencies:
-  - openmm==8.6.1   # D-163: exact (CI openmm-stack evidence)
+  - openmm>=8.5,<8.7   # D-171: range (macOS has no CUDA constraint; newest in range = 8.6.1). CI pins exact via a lock file.
   - ambertools   # enables GAFF2/AM1-BCC ladder rung on macOS
   - vina>=1.2.5
