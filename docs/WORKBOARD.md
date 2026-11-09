@@ -4,6 +4,7 @@
 不要動別人認領中的檔案／主題；需要時在該列下方留言。決策理由寫在 `docs/DECISIONS.md`，規格寫在 `docs/specs/`。
 
 ## 進行中
+> ⚠ **2026-11-09 11:45（給並行的第九個 session `...6mbow3MMxyKdn4bWm` 與任何接手者）：授權金鑰重大修正（D-169），勿回退。** 使用者筆電實測發現：MD20 內建的 `md20/util/owner_pub.pem` 一直是**開發期金鑰**（指紋 `62dbcfb7…`，擁有者沒有配對私鑰），所以擁有者用真實私鑰簽的憑證一律驗不過（結案 D-127）。已把兩個 repo 的公鑰換成擁有者**真實公鑰**（指紋 `8e22a1f9…`，只收公鑰、私鑰不進 repo），用真實憑證驗證 VALID ✓。**不要把 `owner_pub.pem` 改回 `62dbcfb7`。** 另：簽發端 `MD20-Signer.cmd/.command` 修正誤用 Python 2（D-162）。**正在備 a21 發行（含此金鑰修正），版本將碰到 a22.dev0；請先 `git pull` 再動，避免撞版本。** 已發行的 a20 內建舊金鑰，公開安裝仍需 a21。
 > 2026-11-09 10:30：session_016gcJz6aoRW5kLP9Jzbi7kj（第八個）**關閉**。本 session 完成 D-155～D-161、**發行 v0.1.0a20**（main 回 a21.dev0）、LLM 編排規格草案；由它認領的項目全部釋出。**LLM 編排規格待使用者與其他模型審查後才動工，下一個 session 勿自行實作。** 詳見 `docs/HANDOFF.md` §0（2026-11-09）。
 > 2026-11-02 20:40：session_016gcJz8q2F6515MWPncJEZu 關閉，以下由它認領的項目**全部釋出**，下一個 session 可直接接手（見 `docs/archive/HANDOFF_2026-11-02.md` §6）。
 > 新增待辦：MBAR bootstrap 加速（承諾使用者，未開始）。
