@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "md20"
-version = "0.1.0a21"   # D-160: dev tree; latest PUBLISHED release is a20 (tagged at the previous commit)
+version = "0.1.0a22.dev0"   # D-160: dev tree; latest PUBLISHED release is a21 (tagged at the previous commit)
 description = "MD20 teaching workstation: docking → MD → enhanced sampling on a single machine (Windows-first)."
 readme = "README.md"
 requires-python = ">=3.10"

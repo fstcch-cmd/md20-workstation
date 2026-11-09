@@ -7,7 +7,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 
 ## 版本事實
 
-- 套件版本（pyproject／`md20.__version__`）：`0.1.0a21`（開發中，未發行）
+- 套件版本（pyproject／`md20.__version__`）：`0.1.0a22.dev0`（開發中，未發行）
 - 已發行的最新版本：**v0.1.0a21**；已發行共 18 版：v0.1.0a1, v0.1.0a2, v0.1.0a3, v0.1.0a4, v0.1.0a6, v0.1.0a7, v0.1.0a8, v0.1.0a9, v0.1.0a10, v0.1.0a11, v0.1.0a12, v0.1.0a13, v0.1.0a14, v0.1.0a15, v0.1.0a16, v0.1.0a17, v0.1.0a20, v0.1.0a21
 - 從未發行：v0.1.0a5, v0.1.0a18, v0.1.0a19（發行說明草稿：docs/releases/v0.1.0a18.md, docs/releases/v0.1.0a19.md）
 - 查證：gh api repos/fstcch-cmd/md20-workstation/releases（2026-11-07 查證：a1–a17 共 16 個 prerelease，無 a5、a18、a19；a17 tag 指向 8e2fc14ba8b54752aa8e02d0d2c7c72c807e0483）
