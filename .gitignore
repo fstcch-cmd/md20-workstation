@@ -14,3 +14,5 @@ md20-pip-*.txt
 .venv/
 .DS_Store
 *.pdb.part
+# D-164: report_template preview figures land in cwd when run from repo root; never commit
+/md_*.png
