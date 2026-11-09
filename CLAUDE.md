@@ -42,10 +42,10 @@ Claude-Session: <本次 session 連結>
 - PDB/PDBQT 的戳記必須純 ASCII(cp950 Windows 會崩)。
 
 ## 現況與還沒做
-**對外版本是 v0.1.0a17**（2026-11-04；a18 只在 main、從未發行，見 DECISIONS 11/07）；repo 11/07 曾短暫改私人、同日改回公開（私人時 CI 計費、release 需登入下載；見 DECISIONS 11/07 發行決定）；a18、a19 從未發行，main 為開發中 a20（D-132）；決策到 D-144（四種語言：英、繁中、日、韓；文字規範 `docs/specs/writing_style.md`）。給學生的步驟在 `docs/students/`；專案名稱用英數字（D-67）。
+**對外版本是 v0.1.0a20**（2026-11-09 prerelease，D-160）；main 為開發中 a21.dev0。代理封鎖建 git tag，發行繞法（推 `release/<tag>` 分支＋`gh workflow run release-windows.yml -f tag=<tag>`）見 D-160。能力現況以 `docs/CAPABILITIES.md` 為準（D-136）；四種語言：英、繁中、日、韓（文字規範 `docs/specs/writing_style.md`）。給學生的步驟在 `docs/students/`；專案名稱用英數字（D-67）。**LLM 編排規格 `docs/specs/llm_orchestration.md`（D-161）是草案：使用者與其他模型審查、收到回饋前不實作。**
 WP5、WP9、WP13、金屬 policy/幾何鍵結模型已實作(真實驗證狀態見 `docs/STATUS.md`)。
 GUI 閘門一鍵決定(`md20/gui/actions.py`)、3D 互作/vdW 表面、金屬擬合參數(`md20/build/metal_params.py`:QM Hessian 內建轉換/MCPB.py 轉譯/JSON,附 QM 小模型輸入產生)已實作。
-還沒做:配體直接配位金屬的參數化(目前只有 D-53 距離約束後備)、受體長 loop 等選項的自動處理、漏斗約束 ΔG° 已實作但預設關閉(D-140,待 CI 與筆電驗證)、D-72 筆電實測。細節見 `docs/HANDOFF.md` §6。
+還沒做:配體直接配位金屬的參數化(目前只有 D-53 距離約束後備)、受體長 loop 等選項的自動處理、漏斗約束 ΔG°：`BindingConfig` dataclass 預設徑向，pipeline 層 teaching/research 預設漏斗、classroom 徑向（D-151/D-154；D-140 的筆電 3PTB 驗收條件仍未完成）、D-72 筆電實測。細節見 `docs/HANDOFF.md` §6。
 
 ## 授權與數位簽章（2026-11-07 起，必知）
 - 私人 repo **`fstcch-cmd/md-digital-signature`** 是簽發端（擁有者工具、簽出授權紀錄）；本 repo 只放驗證端。接手時兩個都要 add_repo＋clone。

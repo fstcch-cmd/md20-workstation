@@ -10,6 +10,7 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **第九個 session 接手**：(1) CLAUDE.md 現況同步（a17→a20、漏斗預設層級，已改未推）；(2) 待使用者指派下一批（LLM 規格審查回饋／鋅科學模型 D-150/D-152／D-128 加密層／MBAR bootstrap 加速）。**LLM 編排不自行實作** | 使用者 11/09 10:22 | session_016gcJz6mbow3MMxyKdn4bWm | 2026-11-09 10:30 | 只改文件；push 與下一批合併 |
 | **（已釋出）Evidence-Driven Repair R1–R8＋11/08–11/09 收尾**：完成 D-130（重做）、D-133～D-144；11/09 續 D-155～D-159（清假示範、CI 修正、離子去碰撞通則、timeout）、**D-160 發行 v0.1.0a20**、D-161 LLM 編排規格草案。剩餘：LLM 規格待審、漏斗轉預設（待驗證）、預算（擁有者）、D-128 加密層、鋅配體配位參數化 | 使用者 11/07 23:01 | session_016gcJz6aoRW5kLP9Jzbi7kj（已關閉 11/09） | 2026-11-07 23:25 | 授權第 3 層 D-128 已於第六個 session 完成 |
 | **授權與數位簽章（第 2–4 層）**：D-124 LICENSE 已完成；D-125 簽章授權開發中（分支 agent/license-gate，未推）；簽發端移到私人 repo `md-digital-signature`；第 3、4 層待做 | 使用者 11/07 21:50–22:11 | session_016gcJz8q8wadWxHb24EMCKt | 2026-11-07 21:55 | 私鑰永不進 repo；第 4 層需使用者建 Secret |
 | **第五個 session（主 session＋Sonnet 子代理）：D-111～D-123 已整合並一次 push**（使用者：push 不要太頻繁，批次推送）；ac5fba5 CI 已跑完，紅燈全在已修範圍。28e87aa 已證實：膜 case B Windows／macOS PASSED（D-102），case C water overlaps 閘門＋bilayer→declashed（D-104）。下一項：micromamba／conda 鎖版（supply_chain §2） | 使用者 11/07（開發順序由開發者決定） | session_016gcJz8q8wadWxHb24EMCKt | 2026-11-07 19:06 | 勿動 md20/sampling/assessment.py 的 mbar_overlap、md20/docking/vina_cli.py |
