@@ -97,3 +97,22 @@ def test_ci_exports_explicit_lock_per_os_without_auto_commit():
     assert "env export -n md20 --explicit" in CI
     assert "name: lock-${{ runner.os }}" in CI
     assert "git commit" not in CI and "git push" not in CI
+
+
+def test_cuda_version_is_consistent_across_ymls_driver_module_and_family():
+    """D-170 回歸守衛（第九個 session 補，peer 建議）：openmm 的 CUDA 綁定散在環境檔與
+    md20/env/drivers.py 兩處，當初 12.4→12.9 的漂移是到 a21 Windows verify 才爆。這個測試
+    把三處綁在一起，任何一處忘了一起改就在本機先紅。"""
+    allv = _all()
+    cuda_ymls = {f: v for f, v in allv.get("cuda-version", {}).items()}
+    # 兩個 cuda 環境檔都要釘 cuda-version，且彼此一致、等於 FAMILY
+    assert set(cuda_ymls) >= {"linux-cuda.yml", "windows-cuda.yml"}, cuda_ymls
+    fam = FAMILY["cuda-version"]
+    for fname, spec in cuda_ymls.items():
+        assert spec in ("=" + fam, "==" + fam), (fname, spec, fam)
+    # drivers.py 的 MD20_CUDA 必須與環境檔一致，且其驅動底線有定義
+    from md20.env import drivers
+    assert drivers.MD20_CUDA == fam, (drivers.MD20_CUDA, fam)
+    assert fam in drivers.CUDA_MIN_DRIVER, (fam, sorted(drivers.CUDA_MIN_DRIVER))
+    win_floor, linux_floor = drivers.CUDA_MIN_DRIVER[fam]
+    assert win_floor and linux_floor  # 兩個平台的驅動底線都要給，否則學生無從判斷要不要更新驅動
