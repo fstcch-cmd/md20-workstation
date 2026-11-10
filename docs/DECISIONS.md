@@ -6,6 +6,18 @@
 ---
 
 ## 2026-11-10
+### D-177　LLM 編排規格審查回饋（第一批，使用者 2026-11-10）：三項決定採納
+- **日期**：2026-11-10
+- **背景**：使用者指派審查 LLM 編排（D-161）track。規則是「規格先審、收到回饋才動工」；本條只記審查決定，**未實作任何編排**。
+- **採納的三項決定**：
+  1. **中段補救一律人工確認**：LLM 只提議，任何改 config／選閘門選項都要使用者點頭 MD20 才套用；**無自動補救白名單**。對應「寧可擋也不猜」。
+  2. **設定暴露＝白名單安全鍵＋合法範圍**：只暴露可調安全參數鍵與範圍給 LLM，科學敏感鍵（力場、質子化、約束、金屬、積分器）不暴露或唯讀。
+  3. **規則檔語言＝英文為主**：`MD20_LLM_GUIDE.md` 轉成英文（本地/開源模型對英文 instruction 遵循度較佳）。報告輸出仍用使用者語言（§5.2 不變）。
+- **落實**：`docs/specs/llm_orchestration.md` §2.2 與 §12 更新（未決→已決/仍未決分列）；`docs/llm/MD20_LLM_GUIDE.md` 重寫為英文，hard rule 3 改為「propose only; never auto-apply」、動作表 `propose_config_change` 註明白名單鍵＋範圍＋需使用者確認。
+- **仍未決（待後續審查）**：本地模型最低硬體門檻與 tool-calling 可靠度對策、報告敘述槽模板位置、L0–L5 里程碑排序與第一個實作起點。**實作仍待使用者明確指派「開始實作」。**
+- **相關檔案**：`docs/specs/llm_orchestration.md`、`docs/llm/MD20_LLM_GUIDE.md`。
+- **證據**：純規格/文件，無程式與測試改動。
+
 ### D-176　修復 macOS openmm-stack：放寬 3PTB 盒體積 sanity 門檻 0.8→0.85（平台邊際、非科學）
 - **日期**：2026-11-10
 - **症狀**：D-175 後 heavy(workflow)、pure-python 全綠，只剩 `openmm-stack (macos-latest)` 一個 job 紅（Linux 同 job 綠）。單一斷言 `test_3ptb_build_and_short_md`：`assert vol < 0.8 * cube_vol`，實測 208.806 vs 0.8×260.942=208.753，即比值 **0.8002**，踩過 0.8 門檻 **0.02%**。
