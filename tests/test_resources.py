@@ -19,8 +19,21 @@ def test_guards():
 
 
 def test_duty_cycle_sleeps_proportionally():
-    import time
-    d = DutyCycle(0.5)
-    time.sleep(0.05)
-    t0 = time.monotonic(); d(); slept = time.monotonic() - t0
-    assert 0.03 < slept < 0.5
+    # Deterministic: inject a fake clock + capture sleeps instead of wall-clock timing (D-179;
+    # the old real-sleep version flaked on loaded macOS CI runners). 50% duty → sleep == busy.
+    ticks = iter([100.0, 100.06, 100.06])   # init t0, then now (busy=0.06), then reset
+    slept = []
+    d = DutyCycle(0.5, clock=lambda: next(ticks), sleep=slept.append)
+    d()
+    assert len(slept) == 1 and abs(slept[0] - 0.06) < 1e-9   # busy * (1-0.5)/0.5 = busy
+
+    # cap at 5.0 s regardless of how long the busy interval was
+    ticks2 = iter([0.0, 100.0, 100.0])
+    slept2 = []
+    DutyCycle(0.5, clock=lambda: next(ticks2), sleep=slept2.append)()
+    assert slept2 == [5.0]
+
+    # duty == 1.0 never sleeps (GPU fully busy)
+    slept3 = []
+    DutyCycle(1.0, clock=lambda: 1.0, sleep=slept3.append)()
+    assert slept3 == []

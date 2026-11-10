@@ -78,16 +78,20 @@ def platform_properties(platform_name: str, base: dict | None, rp: ResourcePlan)
 class DutyCycle:
     """Sleep after GPU work so the GPU is busy only `duty` of the wall time (keeps a desktop responsive)."""
 
-    def __init__(self, duty: float):
+    def __init__(self, duty: float, *, clock=time.monotonic, sleep=time.sleep):
+        # clock/sleep are injectable so the proportionality can be tested deterministically
+        # (wall-clock timing flakes on loaded CI runners). Defaults keep runtime behaviour identical.
         self.duty = max(0.05, min(1.0, float(duty)))
-        self._t = time.monotonic()
+        self._clock = clock
+        self._sleep = sleep
+        self._t = clock()
 
     def __call__(self) -> None:
-        now = time.monotonic()
+        now = self._clock()
         busy = now - self._t
         if self.duty < 1.0 and busy > 0:
-            time.sleep(min(5.0, busy * (1.0 - self.duty) / self.duty))
-        self._t = time.monotonic()
+            self._sleep(min(5.0, busy * (1.0 - self.duty) / self.duty))
+        self._t = self._clock()
 
 
 def gpu_temperature_c() -> int | None:

@@ -6,6 +6,15 @@
 ---
 
 ## 2026-11-10
+### D-179　修復 flaky 計時測試 `test_duty_cycle_sleeps_proportionally`（macOS CI 偶發紅；非 L0）
+- **日期**：2026-11-10
+- **症狀**：L0（a125776）的 CI 上 `pure-python (macos-latest, 3.12)` 紅，失敗測試＝`tests/test_resources.py::test_duty_cycle_sleeps_proportionally`。與 L0（純介面邏輯）無關；是既有牆鐘計時測試：`DutyCycle(0.5)` 後 `time.sleep(0.05)`，高負載 runner 上該 sleep 偶爾 block 很久→算出的 sleep 衝破斷言上界 0.5。
+- **決定**：根治而非放寬容忍度。`DutyCycle.__init__` 加可選注入 `clock`/`sleep`（預設 `time.monotonic`/`time.sleep`，**runtime 行為不變**）；測試改用假時鐘與 sleep 捕捉，決定性驗證比例公式 `busy*(1-duty)/duty`、5.0 上限、duty=1.0 不睡。不再依賴真實時間。
+- **被否決**：只放寬斷言上界（治標、仍可能 flaky）；re-run job（不治本）。
+- **證據**：`tests/test_resources.py` 3 項 0.48s 綠（原本含真實 sleep ~數秒）；容器全套 1503 passed、0 failed。
+- **相關檔案**：`md20/env/resources.py`、`tests/test_resources.py`。
+- **未決**：無。其他計時測試（如 `test_vina_cpu_use::test_effective_threads`，B 於 D-163 回報 flaky）可循同模式之後處理。
+
 ### D-178　LLM 編排 L0 實作（介面定義層；使用者 2026-11-10 指派）
 - **日期**：2026-11-10
 - **背景**：使用者審查 LLM 規格（D-177）後明確指派「開始實作 L0」。L0＝規則檔（已於 D-177 轉英文）＋操作核心介面定義。
