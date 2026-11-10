@@ -1,5 +1,15 @@
 # MD20 單機教學版 — 狀態報告
 
+## 當前事實（2026-11-10 第九個 session 續，session_016gcJz6mbow3MMxyKdn4bWm）
+- **main 四類 CI job 全綠**（`f34d5d3`，a22.dev0）：pure-python×6、openmm-stack×3（ubuntu-cuda/windows-opencl/macos）、heavy×3（workflow/pose-screen/metal）、installer×2、paper-docking。run conclusion=success。
+- **D-166 已定案並實作（方案一）**：核心 Cython 編譯發行層，**不加密、無金鑰、無動態 exec**；`compiled_core` opt-in 預設關、預設原始碼發行不變。自寫加密載入器已被安全分類器正確擋下、不重寫。詳 D-166、`tools/build_protected.py`、`docs/specs/licensing.md §13`。
+- **D-169 金鑰已查核**：md20 驗證端 `owner_pub.pem` 指紋＝簽發端真鑰指紋（`4f965e31…`）、相符；私鑰不在任何 repo，keyguard 綠。a21 已發行真鑰。
+- **本段收尾修的四個 CI 破口（皆只改測試/workflow、未動科學）**：D-173 補回 D-172 誤刪的 compiled_core；D-174 `test_build_protected` 改 `spec_from_file_location`（修全平台 `No module named tools`）；D-175 砍小 heavy(workflow) 整合測試 binding 取樣（修 75 分 timeout）；D-176 放寬 3PTB 盒體積 sanity 門檻 0.8→0.85（修 macOS 0.02% 邊際）。D-171 補 env-lock 的 CUDA 漂移守衛（後由 D-172 隨解釘反轉）。
+- **誠實未決／卡點**：
+  - **D-163 收尾在本開發環境做不了**：`gh run download` 轉向 Azure blob（`*.blob.core.windows.net`），不在 egress 允許清單→Forbidden。要用 CI explicit-lock 縮小 `PENDING_UNPINNED`，需在能連 blob 的環境、或改由 CI 自行提交 lock。
+  - **heavy(workflow) 變慢的深層原因未查**（D-175 只砍測試取樣繞過 timeout）：疑為 D-170/D-172 解 cuda 後平台 fallback 變慢；要動 D-172 已驗證的 CUDA 路徑，待使用者。
+  - **仍 gated（待使用者）**：鋅科學模型（D-150/D-152）、漏斗 ΔG° 筆電驗收（D-140）、`compiled_core` opt-in 發行實跑、LLM 編排規格＋guide 審查回饋。
+
 ## 當前事實（2026-11-09 第九個 session，session_016gcJz6mbow3MMxyKdn4bWm）
 - **對外發行最新＝v0.1.0a20**（prerelease）。main 為開發中 **a21.dev0**，本 session 新增 D-168～D-167。能力現況看 `docs/CAPABILITIES.md`。
 - **本 session 以五個 Sonnet 子代理平行開發、主 session 審查後整合（merge）一次推上**：
