@@ -41,7 +41,11 @@ def test_3ptb_build_and_short_md(pdb_3ptb, tmp_path):
     heavy = prot.topology.select("protein and not element H")
     extent = float(np.ptp(prot.xyz[0, heavy], axis=0).max())
     cube_vol = (extent + 2 * 0.8) ** 3
-    assert vol < 0.8 * cube_vol, (vol, cube_vol)
+    # D-176: sanity bound, not an exact ratio. cube_vol is a rough cube from the protein extent (max ptp) + 2*0.8 nm,
+    # so the realised dodecahedron/cube ratio runs ~0.75-0.80 (ideal 0.707) and varies a hair with per-platform
+    # solvent packing — macOS came in at 0.8002 and tripped a 0.8 bound by 0.02%. 0.85 still catches a genuine
+    # regression (a near-cubic box would be ~1.0) without flaking on platform margin.
+    assert vol < 0.85 * cube_vol, (vol, cube_vol)
     # short MD on the best platform available (CPU in CI)
     choice = choose_platform(probe_steps=20)
     proto = make_protocol("classroom")

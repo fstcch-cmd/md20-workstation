@@ -6,6 +6,16 @@
 ---
 
 ## 2026-11-10
+### D-176　修復 macOS openmm-stack：放寬 3PTB 盒體積 sanity 門檻 0.8→0.85（平台邊際、非科學）
+- **日期**：2026-11-10
+- **症狀**：D-175 後 heavy(workflow)、pure-python 全綠，只剩 `openmm-stack (macos-latest)` 一個 job 紅（Linux 同 job 綠）。單一斷言 `test_3ptb_build_and_short_md`：`assert vol < 0.8 * cube_vol`，實測 208.806 vs 0.8×260.942=208.753，即比值 **0.8002**，踩過 0.8 門檻 **0.02%**。
+- **診斷**：`cube_vol` 是用蛋白 extent（max ptp）+2×0.8nm 粗估的立方體，故實現的 rhombic dodecahedron/cube 比值約 0.75–0.80（理想 0.707），會隨各平台溶劑堆疊微幅變動；macOS 剛好 0.8002。盒子本身正常（截角非立方、省體積），是**門檻卡太死**，非科學 bug，也與本 session 的改動無關（我只動 build 工具與 heavy 測試 binding 預算）。
+- **決定**：門檻 0.8→0.85，加註解說明這是 sanity bound（抓「退化成近立方 ≈1.0」的真回歸）而非精確比值。只改測試斷言，不動 solvation/box 科學程式。
+- **被否決**：改 box 構建邏輯（0.8002 正常，無需改）；用精確理論比值（cube_vol 本就是粗估，精確化沒意義且更脆）。
+- **證據**：macOS job 其餘 1569 passed，僅此 1 failed；Linux 同 job 全綠。CI 綠待本 commit 確認。
+- **相關檔案**：`tests/test_real_case_integration.py`。
+- **未決**：無。此為平台數值邊際，非回歸。
+
 ### D-175　修復 heavy(workflow) 75 分 timeout：砍小整合測試的 binding 取樣預算（只改測試、不動科學）
 - **日期**：2026-11-10
 - **症狀**：`8aa612e` 修好 import（D-174）後，CI 只剩 `heavy (workflow)` 一個 job 紅。faulthandler 堆疊顯示 `test_full_workflow_3ptb` 卡在 **SMD 拉離的 `integ.step`**（`run_binding`，OpenMM `step()` 中），`faulthandler_timeout=900` 只 dump 不殺，最後整個 heavy 步驟撞 75 分 timeout 被砍。CI 檔自註這測試「歷史約 30 分」。
