@@ -10,6 +10,7 @@
 
 | 文件 | 範圍 | 狀態 |
 |---|---|---|
+| [llm_interface.md](llm_interface.md) | LLM 介面定義（L0，D-178）：7 個動作契約、只提議不自動套用、設定暴露白名單（安全鍵＋範圍 vs 科學敏感鍵）、capabilities 唯讀視圖 | 已實作・待 CI（純 Python 12 項綠；D-177／D-178） |
 | [umbrella_adaptive.md](umbrella_adaptive.md) | 傘狀採樣智慧補窗（由粗到細）、每 window 各自的 k、即時覆蓋圖、手動補採樣；PMF 涵蓋與持平（D-62、D-65） ；D-101 SMD 力曲線預先規劃、即時斷點提示 | 已驗證（heavy workflow，c868014；筆電實跑） |
 | [restraints_freeze_truncation.md](restraints_freeze_truncation.md) | 分階段約束策略、凍結選項、口袋截斷模型、資源估算 | 分組約束已驗證（81b72d9）；智慧建議已實作・純 Python（D-118，待 CI）；凍結／截斷**設計中** |
 | [implicit_solvent.md](implicit_solvent.md) | 隱式溶劑 GBn2：組裝、protocol、閘門（金屬、結合計算擋下） | 已驗證（81b72d9 起） |

@@ -6,6 +6,16 @@
 ---
 
 ## 2026-11-10
+### D-178　LLM 編排 L0 實作（介面定義層；使用者 2026-11-10 指派）
+- **日期**：2026-11-10
+- **背景**：使用者審查 LLM 規格（D-177）後明確指派「開始實作 L0」。L0＝規則檔（已於 D-177 轉英文）＋操作核心介面定義。
+- **做了什麼**：新增 `md20/llm/interface.py`（純契約層，**非 server、不呼叫 LLM、無套用路徑**）：`ACTIONS`（7 動作，對應 guide §3，無 apply/execute）、`SAFE_KEYS`/`SCIENCE_SENSITIVE_KEYS`（D-177 白名單，範圍取自 `advisor.PARAMS`）、`validate_proposed_change`（純驗證，ALLOWED 僅代表可供人工確認）、`capabilities_view`（投影 capabilities.json、隱藏 implementation 路徑）。
+- **守衛**：`test_no_params_key_is_silently_unclassified` 斷言 advisor 每個參數鍵都已分類（安全或敏感），杜絕新參數默默漏進安全集。
+- **界線**：仍不含任何編排執行；L1（MCP 轉接頭）才實作本契約，待使用者再指派。
+- **證據**：`tests/test_llm_interface.py` 12 項綠；容器全套 1503 passed、0 failed。
+- **相關檔案**：`md20/llm/interface.py`、`md20/llm/__init__.py`、`tests/test_llm_interface.py`、`docs/specs/llm_interface.md`、`docs/specs/README.md`、`docs/specs/llm_orchestration.md`。
+- **未決**：SAFE/SENSITIVE 分類待審查（padding_nm、target_overlap 邊界）；capabilities 視圖收斂程度；L1 起點待指派。
+
 ### D-177　LLM 編排規格審查回饋（第一批，使用者 2026-11-10）：三項決定採納
 - **日期**：2026-11-10
 - **背景**：使用者指派審查 LLM 編排（D-161）track。規則是「規格先審、收到回饋才動工」；本條只記審查決定，**未實作任何編排**。
