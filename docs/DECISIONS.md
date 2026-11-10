@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-11-10
+### D-174　修復：test_build_protected 用 `from tools import` 在 CI 全平台 pure-python 紅（import 慣例）
+- **日期**：2026-11-10
+- **背景**：D-166 的 `tests/test_build_protected.py` 用 `from tools import build_protected`。容器 cwd 在 sys.path 上能 import，但 CI 的 pytest rootdir 沒把 `tools` 當 package → `ModuleNotFoundError: No module named 'tools'`，所有 OS×版本 pure-python collection 失敗（ac0f226 仍紅的真因，與先前 D-173 修的 compiled_core 是兩個不同問題；本機全套綠因此抓不到）。
+- **決定**：改用專案既有慣例 `importlib.util.spec_from_file_location("build_protected", ROOT/"tools"/"build_protected.py")` 載入（同 test_report_template、test_capability_manifest、test_validate_membrane_diag）。
+- **教訓**：測試要 import `tools/` 下的腳本一律走 spec_from_file_location，不用 `from tools import`；此類 import 問題容器測不出來，要看 CI log。
+- **證據**：`tests/test_build_protected.py` 8 項綠；容器全套 1489 passed/0 failed。CI 綠待本 commit 確認。
+- **相關檔案**：`tests/test_build_protected.py`。
+- **未決**：無。
+
 ## 2026-11-09
 ### D-173　修復：D-172 重寫 release-windows.yml 時誤刪 D-166 的 compiled_core，導致全平台 pure-python CI 紅
 - **背景**：D-172（收回 cuda pin）重寫 `release-windows.yml` 的 package 步驟時，一併移除了 D-166 加入的 `compiled_core` 輸入與 opt-in 編譯步驟。D-166 的 `tests/test_build_protected.py::test_release_workflow_compiled_core_defaults_false` 斷言該輸入存在，於是在**所有 OS×版本的 pure-python**（及連帶跑 collection 的 openmm-stack／heavy(workflow)）job 失敗——即 ba17bd2 的 CI 大面積紅。

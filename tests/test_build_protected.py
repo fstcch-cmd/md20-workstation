@@ -2,13 +2,18 @@
 """D-166 核心編譯層的純邏輯測試（容器無 Cython，只測清單與 strip 計畫）。"""
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import pytest
 
-from tools import build_protected as bp
-
 ROOT = Path(__file__).resolve().parents[1]
+
+# 與 test_report_template / test_capability_manifest 同慣例：用檔案路徑載入 tools 腳本，
+# 不用 `from tools import ...`（CI 的 pytest rootdir 沒把 tools 當 package，會 ModuleNotFoundError）。
+_spec = importlib.util.spec_from_file_location("build_protected", ROOT / "tools" / "build_protected.py")
+bp = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(bp)
 
 
 def test_core_modules_all_exist():
