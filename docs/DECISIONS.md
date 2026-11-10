@@ -6,6 +6,16 @@
 ---
 
 ## 2026-11-10
+### D-175　修復 heavy(workflow) 75 分 timeout：砍小整合測試的 binding 取樣預算（只改測試、不動科學）
+- **日期**：2026-11-10
+- **症狀**：`8aa612e` 修好 import（D-174）後，CI 只剩 `heavy (workflow)` 一個 job 紅。faulthandler 堆疊顯示 `test_full_workflow_3ptb` 卡在 **SMD 拉離的 `integ.step`**（`run_binding`，OpenMM `step()` 中），`faulthandler_timeout=900` 只 dump 不殺，最後整個 heavy 步驟撞 75 分 timeout 被砍。CI 檔自註這測試「歷史約 30 分」。
+- **診斷（讀碼，未動 binding 科學碼）**：卡點在拉離迴圈、還沒進 12 個窗，屬 **MD 吞吐量慢**而非多跑漏斗/窗（tier=classroom＝徑向，D-154）。即測試在 GPU-less CI runner 上整體偏慢、超過 75 分步驟上限。
+- **決定（只改測試檔）**：把 `test_full_workflow_3ptb` 的 binding 取樣預算砍小——`max_windows` 12→6、`window_prod_ps` 5.0→2.0、`window_equil_ps` 1.0→0.5（umbrella 產出約 5x↓）。這是 **wiring smoke** 預算，驗「docking→MD→SMD→傘狀→報告」全鏈接線，不是收斂 ΔG；斷言本來就容許 `cb["status"]=="insufficient"`，短取樣正是預期。**不動任何產品/科學預設、不動 binding/funnel 程式。**
+- **被否決**：改 `CONDA_OVERRIDE_CUDA:"12.4"` 或平台選擇（疑為 D-170/D-172 cuda 解釘後平台 fallback 變慢的深層原因，但在 D-172 已驗證的 install 路徑上，不由本 session 動）；調高步驟 timeout（遮症狀、不治本，且 heavy 長期與 timeout 搏鬥見 D-139）。
+- **證據**：容器 `pytest --co` 可收集（heavy 於容器 skip，真機交 CI）。CI 綠待本 commit 確認。
+- **相關檔案**：`tests/test_workflow_integration.py`。
+- **未決（留給 binding/gated 區負責人）**：heavy(workflow) 變慢的根因是否為 CUDA override／平台 fallback 回歸（D-170/D-172 之後）；若是，應修平台選擇而非只砍測試。本次砍測試能否落回 75 分內，待這輪 CI 證實；若仍超時，需查平台 fallback。
+
 ### D-174　修復：test_build_protected 用 `from tools import` 在 CI 全平台 pure-python 紅（import 慣例）
 - **日期**：2026-11-10
 - **背景**：D-166 的 `tests/test_build_protected.py` 用 `from tools import build_protected`。容器 cwd 在 sys.path 上能 import，但 CI 的 pytest rootdir 沒把 `tools` 當 package → `ModuleNotFoundError: No module named 'tools'`，所有 OS×版本 pure-python collection 失敗（ac0f226 仍紅的真因，與先前 D-173 修的 compiled_core 是兩個不同問題；本機全套綠因此抓不到）。
