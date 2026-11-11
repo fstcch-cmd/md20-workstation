@@ -23,6 +23,7 @@ from .figure_text import FIG
 from . import figure_text as FT
 from .html import _img, _esc, build_run_report
 from . import subsystem_report as SR
+from . import edition_section as ES
 from ..i18n import HTML_LANG, LANGS, colon, norm, paren, pick, stop
 
 
@@ -1826,6 +1827,7 @@ def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None 
                             ("歸屬不明的決策紀錄", "Decision records of unknown attribution", "帰属不明の判断記録", "귀속 불명의 결정 기록")))
     n_meth = nxt()
     n_lim = nxt()
+    lite = ES.is_lite_report(st)              # D-181: the Lite appendix and footer mark exist only in a Lite run
     html = [f"<!doctype html><html lang={HTML_LANG[L]}><head><meta charset=utf-8>"
             f"<title>{_esc(tx(H['title'], L))} · {_esc(wf.name)}</title><style>{CSS}</style></head><body>" + banner_html,
             f"<h1>{_esc(tx(H['title'], L))}</h1>",
@@ -1842,6 +1844,10 @@ def build_workflow_report(wf, out_path: Path | None = None, *, lang: str | None 
                                                                           "全パラメータの使用値、このケースの推奨値と理由", "전체 매개변수의 사용값, 이 사례의 권장값과 이유")),
             f"<h2>{_esc(tx(H['appendix_log'], L))}</h2>{log}",
             f"<h2>{_esc(tx(H['appendix_cfg'], L))}</h2><details><summary>config.json</summary><pre>{_esc(json.dumps(cfg, ensure_ascii=False, indent=1))}</pre></details>",
+            # D-181: last appendix, so no existing heading, letter or table number moves; nothing is added in the complete edition
+            (ES.appendix_html(doc, st, cfg, L, ES.assessment_inputs(
+                (st["steps"].get("binding") or {}).get("results") or {}, assessment_for=_assessment_for, claim_of=_claim_of)) if lite else ""),
+            (ES.footer_mark(L) if lite else ""),
             __import__("md20.util.stamp", fromlist=["html_footer"]).html_footer(), "</body></html>"]
     out_path.write_text("".join(html), encoding="utf-8")
     try:

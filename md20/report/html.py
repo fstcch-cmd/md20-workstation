@@ -231,6 +231,10 @@ def build_run_report(run: Run, out_path: Path | str | None = None, *, lang: str 
     parts.append(f"<p>MD20 {__version__} · Python {_platform.python_version()} · {_esc(_platform.platform())} · protocol hash <code>{_esc(rm.get('protocol_hash'))}</code></p>")
     parts.append(f"<details><summary>Protocol JSON</summary><pre>{_esc(json.dumps(rm.get('protocol'), ensure_ascii=False, indent=1))}</pre></details>")
     from ..util.stamp import html_footer
+    from .. import edition as _edition
+    if _edition.is_lite():                              # D-181: MD20 Lite mark; the complete edition's page is unchanged
+        from .edition_section import footer_mark
+        parts.append(footer_mark(lang))
     parts.append(html_footer() + "</body></html>")
     out_path.write_text("".join(parts), encoding="utf-8")
     return out_path

@@ -8,7 +8,7 @@ NF-κB p65 (no co-crystal) — structurally cannot provide.  The user-facing dem
 the real teaching case instead; see DECISIONS D-155.  The rendered HTML is labelled "synthetic demo data" and
 named `trypsin_benzamidine`, so it is not mistaken for a teaching result.
 
-Usage: python tools/report_template.py OUT_DIR      (CI job `report-template` runs it with RDKit installed, so the
+Usage: python tools/report_template.py OUT_DIR [--lite]      (--lite renders the MD20 Lite variant, D-181; CI job `report-template` runs it with RDKit installed, so the
 compound and 2D-interaction figures appear too)
 """
 from __future__ import annotations
@@ -421,20 +421,41 @@ def subsystems(root: Path, wf, st: dict, rng) -> None:
     st["coarse_grained"] = {"POPC_CG": {"plan": plan.to_dict(), "membrane_file": cg["file"]}}
 
 
-def main(out: Path) -> int:
+def _lite_edition_record() -> dict:
+    """D-181: the `state["edition"]` entry of a synthetic Lite run: the limits a research-tier request with three repeats meets,
+    and the reductions that were applied.  Built with explicit editions, so it needs no switch of the running edition."""
+    from md20 import edition as E
+    cfg = {"ligands": [{"name": "BEN"}], "md": {"tier": "research", "replicas": 3},
+           "binding": {"enabled": True, "ligands": ["BEN"], "target_replicas": 3, "config": {}}}
+    _, changes = E.clamp_config(cfg, E.LITE)
+    rec = E.state_record(E.check_config(cfg, E.LITE), changes, at="synthetic")
+    rec["edition"] = E.LITE
+    return rec
+
+
+def main(out: Path, lite: bool = False) -> int:
+    """Render the template in English and Traditional Chinese.  `lite=True` renders the MD20 Lite variant of the same
+    synthetic data (appendix 'What the complete edition would add' and the footer mark) into separate files; the default
+    output is not changed."""
     from md20.report.workflow_report import build_workflow_report
+    from md20.util.jsonio import atomic_write_json
     out.mkdir(parents=True, exist_ok=True)
     counts = {}
+    tag = "lite_" if lite else ""
     for lang in ("en", "zh"):
-        root = out / f"_work_{lang}"
+        root = out / f"_work_{tag}{lang}"
         wf = build(root, lang)
+        if lite:
+            st = wf.state()
+            st["edition"] = _lite_edition_record()
+            atomic_write_json(st, wf.state_path)
         banner = ("<div style='background:#fff4e5;border:1px solid #f0b46c;padding:10px 14px;margin:0 0 18px;font-size:14px'>"
                   + ("<b>報告範本（合成示範資料）</b>：本檔所有數字與圖都是為了展示版面、圖表種類與通用解讀用語而產生的合成資料，"
                      "不是任何真實模擬結果，請勿引用。" if lang == "zh" else
                      "<b>Report template (synthetic demo data)</b>: every number and figure in this file was generated to show the layout, "
                      "the figure types and the general interpretation wording. It is not the result of any real simulation; do not cite it.")
                   + "</div>")
-        p = build_workflow_report(wf, out / f"MD20_report_template_{lang}.html", lang=lang, banner_html=banner)
+        p = build_workflow_report(wf, out / f"MD20_report_template_{tag}{lang}.html", lang=lang, banner_html=banner)
         idx = json.loads((wf.dir / "report_figures" / f"index_{lang}.json").read_text(encoding="utf-8"))
         counts[lang] = len(idx["figures"])
         kinds = sorted({f["kind"] for f in idx["figures"]})
@@ -443,4 +464,5 @@ def main(out: Path) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(Path(sys.argv[1] if len(sys.argv) > 1 else "report_template")))
+    _args = [a for a in sys.argv[1:] if a != "--lite"]
+    sys.exit(main(Path(_args[0] if _args else "report_template"), lite="--lite" in sys.argv[1:]))
