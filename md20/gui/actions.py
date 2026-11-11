@@ -14,12 +14,13 @@ from __future__ import annotations
 import copy
 import re
 
+from .. import edition
 from ..build.receptor import receptor_choice_action, CHAIN_BREAK_GATES
 from ..util import atomic_write_json, load_json
 from ..sampling.assessment import claim_eligible
 
 # workflow step keys in execution order; a decision at step X invalidates X and everything after it
-STEP_ORDER = ["structure_gate", "receptor_docking", "screen_library", "screen_docking", "screen_selection", "docking_preflight",
+STEP_ORDER = [edition.STEP, "structure_gate", "receptor_docking", "screen_library", "screen_docking", "screen_selection", "docking_preflight",
               "fold", "docking", "pose_selection", "md_confirm", "md_cases", "md_runs", "analysis", "binding", "report"]
 STRUCTURE_OVERRIDE = {"resolution": "resolution", "R-free": "r_free", "ligand occupancy": "ligand_occupancy",
                       "pocket occupancy": "pocket"}
@@ -29,6 +30,19 @@ _CARBOXYLATE_OPT = re.compile(r"metal_carboxylate:\s*\{\s*([A-Za-z0-9:]+)\s*:\s*
 _LOCATIONS = {"intracellular": "intracellular", "extracellular-membrane": "extracellular-membrane", "secreted": "secreted"}
 
 
+class EditionLimit(ValueError):
+    """A one-click action that would go beyond the limits of the edition in use (D-181).  str() is the Chinese text the
+    GUI already shows for a refused action; `texts` is the same message as (zh, en, ja, ko)."""
+
+    def __init__(self, texts):
+        self.texts = tuple(texts)
+        super().__init__(self.texts[0])
+
+
+def _limit_hit(code: str, value, limit, feature: str, can_clamp: bool = True) -> "EditionLimit":
+    return EditionLimit(edition.Hit(code, edition.SCALE, value, limit, feature, can_clamp).texts())
+
+
 def _act(label: str, patch: list, from_step: str, *, needs_text: bool = False, text_hint: str = "") -> dict:
     return {"label": label, "patch": patch, "from_step": from_step, "needs_text": needs_text, "text_hint": text_hint}
 
@@ -36,6 +50,13 @@ def _act(label: str, patch: list, from_step: str, *, needs_text: bool = False, t
 def _option_action(gate: dict, option: str, *, step: str, ligand: str | None) -> dict | None:
     name = gate.get("name", "")
     ev = gate.get("evidence") or {}
+    if name == edition.GATE_NAME:
+        # D-181: "reduce the settings automatically and continue" is one click: the person's decision is the config key
+        # edition.accept_clamp; the workflow reduces the sizes at its entrance and logs each change.  The other options
+        # (change the settings, open in the complete edition, learn more) are done outside the program.
+        if "edition.accept_clamp" in option:
+            return _act(option, [{"path": list(edition.ACCEPT_KEY), "value": True}], edition.STEP)
+        return None
     # structure confidence: "仍要使用（structure_override.x）" → override with the student's reason
     if name in STRUCTURE_OVERRIDE and "structure_override" in option:
         return _act(option, [{"path": ["structure_override", STRUCTURE_OVERRIDE[name]], "value": "{text}"}], step,
@@ -280,6 +301,11 @@ def apply_patch(cfg: dict, patch: list[dict], text: str = "") -> dict:
 def invalidate_from(wf, step: str) -> list[str]:
     """Drop `step` and every later step from the workflow state so the next run redoes them."""
     st = wf.state()
+    if step == edition.STEP:
+        # the edition gate sits in front of every step: deciding it must not make finished work run again
+        dropped = [step] if st["steps"].pop(step, None) is not None else []
+        atomic_write_json(st, wf.state_path)
+        return dropped
     i = STEP_ORDER.index(step) if step in STEP_ORDER else 0
     dropped = [k for k in STEP_ORDER[i:] if st["steps"].pop(k, None) is not None]
     atomic_write_json(st, wf.state_path)
@@ -322,6 +348,9 @@ def set_replicas(wf, n: int, note: str = "") -> dict:
         raise ValueError("重複條數要是整數") from exc
     if not 1 <= n <= MAX_REPLICAS:
         raise ValueError(f"重複條數要在 1 到 {MAX_REPLICAS} 之間")
+    cap = edition.limits().max_replicas
+    if cap is not None and n > cap:                       # D-181: refuse here instead of blocking at the next run
+        raise _limit_hit("md.replicas", n, cap, "replicas")
     cfg = load_json(wf.dir / "config.json", wf.cfg)
     before, was_explicit = configured_replicas(cfg)
     done = wf.completed_replicas()
@@ -442,6 +471,9 @@ def add_smd_run(wf, target: str, note: str = "") -> dict:
     if not res or res.get("status") != "PASS":
         raise ValueError(f"{target} 還沒有完成的結合自由能結果；先完成第一次")
     n = int(res.get("replicas") or 1) + 1
+    cap = edition.limits().max_binding_replicas
+    if cap is not None and n > cap:                       # D-181
+        raise _limit_hit("binding.replicas", n, cap, "binding_full")
     cfg = load_json(wf.dir / "config.json", wf.cfg)
     b = cfg.setdefault("binding", {})
     b.setdefault("target_replicas", {})[target] = n
@@ -485,6 +517,8 @@ def resample_range(wf, target: str, lo_nm: float, hi_nm: float, *, k: float | No
     """The student marks a stretch of the coverage chart: plan windows there (plan_range), add them to this target's
     `binding.manual_windows`, and reopen only this target — finished windows are reused, refinement then continues
     and the PMF is recomputed."""
+    if edition.limits().max_refine_rounds is not None:       # D-181: adding windows by hand reopens the window refinement
+        raise EditionLimit(tuple(edition.upgrade_text("binding_full", l) for l in ("zh", "en", "ja", "ko")))
     from ..sampling.adaptive import plan_range
     from ..sampling.binding import BindingConfig
     dirs = binding_dirs(wf, target)
@@ -530,6 +564,11 @@ def select_screen_ligands(wf, names: list[str], mode: str = "independent", note:
     if mode == "simultaneous" and len(names) < 2:
         raise ValueError("多配體同時對接至少要選 2 個化合物")
     cfg = load_json(wf.dir / "config.json", wf.cfg)
+    cap = edition.limits().max_ligands
+    if cap is not None:                                    # D-181: the explicit ligands and the picks must fit together
+        total = len({str(l.get("name")) for l in cfg.get("ligands") or [] if isinstance(l, dict)} | set(names))
+        if total > cap:
+            raise _limit_hit("ligands.count", total, cap, "multi_ligand_full", False)
     sc = cfg.setdefault("screen", {})
     sc["select"], sc["next_mode"] = names, mode
     atomic_write_json(cfg, wf.dir / "config.json")

@@ -10,8 +10,14 @@
   md20 setup-fold [--engine omegafold|boltz|esmfold] [--yes] [--warmup]  install a folding tool (plan first)
   md20 setup-cg [--yes]                         install martinize2, insane, martini_openmm (plan first)
   md20 license status|machine|install FILE|update-revocations FILE   signed licence (D-125, D-128); real calculations need one
+  md20 edition [--json]                         which edition this is (complete or Lite), its size limits and, in Lite, what only the complete edition has (D-181)
   md20 autonomy policy set|show|revoke | plan | status | approve | run   bounded autonomy (D-137, D-143); no policy = recommendations only
   md20 binding reassess WORKFLOW                re-assess stored binding results with the current rules and write back (D-143)
+
+Exit codes that scripts rely on: 0 done, or paused (run again to continue); 3 a step needs a human decision (NEEDS_HUMAN:
+`run`, `pipeline run`, `resume`), which includes an edition limit (gate `edition limit`, D-181); 13 no valid licence or the
+licence lacks a feature (D-125, D-128); 14 a complete-edition feature was called in a Lite package outside a workflow (D-181).
+The other codes belong to one command each (1 a failed check, 2 a missing argument or a build that is not PASS, 4 setup-cg).
 """
 from __future__ import annotations
 
@@ -35,6 +41,29 @@ def _p(msg: str) -> None:
 
 
 EXIT_LICENSE = 13
+EXIT_NEEDS_HUMAN = 3             # a workflow step is NEEDS_HUMAN; an edition limit is one of them (D-181)
+EXIT_EDITION = 14                # UpgradeRequired outside a workflow (D-181)
+_COMPLETE_ONLY_COMMANDS = {"autonomy": "autonomy"}      # command -> edition.PRO_FEATURES id (D-181)
+
+
+def _edition_block(wf) -> dict | None:
+    """The blocked `edition` step of a workflow, or None when the workflow is not stopped by the edition (D-181)."""
+    from . import edition
+    st = (wf.state().get("steps") or {}).get(edition.STEP) or {}
+    return st if st.get("status") == "NEEDS_HUMAN" else None
+
+
+def _print_edition_block(step: dict, cfg_path) -> None:
+    """What to do about an edition stop, in place of the pose_choices hint of the other blocked steps."""
+    gates = [g for g in step.get("gates") or [] if isinstance(g, dict)]
+    options = gates[0].get("options") if gates else []
+    _p("這是 MD20 Lite 的規模上限，不是錯誤。")
+    for i, o in enumerate(options or [], 1):
+        _p(f"  {i}. {o}")
+    hits = ((gates[0].get("evidence") or {}).get("hits") if gates else None) or []
+    if any(h.get("can_clamp") for h in hits):
+        _p(f"要讓程式自動縮小規模後繼續，請在 {cfg_path} 加上 \"edition\": {{\"accept_clamp\": true}}，再重新執行同一指令。"
+           "每一項改動都會寫進決策日誌。")
 
 
 def _need_license(what: str) -> None:
@@ -200,8 +229,10 @@ def cmd_pipeline(a):
     platform = choose_platform()
     _p(f"平台：{platform.name}；workflow 目錄：{wf.dir}")
     from .engine.replica_plan import lines as replica_lines
-    for line in replica_lines(wf.replica_plan(), "zh"):          # D-131: the replica plan, said at the start, never stops
-        _p(line)
+    from . import edition
+    if not edition.check_config(wf.cfg):                          # D-181: with limits still to apply, the plan below would be the unreduced one
+        for line in replica_lines(wf.replica_plan(), "zh"):       # D-131: the replica plan, said at the start, never stops
+            _p(line)
     hours = tuple(int(x) for x in a.hours.split("-")) if a.hours else None
     policy = PausePolicy(pause_file=proj.dir / "PAUSE", pause_on_battery=not a.ignore_battery, allowed_hours=hours,
                          power_probe=_power_state, resource_guard=_guard())
@@ -220,8 +251,11 @@ def cmd_pipeline(a):
                      should_pause=policy, progress_cb=cb)
     except WorkflowBlocked as exc:
         _p(f"[NEEDS_HUMAN] {exc}")
-        _p(f"請在 {wf.dir / 'config.json'} 加上 pose_choices / human_choices 後重新執行同一指令。")
-        return 3
+        if (blk := _edition_block(wf)) is not None:               # D-181: an edition limit, not a pose or receptor decision
+            _print_edition_block(blk, wf.dir / "config.json")
+        else:
+            _p(f"請在 {wf.dir / 'config.json'} 加上 pose_choices / human_choices 後重新執行同一指令。")
+        return EXIT_NEEDS_HUMAN
     _p(f"workflow {out['status']}" + (f"；報告：{out.get('report')}" if out.get("report") else "（已暫停，重新執行即可續跑）"))
     return 0
 
@@ -268,15 +302,18 @@ def cmd_resume(a):
         proj = Project(r["project_dir"])
         cfg = json.loads((Path(r["workflow_dir"]) / "config.json").read_text(encoding="utf-8"))
         policy = PausePolicy(pause_file=proj.dir / "PAUSE", pause_on_battery=not a.ignore_battery, power_probe=_power_state, resource_guard=_guard())
+        wf_r = Workflow(proj, cfg)
         try:
-            out = Workflow(proj, cfg).run(lambda case, proto: make_backend_factory(case, proto, platform=platform, resource_mode=a.mode), platform,
-                                          should_pause=policy)
+            out = wf_r.run(lambda case, proto: make_backend_factory(case, proto, platform=platform, resource_mode=a.mode), platform,
+                           should_pause=policy)
             _p(f"[{out['status']}] {r['name']}")
             if out["status"] == "PAUSED":
                 return 0
         except WorkflowBlocked as exc:
             _p(f"[NEEDS_HUMAN] {r['name']}：{exc}")
-            rc = 3
+            if (blk := _edition_block(wf_r)) is not None:          # D-181
+                _print_edition_block(blk, Path(r["workflow_dir"]) / "config.json")
+            rc = EXIT_NEEDS_HUMAN
     return rc
 
 
@@ -562,6 +599,42 @@ def cmd_license(a):
     return 2
 
 
+def _autonomy_needs_the_complete_edition(a):
+    from . import edition
+    raise edition.UpgradeRequired("autonomy")
+
+
+def cmd_edition(a):
+    """D-181: which edition this is, its limits and, in Lite, what only the complete edition has.  Reads only; there is no
+    way to change the edition from here (the package and the licence decide, md20/edition.py)."""
+    from . import edition
+    if a.json:
+        print(json.dumps(edition.summary(), ensure_ascii=False, indent=2), flush=True)
+        return 0
+    s = edition.summary("zh")
+    lite = s["edition"] == edition.LITE
+    _p(f"版本：{s['name']}")
+    rows = edition.comparison_rows("zh")
+    full_name = edition.name(edition.FULL, "zh")
+    mark = lambda here: "（目前）" if here else ""                        # noqa: E731
+    _p("")
+    _p("| 項目 | MD20 Lite" + mark(lite) + f" | {full_name}" + mark(not lite) + " |")
+    _p("|---|---|---|")
+    for r in rows:
+        _p(f"| {r['item']} | {r['lite']} | {r['full']} |")
+    if lite:
+        _p("")
+        _p("只有完整版才有的功能：")
+        for f in s["locked"]:
+            _p(f"- {f['title']}：{f['gain']}")
+        _p("")
+        _p(s["how_to_upgrade"])
+    else:
+        _p("")
+        _p("目前是完整版，沒有規模上限。上表是 MD20 Lite 的上限，給你對照。")
+    return 0
+
+
 def cmd_status(a):
     proj = _open_project(a)
     for c in proj.cases():
@@ -676,6 +749,8 @@ def main(argv=None) -> int:
     rp = sub.add_parser("report"); rp.add_argument("--project", required=True); rp.add_argument("--case", required=True)
     rp.add_argument("--run"); rp.add_argument("--bundle", action="store_true"); rp.set_defaults(fn=cmd_report)
     m = sub.add_parser("demo"); m.add_argument("--dir"); m.set_defaults(fn=cmd_demo)
+    ed = sub.add_parser("edition", help="目前的版本（完整版或 Lite）、規模上限，以及 Lite 沒有的功能（D-181）")
+    ed.add_argument("--json", action="store_true", help="以 JSON 輸出（edition.summary()）"); ed.set_defaults(fn=cmd_edition)
     lc = sub.add_parser("license", help="MD20 授權（D-125）：status、machine、install、update-revocations")
     ls = lc.add_subparsers(dest="lic_cmd", required=True)
     ls.add_parser("status", help="show the licence state in four languages"); ls.add_parser("machine", help="print the machine code")
@@ -684,19 +759,31 @@ def main(argv=None) -> int:
     ur = ls.add_parser("update-revocations", help="import a signed revocation list (revoked.json); only a newer valid list is accepted")
     ur.add_argument("file")
     lc.set_defaults(fn=cmd_license)
-    from .autonomy.cli import register as register_autonomy       # D-143: `md20 autonomy ...`, `md20 binding reassess`
-    register_autonomy(sub)
+    from . import edition
+    try:
+        from .autonomy.cli import register as register_autonomy   # D-143: `md20 autonomy ...`, `md20 binding reassess`
+        register_autonomy(sub)
+    except edition.UpgradeRequired:
+        # D-181: in a Lite package the autonomy module is a stub.  Keep the command name so that it answers with the
+        # edition text instead of "invalid choice".
+        au = sub.add_parser("autonomy", help="（完整版功能）自動檢查與補跑"); au.add_argument("rest", nargs=argparse.REMAINDER)
+        au.set_defaults(fn=_autonomy_needs_the_complete_edition)
     a = ap.parse_args(argv)
-    if a.dir is None and a.cmd not in ("demo", "license"):                # D-88: same projects folder as the GUI chose last time
+    if a.dir is None and a.cmd not in ("demo", "license", "edition"):                # D-88: same projects folder as the GUI chose last time
         from .gui.folders import saved_projects_dir
         a.dir = str(saved_projects_dir())
     os.environ["MD20_RESOURCE_MODE"] = a.mode          # D-68: Vina and other helpers follow the chosen mode
     from .util.license import LicenseRequired
     try:
+        if a.cmd in _COMPLETE_ONLY_COMMANDS and edition.is_lite():
+            raise edition.UpgradeRequired(_COMPLETE_ONLY_COMMANDS[a.cmd])        # D-181: also for a Lite licence on a complete package
         return int(a.fn(a) or 0)
     except LicenseRequired as exc:             # also FeatureNotLicensed (D-128): "your licence does not include X"
         print("\n\n".join(exc.texts()), file=sys.stderr, flush=True)
         return EXIT_LICENSE
+    except edition.UpgradeRequired as exc:     # D-181: a complete-edition feature outside a workflow (a workflow turns it into a gate)
+        print("\n\n".join(exc.texts) + "\n" + "\n".join(edition.HOW_TO_UPGRADE[:1]), file=sys.stderr, flush=True)
+        return EXIT_EDITION
 
 
 if __name__ == "__main__":

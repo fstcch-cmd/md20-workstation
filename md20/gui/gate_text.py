@@ -1038,3 +1038,26 @@ def option_text(option: str, lang: str) -> str:    # noqa: F811
         if m and m.group(2) in _CARBOXYLATE_VALUES:
             return pick((option, *_CARBOXYLATE_VALUES[m.group(2)]), lang)
     return _orig_option_text(option, lang)
+
+
+# D-181 edition limits (md20/edition.py, docs/specs/lite_edition.md §6): one gate for every stop at a size limit or a
+# complete-only feature.  The option texts are the tuples edition.py defines, so the words are written once.
+from .. import edition as _edition
+
+GATES.update({
+    _edition.GATE_NAME: (
+        ("版本的規模上限", "Edition limit", "版の上限", "버전 한도"),
+        ("這個設定或系統超過 MD20 Lite 的規模上限。可以讓程式自動縮小規模後繼續，也可以自己修改設定。"
+         "膜系統、三個以上配體這類項目不能自動縮小，要留什麼由你決定。完整版沒有這些上限。",
+         "This setting or system goes beyond the size limits of MD20 Lite. You can let the program reduce the sizes "
+         "and continue, or change the settings yourself. Items such as a membrane or three or more ligands cannot be "
+         "reduced automatically, so you decide what to keep. The complete edition has no such limits.",
+         "この設定または系は MD20 Lite の規模の上限を超えています。プログラムに規模を自動で縮小させて続けるか、"
+         "設定を自分で変更できます。膜系や三つ以上のリガンドなどは自動では縮小できないため、何を残すかはあなたが決めます。"
+         "完全版にはこの上限がありません。",
+         "이 설정이나 시스템이 MD20 Lite의 규모 상한을 넘었습니다. 프로그램이 규모를 자동으로 줄여 계속하게 하거나 "
+         "설정을 직접 바꿀 수 있습니다. 막 시스템이나 세 개 이상의 리간드 같은 항목은 자동으로 줄일 수 없으므로 "
+         "무엇을 남길지 직접 정합니다. 정식판에는 이런 상한이 없습니다.")),
+})
+for _opt in (_edition.OPT_CLAMP, _edition.OPT_EDIT, _edition.OPT_OPEN_IN_FULL, _edition.OPT_LEARN):
+    OPTIONS[_opt[0]] = tuple(_opt[1:])

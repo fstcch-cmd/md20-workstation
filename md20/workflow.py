@@ -39,6 +39,7 @@ from typing import Callable
 
 import numpy as np
 
+from . import edition
 from .project import Project
 from .util import atomic_write_json, load_json, now_iso, ensure_dir, safe_name
 
@@ -120,6 +121,31 @@ def _live_mark(wf_dir, key: str, build_dir) -> None:
         pass
 
 
+def _fmt_value(v) -> str:
+    return f"{v:g}" if isinstance(v, float) else str(v)
+
+
+def protein_residues_in_pdb(path, n_atoms: int) -> int | None:
+    """Amino-acid residues among the first `n_atoms` atoms of a topology PDB, which is the receptor part of the system
+    (end caps, metals and waters are not counted).  For build manifests written before the build recorded
+    `n_protein_residues`.  None when the file cannot be read."""
+    from .build.assemble import SEQUENCE_RESNAMES
+    try:
+        lines = Path(path).read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return None
+    seen, k = set(), 0
+    for l in lines:
+        if not l.startswith(("ATOM", "HETATM")):
+            continue
+        if k >= n_atoms:
+            break
+        k += 1
+        if l[17:20].strip() in SEQUENCE_RESNAMES:
+            seen.add((l[21:22], l[22:27]))
+    return len(seen)
+
+
 class WorkflowBlocked(RuntimeError):
     """A step needs a human decision; message explains which and why."""
 
@@ -191,6 +217,7 @@ DECISION_KEYS: tuple[tuple[str, ...], ...] = (
     ("binding", "added"), ("binding", "target_replicas"),               # targets and extra SMD runs chosen later (D-87)
     ("binding", "skip_targets"),                                         # targets left out at the path gate (D-92)
     ("binding", "alone"), ("binding", "anchor_residues"),                # path gate choices (D-93)
+    edition.ACCEPT_KEY,                    # edition.accept_clamp: reduce the sizes to the Lite limits and go on (D-181)
 )
 LIGAND_DECISION_KEYS = ("cpp_override", "cpp_evidence", "target_location", "fold_accept_low", "fold_upload", "fold_engine",
                         "fold_accept_rmsd", "fold_receptor_seq")
@@ -312,6 +339,151 @@ class Workflow:
         st["steps"][step] = {"status": "NEEDS_HUMAN", "message": message, **data, "at": now_iso()}
         atomic_write_json(st, self.state_path)
         raise WorkflowBlocked(message)
+
+    # ------------------------------------------------------------------ edition limits (D-181, docs/specs/lite_edition.md §6)
+    # The workflow asks md20.edition and obeys it; it does not know what an edition is.  Every stop is the ordinary
+    # three-state gate: step `edition.STEP` is NEEDS_HUMAN with `edition.gate(...)`, the hits are kept under
+    # state["edition"].  Sizes are reduced only when the person has set edition.accept_clamp; features and the number of
+    # ligands are never dropped for them (寧可擋也不要猜).
+    def _edition_record(self, hits=(), changes=()) -> dict:
+        """Merge hits and applied reductions into state["edition"] (each hit code once, newest first; each reduction once)."""
+        st = self.state()
+        prev = st.get("edition") or {}
+        clamped = [dict(c) for c in prev.get("clamped") or []]
+        seen = {(c.get("key"), repr(c.get("from")), repr(c.get("to"))) for c in clamped}
+        for c in changes:
+            if (c["key"], repr(c["from"]), repr(c["to"])) not in seen:
+                clamped.append(dict(c))
+        rec = edition.state_record(list(hits) + list(prev.get("hits") or []), clamped, at=now_iso())
+        st["edition"] = rec
+        atomic_write_json(st, self.state_path)
+        return rec
+
+    def _edition_block(self, hits: list) -> None:
+        self._edition_record(hits)
+        msg = "超出 MD20 Lite 的規模上限，已停下來等你決定：\n" + "\n".join(f"• {h.text('zh')}" for h in hits)
+        self._block(edition.STEP, msg, gates=[edition.gate(hits, "zh")])
+
+    def _edition_resolved(self) -> None:
+        """The config is within the limits now: take the blocked entry away (the record under state["edition"] stays)."""
+        st = self.state()
+        if (st["steps"].get(edition.STEP) or {}).get("status") == "NEEDS_HUMAN":
+            st["steps"].pop(edition.STEP)
+            atomic_write_json(st, self.state_path)
+
+    def _edition_hits(self, cfg: dict) -> list:
+        """`edition.check_config` plus the replica default.  `md.replicas` left out means the default of 3 (D-131), which
+        is above the Lite limit; edition.check_config only sees a number the config sets, so the unset case is added here
+        (an edition without a replica limit adds nothing)."""
+        hits = list(edition.check_config(cfg))
+        lim = edition.limits().max_replicas
+        if lim is not None and not any(h.code == "md.replicas" for h in hits):
+            from .engine.replica_plan import configured_replicas
+            n, explicit = configured_replicas(cfg)
+            if not explicit and n > lim:
+                hits.append(edition.Hit("md.replicas", edition.SCALE, n, lim, "replicas", True))
+        return hits
+
+    def _edition_clamp(self, cfg: dict) -> tuple[dict, list]:
+        new, changes = edition.clamp_config(cfg)
+        lim = edition.limits().max_replicas
+        if lim is not None:
+            from .engine.replica_plan import configured_replicas
+            n, explicit = configured_replicas(new)
+            if not explicit and n > lim:                       # the replica default: make the Lite number explicit
+                new.setdefault("md", {})["replicas"] = lim
+                changes.append({"key": "md.replicas", "from": n, "to": lim, "code": "md.replicas"})
+        return new, changes
+
+    def _edition_apply(self, changes: list, hits: list) -> None:
+        """Write the reductions to the workflow's own config.json and to the config in memory, log each one once."""
+        cfg_path = self.dir / "config.json"
+        disk = load_json(cfg_path, None) if cfg_path.is_file() else None
+        recorded = {(c.get("key"), repr(c.get("from")), repr(c.get("to"))) for c in (self.state().get("edition") or {}).get("clamped") or []}
+        by_code = {h.code: h for h in hits}
+        for target in (self.cfg, disk):
+            if not isinstance(target, dict):
+                continue
+            for c in changes:
+                node = target
+                parts = c["key"].split(".")
+                for k in parts[:-1]:
+                    if not isinstance(node.get(k), dict):
+                        node[k] = {}
+                    node = node[k]
+                node[parts[-1]] = c["to"]
+        if isinstance(disk, dict) and disk != load_json(cfg_path, None):
+            atomic_write_json(disk, cfg_path)
+        for c in changes:
+            if (c["key"], repr(c["from"]), repr(c["to"])) in recorded:
+                continue                                       # the same reduction again (rerun from the original file)
+            h = by_code.get(c["code"])
+            why = (f"{c['key']} 由 {_fmt_value(c['from'])} 改為 {_fmt_value(c['to'])}。" + (h.text("zh") if h else "") +
+                   " 使用者已設定 edition.accept_clamp，同意自動縮小規模後繼續；只改規模，不刪配體，也不改其他科學設定。")
+            self.dec.record("edition.clamp", c["key"], f"{_fmt_value(c['from'])} -> {_fmt_value(c['to'])}", why, kind="auto_fixed",
+                            code=c["code"], before=c["from"], after=c["to"])
+
+    def edition_entrance(self) -> None:
+        """Entrance check, next to the licence and `required_features` checks (called by `run` once the lock is held,
+        because a block writes the state).  Raises WorkflowBlocked when the edition stops the run."""
+        hits = self._edition_hits(self.cfg)
+        if not hits:
+            self._edition_resolved()
+            return
+        if not edition.accepted(self.cfg):
+            self._edition_block(hits)
+        _, changes = self._edition_clamp(self.cfg)
+        self._edition_apply(changes, hits)
+        self._edition_record(hits, changes)
+        left = self._edition_hits(self.cfg)
+        if left:                                               # features and the number of ligands cannot be reduced for the person
+            self._edition_block(left)
+        self._edition_resolved()
+
+    def _edition_case_counts(self, entry: dict, assembly: dict | None) -> dict:
+        """Atoms, protein residues and solvent of a built case: from the build summary just made, else from the case's
+        build manifest.  A manifest written before the residue count existed gets it from topology.pdb."""
+        asm = assembly
+        if asm is None:
+            try:
+                bm = load_json(self.project.case(entry["case_id"]).build_dir / "build_manifest.json", {})
+            except Exception:  # noqa: BLE001  (a case that cannot be read has no counts to judge)
+                return {}
+            asm = bm.get("assembly") or bm
+        n_res = asm.get("n_protein_residues") or None
+        if n_res is None and asm.get("topology_pdb") and asm.get("n_protein_atoms"):
+            n_res = protein_residues_in_pdb(asm["topology_pdb"], int(asm["n_protein_atoms"]))
+        return {"n_atoms": int(asm.get("n_atoms") or 0) or None, "n_protein_residues": n_res,
+                "solvent": asm.get("solvent") or self._solvent()}
+
+    def _edition_check_case(self, key: str, built: dict, assembly: dict | None = None) -> None:
+        """After the build: the real atom and residue counts against the edition.  A case over the limit is marked
+        NEEDS_HUMAN in md_cases so that the next run builds it again (after the person changed the settings) and
+        checks it again; it is never skipped as 'already built'."""
+        lim = edition.limits()
+        if lim.max_atoms is None and lim.max_atoms_implicit is None and lim.max_protein_residues is None:
+            return                                             # no system limit in this edition: nothing is read or changed
+        counts = self._edition_case_counts(built[key], assembly)
+        if not counts:
+            return
+        hits = edition.check_system(**counts)
+        if not hits:
+            return
+        built[key] = {**built[key], "status": "NEEDS_HUMAN", "blocking": "edition",
+                      "blocking_detail": [edition.gate(hits, "zh")]}
+        self._mark("md_cases", cases=built)
+        self._edition_block(hits)
+
+    def _edition_check_library(self, n_rows: int) -> None:
+        hits = edition.check_library(int(n_rows))
+        if hits:
+            self._edition_block(hits)
+
+    def _edition_check_ligands(self) -> None:
+        """The ligand count after the screening picks were merged in (the entrance saw only the explicit ligands)."""
+        hits = [h for h in edition.check_config(self.cfg) if h.code == "ligands.count"]
+        if hits:
+            self._edition_block(hits)
 
     # ------------------------------------------------------------------ steps
     def fetch_receptor(self) -> Path:
@@ -691,6 +863,8 @@ class Workflow:
                "filters": (self.cfg.get("screen") or {}).get("filters") or {},
                "allow_name_lookup": bool((self.cfg.get("screen") or {}).get("allow_name_lookup"))}
         if (d := self._done("screen_library")) and d.get("key") == key and verify_cheap_fingerprint(lib, d["key"]["fingerprint"] | {"bytes": key["fingerprint"]["bytes"]}):
+            if (d.get("summary") or {}).get("total"):
+                self._edition_check_library(int(d["summary"]["total"]))      # D-181: a library read earlier is judged again
             return load_json(d["manifest"], {"entries": {}})
         scfg = self._screen_config()
         entries, problems = read_library(lib, sheet=scfg.sheet)
@@ -699,6 +873,7 @@ class Workflow:
                         + (f"\n…另有 {len(problems) - 40} 項" if len(problems) > 40 else ""),
                         gates=[{"name": "library", "status": "NEEDS_HUMAN", "explanation": "\n".join(problems[:40]),
                                 "options": ["修正化合物庫檔案後重新執行"]}])
+        self._edition_check_library(len(entries))          # D-181: rows read, before any filter or 3D download
         self.dec.record("screen.library", "input", {"file": str(lib), "rows": len(entries)},
                         f"化合物庫 {lib.name}：{len(entries)} 筆；來源優先序 sdf > smiles > pubchem_cid > inchikey > chembl_id > ccd。"
                         + ("名稱查詢已啟用（可能對應錯分子，每筆記錄）。" if scfg.allow_name_lookup else "名稱查詢關閉（寧可擋也不要猜）。"))
@@ -809,6 +984,7 @@ class Workflow:
             return False
         merged = self.screen_selection(man, res)
         self.cfg["ligands"] = merged
+        self._edition_check_ligands()                      # D-181: explicit ligands plus the picks must fit the edition
         self.cfg.setdefault("docking", {})["mode"] = (self.cfg.get("screen") or {}).get("next_mode") or "independent"
         return True
 
@@ -1387,6 +1563,7 @@ class Workflow:
         built = dict((self._done("md_cases") or {}).get("cases", {}))
         for spec in self._cases_to_build(sel):
             if spec["key"] in built and built[spec["key"]].get("status") == "PASS":
+                self._edition_check_case(spec["key"], built)             # D-181: a case built earlier is checked again, never skipped
                 continue
             case = self.project.new_case(f"{self.name}_{spec['key']}")
             _live_mark(self.dir, spec["key"], case.build_dir)
@@ -1396,6 +1573,7 @@ class Workflow:
             self._mark("md_cases", cases=built)
             if s["status"] != "PASS":
                 self._block("md_cases", f"{spec['key']} 建模需要人工決定：{s.get('blocking')}：{s.get('blocking_detail')}", cases=built)
+            self._edition_check_case(spec["key"], built, s.get("assembly"))      # D-181: the real counts of the built system
         return built
 
     # ------------------------------------------------------------------ membrane systems without a receptor (D-80)
@@ -1669,10 +1847,17 @@ class Workflow:
     def _plan_long_run(self, key: str, case, proto, runs: dict) -> None:
         """Production > 100 ns (or an md.long_run block): save interval, log interval, chunk length and disk check
         (engine/longrun.py, docs/specs/long_timescale.md).  > 1 µs waits for md.long_run_confirmed."""
-        from .engine.longrun import needs_plan, plan_long_run, apply_plan, record_plan
         md = self.cfg.get("md", {})
         lr = md.get("long_run") or {}
         prod = next((s for s in getattr(proto, "stages", []) if s.name == "production"), None)
+        cap = edition.limits().max_production_ns
+        if cap is not None:
+            # D-181: an edition with a production cap never plans a long run (the planner is complete-edition code).  The
+            # entrance already refused md.long_run and a longer production, so a hit here means the config changed after it.
+            if prod is not None and (lr or prod.length_ps / 1000.0 > cap):
+                raise edition.UpgradeRequired("long_run")
+            return
+        from .engine.longrun import needs_plan, plan_long_run, apply_plan, record_plan
         if prod is None or not needs_plan(prod.length_ps / 1000.0, lr):
             return
         bm = load_json(case.build_dir / "build_manifest.json", {})
@@ -2262,7 +2447,21 @@ class Workflow:
             st["hardware"] = hw
             st.setdefault("hardware_history", []).append({**hw, "at": now_iso()})
             atomic_write_json(st, self.state_path)
-            return self._run(make_factory, platform, should_pause=should_pause, progress_cb=progress_cb)
+            # D-181: the edition's limits, after the licence checks above; here (lock held) because a stop writes the state
+            self.edition_entrance()
+            try:
+                return self._run(make_factory, platform, should_pause=should_pause, progress_cb=progress_cb)
+            except edition.UpgradeRequired as exc:
+                # safety net: a complete-edition feature was reached in a Lite package (its module is a stub).  Say so
+                # with the edition text and stop at the edition gate instead of ending in a traceback.
+                hits = ([edition.Hit(f"feature.{exc.feature}", edition.FEATURE, feature=exc.feature)]
+                        if exc.feature in {f.id for f in edition.PRO_FEATURES} else [])
+                self._edition_record(hits)
+                msg = (exc.texts[0] or str(exc)) + "\n" + edition.HOW_TO_UPGRADE[0]
+                self._block(edition.STEP, msg, gates=[{
+                    "name": edition.GATE_NAME, "status": "NEEDS_HUMAN", "explanation": msg,
+                    "evidence": {"edition": edition.current(), "hits": [h.as_dict() for h in hits], "texts": list(exc.texts)},
+                    "options": [edition.OPT_EDIT[0], edition.OPT_OPEN_IN_FULL[0], edition.OPT_LEARN[0]]}])
         finally:
             lock.release()
 

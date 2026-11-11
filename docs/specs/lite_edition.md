@@ -78,6 +78,61 @@ Lite 是交付給實驗室以外的人用的版本。它存在的理由是**把�
 `clamp_config` 不會替使用者拿掉功能或刪配體。要留哪兩個配體、要不要放棄膜系統，是使用者的決定（寧可擋也不要猜）。
 同一個上限在同一個專案只提示一次。啟動時不跳廣告。
 
+### 6.1 流程與命令列（FLOW，已實作，`tests/test_edition_workflow.py`）
+流程、命令列與 GUI 只問 `md20/edition.py`，不自己判斷版本。所有停下來都走既有的三態閘門：步驟 `edition`（`edition.STEP`）設為 NEEDS_HUMAN，
+閘門名稱 `edition limit`（`edition.GATE_NAME`），命中項存在 `state["edition"]`。完整版沒有任何命中，所以沒有 `state["edition"]`、沒有閘門，設定檔與輸出不變。
+
+| 時機 | 位置 | 做什麼 |
+|---|---|---|
+| 入口 | `Workflow.run`，授權與 `required_features` 檢查之後、拿到鎖之後 | `check_config`。無命中就放行。 |
+| 建模後 | `build_cases`，每個案例（含先前已建好的案例） | 用 build 的真實原子數與蛋白殘基數呼叫 `check_system`。 |
+| 讀完化合物庫 | `run_screen_library`，`read_library` 之後、任何 3D 下載之前 | `check_library(讀到的列數)`。 |
+| 篩選挑選後 | `apply_screen`，`screen_selection` 合併之後 | 明列配體加上挑選的化合物超過上限就停下，不刪任何配體。 |
+| 安全網 | `Workflow.run` | 漏出來的 `UpgradeRequired`（Lite 安裝包裡完整版模組是空殼）變成同一個閘門，不給 traceback。 |
+
+放在拿到鎖之後，是因為停下來要寫 state；授權檢查只丟例外，所以仍在它前面。
+
+**入口的處理**
+1. 命中且 `edition.accept_clamp` 為真：呼叫 `clamp_config`，把縮小後的值寫進工作流程自己的 `config.json` 與記憶體中的設定，
+   每項改動寫一筆 DecisionLog（`edition.clamp`，`kind: auto_fixed`，中文 `why`），並存進 `state["edition"]["clamped"]`。
+   縮小後還有命中（功能、配體數）就停下，閘門只列剩下的項目，因此不會出現一個按了沒用的「自動縮小」選項。
+2. 命中但沒有 `accept_clamp`：停下，閘門第一個選項是自動縮小。`edition.accept_clamp` 在 `DECISION_KEYS`，所以 `pipeline run` 用原始檔重跑時會沿用。
+3. 同一項縮小（鍵、原值、新值相同）只記一次 DecisionLog，所以用原始檔重跑不會重複記錄。
+
+**`md.replicas` 沒寫的情況**：預設是 3（D-131），高於 Lite 的 1。`edition.check_config` 只看設定檔有寫的數字，所以流程在 `_edition_hits` 補上這一項
+（沒有重複上限的版本不會多出任何命中），縮小時把 `md.replicas` 明確寫成 1。建議之後把這一項移到 `edition.check_config`，流程端的補丁會自動失效（以代碼去重）。
+
+**建模後的案例**：超過上限的案例在 `md_cases` 標成 NEEDS_HUMAN（`blocking: edition`），下一次執行會重新建模並重新檢查，不會被當成已建好而跳過。
+舊的 build manifest 沒有 `n_protein_residues` 時，從 `topology.pdb` 的前 `n_protein_atoms` 個原子數蛋白殘基。build 現在記錄
+`BuildResult.n_protein_residues`（只數序列殘基，不含 ACE、NME、金屬、水與配體），不動任何科學。
+
+**化合物庫算列數**：用 `read_library` 讀到的列數（空白列已略過），在篩選條件與下載之前。篩選條件可以把化合物濾到上限以下，
+若算濾完的數目，就能用條件規避上限，也要先下載才知道。先前讀過的庫（步驟已完成）每次執行也會再判斷一次。
+
+**`state["edition"]` 的形狀**（`edition.state_record`）：`{"edition": "lite", "hits": [...], "clamped": [...], "at": "..."}`。
+`hits` 每個代碼一筆（取最新值），含 `code, kind, value, limit, feature, can_clamp, text{zh,en,ja,ko}`；`clamped` 是已套用的縮小
+（`key, from, to, code`）。各階段都合併進同一筆：入口只有設定檔命中；縮小後多了 `clamped`；建模後多了 `system.*`；讀庫後多了 `screen.compounds`。
+使用者自己改好設定而不是接受縮小時，命中仍留在紀錄裡（它們真的發生過），`clamped` 為空；被擋住的 `edition` 步驟則會移除。
+
+**縮小後不走的路徑**：自動補窗口（`max_refine_rounds` 為 0，`range(first, base_round + 0)` 不執行）、第二次重複（`md.replicas` 為 1）、
+長時間規劃（`_plan_long_run` 在有正式模擬上限的版本直接返回，超過上限或有 `md.long_run` 時丟 `UpgradeRequired`，由安全網接住）、
+自主補跑（`autonomy` 是不可縮小的功能命中）。GUI 的「加做第二次拉離」「手動補窗口」「重複數設成大於 1」「篩選挑選超過配體上限」在動手前就以
+`EditionLimit`（`ValueError` 的子類別，帶四語 `texts`）拒絕。
+
+**命令列**
+- `pipeline run` 與 `resume` 把版本上限當成一般的 NEEDS_HUMAN：印 `[NEEDS_HUMAN] …`，結束碼 **3**（既有的慣例，`run`、`pipeline run`、`resume` 相同），
+  並印出選項與 `edition.accept_clamp` 的寫法，不再印 `pose_choices` 的提示。沒有新增旗標：既有的閘門決定都是設定檔鍵，沒有對應的旗標。
+- `md20 edition` 印版本名、上限對照表，Lite 還印只有完整版才有的功能與升級方式；`md20 edition --json` 印 `edition.summary()`。不能改版本。
+- 其他命令在 Lite 安裝包裡碰到完整版模組（空殼丟 `UpgradeRequired`）以結束碼 **14** 離開，stderr 印四語說明。`md20 autonomy` 在 Lite 安裝包保留命令名稱並回這段說明；
+  Lite 授權裝在完整安裝包時，也以同樣方式擋掉（`edition.is_lite()`）。
+- 結束碼總表：0 完成或暫停；3 需要人決定（含版本上限）；13 沒有授權或授權不含功能；14 Lite 呼叫了完整版功能；其餘各命令自己的碼不變。
+
+**GUI**：`gui/actions.py` 把「自動縮小設定後繼續」註冊成一鍵，補丁是 `edition.accept_clamp: true`，只移除 `edition` 這一個停下的步驟，不讓已完成的步驟重跑。
+`gui/gate_text.py` 有四語標題與說明，選項文字直接取自 `edition.OPT_*`。
+
+**快速預覽**：`md20/edition_preview.py::quick_preview_available(result)` 接受平台結果或 Doctor 結果，只有 CUDA、HIP、Metal，
+或裝置不是 CPU 的 OpenCL 才回 True；CPU、Reference、裝置不明的 OpenCL 都回 False。它不改任何閘門：GBn2 下的結合自由能與金屬位點照舊被擋。
+
 ## 7. 報告
 - 頁尾標示 MD20 Lite。
 - 「完整版會多給你什麼」一節**依這次結果實際缺的條件產生**，資料來自 D-96 的評估物件與本次的 Hit，不是固定文案。

@@ -30,6 +30,7 @@ class BuildResult:
     topology_pdb: str = ""
     n_atoms: int = 0
     n_protein_atoms: int = 0
+    n_protein_residues: int = 0          # amino-acid residues of the receptor (caps, metals, waters and ligands not counted); D-181 edition limit
     n_ligand_atoms: int = 0
     n_waters: int = 0
     n_ions: dict = field(default_factory=dict)
@@ -68,6 +69,7 @@ _PROTEIN_RESNAMES = {"ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HI
                      "PRO", "SER", "THR", "TRP", "TYR", "VAL", "HID", "HIE", "HIP", "HSD", "HSE", "HSP", "CYX", "CYM",
                      "ASH", "GLH", "LYN", "ARN", "SEP", "TPO", "PTR", "MSE", "ACE", "NME", "NMA"}
 _BACKBONE = {"CA", "C", "N", "O", "OXT"}
+SEQUENCE_RESNAMES = _PROTEIN_RESNAMES - {"ACE", "NME", "NMA"}      # residues of the sequence (end caps are not)
 
 
 def add_position_restraints(system, topology, positions, *, k_protein=1000.0, k_sidechain=1000.0, k_ligand=1000.0,
@@ -726,6 +728,7 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
         atomic_write_json(res.to_dict(), out_dir / "build_manifest.json")
         return res
     n_protein = modeller.topology.getNumAtoms()
+    n_protein_res = sum(1 for r in modeller.topology.residues() if r.name in SEQUENCE_RESNAMES)
     receptor_chain_ids = {c.id for c in modeller.topology.chains()}
     lig_names = set()
     generators = []
@@ -979,7 +982,7 @@ def assemble_system(receptor_pdb: Path | str, ligands: list[LigandRecord], out_d
     # its provenance is in build_manifest.json (stamped) together with its SHA-256.
     sys_xml.write_text(XmlSerializer.serialize(system), encoding="utf-8")
     res = BuildResult(status=report.status, system_xml=str(sys_xml), topology_pdb=str(top_pdb), n_atoms=n_atoms,
-                      n_protein_atoms=n_protein, n_ligand_atoms=n_lig, n_waters=n_water, n_ions=counts, box_nm=box_nm,
+                      n_protein_atoms=n_protein, n_protein_residues=n_protein_res, n_ligand_atoms=n_lig, n_waters=n_water, n_ions=counts, box_nm=box_nm,
                       total_charge=total_q, forcefields=list(forcefield_files) + generators,
                       ligands=[{**l.to_dict(), "atom_indices": list(range(a, b)),
                                 "heavy_atom_indices": [i for i in range(a, b) if atoms_el[i] != "H"]}
