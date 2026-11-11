@@ -15,6 +15,7 @@ import os
 import sys
 from pathlib import Path
 
+from ..edition import UpgradeRequired
 from ..i18n import pick, colon
 
 MEMBRANE_TYPES = {
@@ -292,8 +293,11 @@ def advanced_checks(adv: dict, *, ligands: list[dict], has_receptor: bool, bindi
                                "결합 세기 계산을 끄십시오."), lang, suggestion=False))
         solute = has_receptor if t == "protein" else (bool(ligands) if t == "surface" else False)
         if not (t == "protein" and not has_receptor) and not (t == "surface" and not ligands):
-            _, rep = plan_membrane(spec, has_solute=solute, solvent=solvent)
-            for g in rep.gates:
+            try:
+                _, rep = plan_membrane(spec, has_solute=solute, solvent=solvent)
+            except UpgradeRequired:                   # D-181: a Lite package ships a stub; the edition issue is shown by edition_ui
+                rep = None
+            for g in (rep.gates if rep is not None else []):
                 if g.status == "PASS":
                     continue
                 level = "error" if g.status == "NEEDS_HUMAN" else "info"

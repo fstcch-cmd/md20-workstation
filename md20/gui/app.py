@@ -15,6 +15,7 @@ from .logic import Runner, config_from_form, list_workflows, pose_table, set_pos
 from .actions import apply_gate_action, resample_range, select_screen_ligands
 from . import actions as ACT
 from . import theme
+from . import edition_ui
 from .connection import CONNECTION_JS, tune_heartbeat
 from ..docking.screen import echart_screen, echart_ranking
 from .views import (gate_cards, timeline, live_series, echart_options, viewer_targets, scene_for, viewer_html,
@@ -139,6 +140,8 @@ def _theme_head(L: str) -> None:
     from . import theme
     ui.colors(**theme.QUASAR_COLORS)
     ui.add_head_html(theme.css(L))
+    if edition_ui.css():                    # D-181: Lite only; the complete edition's pages carry nothing extra
+        ui.add_head_html(edition_ui.css())
     ui.add_head_html(CONNECTION_JS)
 
 STATUS_COLOR = {"PASS": "positive", "COMPLETE": "positive", "RUNNING": "primary", "PAUSED": "warning",
@@ -222,7 +225,13 @@ def _header():
     L = lang()
     _theme_head(L)
     with ui.header().classes("items-center justify-between md20-header"):
-        ui.label(t("app_title", L)).classes("text-lg md20-title")
+        badge_text = edition_ui.badge(L)        # D-181: Lite says so on every page; the complete edition shows nothing
+        if badge_text:
+            with ui.row().classes("items-center gap-2"):
+                ui.label(t("app_title", L)).classes("text-lg md20-title")
+                ui.link(badge_text, "/edition").classes("md20-edbadge").props("data-testid=edition-badge").tooltip(edition_ui.badge_hint(L))
+        else:
+            ui.label(t("app_title", L)).classes("text-lg md20-title")
         with ui.row().classes("items-center gap-4"):
             ui.link(t("nav_home", L), "/").classes("text-white no-underline")
             ui.link(t("nav_system", L), "/system").classes("text-white no-underline")
@@ -337,7 +346,10 @@ def dashboard():
 
 def _optional_tools(L: str):
     """D-80: folding environment (setup-fold) and coarse-grained tools (setup-cg): installed or not, the exact install
-    command, and a button that shows the install plan.  Nothing is installed from the GUI."""
+    command, and a button that shows the install plan.  Nothing is installed from the GUI.
+    D-181: Lite does not ship those tools' code, so the section is left out there (the Editions page describes them)."""
+    if edition_ui.is_lite():
+        return
     from .advanced import tool_rows, setup_preview, TOOL_TEXT
     from ..build.fold import fold_status
     from ..build.martini import availability
@@ -535,16 +547,124 @@ class _Blocked:
         return False
 
 
+def _edition_card(wf: Workflow) -> None:
+    """D-181: the limit card of Lite.  It sits at the top of the workflow page and is empty unless a start was stopped
+    because the settings go beyond Lite.  `_start` fills it at once (through the client's registered box); a page opened
+    afterwards fills it from STATE.  Nothing here starts or restarts a calculation by itself.  The complete edition's
+    page gets no element at all."""
+    if not edition_ui.is_lite():
+        return
+    box = ui.column().classes("w-full gap-0")
+    client = _client()
+    if client is not None:
+        client._md20_edition_box = (box, wf)
+    _edition_card_fill(box, wf)
+
+
+def _client():
+    """The browser client of the running handler or page build, or None (an interface detail must never break a page)."""
+    try:
+        from nicegui import context
+        return context.client
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _edition_card_refresh(wf: Workflow) -> None:
+    """Called by `_start` when it stopped a start: show the card on the page that is open."""
+    try:
+        box, page_wf = _client()._md20_edition_box
+    except Exception:  # noqa: BLE001  (the start came from a page without the card, e.g. a form: the next page shows it)
+        return
+    if page_wf.dir == wf.dir:
+        _edition_card_fill(box, wf)
+        ui.run_javascript("window.scrollTo({top: 0, behavior: 'smooth'})")
+
+
+def _edition_card_fill(box, wf: Workflow) -> None:
+    box.clear()
+    if STATE.get("edition_block") != (wf.project.dir.name, wf.name) or not edition_ui.is_lite():
+        return
+    L = lang()
+    cfg = load_json(wf.dir / "config.json", wf.cfg)
+    res = edition_ui.config_hits(cfg, L, folder=str(wf.project.dir))
+    if not res:                                   # the settings were changed since: nothing to decide any more
+        STATE["edition_block"] = None
+        return
+
+    def go_reduce():
+        job = RUNNER.get(wf)
+        if job and job.alive():
+            ui.notify(t("busy", lang()), type="warning"); return
+        edition_ui.accept_clamp(wf)               # writes edition.accept_clamp; the workflow applies and logs the reduction
+        if getattr(_start(wf), "blocked", False):
+            _edition_card_fill(box, wf); return
+        box.clear()
+        ui.notify(pick(edition_ui.TEXT["started"], lang()), type="positive")
+
+    def go_edit():
+        STATE["edition_block"] = None
+        mode = cfg.get("gui_mode")
+        ui.navigate.to(f"/new/{mode if mode in ('quick', 'pro') else 'quick'}")
+
+    with box, ui.card().classes("w-full max-w-6xl mx-auto md20-card md20-gate md20-gate--needs").props("data-testid=edition-card"):
+        with ui.row().classes("items-center gap-2"):
+            ui.html('<span class="md20-glyph" aria-hidden="true">\u25c6</span>')
+            ui.label(res["title"]).classes("md20-section")
+        ui.label(res["sub"]).classes("md20-muted")
+        with ui.column().classes("w-full gap-0"):
+            for h in res["hits"]:
+                mod, glyph = ("autofix", "\u25d0") if h["state"] == "autofix" else ("needs", "\u25c6")
+                with ui.row().classes(f"w-full items-start gap-2 no-wrap md20-edhit md20-gate--{mod}").props(f"data-testid=edition-hit-{h['code']}"):
+                    ui.html(f'<span class="md20-glyph" aria-hidden="true">{glyph}</span>')
+                    with ui.column().classes("gap-0"):
+                        ui.label(h["text"]).classes("text-sm")
+                        ui.label(h["tag"]).classes("md20-edlimit")
+        if res["partial"]:
+            ui.label(res["partial"]).classes("text-sm")
+        for c in res["choices"]:
+            if c["id"] == "learn":
+                ui.link(c["label"], c["href"]).classes("text-sm").props("data-testid=edition-learn")
+                continue
+            with ui.column().classes("w-full gap-1").props(f"data-testid=edition-choice-{c['id']}"):
+                if c["id"] == "clamp":
+                    if res["changes"]:
+                        ui.label(res["changes_title"]).classes("text-sm font-semibold")
+                        for line in res["changes"]:
+                            ui.label("\u2022 " + line).classes("text-sm")
+                    ui.button(c["label"], on_click=go_reduce).props("color=primary no-caps data-testid=edition-reduce")
+                elif c["id"] == "edit":
+                    ui.button(c["label"], on_click=go_edit).props(f"{'color=primary' if c['primary'] else 'outline'} no-caps data-testid=edition-edit")
+                else:
+                    ui.label(c["label"]).classes("text-sm font-semibold")
+                if c["text"]:
+                    ui.label(c["text"]).classes("md20-why")
+                if c["id"] == "open_full":
+                    if c["folder"]:
+                        with ui.row().classes("items-center gap-2"):
+                            ui.label(c["folder"]).classes("text-sm font-mono").props("data-testid=edition-folder")
+                            ui.button(icon="content_copy", on_click=lambda f=c["folder"]: ui.run_javascript(edition_ui.copy_js(f))
+                                      ).props("flat dense").tooltip(pick(edition_ui.TEXT["copy"], L))
+                    ui.label(res["upgrade"]).classes("md20-why")
+
+
 def _start(wf: Workflow):
     """D-103: the calculation runs in its own process (md20.gui.worker): it never holds the GUI's GIL, and its
     status and progress are files the GUI reads back after a reconnect or restart.  The worker probes the OpenMM
     platform and builds the pause policy itself (same settings as before: PAUSE file, battery, resource guard)."""
+    if edition_ui.is_lite() and edition_ui.config_hits(load_json(wf.dir / "config.json", wf.cfg)):
+        # D-181: the settings go beyond Lite.  Nothing starts; the limit card on the workflow page shows what, and the
+        # ways forward (reduce automatically, change the settings, open in the complete edition)
+        STATE["edition_block"] = (wf.project.dir.name, wf.name)
+        _edition_card_refresh(wf)
+        return _Blocked(wf)
     (wf.project.dir / "PAUSE").unlink(missing_ok=True)
     os.environ["MD20_RESOURCE_MODE"] = resource_mode()
     from ..util.license import FeatureNotLicensed, LicenseRequired
     try:
         job = RUNNER.start_process(wf)
         STATE["feature_block"] = None
+        STATE["edition_block"] = None
         return job
     except FeatureNotLicensed as exc:                # D-128: "your licence does not include X", shown on the feature card
         STATE["feature_block"] = exc.texts()
@@ -702,6 +822,7 @@ def workflow_page(project: str, name: str):
     run_btn = t("run_continue", L)
     with ui.column().classes("w-full max-w-6xl mx-auto gap-3"):
         ui.label(f"{project} / {name}").classes("text-xl font-semibold")
+        _edition_card(wf)                       # D-181: empty unless a start was stopped by a Lite limit
         status = ui.label("").classes("text-lg")
         msg = ui.markdown("")
         rep_box = ui.column().classes("w-full")
