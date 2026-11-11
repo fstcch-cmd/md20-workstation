@@ -5,6 +5,16 @@
 
 ## 0. 新 session 第一步
 
+> **2026-11-11 第十個 session（session_016gcJz9BT5agmHfn8ufogo6，Opus 5.5＋2 個 Sonnet 子代理）。**
+>
+> **已推（11/12 依使用者指示）**：D-183（註解小帳）、D-184（L1 MCP）、D-185（討論紀錄），接在 Lite 第一批（D-181/D-182，另一個 session）之後。本地原號 D-181/D-182 因撞號改為 D-183/D-184。
+>
+> **做了**：D-184 L1 MCP 轉接頭（`md20 mcp`，只暴露 read_capabilities／plan_workflow／read_report，零依賴；規格 `docs/specs/llm_mcp.md`）；D-183 註解標號小帳。容器全套 1609 passed／0 failed。
+>
+> **下一步候選（待使用者）**：審 D-184 兩個判斷點（`md.replicas` 豁免、提議檔放 `<root>/llm_proposals/`）；本機／筆電接 Claude Desktop 實測；L2 指派前不動 read_problem 等動作。
+>
+> --- 以下為前一次交接 ---
+
 > **2026-11-11 第九個 session 交接（session_016gcJz6mbow3MMxyKdn4bWm，Opus 4.8）。使用者 11/11 08:24 指示準備交接、開新 session。**
 >
 > **第一步照舊**：兩個 repo 都 add_repo＋clone；`git pull`；讀 `docs/STATUS.md` 開頭、本 §0、`docs/DECISIONS.md` 最上面（D-180→D-172）。

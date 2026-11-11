@@ -203,7 +203,7 @@ end-user 的專家迴圈診斷出「核心少了某能力」→ 升級成開發�
 ## 12. 里程碑與未決
 里程碑（草案，待排序）：
 - L0 **[已實作・待 CI，D-178]**：規則檔（`MD20_LLM_GUIDE.md`，英文）+ 操作核心介面定義 `md20/llm/interface.py`（7 動作契約、只提議不自動套用、白名單安全鍵＋範圍、capabilities 唯讀視圖）。規格見 `llm_interface.md`。
-- L1：MCP 轉接頭（前：`plan_workflow`；後：`read_report`）。
+- L1 **[已實作・待 CI／本機，D-184]**：MCP 轉接頭（前：`plan_workflow`；後：`read_report`；另 `read_capabilities`）。零依賴 stdio server `md20 mcp`。規格見 `llm_mcp.md`。
 - L2：中段診斷（結構化問題 + `propose_config_change`/`select_gate_option` + 閘門重判）。
 - L3：檔案存取與診斷（§7）。
 - L4：報告客製槽（§8）+ 程式內 BYO-key 面板。

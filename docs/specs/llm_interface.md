@@ -1,5 +1,7 @@
 # Spec: LLM 介面定義（L0，D-178）
 
+> **L1 擴充（D-184，2026-11-11）**：ACTIONS 7→8（新增唯讀 `read_report`）、`L1_EXPOSED`、`KNOWN_DRAFT_KEYS`、`PLANNABLE_DECISION_PATHS`、`validate_workflow_draft`；轉接頭本身見 `llm_mcp.md`。
+
 狀態：**[已實作・待 CI]**（純 Python 測試 12 項綠；不需真實引擎）。這是 LLM 編排 track（`llm_orchestration.md`，D-161）的 **L0**——契約層，不是 server、不呼叫 LLM、不套用任何東西。使用者 2026-11-10 指派 L0 實作。
 
 ## 要解決什麼

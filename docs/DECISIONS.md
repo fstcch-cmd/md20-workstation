@@ -6,6 +6,19 @@
 ---
 
 ## 2026-11-11
+### D-184　LLM 編排 L1：MCP 轉接頭（零依賴 stdio server `md20 mcp`；只暴露三工具；使用者 2026-11-11 指派）
+- **日期**：2026-11-11
+- **使用者決定（本 session 問答）**：(1) L1 只暴露 `read_capabilities`＋`plan_workflow`＋新增唯讀 `read_report`，L0 其餘 5 動作（read_problem／select_gate_option／propose_config_change／read_file／write_report_narrative）留到 L2+ 指派；(2) **零依賴自寫 stdio**，不把官方 `mcp` SDK 加進學生環境（不動 5 個 environment yml 與 env-lock）；(3) 平時 commit 只在本地累積、不推備份分支（依 D-180 每週推一次 main）。
+- **做了什麼**：`md20/llm/mcp_server.py`（協定層）、`md20/llm/tools.py`（工具層）、`md20 mcp` CLI 子命令、`interface.py` L0 契約擴充（ACTIONS 7→8、`L1_EXPOSED`、`validate_workflow_draft`）、guide §3。細節 `docs/specs/llm_mcp.md`。兩個 Sonnet 子代理平行開發（協定層／工具層），指揮者審查後整合、補端到端測試。
+- **指揮者審查後的修正（判斷，請審）**：
+  1. **`md.replicas` 從人工決定鍵檢查豁免**（`PLANNABLE_DECISION_PATHS`）。子代理照字面把所有 `DECISION_KEYS` 都擋，結果 `example_config()` 本身被拒、且與 SAFE_KEYS 含 replicas 自相矛盾。查證：重複計畫「只是資訊＋預設、從不擋流程」（`engine/replica_plan.py` 開頭、D-131），所以它是規劃參數不是閘門決定；仍照 PARAMS 範圍檢查（0 被擋，有測試）。`screen.next_mode` 等其餘決定鍵**維持擋**（篩選閘門的人選）。
+  2. **專案根目錄不存在就拒絕**（不替 LLM 建資料夾；原本 DecisionLog 會 mkdir）。
+- **安全邊界（測試強制）**：stdout 只放協定（fd 1 層級導向 stderr）；例外不洩漏 traceback/路徑；提議只寫新檔、絕不覆寫、不建專案、不執行；人工閘門決定鍵一律 REJECTED（原則 2）；read_report 不回絕對路徑、不給閘門訊息、擋 `..`/絕對/symlink 逃逸；L2 動作在 tools/list 不存在、呼叫回 -32602。無任何 env／設定／參數後門；不碰授權碼。
+- **被否決**：用官方 SDK 當產品依賴（使用者否決，理由：環境變大、要改 env-lock）；L1 一次暴露 7 動作（等於提前做 L2–L4）；提議寫進專案目錄（會在 LLM 指示下建立專案＝副作用）；草稿驗證放寬到只看範圍（會讓 LLM 代替人選閘門）。
+- **證據**：容器 `tests/test_llm_mcp_server.py`、`tests/test_llm_tools.py`、`tests/test_llm_interface.py`、`tests/test_llm_mcp_e2e.py` 全綠；e2e 真的起 `python -m md20 --dir X mcp` 子行程（`PYTHONIOENCODING=cp950`），並用官方 SDK 2.3.0 stdio client 驅動真 CLI（SDK 要 2025-11-25，我們回 2025-06-18，SDK 接受）。容器全套 pytest **1609 passed、35 skipped、0 failed**。
+- **相關檔案**：`md20/llm/{mcp_server,tools,interface,__init__}.py`、`md20/cli.py`、`docs/llm/MD20_LLM_GUIDE.md`、`docs/specs/{llm_mcp,llm_interface,llm_orchestration,README}.md`、`tests/test_llm_{mcp_server,tools,interface,mcp_e2e}.py`、`tests/_mcp_stub_server.py`。
+- **未決**：`md.replicas` 豁免與提議檔位置待審；尚無 GUI/CLI 檢視確認提議的介面（屬 L2/L4，待指派）；真實 Claude Desktop＋Windows 實機連線未驗（待本機／筆電）；2025-11-25 協定版本未支援。L2 以後與編排規格其餘未決項（本地模型硬體門檻、報告敘述槽模板、L2+ 排序）仍待使用者回饋，未實作。
+
 ### D-183　小帳：openmm 範圍與安裝器退路的註解標號 D-171→D-172（純註解、正規編號定為 D-172）
 - **日期**：2026-11-11
 - **問題**：`environment/{linux-cuda,windows-cuda,windows-opencl,macos}.yml` 的 openmm 範圍註解、`tests/test_env_lock.py:22`、`installer/install.ps1:111`（CUDA solve 失敗退 OpenCL）都標成 **D-171**；但 DECISIONS 中 D-171＝env-lock CUDA 漂移守衛，openmm 放寬為 `>=8.5,<8.7` 與安裝器退路都寫在 **D-172**。

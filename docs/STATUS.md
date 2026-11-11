@@ -1,5 +1,12 @@
 # MD20 單機教學版 — 狀態報告
 
+## 當前事實（2026-11-11 第十個 session，session_016gcJz9BT5agmHfn8ufogo6，Opus 5.5 指揮＋2 個 Sonnet 子代理）
+- **已推上 main（11/12 依使用者指示，與 Lite 第一批同一次推送週；D-185）**：D-183、D-184、D-185，rebase 在 Lite 的 `f14ecc4` 之後；本地原編號 D-181/D-182 因撞 Lite 而改號。對外最新發行仍是 **v0.1.0a21**。
+- **D-184 L1＝MCP 轉接頭（已實作・容器綠・待 CI／本機）**：`md20 mcp` 零依賴 stdio server；只暴露 `read_capabilities`／`plan_workflow`（驗證草稿、只寫提議檔、擋人工閘門決定鍵、不建專案不執行）／`read_report`（唯讀）。官方 SDK 只用於互通測試。容器全套 **1609 passed、35 skipped、0 failed**；e2e 起真 CLI 子行程並用官方 SDK client 驅動。規格 `docs/specs/llm_mcp.md`。
+- **D-183** 註解標號 D-171→D-172（純註解）。
+- **誠實未驗**：真實 Claude Desktop＋Windows 主控台實機連線；CI 結果以本次 push 的 run 為準。
+- **仍待使用者**：`md.replicas` 豁免與提議檔位置（D-184 審查點）；L2 以後；其餘 gated 項同下方 11/10 區塊。
+
 ## 當前事實（2026-11-12，session_016gcJzBMFygWvETdrK5aZY8；D-181、D-182 MD20 Lite，已推上 main）
 - **使用者 2026-11-12 指示一次推上 GitHub**（本週的推送）。CI 結果在推送當下未知，`lite-build` 是第一次執行。
 - **已實作、容器測試通過**：版本契約 `md20/edition.py`；流程三處上限閘門與自動縮小；`md20 edition`；報告附錄 D；介面的徽章、版本頁、上限提示與卡片；打包工具 `tools/build_lite.py`（移除 10 個完整版模組，Lite 樹全模組可 import，27 個純測試檔在 Lite 樹內通過）。容器全套 1,725 passed、50 skipped、0 failed。

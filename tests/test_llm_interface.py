@@ -33,8 +33,8 @@ def test_no_apply_or_execute_action_exists():
     names = set(action_names())
     for forbidden in ("apply_config", "apply", "execute", "run_now", "write_config", "edit_code", "commit"):
         assert forbidden not in names
-    # exactly the seven contract actions
-    assert len(ACTIONS) == 7
+    # the contract actions: the original seven plus read_report (L1)
+    assert len(ACTIONS) == 8
 
 
 def test_propose_actions_are_marked_proposal_only():

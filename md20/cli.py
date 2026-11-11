@@ -5,6 +5,7 @@
   md20 build --project P --case NAME --receptor R.pdb --ligand REF.sdf [--pose POSE] ...
   md20 run --project P --case CASE [--tier teaching|classroom|research] [--fake]
   md20 status --project P                       stage of every case / run
+  md20 mcp                                      stdio MCP server for LLM clients (read-only / propose-only tools)
   md20 demo [--dir DIR]                         end-to-end demo with the Fake backend (no OpenMM needed)
   md20 fold SEQUENCE [--receptor-seq S] [--engine E] [--out DIR]   predicted structure (D-80)
   md20 setup-fold [--engine omegafold|boltz|esmfold] [--yes] [--warmup]  install a folding tool (plan first)
@@ -383,6 +384,13 @@ def cmd_screen(a):
     return 0
 
 
+def cmd_mcp(a):
+    """`md20 mcp`: stdio MCP server (L1). stdout carries protocol messages only; nothing may print here."""
+    from .llm.tools import L1_TOOLS
+    from .llm.mcp_server import serve
+    return serve(Path(a.dir), tools=L1_TOOLS)
+
+
 def cmd_gui(a):
     from .gui.app import main as gui_main
     gui_main(projects_dir=a.dir, port=a.port, show=not a.no_browser, host=a.host)
@@ -729,6 +737,8 @@ def main(argv=None) -> int:
     g = sub.add_parser("gui", help="圖形介面（瀏覽器）"); g.add_argument("--port", type=int, default=8020)
     g.add_argument("--host", default="127.0.0.1", help="預設只本機可連；0.0.0.0 才對網路開放（教室 Wi-Fi 上任何人都能操作）")
     g.add_argument("--no-browser", action="store_true"); g.set_defaults(fn=cmd_gui)
+    mc = sub.add_parser("mcp", help="MCP server over stdio（給 Claude Desktop 等 MCP 客戶端；只有唯讀與提議工具）")
+    mc.set_defaults(fn=cmd_mcp)
     stp = sub.add_parser("stamp", help="檢查／解開 HCC Lab 戳記"); stp.add_argument("action", choices=["verify", "decrypt", "keygen"])
     stp.add_argument("files", nargs="*"); stp.add_argument("--key"); stp.add_argument("--out", default="."); stp.set_defaults(fn=cmd_stamp)
     sv = sub.add_parser("setup-vina", help="下載 AutoDock Vina 執行檔（Windows）"); sv.set_defaults(fn=cmd_setup_vina)
