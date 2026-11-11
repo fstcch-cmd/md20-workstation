@@ -246,3 +246,31 @@ def test_summary_and_comparison():
         rows = E.comparison_rows(lang)
         assert len(rows) >= 6 and all(r["item"] and r["lite"] and r["full"] for r in rows)
     assert E.name(E.LITE, "en") == "MD20 Lite"
+
+
+# ------------------------------------------------------------------------------------------- workflow contract
+def test_gate_offers_the_reduction_only_when_it_helps():
+    hits = E.check_config(_cfg(replicas=3), E.LITE)
+    g = E.gate(hits, "zh")
+    assert g["name"] == E.GATE_NAME and g["status"] == "NEEDS_HUMAN" and "edition.accept_clamp" in g["options"][0]
+    assert len(g["options"]) == 4 and g["evidence"]["hits"][0]["code"] == "md.replicas"
+    only_feature = E.check_config(_cfg(membrane={"a": 1}), E.LITE)
+    g2 = E.gate(only_feature, "en")
+    assert len(g2["options"]) == 3 and not any("accept_clamp" in o for o in g2["options"])
+    for lang in LANG4:
+        assert E.gate(hits, lang)["explanation"]
+
+
+def test_accepted_reads_the_decision_key():
+    assert not E.accepted({}) and not E.accepted(None) and not E.accepted({"edition": "lite"})
+    assert not E.accepted({"edition": {"accept_clamp": False}})
+    assert E.accepted({"edition": {"accept_clamp": True}})
+    assert E.ACCEPT_KEY == ("edition", "accept_clamp")
+
+
+def test_state_record_keeps_each_limit_once():
+    hits = E.check_config(_cfg(replicas=3), E.LITE)
+    rec = E.state_record(hits + hits + [hits[0].as_dict()], [{"key": "md.replicas", "from": 3, "to": 1, "code": "md.replicas"}],
+                         at="2026-11-11T00:00:00Z")
+    assert [h["code"] for h in rec["hits"]] == ["md.replicas"] and rec["clamped"][0]["to"] == 1
+    assert rec["edition"] == E.FULL and json.dumps(rec, ensure_ascii=False)

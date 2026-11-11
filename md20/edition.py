@@ -519,3 +519,47 @@ def summary(lang: str = "en") -> dict:
                        for f in PRO_FEATURES] if ed == LITE else [],
             "comparison": comparison_rows(lang) if ed == LITE else [],
             "how_to_upgrade": pick(HOW_TO_UPGRADE, lang) if ed == LITE else ""}
+
+
+# ---------------------------------------------------------------------------------------------- workflow contract
+# One gate, one state entry and one decision key, shared by the workflow, the command line, the interface and the report.
+GATE_NAME = "edition limit"                  # gate name in `gates=[...]` of a blocked step
+STEP = "edition"                             # workflow step that is blocked, and the key of the state entry
+ACCEPT_KEY = ("edition", "accept_clamp")     # config key a person sets to accept the automatic reduction (a decision key)
+
+OPT_CLAMP = ("自動縮小設定後繼續（edition.accept_clamp）", "Reduce the settings automatically and continue (edition.accept_clamp)",
+             "設定を自動で縮小して続ける（edition.accept_clamp）", "설정을 자동으로 줄이고 계속 (edition.accept_clamp)")
+OPT_OPEN_IN_FULL = ("用完整版打開這個專案接著算", "Open this project in the complete edition and continue there",
+                    "このプロジェクトを完全版で開いて続きを計算する", "이 프로젝트를 정식판에서 열어 이어서 계산")
+OPT_EDIT = ("自己修改設定後重新執行", "Change the settings yourself and run again", "設定を自分で変更して再実行する", "설정을 직접 바꾸고 다시 실행")
+OPT_LEARN = ("了解完整版", "About the complete edition", "完全版について", "정식판 알아보기")
+
+
+def accepted(cfg: dict) -> bool:
+    """True when the config carries the person's decision to let MD20 reduce the sizes."""
+    node = cfg or {}
+    for k in ACCEPT_KEY:
+        node = node.get(k) if isinstance(node, dict) else None
+    return bool(node)
+
+
+def gate(hits: list[Hit], lang: str = "zh") -> dict:
+    """The NEEDS_HUMAN gate for a list of hits, in the shape the workflow's `_block(..., gates=[...])` takes.
+    The reduction is offered only when it would clear at least one hit."""
+    options = ([pick(OPT_CLAMP, lang)] if any(h.can_clamp for h in hits) else []) + [
+        pick(OPT_EDIT, lang), pick(OPT_OPEN_IN_FULL, lang), pick(OPT_LEARN, lang)]
+    return {"name": GATE_NAME, "status": "NEEDS_HUMAN",
+            "explanation": "\n".join(h.text(lang) for h in hits) + "\n" + pick(HOW_TO_UPGRADE, lang),
+            "evidence": {"edition": LITE, "hits": [h.as_dict() for h in hits]}, "options": options}
+
+
+def state_record(hits: list[Hit] = (), changes: list[dict] = (), *, at: str = "") -> dict:
+    """What the workflow stores under `state["edition"]`: the edition in effect, the limits that were met (every one,
+    across the whole run, each code once) and the reductions that were applied.  The report reads this."""
+    seen, out = set(), []
+    for h in hits:
+        d = h.as_dict() if isinstance(h, Hit) else dict(h)
+        if d["code"] not in seen:
+            seen.add(d["code"])
+            out.append(d)
+    return {"edition": current(), "hits": out, "clamped": [dict(c) for c in changes], "at": at}
