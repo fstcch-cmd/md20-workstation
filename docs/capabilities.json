@@ -81,6 +81,18 @@
       "note": "不含化學引擎；另跑 capability manifest 檢查（D-136）"
     },
     {
+      "id": "ci.yml:lite-build",
+      "workflow": "ci.yml",
+      "job": "lite-build",
+      "class": "unit",
+      "blocking": true,
+      "counts_for": [
+        "synthetic_tested"
+      ],
+      "baseline": "尚未在 CI 執行（D-181 未推送；容器內 build、verify、smoke-tests 通過）",
+      "note": "D-181: builds the MD20 Lite tree, imports every module in it and runs the pure smoke tests there"
+    },
+    {
       "id": "ci.yml:openmm-stack",
       "workflow": "ci.yml",
       "job": "openmm-stack",

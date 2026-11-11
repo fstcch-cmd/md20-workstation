@@ -39,6 +39,7 @@ MD20 目前能力的單一機器可讀清單（R7，D-136）。只寫現況；�
 | job | 類別 | 阻擋 | 可支持的狀態 | 580cbff 結果 | 說明 |
 |---|---|---|---|---|---|
 | `ci.yml:pure-python` | unit | 是 | synthetic_tested | success（6/6：三 OS × Python 3.11／3.12） | 不含化學引擎；另跑 capability manifest 檢查（D-136） |
+| `ci.yml:lite-build` | unit | 是 | synthetic_tested | 尚未在 CI 執行（D-181 未推送；容器內 build、verify、smoke-tests 通過） | D-181: builds the MD20 Lite tree, imports every module in it and runs the pure smoke tests there |
 | `ci.yml:openmm-stack` | real_engine | 是 | synthetic_tested, real_engine_tested | success（Windows／macOS／Ubuntu） | 完整套件，CPU 平台；Ubuntu 另有獨立 CG 步驟。看 skip 數：跳過不算通過。 |
 | `ci.yml:heavy` | real_engine | 是 | real_engine_tested | workflow 成功、pose-screen 成功、metal 失敗 | Ubuntu，MD20_HEAVY=1 |
 | `ci.yml:paper-docking` | benchmark | **否** | —（不能當資格） | success（continue-on-error；結果不阻擋） | 兩篇論文對接重現，縮減搜尋（exhaustiveness 8），斷言只檢查一致性。綠燈不是資格；最多支持 scientifically_benchmarked=observed。job 名稱已標 BENCHMARK, non-blocking - not qualification。 |

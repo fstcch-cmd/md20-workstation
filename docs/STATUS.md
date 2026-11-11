@@ -1,5 +1,12 @@
 # MD20 單機教學版 — 狀態報告
 
+## 當前事實（2026-11-11，session_016gcJzBMFygWvETdrK5aZY8；D-181 MD20 Lite，**未推送**）
+- **分支 `lite/d181`（基於 main `2989bb6`）只存在於開發容器與交給使用者的 git bundle**，main 與 CI 都還沒有這批。
+- **已實作、容器測試通過**：版本契約 `md20/edition.py`；流程三處上限閘門與自動縮小；`md20 edition`；報告附錄 D；介面的徽章、版本頁、上限提示與卡片；打包工具 `tools/build_lite.py`（移除 10 個完整版模組，Lite 樹全模組可 import，27 個純測試檔在 Lite 樹內通過）。容器全套 1,725 passed、50 skipped、0 failed。
+- **未驗證**：介面沒有在真的瀏覽器看過（容器無 NiceGUI）；沒有真實引擎執行；CI `lite-build` 沒跑過；Lite 上限數字未在目標筆電校準；日文韓文未經母語者校對。
+- **已知問題**：見 DECISIONS D-181「整合後仍成立的問題」八項。最重要的兩項：自動補窗、長時間規劃、進階分析的程式碼仍在 Lite 安裝包裡；自動縮小的值會留在設定檔，完整版打開後要人改回來。
+- **待使用者**：簽發端是否接受 `features` 含 `lite`；是否拆三個科學模組；上限數字；推送。
+
 ## 當前事實（2026-11-10 第九個 session 續，session_016gcJz6mbow3MMxyKdn4bWm）
 - **main 四類 CI job 全綠**（`f34d5d3`，a22.dev0）：pure-python×6、openmm-stack×3（ubuntu-cuda/windows-opencl/macos）、heavy×3（workflow/pose-screen/metal）、installer×2、paper-docking。run conclusion=success。
 - **D-166 已定案並實作（方案一）**：核心 Cython 編譯發行層，**不加密、無金鑰、無動態 exec**；`compiled_core` opt-in 預設關、預設原始碼發行不變。自寫加密載入器已被安全分類器正確擋下、不重寫。詳 D-166、`tools/build_protected.py`、`docs/specs/licensing.md §13`。

@@ -70,6 +70,13 @@ LITE_SMOKE_DESELECT: tuple[str, ...] = (
     "tests/test_edition.py::test_source_tree_is_the_complete_edition",
     "tests/test_edition.py::test_summary_and_comparison",
     "tests/test_edition.py::test_state_record_keeps_each_limit_once",
+    # These four drive the workflow beyond the Lite limits on purpose (a second pull, a library selection that goes on to
+    # more ligands, long-run planning).  In a Lite tree the workflow refuses them, which is the behaviour Lite wants;
+    # tests/test_edition_workflow.py covers that refusal.
+    "tests/test_binding_targets.py::test_finished_target_kept_and_one_more_run",
+    "tests/test_screen_workflow.py::test_workflow_screen_blocks_on_selection_then_merges",
+    "tests/test_longrun.py::test_workflow_blocks_over_one_microsecond_then_applies_plan",
+    "tests/test_longrun.py::test_workflow_leaves_runs_up_to_100_ns_untouched",
 )
 
 

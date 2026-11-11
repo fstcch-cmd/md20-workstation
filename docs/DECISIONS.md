@@ -20,8 +20,22 @@
   - **同一個安裝包靠授權解鎖**。完整版程式碼在對方手上，改一行判斷就能解鎖。
   - **用故意降低結果品質來逼升級**。會傷 MD20 的信譽，也違反 STATUS 誠實三級。
 - **更正（對 11/11 早上專案文件 06 的初稿）**：初稿寫隱式溶劑讓「低配筆電幾分鐘看到結果、PMF 當描述性參考」。讀了 `implicit_solvent.md` 與 D-25 後兩點都不成立：GBn2 只在 GPU 上快，CPU 反而很慢；既有閘門在 GBn2 下擋掉結合自由能與金屬位點。Lite 不改這個閘門。快速預覽只在偵測到 GPU 時提供，只做分子動力學與結構分析。
-- **證據／測試**：`tests/test_edition.py` 43 項（版本判定、標記損壞、授權字、上限、縮小的冪等與不改輸入、四語文字無殘留佔位符、文字規範、登錄表模組存在且不含必要模組、與 `protocol.TIERS`／`BindingConfig` 預設值同步）。容器全套見本批整合 commit。
-- **相關檔案**：`md20/edition.py`、`tests/test_edition.py`、`docs/specs/lite_edition.md`。
+- **證據／測試**：`tests/test_edition.py` 38 項（版本判定、標記損壞、授權字、上限、縮小的冪等與不改輸入、四語文字無殘留佔位符、文字規範、登錄表模組存在且不含必要模組、與 `protocol.TIERS`／`BindingConfig` 預設值同步）。容器全套見本批整合 commit。
+- **整合（同日，四條線）**：流程、報告、介面、打包四個工作包由 Sonnet 子代理各自在分支上做。報告與介面兩條自己提交並回報；流程與打包兩條在使用者中斷時被停止，程式與測試已寫完但未提交，由指揮者檢查測試後接手提交，並補上 CI `lite-build` 工作與規格 §9。四條合併後容器全套 **1,725 passed、50 skipped、0 failed**（其中 `tests/test_build_lite.py` 40 項另跑）。
+  - **流程**（`md20/workflow.py`、`md20/cli.py`、`md20/gui/actions.py`、`gate_text.py`、`md20/edition_preview.py`，`tests/test_edition_workflow.py` 59 項）：入口、建模後、讀完化合物庫後三處檢查；`edition.accept_clamp` 是決定鍵；每項縮小寫 DecisionLog；`md20 edition` 與 `--json`。發現 `md.replicas` 未設時預設是 3（D-131），高於 Lite 上限，流程層已補上這個情況。
+  - **報告**（`md20/report/edition_section.py`，`tests/test_edition_report.py` 28 項）：附錄 D 放在報告最後，依本次執行的資料產生。子代理做了三個與任務書不同、指揮者同意的判斷：共同口袋的 DESCRIPTIVE 比較不算升級項目（完整版也不排名，D-96）；沒有存評估物件的舊結果，unknown 診斷不歸因於 Lite；隱式溶劑下 ΔG° 不輸出不列為升級項目（是 GBn2 閘門造成的）。
+  - **介面**（`md20/gui/edition_ui.py`，`tests/test_gui_edition.py` 56 項）：徽章、版本頁、膜系統與摺疊的說明頁、欄位下的上限提示、開始前的上限卡片、有 GPU 才出現的快速預覽開關。沒有彈窗與啟動廣告。表單未動過的欄位在 Lite 直接從上限值開始，否則每次預設執行都會撞上限卡片。
+  - **打包**（`tools/build_lite.py`，`tests/test_build_lite.py` 40 項）：實際移除 10 個模組。`sampling/adaptive.py`、`engine/longrun.py`、`analysis/extended.py`、`autonomy/cli.py` 檢查 import 後**留在 Lite**，原因見 `lite_edition.md` §9。
+- **整合後仍成立的問題（誠實列出）**：
+  1. 自動補窗、長時間模擬規劃、進階分析的程式碼仍在 Lite 安裝包裡，只靠上限數字擋。要拿掉得拆這三個科學模組，本輪沒做。
+  2. 介面沒有在真的瀏覽器看過（容器無 NiceGUI）。沒有真實引擎執行。
+  3. 自動縮小（以及介面在 Lite 開結合自由能時寫入的窗口數 12、補窗 0）會留在 `config.json`。同一個專案用完整版打開後這些值仍然生效，要人改回來。`state["edition"]["clamped"]` 有記下每項的原值，完整版可以據此提供「還原」，尚未實作。
+  4. 既有的 `advisor.py` 在偵測不到 GPU 時建議 `gbn2`，與 D-25 的實測相反。這是既有問題，本批沒有改（屬建議邏輯變更）。
+  5. 教學案例一有六個配體，在 Lite 會撞「最多 2 個配體」且不能自動縮小。
+  6. 報告的「ΔG° 沒有輸出」一項在 classroom 等級時不是 Lite 造成的，目前只陳述事實、不宣稱因果，但放在升級說明旁邊可能被誤讀。
+  7. 日文與韓文由模型撰寫，未經母語者校對。
+  8. `md20/edition.py` 尚未加入 `tools/build_protected.py` 的 `CORE_MODULES`。
+- **相關檔案**：`md20/edition.py`、`md20/edition_preview.py`、`md20/report/edition_section.py`、`md20/gui/edition_ui.py`、`tools/build_lite.py`、`tests/test_edition*.py`、`tests/test_gui_edition.py`、`tests/test_build_lite.py`、`docs/specs/lite_edition.md`。
 - **未決**：
   - 簽發端 `md20sign` 是否接受 `features` 含 `lite`（私人 repo，本 session 無存取權）。
   - 上限數字待 GTX 1060 筆電實測校準。

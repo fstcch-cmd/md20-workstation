@@ -1,7 +1,7 @@
 # Spec: MD20 Lite（導流版）（D-181）
 
-狀態：**[開發中]** 核心契約 `md20/edition.py` 已實作並有測試（`tests/test_edition.py`）。報告（第 7 節）已實作並有測試（`tests/test_edition_report.py`）。打包剝除、流程掛點、GUI 分頭實作中，
-各節標示實際狀態。真實引擎驗證依 D-180 在使用者本機做（目標機：GTX 1060 4 GB 筆電）。
+狀態：**[已實作・容器測試通過・未在真機與瀏覽器驗證]** 核心契約、流程閘門與命令列、報告附錄、介面、打包工具都已實作，容器全套測試通過（1,725 項）。
+介面沒有在真的瀏覽器看過。沒有用真實引擎跑過。上限數字未校準。真實引擎驗證依 D-180 在使用者本機做（目標機：GTX 1060 4 GB 筆電）。
 
 ## 1. 目的與原則（使用者 2026-11-11 指定）
 Lite 是交付給實驗室以外的人用的版本。它存在的理由是**把使用者帶到完整版**：用過 Lite 的人會想接著用完整版。
@@ -133,12 +133,6 @@ Lite 是交付給實驗室以外的人用的版本。它存在的理由是**把�
 **快速預覽**：`md20/edition_preview.py::quick_preview_available(result)` 接受平台結果或 Doctor 結果，只有 CUDA、HIP、Metal，
 或裝置不是 CPU 的 OpenCL 才回 True；CPU、Reference、裝置不明的 OpenCL 都回 False。它不改任何閘門：GBn2 下的結合自由能與金屬位點照舊被擋。
 
-## 7. 報告
-- 頁尾標示 MD20 Lite。
-- 「完整版會多給你什麼」一節**依這次結果實際缺的條件產生**，資料來自 D-96 的評估物件與本次的 Hit，不是固定文案。
-  例如只跑了一次重複，就寫完整版會安排三次以上並附上差異；PMF 重疊不足，就寫完整版會自動補窗口。沒有缺的項目就不寫。
-- 附 Lite 與完整版的對照表（`comparison_rows`）。
-- 文字守 `writing_style.md`，四種語言。
 ## 7. 報告（已實作，`md20/report/edition_section.py`，測試 `tests/test_edition_report.py`）
 報告是 Lite 使用者決定要不要升級的地方，所以必須誠實：只寫**這次執行缺了什麼**，以及完整版**針對那一項**會多給什麼。資料來自這次執行自己的紀錄，沒有固定文案。
 - **位置**：附錄 D「這次執行與完整版的差別」，放在報告最後，附錄 C（設定檔）之後、頁尾戳記之前。理由：這樣既有的章節編號、附錄字母與表號都不動（Lite 只多一個表號 20 之類的最後一張表），
@@ -206,11 +200,35 @@ Lite 是交付給實驗室以外的人用的版本。它存在的理由是**把�
 - 既有閘門在 GBn2 下**擋掉結合自由能**（去溶劑化能障在連續介質下失真）與金屬位點。Lite 不改這個閘門。快速預覽只做分子動力學與結構分析，要做 PMF 請改顯式水。
 - 報告加註：隱式溶劑的結果只供描述，不能與顯式水或文獻值直接比較。
 
-## 9. 打包（`tools/build_lite.py`）
-複製乾淨的源碼樹，移除 `edition.pro_modules()` 列的檔案，換成同名的空殼模組：匯出原模組的公開名稱，呼叫時丟 `UpgradeRequired`（帶四語說明）。
-寫入 `md20/_edition.json`。然後在這棵樹上跑測試（CI `lite-build`），確認少了這些模組仍可 import、基本流程可跑。
-哪些模組可以乾淨移除，以「空殼替換後全套 import 通過」為準；移不乾淨的留在 Lite 並記在本節。
-Lite 發行建議同時開 `compiled_core`（`licensing.md` §13），把 `edition.py` 一起編譯。
+## 9. 打包（`tools/build_lite.py`，已實作，`tests/test_build_lite.py` 40 項）
+`python tools/build_lite.py --src . --out <資料夾> [--version X] [--verify] [--smoke-tests]`
+
+複製乾淨的源碼樹，把 `edition.pro_modules()` 列的檔案換成同名的空殼模組，寫入 `md20/_edition.json`。
+空殼用 `ast` 從原檔產生：保留公開名稱，函式和類別建構子在**被呼叫時**丟 `UpgradeRequired`（帶四語說明），import 時不丟。
+原模組定義的例外類別在空殼裡仍是真的例外類別，所以呼叫端的 `except F.FoldError` 照常運作。空殼不含任何原本的實作。
+工具拒絕輸出到源碼樹內，也不會把標記留在源碼樹。
+
+**實際移除的模組（10 個）**
+| 功能 | 模組 |
+|---|---|
+| 膜系統 | `md20/build/membrane.py`、`md20/analysis/membrane.py` |
+| 胜肽序列摺疊 | `md20/build/fold.py` |
+| 粗粒化 | `md20/build/martini.py`、`md20/build/cg_system.py` |
+| 自動檢查與補跑 | `md20/autonomy/controller.py`、`executors.py`、`ledger.py`、`model.py`、`rules.py` |
+
+**留在 Lite 的模組，以及原因**（原本想移除，檢查 import 後不行）
+| 模組 | 原因 |
+|---|---|
+| `md20/sampling/adaptive.py` | `sampling/binding.py` 用它規劃**第一批**窗口（`plan_from_smd`、`coverage_view`）。拿掉後 Lite 的快速 PMF 跑不了。自動補窗由上限 `max_refine_rounds = 0` 擋，不是靠移除程式碼。 |
+| `md20/engine/longrun.py` | `engine/backend.py` 和 `engine/replica_plan.py` 在一般模擬也用它的工具函式。長時間模擬由入口檢查和 `_plan_long_run` 擋。 |
+| `md20/analysis/extended.py` | `analysis/traj.py`、`fingerprint.py`、`replica_set.py`、`sampling/binding.py` 的基本分析都用到。 |
+| `md20/autonomy/cli.py` | `md20/cli.py` 對所有版本註冊這個子命令。 |
+
+**這代表的誠實限制**：自動補窗、長時間模擬規劃、進階分析這三項的程式碼**仍在 Lite 安裝包裡**，只靠上限數字擋。要真的拿掉，得先把這三個模組各自拆成「基本」與「完整版」兩半，那是動科學模組的重構，本輪沒做（待使用者決定，見 D-181 未決）。
+
+**驗證**：`--verify` 在子程序裡以 Lite 樹為 `sys.path` 首位，逐一 import 所有 `md20.*` 模組，確認 `build_edition() == "lite"`，並檢查空殼沒有洩漏實作。`--smoke-tests` 在 Lite 樹裡跑 27 個純 Python 測試檔。CI 的 `lite-build` 工作做同樣的事。
+以上只在開發容器驗證（無 OpenMM、RDKit、Vina）。Lite 安裝包在真機上完整跑一次示範案例還沒做。
+Lite 發行建議同時開 `compiled_core`（`licensing.md` §13），並把 `md20/edition.py` 加進 `CORE_MODULES`（尚未加）。
 
 ## 10. 誠實限制
 - 規模上限是 `edition.py` 裡的數字。原始碼發行時改得掉，所以 Lite 應搭配核心編譯。編譯不是不可破。
