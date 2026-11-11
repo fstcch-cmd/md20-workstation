@@ -224,11 +224,13 @@ Lite 是交付給實驗室以外的人用的版本。它存在的理由是**把�
 | `md20/analysis/extended.py` | `analysis/traj.py`、`fingerprint.py`、`replica_set.py`、`sampling/binding.py` 的基本分析都用到。 |
 | `md20/autonomy/cli.py` | `md20/cli.py` 對所有版本註冊這個子命令。 |
 
-**這代表的誠實限制**：自動補窗、長時間模擬規劃、進階分析這三項的程式碼**仍在 Lite 安裝包裡**，只靠上限數字擋。要真的拿掉，得先把這三個模組各自拆成「基本」與「完整版」兩半，那是動科學模組的重構，本輪沒做（待使用者決定，見 D-181 未決）。
+**這代表的誠實限制**：自動補窗、長時間模擬規劃、進階分析這三項的程式碼**仍在 Lite 安裝包裡**，只靠上限數字擋。要真的拿掉，得先把這三個模組各自拆成「基本」與「完整版」兩半，那是動科學模組的重構。D-182 決定現階段不拆，改以編譯出貨提高取出成本。
 
 **驗證**：`--verify` 在子程序裡以 Lite 樹為 `sys.path` 首位，逐一 import 所有 `md20.*` 模組，確認 `build_edition() == "lite"`，並檢查空殼沒有洩漏實作。`--smoke-tests` 在 Lite 樹裡跑 27 個純 Python 測試檔。CI 的 `lite-build` 工作做同樣的事。
 以上只在開發容器驗證（無 OpenMM、RDKit、Vina）。Lite 安裝包在真機上完整跑一次示範案例還沒做。
-Lite 發行建議同時開 `compiled_core`（`licensing.md` §13），並把 `md20/edition.py` 加進 `CORE_MODULES`（尚未加）。
+**D-182（使用者 2026-11-11 交由開發者決定）：不拆這三個模組，Lite 一律以核心編譯出貨。** `md20/edition.py` 與上表前三個模組已加入 `tools/build_protected.py` 的 `CORE_MODULES`。
+Lite 的出貨順序是先 `build_lite.py`（移除 10 個模組、寫標記），再對 Lite 樹跑 `build_protected.py`（編譯核心並移除對應的 `.py`）。**沒有開 `compiled_core` 的 Lite 不應該交給外部的人。**
+真編譯在開發容器做不了（沒有 Cython），這四個新加入的模組能否順利編譯、編譯後 Lite 能否跑完示範案例，要在發行 runner 或使用者本機驗證。
 
 ## 10. 誠實限制
 - 規模上限是 `edition.py` 裡的數字。原始碼發行時改得掉，所以 Lite 應搭配核心編譯。編譯不是不可破。

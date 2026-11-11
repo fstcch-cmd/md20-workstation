@@ -150,7 +150,7 @@ CLI 結束碼 13（與沒有授權相同），stderr 四語「你的授權不含
 ## 13. 第 4 層：出貨 build 的核心編譯（D-166，方案一「只編譯、不加密」）
 使用者 2026-11-09 在三方案中選「只做 Cython 編譯、不加密」。這一層**不碰金鑰、不加密、不做執行期解密、不動態 exec**，因此不需要任何 GitHub Secret。
 
-- 工具 `tools/build_protected.py`：`CORE_MODULES` 明列核心模組（`util/license.py`、`util/stamp.py`、`workflow.py`、`build/assemble.py`、`build/metal.py`、`build/metal_params.py`、`build/pipeline.py`、`sampling/binding.py`、`sampling/funnel.py`、`sampling/_mdh_legacy.py`）。刻意不含 i18n、report、gui、cli、advisor，以及各 package 的 `__init__.py`（編譯 `__init__.py` 會破壞 import 與 package data）。
+- 工具 `tools/build_protected.py`：`CORE_MODULES` 明列核心模組（`util/license.py`、`util/stamp.py`、`workflow.py`、`build/assemble.py`、`build/metal.py`、`build/metal_params.py`、`build/pipeline.py`、`sampling/binding.py`、`sampling/funnel.py`、`sampling/_mdh_legacy.py`，以及 D-182 為 MD20 Lite 加入的 `edition.py`、`sampling/adaptive.py`、`engine/longrun.py`、`analysis/extended.py`）。刻意不含 i18n、report、gui、cli、advisor，以及各 package 的 `__init__.py`（編譯 `__init__.py` 會破壞 import 與 package data）。
 - `plan_build` 純函式決定「編譯＋移除 .py」清單，永不列入 `__init__.py`；`strip_sources` 只有在對應 `.pyd`／`.so` 已存在時才移除該 `.py`（fail-safe，不出缺模組的 build）；`compile_core` lazy import Cython，缺則丟 RuntimeError（fail closed）、就地 `build_ext --inplace`。
 - 發行：`release-windows.yml` 的 `compiled_core` 輸入**預設 false**。false＝現行 `git archive` 原始碼發行逐位元不變；true＝裝 Cython、對乾淨出貨樹編譯核心、移除核心 `.py`、改打包 staging 樹，並斷言 `md20/util/license.py` 不在 ZIP。
 - **誠實限制**：編譯成 C 擴充比讀 `.py` 難得多，但不是不可破（擴充仍可逆向）。真正的護城河是「出貨 build 不含核心原始碼」本身（D-128 §6），編譯是手段不是加密；驗證邏輯（§1–§7）內容完全不變，只是改以編譯形式出貨。端到端（真編譯＋乾淨機安裝仍可跑）需 opt-in 發行 run 驗證。

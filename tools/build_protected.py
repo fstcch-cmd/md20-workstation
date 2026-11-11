@@ -40,6 +40,12 @@ CORE_MODULES: tuple[str, ...] = (
     "md20/sampling/binding.py",    # 結合自由能核心
     "md20/sampling/funnel.py",     # 漏斗約束與標準態
     "md20/sampling/_mdh_legacy.py",# WHAM/MBAR/bootstrap 核心
+    # D-181／D-182：MD20 Lite。版本判定與上限數字，以及三個「留在 Lite 安裝包裡、只靠上限擋」的完整版能力模組。
+    # 編譯後 Lite 出貨樹不含它們的 .py（Lite 發行必須開 compiled_core，見 docs/specs/lite_edition.md §9、§10）。
+    "md20/edition.py",             # 版本判定、Lite 上限、完整版功能登錄表
+    "md20/sampling/adaptive.py",   # 傘狀採樣窗口規劃與自動補窗
+    "md20/engine/longrun.py",      # 長時間模擬規劃
+    "md20/analysis/extended.py",   # 進階分析（tICA、MSM、氫鍵網路、水合）
 )
 
 

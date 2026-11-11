@@ -6,6 +6,20 @@
 ---
 
 ## 2026-11-11
+### D-182　Lite 不拆三個科學模組，一律以核心編譯出貨（使用者 2026-11-11 交由開發者決定）
+- **日期**：2026-11-11（session_016gcJzBMFygWvETdrK5aZY8）
+- **問題**（D-181 整合後第 1 項）：`sampling/adaptive.py`、`engine/longrun.py`、`analysis/extended.py` 被基本流程用到，無法從 Lite 安裝包移除，所以自動補窗、長時間規劃、進階分析的程式碼仍在 Lite 裡，只靠上限數字擋。給使用者兩個選項：A 先不拆、Lite 搭配核心編譯出貨；B 現在就拆成基本與完整版兩半。使用者回覆「你自行決定」。
+- **決定：A。** 把 `md20/edition.py` 與這三個模組加入 `tools/build_protected.py` 的 `CORE_MODULES`。Lite 的出貨順序是先 `build_lite.py` 再 `build_protected.py`。沒有開 `compiled_core` 的 Lite 不交給外部的人。
+- **理由**：
+  1. 拆模組要動三個科學模組的內部結構，改完必須用真實引擎重新驗證窗口規劃、分析數值不變。這個 session 沒有真實引擎，而 Lite 本身連一次真機執行都還沒做。先把風險低的做完，拿到筆電實測結果再決定值不值得拆。
+  2. 這三項在 Lite 已經有兩層擋：入口的設定檢查，以及流程內的明確判斷（`max_refine_rounds = 0`、`_plan_long_run` 的上限）。程式碼在不在安裝包裡影響的是「改程式的人能不能拿到」，編譯把這件事的成本提高到與授權驗證本身相同的水準（D-166 的定位）。
+  3. 可逆。之後要拆，`edition.PRO_FEATURES` 的 `modules=` 加回去即可，打包工具不用改。
+- **誠實限制**：編譯不是不可破（D-166 已載明）。四個新加入的模組**沒有真的編譯過**，開發容器沒有 Cython；`edition.py` 與 `extended.py` 用到 dataclass 與大量 numpy，預期可編，但未驗證。`compiled_core` 仍是 opt-in、預設關，所以現行原始碼發行不受影響。
+- **被否決**：B（現在拆）。理由見上，不是否定方向，是順序。
+- **證據／測試**：`tests/test_build_protected.py` 通過（清單存在性與計畫為純函式）；容器全套見本 commit。
+- **相關檔案**：`tools/build_protected.py`、`docs/specs/lite_edition.md` §9、`docs/specs/licensing.md` §13。
+- **未決**：在發行 runner 或使用者本機做一次「build_lite → build_protected → 安裝 → 示範案例」的端到端驗證。
+
 ### D-181　MD20 Lite（導流版）：版本契約 `md20/edition.py`、上限、功能登錄表（使用者 2026-11-11 指定）
 - **日期**：2026-11-11（session_016gcJzBMFygWvETdrK5aZY8）
 - **使用者指示**：要一個交付給外人的 Lite。它的存在是為完整版導流，用過 Lite 的人會想接著用完整版。五個決定（都是使用者在選項中選的）：同一份源碼而打包時把完整版模組實際移除、限規模但流程完整、報告內附對照加上碰到上限時提示、免費但需擁有者簽發的授權檔、提供隱式溶劑快速預覽並在報告加註限制。
@@ -34,7 +48,7 @@
   5. 教學案例一有六個配體，在 Lite 會撞「最多 2 個配體」且不能自動縮小。
   6. 報告的「ΔG° 沒有輸出」一項在 classroom 等級時不是 Lite 造成的，目前只陳述事實、不宣稱因果，但放在升級說明旁邊可能被誤讀。
   7. 日文與韓文由模型撰寫，未經母語者校對。
-  8. `md20/edition.py` 尚未加入 `tools/build_protected.py` 的 `CORE_MODULES`。
+  8. ~~`md20/edition.py` 尚未加入 `tools/build_protected.py` 的 `CORE_MODULES`。~~ 已於 D-182 加入。
 - **相關檔案**：`md20/edition.py`、`md20/edition_preview.py`、`md20/report/edition_section.py`、`md20/gui/edition_ui.py`、`tools/build_lite.py`、`tests/test_edition*.py`、`tests/test_gui_edition.py`、`tests/test_build_lite.py`、`docs/specs/lite_edition.md`。
 - **未決**：
   - 簽發端 `md20sign` 是否接受 `features` 含 `lite`（私人 repo，本 session 無存取權）。
