@@ -471,5 +471,146 @@ def e2e(out: Path) -> int:
     return 0 if not problems else 1
 
 
+# --------------------------------------------------------------------------------------------- MD20 Lite (D-181)
+def lite_tree() -> Path:
+    """A copy of the package with the Lite marker next to `edition.py`.  The marker is the only thing that makes a
+    package Lite (no setting or variable can), so a server started from this copy is MD20 Lite.  The complete-edition
+    modules stay in the copy: the preview checks the interface, not the packaging (tools/build_lite.py)."""
+    import json
+    import shutil
+    from md20 import edition as E
+    dst = Path(tempfile.mkdtemp(prefix="md20lite_"))
+    shutil.copytree(ROOT / "md20", dst / "md20", ignore=shutil.ignore_patterns("__pycache__"))
+    (dst / "md20" / E.MARKER_NAME).write_text(json.dumps(E.marker_document("preview")), encoding="utf-8")
+    return dst
+
+
+def build_lite_demo(root: Path) -> dict:
+    """Two workflows: `beyond` (six ligands, research tier, three repeats: some limits can be reduced, one cannot) and
+    `reducible` (one ligand, three repeats and 50 ns: reducing the sizes clears everything)."""
+    import copy
+    from md20.project.store import Project
+    from md20.gui.content import teaching_config
+    from md20.workflow import Workflow, example_config
+    proj = Project.create(root, "LiteDemo")
+    beyond = teaching_config("hsieh2024")
+    beyond["name"] = "beyond"
+    beyond["md"] = {**beyond.get("md", {}), "tier": "research", "replicas": 3}
+    Workflow(proj, beyond)
+    ok = copy.deepcopy(example_config())
+    ok["name"] = "reducible"
+    ok["md"].update({"tier": "teaching", "replicas": 3, "production_ns": 50.0})
+    ok["binding"] = {"enabled": False, "ligands": [], "config": {}}
+    Workflow(proj, ok)
+    return {"project": proj.dir.name, "beyond": "beyond", "reducible": "reducible"}
+
+
+def lite(out: Path) -> int:
+    """MD20 Lite in a real browser: the badge on every page, the Editions page and the two description pages, the field
+    limits in the quick and professional forms, and the limit card that stops a start (nothing launches) and offers the
+    ways forward; "reduce automatically and continue" writes edition.accept_clamp and starts once.  Screenshots in four
+    languages.  Every failed check is printed and fails the job.  Usage: python tools/gui_preview.py lite OUT_DIR"""
+    import json
+    from playwright.sync_api import sync_playwright
+    from md20.i18n import LANG_NAMES
+    from md20.gui.content import t as ui_text
+    out.mkdir(parents=True, exist_ok=True)
+    tree = lite_tree()
+    root = Path(tempfile.mkdtemp(prefix="md20litegui_"))
+    demo = build_lite_demo(root)
+    port = _free_port()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
+    env["MD20_GUI_FAKE_RUN"] = "3"
+    env["PYTHONPATH"] = str(tree) + os.pathsep + env.get("PYTHONPATH", "")
+    proc = subprocess.Popen([sys.executable, "-m", "md20", "--dir", str(root), "gui", "--port", str(port), "--no-browser"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, cwd=str(tree))
+    base = f"http://127.0.0.1:{port}"
+    problems: list[str] = []
+
+    def check(cond, msg):
+        if not cond:
+            problems.append(msg)
+        print("LITE", "ok " if cond else "FAIL", msg)
+
+    def wf_dir(key):
+        return root / demo["project"] / "workflows" / demo[key]
+    try:
+        for _ in range(240):
+            try:
+                urllib.request.urlopen(base + "/", timeout=2); break
+            except Exception:  # noqa: BLE001
+                if proc.poll() is not None:
+                    print(proc.stdout.read().decode(errors="ignore")[-4000:]); return 1
+                time.sleep(0.5)
+        with sync_playwright() as p:
+            br = p.chromium.launch()
+            pg = br.new_page(viewport={"width": 1400, "height": 1000})
+            from md20.util.jsonio import atomic_write_json
+            for code in ("en", "zh", "ja", "ko"):
+                atomic_write_json({"lang": code}, root / "gui_settings.json")
+                urllib.request.urlopen(base + "/", timeout=30).read()
+                pages = {"01_home": "/", "02_editions": "/edition", "03_membrane": "/edition/membrane", "04_fold": "/edition/fold",
+                         "05_quick": "/new/quick", "06_pro": "/new/pro?expand=all", "07_system": "/system"}
+                for fname, path in pages.items():
+                    pg.goto(base + path, wait_until="networkidle", timeout=60000)
+                    pg.wait_for_timeout(1500)
+                    check(pg.get_by_test_id("edition-badge").count() == 1, f"{code} {fname}: the Lite badge is in the header")
+                    pg.screenshot(path=str(out / f"lite_{code}_{fname}.png"), full_page=True)
+                pg.goto(base + "/edition", wait_until="networkidle")
+                check(pg.get_by_test_id("edition-table").count() == 1 and pg.get_by_test_id("edition-upgrade").count() == 1,
+                      f"{code}: the Editions page has the comparison table and the upgrade line")
+                pg.goto(base + "/new/pro?expand=all", wait_until="networkidle")
+                pg.wait_for_timeout(1500)
+                check(pg.get_by_test_id("limit-ligands").count() == 1 and pg.get_by_test_id("limit-production_ns").count() == 1,
+                      f"{code}: the professional form shows the Lite limit under the ligand box and the production length")
+                # the limit card: pressing Start on a workflow beyond Lite launches nothing
+                for key in ("beyond", "reducible"):
+                    pg.goto(f"{base}/wf/{demo['project']}/{demo[key]}", wait_until="networkidle", timeout=60000)
+                    pg.get_by_role("button", name=ui_text("run_continue", code)).first.click()
+                    pg.get_by_test_id("edition-card").wait_for(timeout=15000)
+                    pg.wait_for_timeout(800)
+                    check(not (wf_dir(key) / "_gui_job").exists(), f"{code} {key}: nothing was launched")
+                    pg.screenshot(path=str(out / f"lite_{code}_08_card_{key}.png"), full_page=True)
+                    if key == "beyond":
+                        check(pg.get_by_test_id("edition-reduce").count() == 0, f"{code}: reducing is not offered while a limit needs a decision")
+                        check(pg.get_by_test_id("edition-folder").count() == 1, f"{code}: the project folder path is shown")
+            # language switch with the card open: the card follows, nothing starts
+            pg.goto(f"{base}/wf/{demo['project']}/{demo['reducible']}", wait_until="networkidle", timeout=60000)
+            pg.get_by_role("button", name=ui_text("run_continue", "ko")).first.click()
+            pg.get_by_test_id("edition-card").wait_for(timeout=15000)
+            pg.get_by_test_id("lang-select").click()
+            pg.get_by_role("option", name=LANG_NAMES["zh"]).click()
+            pg.wait_for_load_state("networkidle")
+            pg.wait_for_timeout(1500)
+            check("Lite" in pg.get_by_test_id("edition-card").inner_text() and "超過" in pg.get_by_test_id("edition-card").inner_text(),
+                  "the card switches language live")
+            check(not (wf_dir("reducible") / "_gui_job").exists(), "switching the language started nothing")
+            # reduce automatically and continue: the decision key is written and the run starts once
+            pg.get_by_test_id("edition-reduce").click()
+            pg.wait_for_timeout(5000)
+            cfg = json.loads((wf_dir("reducible") / "config.json").read_text(encoding="utf-8"))
+            check((cfg.get("edition") or {}).get("accept_clamp") is True, "Reduce automatically writes edition.accept_clamp")
+            check((wf_dir("reducible") / "_gui_job").exists(), "the calculation started after the reduction")
+            pg.screenshot(path=str(out / "lite_09_after_reduce.png"), full_page=True)
+            br.close()
+    except Exception as exc:  # noqa: BLE001
+        problems.append(f"{type(exc).__name__}: {exc}")
+        print("LITE FAIL", type(exc).__name__, exc)
+    finally:
+        proc.terminate()
+        try:
+            log = proc.communicate(timeout=10)[0].decode(errors="ignore")
+        except subprocess.TimeoutExpired:
+            proc.kill(); log = ""
+    if "Traceback" in log:
+        problems.append("server printed a Traceback")
+        print(log[-6000:])
+    print("LITE", "OK" if not problems else "FAILED")
+    (out / "lite.txt").write_text("OK\n" if not problems else "\n".join(problems) + "\n", encoding="utf-8")
+    return 0 if not problems else 1
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "lite":
+        sys.exit(lite(Path(sys.argv[2] if len(sys.argv) > 2 else "gui_preview_lite")))
     sys.exit(main(Path(sys.argv[1] if len(sys.argv) > 1 else "gui_preview")))

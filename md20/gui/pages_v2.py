@@ -22,6 +22,7 @@ from .app import STATE, RUNNER, lang, _, _header, _start, _upload_payload
 from .content import t, MODES, TEACHING, teaching_config
 from .logic import config_from_mode, list_workflows, parse_ligand_lines
 from . import advanced as A
+from . import edition_ui
 from ..i18n import pick
 
 LEVEL_STYLE = {"error": ("negative", "level_error"), "warning": ("warning", "level_warning"), "info": ("grey-7", "level_info")}
@@ -225,6 +226,12 @@ def teach(case: str):
             for i, q in enumerate(c["discussion"], 1):
                 ui.label(f"{i}. {tx(q, L)}").classes("text-sm")
 
+        lite_note = edition_ui.config_hits(cfg, L)         # D-181: empty in the complete edition
+        if lite_note:
+            ui.label(lite_note["title"]).classes("md20-section")
+            for h in lite_note["hits"]:
+                ui.label("\u2022 " + h["text"]).classes("text-sm")
+
         def start():
             proj = _project("Teaching")       # D-67: one folder whatever the interface language (a switch restarted the lesson)
             if (proj.dir / "workflows" / safe_name(cfg["name"]) / "config.json").is_file():
@@ -324,7 +331,10 @@ def _form(mode: str, expand_all: bool = False):
     _header()
     pro = mode == "pro"
     state = {"goal": "teaching", "touched": set(), "updating": False, "receptor_file": "", "receptor_text": None,
-             "library_file": "", "adv": A.defaults(), "quick_fold": set(), "quick_peps": None}
+             "library_file": "", "adv": A.defaults(), "quick_fold": set(), "quick_peps": None,
+             "library_n": None, "gbn2": False}
+    lite_limits = edition_ui.field_limits(L)           # D-181: {} in the complete edition, so nothing below is added
+    lim_labels: dict = {}
     widgets: dict = {}
     why_labels: dict = {}
     rec_labels: dict = {}
@@ -367,6 +377,8 @@ def _form(mode: str, expand_all: bool = False):
             ui.label(t("ligand_help", L)).classes("md20-why")
             ligs = ui.textarea(placeholder="LIG  CC(=O)Nc1ccc(O)cc1\nMEL  GIGAVLKVLTTGLPALISWIKRKRQQ").props("autogrow").classes("w-full font-mono")
             lig_err = ui.label("").classes("text-sm text-negative")
+            if "ligands" in lite_limits:
+                lim_labels["ligands"] = ui.label("").classes("md20-edlimit").props("data-testid=limit-ligands")
             qf_box = ui.row().classes("w-full gap-3 items-center")       # quick mode: "fold this peptide" per peptide
             ligs.on("blur", lambda: refresh())
             ui.label(t("site", L)).classes("md20-section")
@@ -387,6 +399,8 @@ def _form(mode: str, expand_all: bool = False):
             ui.label(t("hts", L)).classes("md20-section")
             ui.label(t("hts_help", L)).classes("md20-why")
             lib_info = ui.label("").classes("text-sm")
+            if "library" in lite_limits:
+                lim_labels["library"] = ui.label("").classes("md20-edlimit").props("data-testid=limit-library")
             with ui.row().classes("items-center gap-3"):
                 ui.button(t("hts_template", L), on_click=lambda: ui.navigate.to("/template/compound_library.xlsx", new_tab=True)).props("outline no-caps")
 
@@ -405,15 +419,19 @@ def _form(mode: str, expand_all: bool = False):
                                   + str(exc), type="negative"); return
                     state["library_file"] = str(dst)
                     ne, nw = len(entries), len(warns)
+                    state["library_n"] = ne
                     lib_info.set_text(_(f"已上傳 {fname}，共 {ne} 個化合物", f"Uploaded {fname} with {ne} compounds",
                                         f"{fname} をアップロードしました（化合物 {ne} 個）", f"{fname} 업로드됨, 화합물 {ne}개")
                                       + (_(f"，{nw} 則提醒", f", {nw} notes", f"、注意 {nw} 件", f", 알림 {nw}건") if warns else ""))
+                    if "library" in lite_limits:
+                        refresh()
                 ui.upload(on_upload=got_library, auto_upload=True, max_files=1, label=t("hts_upload", L)).props("accept=.xlsx,.xls,.csv flat bordered color=primary")
 
         # ------------------------------------------------------------------ parameters
         ui.label(t("parameters", L)).classes("md20-section")
         with ui.row().classes("items-center gap-2"):
             ui.button(t("reset_rec", L), on_click=lambda: reset_all()).props("outline no-caps size=sm")
+        gbn2_box = ui.column().classes("w-full gap-1")      # D-181: quick mode of Lite, when a GPU is usable
         keys = list(PARAMS) if pro else QUICK_KEYS
         param_box = ui.column().classes("w-full gap-2")
         adv_box = ui.column().classes("w-full gap-2")
@@ -459,10 +477,12 @@ def _form(mode: str, expand_all: bool = False):
 
     def current_values(f) -> dict:
         rec = advisor.recommended_values(f, state["goal"])
-        out = dict(rec)
+        out = {k: edition_ui.lite_value(k, v) for k, v in rec.items()}      # D-181: the recommendation itself in the complete edition
         for k, w in widgets.items():
             if k in state["touched"]:
                 out[k] = w.value
+        if state["gbn2"]:                        # D-181: the quick preview changes only the solvent; the gates stay as they are
+            out["solvent"] = "gbn2"
         return out
 
     def on_change_factory(key):
@@ -488,10 +508,12 @@ def _form(mode: str, expand_all: bool = False):
                     for k in ks:
                         with ui.row().classes("w-full gap-3 no-wrap items-start py-1"):
                             with ui.column().classes("w-2/5 gap-0"):
-                                widgets[k] = _widget(k, rec[k]["value"], L, on_change_factory(k))
+                                widgets[k] = _widget(k, edition_ui.lite_value(k, rec[k]["value"]), L, on_change_factory(k))
                             with ui.column().classes("w-3/5 gap-0"):
                                 rec_labels[k] = ui.label("").classes("md20-changed")
                                 why_labels[k] = ui.label(rec[k]["why"]).classes("md20-why")
+                                if k in lite_limits:
+                                    lim_labels[k] = ui.label("").classes("md20-edlimit").props(f"data-testid=limit-{k}")
 
     def adv_set(key, cast=None):
         def h(e):
@@ -512,7 +534,8 @@ def _form(mode: str, expand_all: bool = False):
         adv = state["adv"]
         adv_box.clear()
         with adv_box:
-            with ui.expansion(A.tx("membrane", L), value=expand_all).classes("w-full md20-card").props("data-testid=group-membrane"):
+            with ui.expansion(A.tx("membrane", L), value=expand_all, **_edition_caption(L)).classes("w-full md20-card").props("data-testid=group-membrane"):
+                _edition_group_link(L, "membrane")
                 ui.label(A.tx("membrane_help", L)).classes("md20-why")
                 adv_row(lambda: ui.select({k: pick(v, L) for k, v in A.RESOLUTIONS.items()}, value=adv.get("resolution", "aa"),
                                           label=A.tx("resolution", L), on_change=adv_set("resolution")).props(
@@ -526,7 +549,8 @@ def _form(mode: str, expand_all: bool = False):
                 adv_row(lambda: ui.number(A.tx("surface_distance", L) + paren("nm", L), value=adv["surface_distance_nm"],
                                           min=0.0, max=5.0, step=0.1, on_change=adv_set("surface_distance_nm", float)).classes("w-full"),
                         "surface_help")
-            with ui.expansion(A.tx("fold", L), value=expand_all).classes("w-full md20-card").props("data-testid=group-fold"):
+            with ui.expansion(A.tx("fold", L), value=expand_all, **_edition_caption(L)).classes("w-full md20-card").props("data-testid=group-fold"):
+                _edition_group_link(L, "fold")
                 ui.label(A.tx("fold_help", L)).classes("md20-why")
                 adv_row(lambda: ui.select({k: pick(v, L) for k, v in A.FOLD_MODES.items()}, value=adv["fold"],
                                           label=A.tx("fold_mode", L), on_change=adv_set("fold")).classes("w-full"), None)
@@ -580,6 +604,57 @@ def _form(mode: str, expand_all: bool = False):
         return {**A.defaults(), "fold": "dock" if (for_checks and state["quick_fold"]) else "off",
                 "long_run_confirmed": state["adv"]["long_run_confirmed"]}
 
+    def update_limits(vals: dict, draft: dict) -> None:
+        """D-181: under each limited field, the Lite limit; when the value is beyond it, the message instead."""
+        for k, lbl in lim_labels.items():
+            if k == "ligands":
+                value = len(draft["ligands"])
+            elif k == "library":
+                value = state["library_n"]
+            elif k == "binding":
+                value = None
+            elif k == "window_prod_ps":
+                value = vals.get(k) if vals.get("binding") else None
+            else:
+                value = vals.get(k)
+            msg = edition_ui.validate_setting(k, value, L)
+            lbl.set_text(("\u25c6 " + msg) if msg else lite_limits[k]["help"])
+            if msg:
+                lbl.classes(add="md20-edlimit--over")
+            else:
+                lbl.classes(remove="md20-edlimit--over")
+
+    def render_gbn2() -> None:
+        """D-181: the quick preview with implicit solvent, offered in the quick mode of Lite when a GPU platform is usable."""
+        if pro or not edition_ui.is_lite():
+            return
+        offer = edition_ui.gbn2_preview_offer(_platform_info(), L)
+        gbn2_box.clear()
+        if not offer["show"]:
+            if state["gbn2"]:
+                state["gbn2"] = False
+            return
+        with gbn2_box:
+            ui.switch(offer["label"], value=state["gbn2"],
+                      on_change=lambda e: (state.__setitem__("gbn2", bool(e.value)), refresh())).props("data-testid=gbn2-preview")
+            ui.label(offer["caption"]).classes("md20-edlimit")
+
+    async def probe_platform() -> None:
+        """Once per GUI process: find out whether a GPU platform is usable, off the event loop (D-103)."""
+        if STATE.get("platform_probed"):
+            return
+        STATE["platform_probed"] = True
+        try:
+            from nicegui import run as nrun
+            STATE["platform_info"] = await nrun.io_bound(_probe_platform_process)
+        except Exception:  # noqa: BLE001  (the preview is simply not offered)
+            return
+        try:
+            render_gbn2()
+            refresh()
+        except Exception:  # noqa: BLE001  (the page was closed meanwhile)
+            pass
+
     def refresh():
         f = features()
         state["goal"] = goal.value or "teaching"
@@ -587,12 +662,16 @@ def _form(mode: str, expand_all: bool = False):
         state["updating"] = True
         try:
             for k, w in widgets.items():
-                if k not in state["touched"] and w.value != rec[k]["value"]:
-                    w.value = rec[k]["value"]
+                shown = edition_ui.lite_value(k, rec[k]["value"])      # D-181: the Lite limit when the recommendation is above it
+                if k not in state["touched"] and w.value != shown:
+                    w.value = shown
                 why_labels[k].set_text(rec[k]["why"])
                 changed = k in state["touched"] and w.value != rec[k]["value"]
+                capped = k not in state["touched"] and shown != rec[k]["value"]
                 rec_labels[k].set_text((t("changed", L) + " · " + t("recommended", L) + " " +
-                                        advisor.format_value(k, rec[k]["value"], L)) if changed else "")
+                                        advisor.format_value(k, rec[k]["value"], L)) if changed else
+                                       (pick(edition_ui.TEXT["lite_cap"], L) + " · " + t("recommended", L) + " " +
+                                        advisor.format_value(k, rec[k]["value"], L)) if capped else "")
         finally:
             state["updating"] = False
         vals = current_values(f)
@@ -603,6 +682,8 @@ def _form(mode: str, expand_all: bool = False):
             bind_sel.set_options(names, value=[n for n in (bind_sel.value or []) if n in names])
         if not pro:
             render_quick_fold(draft["ligands"])
+        update_limits(vals, draft)
+        issues += edition_ui.advanced_issues(adv_values(for_checks=True), draft["ligands"], L)
         issues += A.advanced_checks(adv_values(for_checks=True), ligands=draft["ligands"],
                                     has_receptor=bool((pdb_id.value or "").strip() or state["receptor_file"]),
                                     binding=bool(vals.get("binding")), solvent=vals.get("solvent", "explicit"),
@@ -668,7 +749,15 @@ def _form(mode: str, expand_all: bool = False):
             err.set_text(str(exc)); return
         proj = _project(project.value or "Projects")
         cfg["name"] = unique_workflow_name(proj.dir, cfg["name"])
+        lite_binding = {k: v for k, v in edition_ui.form_binding_defaults().items()      # D-181: {} in the complete edition
+                        if cfg["binding"].get("enabled") and k not in (cfg["binding"].get("config") or {})}
+        if lite_binding:
+            cfg["binding"].setdefault("config", {}).update(lite_binding)
         wf = Workflow(proj, cfg)
+        if lite_binding:
+            wf.dec.record("gui.edition", "binding.config", lite_binding,
+                          "Lite 的表單沒有窗口數與自動補窗口的欄位，建立流程時依 Lite 上限寫入設定："
+                          + "、".join(f"{k} = {v}" for k, v in lite_binding.items()) + "。欄位旁的說明已告知使用者。", kind="auto")
         if state["library_file"]:
             shutil.copy2(state["library_file"], wf.dir / Path(state["library_file"]).name)
         job = _start(wf)
@@ -685,7 +774,105 @@ def _form(mode: str, expand_all: bool = False):
     build_params()
     if pro:
         build_advanced()
+    render_gbn2()
     refresh()
+    if edition_ui.is_lite() and not pro and not _platform_info():
+        ui.timer(0.3, probe_platform, once=True)
+
+
+# --------------------------------------------------------------------------------------------- editions (D-181)
+def _platform_info():
+    """What is known about the OpenMM platform: the probe of the quick form, the computer-status check, or None."""
+    return STATE.get("platform_info") or STATE.get("platform") or _doctor_dict().get("platform")
+
+
+def _probe_platform_process() -> dict | None:
+    """Which OpenMM platform would run here, found in a separate process: the GUI process never loads OpenMM or holds a
+    GPU context (D-103), and a failing driver cannot take the page down.  None when it could not be found out."""
+    import json
+    import subprocess
+    import sys
+    code = ("import json\nfrom md20.env import choose_platform\np = choose_platform()\n"
+            "print(json.dumps({'name': p.name, 'is_gpu': bool(p.is_gpu)}))")
+    try:
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return json.loads([ln for ln in r.stdout.splitlines() if ln.startswith("{")][-1])
+    except Exception:  # noqa: BLE001  (no OpenMM, no usable platform, timeout)
+        return None
+
+
+def _edition_caption(L: str) -> dict:
+    """`caption` argument of an expansion for a complete-only group in Lite: the small "complete edition" tag."""
+    t_ = edition_ui.tag(L)
+    return {"caption": t_} if t_ else {}
+
+
+def _edition_group_link(L: str, feature_id: str) -> None:
+    if edition_ui.is_lite():
+        ui.link(pick(edition_ui.TEXT["group_link"], L), f"/edition/{feature_id}").classes("text-sm").props(f"data-testid=edition-link-{feature_id}")
+
+
+@ui.page("/edition")
+def editions():
+    L = lang()
+    _header()
+    page = edition_ui.editions_page(L)
+    if not page:                                  # the complete edition has no such page
+        ui.label(_("找不到這個頁面。", "Page not found.", "ページが見つかりません。", "페이지를 찾을 수 없습니다.")).classes("md20-muted p-4")
+        return
+    with ui.column().classes("w-full max-w-5xl mx-auto gap-3 p-4"):
+        ui.label(page["title"]).classes("text-2xl md20-title")
+        ui.label(page["intro"]).classes("md20-muted")
+        cols = [{"name": c["name"], "label": c["label"], "field": c["name"], "align": "left"} for c in page["columns"]]
+        ui.table(columns=cols, rows=[{**r, "key": r["item"]} for r in page["rows"]], row_key="key").props(
+            "dense flat data-testid=edition-table").classes("w-full md20-card")
+        ui.label(page["features_title"]).classes("md20-section").style("margin-top: 12px")
+        ui.label(page["features_intro"]).classes("md20-muted")
+        with ui.card().classes("w-full md20-card p-4").props("data-testid=edition-features"):
+            for f in page["features"]:
+                with ui.column().classes("w-full gap-1 md20-edrow").props(f"data-testid=edition-feature-{f['id']}"):
+                    ui.label(f["title"]).classes("text-sm font-semibold")
+                    ui.label(f["gain"]).classes("text-sm")
+                    if f["href"]:
+                        ui.link(page["about_label"], f["href"]).classes("text-sm")
+        with ui.column().classes("w-full gap-1 md20-edup").props("data-testid=edition-upgrade"):
+            ui.label(page["upgrade_title"]).classes("md20-section")
+            ui.label(page["upgrade"]).classes("text-sm")
+
+
+@ui.page("/edition/{feature_id}")
+def edition_feature(feature_id: str):
+    L = lang()
+    _header()
+    page = edition_ui.preview_page(feature_id, L)
+    if not page:
+        ui.label(_("找不到這個頁面。", "Page not found.", "ページが見つかりません。", "페이지를 찾을 수 없습니다.")).classes("md20-muted p-4")
+        return
+    lab = page["labels"]
+    with ui.column().classes("w-full max-w-5xl mx-auto gap-3 p-4").props(f"data-testid=edition-preview-{page['id']}"):
+        ui.link(lab["back"], "/edition").classes("text-sm")
+        with ui.row().classes("items-center gap-3"):
+            ui.label(page["title"]).classes("text-2xl md20-title")
+            ui.html(f'<span class="md20-edtag">{page["tag"]}</span>')
+        ui.label(lab["what"]).classes("md20-section")
+        ui.label(page["what"]).classes("text-sm leading-relaxed").style("max-width: 72ch")
+        if page["provide"] or page["get"]:
+            with ui.row().classes("w-full gap-3 no-wrap items-stretch"):
+                for key in ("provide", "get"):
+                    with ui.card().classes("w-1/2 md20-card p-4"):
+                        ui.label(lab[key]).classes("md20-section")
+                        for item in page[key]:
+                            ui.label("\u2022 " + item).classes("text-sm")
+        if page["limits"]:
+            ui.label(lab["limits"]).classes("md20-section")
+            ui.label(page["limits"]).classes("text-sm")
+        fig = Path(__file__).parent / "static" / "edition" / f"{page['figure']}.png"
+        if fig.is_file():                         # the example-figure slot: shown only when a real figure has been added
+            ui.image(fig).classes("md20-edfig").props(f"data-testid=edition-figure-{page['id']}")
+        with ui.column().classes("w-full gap-1 md20-edup"):
+            ui.label(lab["upgrade"]).classes("md20-section")
+            ui.label(page["upgrade"]).classes("text-sm")
 
 
 # --------------------------------------------------------------------------------------------- downloads
