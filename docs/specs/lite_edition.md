@@ -1,6 +1,6 @@
 # Spec: MD20 Lite（導流版）（D-181）
 
-狀態：**[開發中]** 核心契約 `md20/edition.py` 已實作並有測試（`tests/test_edition.py`）。打包剝除、流程掛點、報告、GUI 分頭實作中，
+狀態：**[開發中]** 核心契約 `md20/edition.py` 已實作並有測試（`tests/test_edition.py`）。報告（第 7 節）已實作並有測試（`tests/test_edition_report.py`）。打包剝除、流程掛點、GUI 分頭實作中，
 各節標示實際狀態。真實引擎驗證依 D-180 在使用者本機做（目標機：GTX 1060 4 GB 筆電）。
 
 ## 1. 目的與原則（使用者 2026-11-11 指定）
@@ -139,6 +139,29 @@ Lite 是交付給實驗室以外的人用的版本。它存在的理由是**把�
   例如只跑了一次重複，就寫完整版會安排三次以上並附上差異；PMF 重疊不足，就寫完整版會自動補窗口。沒有缺的項目就不寫。
 - 附 Lite 與完整版的對照表（`comparison_rows`）。
 - 文字守 `writing_style.md`，四種語言。
+## 7. 報告（已實作，`md20/report/edition_section.py`，測試 `tests/test_edition_report.py`）
+報告是 Lite 使用者決定要不要升級的地方，所以必須誠實：只寫**這次執行缺了什麼**，以及完整版**針對那一項**會多給什麼。資料來自這次執行自己的紀錄，沒有固定文案。
+- **位置**：附錄 D「這次執行與完整版的差別」，放在報告最後，附錄 C（設定檔）之後、頁尾戳記之前。理由：這樣既有的章節編號、附錄字母與表號都不動（Lite 只多一個表號 20 之類的最後一張表），
+  完整版的頁面也不會有任何差異。頁尾另有一行「由 MD20 Lite 產生」（`footer_mark`）。單次執行報告（`report/html.py`）只加這一行頁尾標示。
+- **何時出現**：該次執行的版本是 Lite。版本取 `state["edition"]["edition"]`，沒有才問 `edition.current()`。完整版不呼叫這個模組，頁面與今天逐字相同（測試比對兩個版本的頁面，只差附錄與頁尾標示）。
+- **項目的形狀**：`gains(state, cfg, assessments, lang)` 回傳 `[{"feature": PRO_FEATURES id, "kind": "limit"|"note", "observed": 一句帶真實數字的話, "gain": 登錄表那一句, "evidence": {...}}]`。
+  同一功能的項目在頁面上共用一句 `gain`。沒有觀察到的就沒有項目；整份清單是空的時候只寫一句「這次執行沒有碰到 Lite 的任何限制」。
+- **資料來源與對應**：
+  | 來源 | 讀什麼 | 項目（對應功能） |
+  |---|---|---|
+  | a 碰到的上限 | `state["edition"]["hits"]`、`["clamped"]` | 正式模擬從 100 ns 縮短為 10 ns（`long_run`）；重複 3 減為 1（`replicas`）；窗口、拉離、補窗口的縮小（`binding_full`）；配體數、化合物數、原子數、功能（各自對應的功能） |
+  | b MD 重複 | `replica_section.replica_counts`、重複集合的 `single_replica` 旗標 | 幾個系統只有一次 MD 重複，結果只能描述（`replicas`） |
+  | c 結合評估 | 儲存的 `assessment` 與 `claim_status`、拉離次數、`dG_withheld`、`compare_binding` 的 `INSUFFICIENT` | 重疊低於門檻（圖未連通、MBAR 矩陣、相鄰最小值與 0.03）；必要檢查無紀錄；只拉離 1 次；ΔG° 沒有輸出；合格的配體太少無法比較（都是 `binding_full`） |
+  | d 隱式溶劑 | `md.solvent == "gbn2"` | 說明，不是升級項目 |
+  | e 分析工具箱 | 分析步驟寫出的 `extended_file` 與共同基底檔 | 缺 tICA 與 MSM、氫鍵網路、水合、共同主成分時列一次（`analysis_toolbox`）；完全沒有 MD 分析時不寫 |
+- **刻意不寫的**（完整版會得到同樣的結果，寫了就是誤導）：
+  1. 比較被標成 `DESCRIPTIVE`。共同口袋的拉離在兩個版本都只描述不排名（D-96 的設計）。**這裡與開發任務書的初稿不同**，任務書把它對應到 `binding_full` 或 `replicas`，實作時判斷這會承諾完整版做不到的事。
+  2. D-96 之前的舊結果因為沒有儲存評估而全部「無紀錄」的診斷。那是等重新分析，不是 Lite 的限制。只有 `assessment_source == "stored"` 才列「必要檢查無紀錄」。
+  3. 隱式溶劑下被閘門擋掉的 ΔG°。那是 GBn2 的閘門（第 8 節），Lite 與完整版相同。
+- 附 Lite 與完整版的對照表（`comparison_rows`）與升級說明（`HOW_TO_UPGRADE`）。對照表在沒有項目時也保留。
+- 文字守 `writing_style.md`，四種語言；用語規則見 `report_language.md` 的「Lite 附錄」。
+- `tools/report_template.py --lite` 用同一份合成資料產生 Lite 版範本（`MD20_report_template_lite_{en,zh}.html`），預設輸出不變。
+- 未驗證：日文與韓文尚未經母語者校對（同 `writing_style.md` §7）；附錄對真實引擎產生的 `assessment` 只用合成資料測過。
 
 ## 8. 隱式溶劑快速預覽
 用既有的 `md.solvent: gbn2`（D-20，`implicit_solvent.md`），不新增科學模型。**以下更正 11/11 早上專案文件 06 的初稿**：
