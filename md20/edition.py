@@ -188,8 +188,7 @@ PRO_FEATURES: tuple[ProFeature, ...] = (
         ("完整版可以把正式模擬排到微秒級，分段執行並自動續跑。",
          "The complete edition schedules production runs up to the microsecond scale, in segments that resume by themselves.",
          "完全版では本計算をマイクロ秒規模まで計画でき、区切って実行し自動で再開します。",
-         "정식판은 본 계산을 마이크로초 규모까지 계획하고 구간별로 실행하며 자동으로 이어서 실행합니다."),
-        modules=("md20/engine/longrun.py",)),
+         "정식판은 본 계산을 마이크로초 규모까지 계획하고 구간별로 실행하며 자동으로 이어서 실행합니다.")),   # no modules: engine/longrun.py stays in Lite (lite_edition.md §9)
     ProFeature(
         "replicas",
         ("獨立重複與不確定度", "Independent repeats and uncertainty", "独立した繰り返しと不確かさ", "독립 반복과 불확도"),
@@ -203,8 +202,7 @@ PRO_FEATURES: tuple[ProFeature, ...] = (
         ("完整版會自動補窗口直到相鄰窗口重疊足夠，並以多次獨立拉離給出 ΔG° 和誤差。",
          "The complete edition adds windows until neighbouring windows overlap enough, and reports ΔG° with its error from several independent pulls.",
          "完全版では隣り合うウィンドウが十分に重なるまでウィンドウを追加し、複数回の独立した引き離しから ΔG° と誤差を報告します。",
-         "정식판은 이웃한 윈도우가 충분히 겹칠 때까지 윈도우를 추가하고 여러 번의 독립 당김으로 ΔG°와 오차를 보고합니다."),
-        modules=("md20/sampling/adaptive.py",)),
+         "정식판은 이웃한 윈도우가 충분히 겹칠 때까지 윈도우를 추가하고 여러 번의 독립 당김으로 ΔG°와 오차를 보고합니다.")),   # no modules: sampling/adaptive.py stays in Lite (lite_edition.md §9)
     ProFeature(
         "screen_full",
         ("大型化合物庫篩選", "Screening a large compound library", "大規模な化合物ライブラリのスクリーニング", "대규모 화합물 라이브러리 스크리닝"),
@@ -225,8 +223,7 @@ PRO_FEATURES: tuple[ProFeature, ...] = (
         ("完整版多了 tICA 和馬可夫狀態模型、氫鍵網路、水合分析，以及跨系統的共同主成分比較。",
          "The complete edition adds tICA and Markov state models, hydrogen-bond networks, hydration analysis and a common principal-component comparison across systems.",
          "完全版には tICA とマルコフ状態モデル、水素結合ネットワーク、水和解析、系をまたいだ共通主成分での比較が加わります。",
-         "정식판에는 tICA와 마르코프 상태 모형, 수소 결합 네트워크, 수화 분석, 시스템 간 공통 주성분 비교가 더해집니다."),
-        modules=("md20/analysis/extended.py",)),
+         "정식판에는 tICA와 마르코프 상태 모형, 수소 결합 네트워크, 수화 분석, 시스템 간 공통 주성분 비교가 더해집니다.")),   # no modules: analysis/extended.py stays in Lite (lite_edition.md §9)
     ProFeature(
         "autonomy",
         ("自動檢查與補跑", "Automatic checking and follow-up runs", "自動チェックと追加計算", "자동 점검과 추가 계산"),
@@ -234,7 +231,8 @@ PRO_FEATURES: tuple[ProFeature, ...] = (
          "The complete edition schedules follow-up runs by itself when a result is not reliable enough, and records the reason for each step.",
          "完全版では結果の信頼性が足りないときに追加計算を自分で計画し、各ステップの理由を記録します。",
          "정식판은 결과의 신뢰도가 부족하면 추가 계산을 스스로 계획하고 각 단계의 이유를 기록합니다."),
-        modules=("md20/autonomy/cli.py", "md20/autonomy/controller.py", "md20/autonomy/executors.py",
+        # autonomy/cli.py stays in Lite: md20/cli.py registers it for every edition (lite_edition.md §9)
+        modules=("md20/autonomy/controller.py", "md20/autonomy/executors.py",
                  "md20/autonomy/ledger.py", "md20/autonomy/model.py", "md20/autonomy/rules.py")),
     ProFeature(
         "large_system",
