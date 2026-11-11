@@ -7,7 +7,9 @@
 
 > **2026-11-11 第九個 session 交接（session_016gcJz6mbow3MMxyKdn4bWm，Opus 4.8）。使用者 11/11 08:24 指示準備交接、開新 session。**
 >
-> **第一步照舊**：兩個 repo 都 add_repo＋clone；`git pull`；讀 `docs/STATUS.md` 開頭（已更新到 11-10）、本 §0、`docs/DECISIONS.md` 最上面（D-179→D-172）。
+> **第一步照舊**：兩個 repo 都 add_repo＋clone；`git pull`；讀 `docs/STATUS.md` 開頭、本 §0、`docs/DECISIONS.md` 最上面（D-180→D-172）。
+>
+> ⚠ **開發節奏與角色新規（D-180，CLAUDE.md「開發節奏與角色」節）**：指揮大腦＝Fable 5.5；子代理＝Sonnet 5.5；**推 GitHub 每週一次**（取代「一輪 CI 跑完就推」）；**驗證一律在本機電腦跑、跑完刪除**（容器只用 FakeBackend 測邏輯）。
 >
 > **交接狀態：main `7f80d69`（a22.dev0）CI 全綠**（pure-python×6、openmm-stack×3、heavy×3、installer×2 皆 success）。工作樹乾淨、無遺留 worktree、local＝origin。
 >

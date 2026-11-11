@@ -10,6 +10,13 @@ Docking → 建模 → OpenMM MD → SMD/傘狀採樣的單機教學版,給博�
 - 容器**裝不了 OpenMM/RDKit/OpenFF/Vina**;本地用 `FakeBackend` 測邏輯,**真實測試交給 CI** `openmm-stack` 矩陣,不要在容器裡裝這些。
 - 查 CI 用**單次** `gh run view`/`gh api ... comments`,**不要**長 `sleep`+迴圈輪詢,也避免 `rm -rf $VAR` 式語法(會觸發安全中斷)。
 
+## 開發節奏與角色(使用者 2026-11-11 指定,D-180;取代先前的 push 規則)
+- **主要指揮大腦 = Fable 5.5**:領導 session 用 Fable 5.5 規劃與整合。
+- **子代理 = Sonnet 5.5**:平行開發一律開 Sonnet 5.5 子代理協助,指揮者審查後整合。
+- **推 GitHub 頻率 = 每週一次**(不再是「一輪 CI 跑完就推」):平時在本機累積、整合、驗證,每週彙整推一次 main。緊急修復(主線紅)例外。
+- **驗證一律在本機(local)電腦執行,執行完刪除**:真實引擎驗證(OpenMM/RDKit/Vina、heavy 流程、安裝)在使用者本機(RTX 3090/Ubuntu 工作站,見 workstation-setup)跑,**跑完刪除產生的中繼檔/暫存**,不把驗證產物留在工作區或 repo。容器仍只用 `FakeBackend` 測邏輯。
+  - *備註(接手者注意)*:此規則與「真實測試交給 CI」並行——push 時 CI 仍會跑;「本機驗證+刪除」是 push 前的主要把關。若與 CI 牴觸,以本機驗證為準,並把疑點記 DECISIONS。
+
 ## 開發規則(MD20_optimization_brief)
 - 不新增 phase/step,只強化既有邏輯。
 - 三態閘門 PASS / AUTO_FIXED / NEEDS_HUMAN;每個自動決策寫 `DecisionLog`,`why` 用中文。
@@ -51,7 +58,7 @@ GUI 閘門一鍵決定(`md20/gui/actions.py`)、3D 互作/vdW 表面、金屬擬
 - 私人 repo **`fstcch-cmd/md-digital-signature`** 是簽發端（擁有者工具、簽出授權紀錄）；本 repo 只放驗證端。接手時兩個都要 add_repo＋clone。
 - **私鑰永遠不進任何 repo**（擁有者離線保管，與 `md20/util/owner_pub.pem` 成對）；驗證不得有任何環境變數／設定／參數後門。
 - 設計：`docs/specs/licensing.md`（D-125）、D-124 LICENSE、設計文件 https://claude.ai/artifact/222jyPJRrE1Pzspv7shAS6 。
-- 使用者規則：開發順序自己決定；**push 要批次**（一輪 CI 跑完再推）；可用 Sonnet 子代理平行開發（HANDOFF §0）。
+- 使用者規則：開發順序自己決定。**push 節奏、子代理與指揮模型、本機驗證規則見上面「開發節奏與角色」(D-180,取代先前「push 批次」)。**
 
 ## Skills 與工具（使用者 2026-11-07 指定：適合時自動使用）
 - **frontend-design**（Anthropic 官方 skill）：任何 GUI（`md20/gui/`）、報告 HTML 版面、學生說明頁的設計或改版，先載入再動手。
