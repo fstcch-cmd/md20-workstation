@@ -5,6 +5,28 @@
 
 ## 0. 新 session 第一步
 
+> **2026-11-11 第九個 session 交接（session_016gcJz6mbow3MMxyKdn4bWm，Opus 4.8）。使用者 11/11 08:24 指示準備交接、開新 session。**
+>
+> **第一步照舊**：兩個 repo 都 add_repo＋clone；`git pull`；讀 `docs/STATUS.md` 開頭（已更新到 11-10）、本 §0、`docs/DECISIONS.md` 最上面（D-179→D-172）。
+>
+> **交接狀態：main `7f80d69`（a22.dev0）CI 全綠**（pure-python×6、openmm-stack×3、heavy×3、installer×2 皆 success）。工作樹乾淨、無遺留 worktree、local＝origin。
+>
+> **本 session 做了（全部已 push）**：
+> - **D-166** 授權第 4 層＝方案一（只 Cython 編譯、不加密、無金鑰、`compiled_core` opt-in 預設關、原始碼發行不變）。`tools/build_protected.py`、`licensing.md §13`。自寫加密載入器已被安全分類器正確擋下、未落地。
+> - **D-169 金鑰查核**：md20 驗證端 `owner_pub.pem` 指紋 `4f965e31…`＝簽發端真鑰、相符；私鑰不在任何 repo。KEY 正常。
+> - **一連串 CI 穩定化（皆只改測試/workflow、未動科學）**：D-173（補回 D-172 誤刪的 compiled_core）、D-174（`test_build_protected` 改 `spec_from_file_location`，修全平台 `No module named tools`）、D-175（砍小 heavy(workflow) 整合測試 binding 取樣，修 75 分 timeout）、D-176（放寬 3PTB 盒體積門檻 0.8→0.85，修 macOS 0.02% 邊際）、D-179（`DutyCycle` 可注入 clock/sleep，`test_duty_cycle` 改決定性，修 macOS flaky）。
+> - **D-177** LLM 編排規格審查回饋（第一批，使用者定）：中段一律人工確認、設定暴露＝白名單安全鍵＋範圍、guide 轉英文。
+> - **D-178 LLM 編排 L0 實作**（使用者指派）：`md20/llm/interface.py` 契約層——7 動作（無 apply/execute）、`SAFE_KEYS`/`SCIENCE_SENSITIVE_KEYS` 白名單（範圍取自 `advisor.PARAMS`，守衛禁未分類鍵）、`validate_proposed_change`（純驗證無套用）、`capabilities_view`（隱藏 implementation）。**非 server、不呼叫 LLM、無編排執行。** 規格 `docs/specs/llm_interface.md`。
+>
+> **下一步（使用者已指派、等接手者做）**：**L1＝MCP 轉接頭**，實作 `md20/llm/interface.py` 的 L0 契約成實際 server（前 plan_workflow／後 read_report）。使用者定「L0 CI 綠→做 L1」，CI 已綠，L1 可直接開始。
+>
+> **要清的小帳（非功能性，CI 綠）**：`environment/*.yml` 與 `tests/test_env_lock.py` 的註解把「openmm 範圍 `>=8.5,<8.7`」標成 **D-171**，但 DECISIONS 裡 D-171＝env-lock CUDA 漂移守衛、**D-172** 才是 openmm 範圍＋不釘 cuda-version。純註解標號不一致，請接手者或擁有者決定正規編號後一次更正（本 session 未改，避免與並行 session 撞 merge）。
+>
+> **仍 gated（待使用者）**：heavy(workflow) 變慢的深層原因（疑 D-170/D-172 cuda 後平台 fallback，碰 D-172 驗證過路徑）；鋅科學模型（D-150/D-152）；漏斗 ΔG° 筆電驗收（D-140）；`compiled_core` opt-in 發行實跑；LLM L1+ 與 developer 版。
+> **環境卡點**：D-163 收尾（用 CI explicit-lock 縮 `PENDING_UNPINNED`）在本開發環境做不了——`gh run download` 轉 Azure blob、不在 egress 允許清單。需能連 blob 的環境或改由 CI 自行 commit lock。
+>
+> --- 以下為前一次（2026-11-09 第八個 session）交接 ---
+
 > **2026-11-09 第八個 session（session_016gcJz6aoRW5kLP9Jzbi7kj，Opus 4.8）交接。使用者 11/09 10:13 指示收尾、關閉 session。**
 >
 > **第一步照舊：`git pull`，讀 `docs/STATUS.md` 開頭（已更新到 11/09）、本 §0、`docs/DECISIONS.md` 最上面（D-161→D-155）。兩個 repo 都要 add_repo＋clone（md20-workstation 驗證端＋私人 md-digital-signature 簽發端）。**
