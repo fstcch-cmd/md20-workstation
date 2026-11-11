@@ -4,6 +4,7 @@
 不要動別人認領中的檔案／主題；需要時在該列下方留言。決策理由寫在 `docs/DECISIONS.md`，規格寫在 `docs/specs/`。
 
 ## 進行中
+> 2026-11-11 20:10：session_016gcJzBMFygWvETdrK5aZY8 **認領 MD20 Lite（D-181）**：`md20/edition.py`、`tools/build_lite.py`、流程入口與建模後的上限閘門、報告對照、GUI 版本標示。其他 session 請勿動 `md20/edition.py` 與 `docs/specs/lite_edition.md`。本 session 對 repo 只有讀取權，成果以 git bundle 交使用者每週推一次（D-180）。LLM L1 未認領，仍可由別的 session 做。
 > 2026-11-11 08:30：session_016gcJz6mbow3MMxyKdn4bWm **交接並釋出所有認領**。main `7f80d69`（a22.dev0）CI 全綠。本 session 完成 D-166、D-173～D-179、D-177（LLM 審查決定）、D-178（LLM L0 `md20/llm/interface.py`）。**下一步 L1＝MCP 轉接頭**（使用者已指派，L0 CI 已綠可直接做）。待清小帳：env/test 註解把 openmm 範圍標成 D-171、實為 D-172（純標號、CI 綠）。詳 `docs/HANDOFF.md` §0（2026-11-11）。
 > 2026-11-09 20:10：session_016gcJz6mbow3MMxyKdn4bWm：**修復 ba17bd2 的全平台 pure-python CI 紅**——D-172 重寫 release-windows.yml 時誤刪 D-166 的 `compiled_core`，已重放（不碰 D-172 的 cuda 解釘）。容器全套 1489 passed/0 failed。詳 D-173。
 > 2026-11-09 12:30：session_016gcJz6mbow3MMxyKdn4bWm（第九個，接手續開發）：**D-166 完成**（授權第 4 層採方案一「只 Cython 編譯、不加密、無金鑰」，opt-in 預設關、現行原始碼發行不變，已 push 343743a）、**D-171** 補 env-lock 的 CUDA 漂移守衛（回應 D-170 session 的建議）、**D-167** LLM guide 草案（待審、未實作編排）。另已查核 D-169 金鑰：md20 驗證端公鑰指紋＝簽發端真鑰指紋、相符、私鑰不在任何 repo，確認 KEY 正常、可安全接手。D-128 加密層使用者選方案一。LLM 編排規格仍待審。
