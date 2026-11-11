@@ -2,4 +2,4 @@
 name: md20
 channels: [conda-forge]
 dependencies:
-  - openmm>=8.5,<8.7   # D-171: range, not exact — let conda pick a build whose cuda-version fits the student's driver (8.6.1 dropped CUDA<12.9). CI pins exact via a lock file.
+  - openmm>=8.5,<8.7   # D-172: range, not exact — let conda pick a build whose cuda-version fits the student's driver (8.6.1 dropped CUDA<12.9). CI pins exact via a lock file.

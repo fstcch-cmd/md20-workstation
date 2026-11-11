@@ -18,6 +18,7 @@
 
 | 項目 | 來源 | 認領 session | 開始 | 備註 |
 |---|---|---|---|---|
+| **第十個 session：L1＝MCP 轉接頭**（使用者 11/11 指派）：零依賴 stdio JSON-RPC MCP server；只暴露 L1 三工具 read_capabilities／plan_workflow（驗證草稿、寫成提議檔、不執行）／read_report（唯讀，新增）；L2+ 不做。另清小帳 D-183。push 依 D-180 每週一次，平時只本地累積 | 使用者 11/11 08:41 | session_016gcJz9BT5agmHfn8ufogo6 | 2026-11-11 09:00 | 勿動 `md20/llm/`、`md20/cli.py` 的 mcp 子命令、`docs/specs/llm_*.md`、`docs/llm/` |
 | **（已釋出）第九個 session**：D-168 bootstrap 加速、D-163 環境鎖版、D-164 跨重複補圖、D-165 擬合/OH⁻ 競爭羧基閘門、D-167 LLM guide 草案，**五子代理整合後一次 push**；D-166 加密層暫停待使用者選方案（只編譯不加密／商用方案／擱置）；CLAUDE.md 同步 a20。剩餘：LLM 規格+guide 待審、鋅真機守住（D-165）、漏斗筆電驗收、D-72、n_jobs 接 GUI | 使用者 11/09 10:22 | session_016gcJz6mbow3MMxyKdn4bWm | 2026-11-09 10:30 | 已完成；真機交 CI 單次查 |
 | **（已釋出）Evidence-Driven Repair R1–R8＋11/08–11/09 收尾**：完成 D-130（重做）、D-133～D-144；11/09 續 D-155～D-159（清假示範、CI 修正、離子去碰撞通則、timeout）、**D-160 發行 v0.1.0a20**、D-161 LLM 編排規格草案。剩餘：LLM 規格待審、漏斗轉預設（待驗證）、預算（擁有者）、D-128 加密層、鋅配體配位參數化 | 使用者 11/07 23:01 | session_016gcJz6aoRW5kLP9Jzbi7kj（已關閉 11/09） | 2026-11-07 23:25 | 授權第 3 層 D-128 已於第六個 session 完成 |
 | **授權與數位簽章（第 2–4 層）**：D-124 LICENSE 已完成；D-125 簽章授權開發中（分支 agent/license-gate，未推）；簽發端移到私人 repo `md-digital-signature`；第 3、4 層待做 | 使用者 11/07 21:50–22:11 | session_016gcJz8q8wadWxHb24EMCKt | 2026-11-07 21:55 | 私鑰永不進 repo；第 4 層需使用者建 Secret |

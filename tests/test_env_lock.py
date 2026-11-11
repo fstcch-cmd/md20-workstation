@@ -19,7 +19,7 @@ PINNED = {"numpy": "2.4.6", "openff-toolkit": "0.18.0"}
 # D-172: cuda-version is intentionally NOT pinned — conda matches the driver's __cuda and picks an openmm build to fit,
 # so students on different NVIDIA drivers each get a working GPU build without forcing a driver update.
 FAMILY = {"python": "3.11"}
-# D-171: openmm is a RANGE, not exact — 8.6.1 dropped CUDA<12.9 builds, so pinning it exactly forces every student
+# D-172: openmm is a RANGE, not exact — 8.6.1 dropped CUDA<12.9 builds, so pinning it exactly forces every student
 # onto a very new NVIDIA driver.  A range lets conda pick a build whose cuda-version fits the student's driver
 # (CI reproducibility moves to a lock file).  This is intentional, not "awaiting a lock", so it is excluded from both.
 RANGED = {"openmm": ">=8.5,<8.7"}

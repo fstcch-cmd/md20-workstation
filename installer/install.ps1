@@ -108,7 +108,7 @@ if (($Pkgs.Length + $PkgTail) -ge 260) {
 }
 $env:CONDA_PKGS_DIRS = $Pkgs
 $env:PYTHONUTF8 = "1"   # Traditional-Chinese consoles default to cp950; every md20 text file is UTF-8
-# D-171: build the env; if the CUDA solve fails (driver's CUDA version has no matching OpenMM GPU build), fall back
+# D-172: build the env; if the CUDA solve fails (driver's CUDA version has no matching OpenMM GPU build), fall back
 # to OpenCL/CPU once instead of crashing.  With the relaxed openmm range this rarely triggers, but it keeps a student
 # whose driver is too old for any GPU build from being left with a failed install.
 $built = $false

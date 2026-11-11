@@ -6,6 +6,14 @@
 ---
 
 ## 2026-11-11
+### D-183　小帳：openmm 範圍與安裝器退路的註解標號 D-171→D-172（純註解、正規編號定為 D-172）
+- **日期**：2026-11-11
+- **問題**：`environment/{linux-cuda,windows-cuda,windows-opencl,macos}.yml` 的 openmm 範圍註解、`tests/test_env_lock.py:22`、`installer/install.ps1:111`（CUDA solve 失敗退 OpenCL）都標成 **D-171**；但 DECISIONS 中 D-171＝env-lock CUDA 漂移守衛，openmm 放寬為 `>=8.5,<8.7` 與安裝器退路都寫在 **D-172**。
+- **決定**：正規編號＝**D-172**（內容所在的條目），六處註解一次改成 D-172。只改註解，不動任何版本、測試邏輯或安裝行為。
+- **不改**：WORKBOARD 舊留言「再更正（D-171，收回上面的 D-170）」屬歷史紀錄，依「不刪除歷史」保留原文，以本條為準。
+- **證據**：`tests/test_env_lock.py` 7 項本機綠；`grep D-171` 只剩 DECISIONS 的 D-171 本條與歷史紀錄。
+- **相關檔案**：`environment/*.yml`（4）、`tests/test_env_lock.py`、`installer/install.ps1`。
+- **未決**：無。
 ### D-182　Lite 不拆三個科學模組，一律以核心編譯出貨（使用者 2026-11-11 交由開發者決定）
 - **日期**：2026-11-11（session_016gcJzBMFygWvETdrK5aZY8）
 - **問題**（D-181 整合後第 1 項）：`sampling/adaptive.py`、`engine/longrun.py`、`analysis/extended.py` 被基本流程用到，無法從 Lite 安裝包移除，所以自動補窗、長時間規劃、進階分析的程式碼仍在 Lite 裡，只靠上限數字擋。給使用者兩個選項：A 先不拆、Lite 搭配核心編譯出貨；B 現在就拆成基本與完整版兩半。使用者回覆「你自行決定」。
