@@ -2,6 +2,8 @@
 
 **接手前先讀 `docs/STATUS.md`(開頭是目前版本與誠實現況)、`docs/WORKBOARD.md` 與 `docs/DECISIONS.md` 最上面幾條,再讀 `docs/HANDOFF.md`(一般說明)。舊的交接、審查與發行說明在 `docs/archive/`。** 以下是每次都要遵守的重點。
 
+**第二位開發者或新加入的人：先讀 `docs/ONBOARDING.md`（D-187）。** 它把現有的開發分線、流程、功能現況、待做、等驗收、要在本機驗證的項目和所有規則整理在一份。
+
 ## 這個 repo 是什麼
 Docking → 建模 → OpenMM MD → SMD/傘狀採樣的單機教學版,給博士生在自己筆電上跑(Windows 優先)。擁有者 HCC Lab, NKUST。所有成果在本 repo + GitHub Actions CI 上。
 **出貨兩個版本：完整版與 Lite，共用同一份源碼（見下方「兩個版本架構」一節，接手必讀）。**

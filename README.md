@@ -111,6 +111,8 @@ MSI Cyborg 14 筆電（RTX 4060 Laptop 8 GB、Windows 11）：24k 原子水盒�
 - **完整版**：源碼樹本身，功能完整、規模不限。
 - **MD20 Lite**：給實驗室以外的人，流程完整但規模受限。由 `tools/build_lite.py` 從源碼樹打包產生。
 
+新加入的開發者請先讀 [`docs/ONBOARDING.md`](docs/ONBOARDING.md)。
+
 開發前請先讀 `CLAUDE.md` 的「兩個版本架構」一節，判斷這次的工作屬於共用的基本路線、只有完整版才有的功能，還是 Lite 專屬。規格在 `docs/specs/lite_edition.md`。
 
 ```powershell
