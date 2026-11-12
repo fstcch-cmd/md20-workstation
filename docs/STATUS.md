@@ -1,7 +1,7 @@
 # MD20 單機教學版 — 狀態報告
 
-## 當前事實（2026-11-11，session_016gcJzBMFygWvETdrK5aZY8；D-181 MD20 Lite，**未推送**）
-- **分支 `lite/d181`（基於 main `2989bb6`）只存在於開發容器與交給使用者的 git bundle**，main 與 CI 都還沒有這批。
+## 當前事實（2026-11-12，session_016gcJzBMFygWvETdrK5aZY8；D-181、D-182 MD20 Lite，已推上 main）
+- **使用者 2026-11-12 指示一次推上 GitHub**（本週的推送）。CI 結果在推送當下未知，`lite-build` 是第一次執行。
 - **已實作、容器測試通過**：版本契約 `md20/edition.py`；流程三處上限閘門與自動縮小；`md20 edition`；報告附錄 D；介面的徽章、版本頁、上限提示與卡片；打包工具 `tools/build_lite.py`（移除 10 個完整版模組，Lite 樹全模組可 import，27 個純測試檔在 Lite 樹內通過）。容器全套 1,725 passed、50 skipped、0 failed。
 - **未驗證**：介面沒有在真的瀏覽器看過（容器無 NiceGUI）；沒有真實引擎執行；CI `lite-build` 沒跑過；Lite 上限數字未在目標筆電校準；日文韓文未經母語者校對。
 - **已知問題**：見 DECISIONS D-181「整合後仍成立的問題」八項。最重要的兩項：自動補窗、長時間規劃、進階分析的程式碼仍在 Lite 安裝包裡；自動縮小的值會留在設定檔，完整版打開後要人改回來。
