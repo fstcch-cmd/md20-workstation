@@ -7,6 +7,11 @@
 
 你要接手 MD20 單機教學版分子動力學工作站的開發。這是 HCC Lab, NKUST 的專案。
 
+⚠ 這個專案有兩個版本架構：完整版與 Lite，共用同一份源碼與同一個 main 分支（D-186）。
+  動手前先讀 CLAUDE.md 的「兩個版本架構：完整版與 Lite」一節，判斷你的工作屬於
+  「共用的基本路線」「只有完整版才有的功能」還是「Lite 專屬」，並在 WORKBOARD 認領時寫明。
+  改到基本路線時要順便驗 Lite 樹：python tools/build_lite.py --src . --out <暫存> --verify --smoke-tests
+
 第一步（照規矩做）：
 1. add_repo（push 權限）並 clone 兩個 repo：
    - fstcch-cmd/md20-workstation（產品／驗證端）

@@ -106,6 +106,13 @@ MSI Cyborg 14 筆電（RTX 4060 Laptop 8 GB、Windows 11）：24k 原子水盒�
 
 ## 開發
 
+這個 repo 出貨兩個版本，共用同一份源碼與同一個 `main` 分支：
+
+- **完整版**：源碼樹本身，功能完整、規模不限。
+- **MD20 Lite**：給實驗室以外的人，流程完整但規模受限。由 `tools/build_lite.py` 從源碼樹打包產生。
+
+開發前請先讀 `CLAUDE.md` 的「兩個版本架構」一節，判斷這次的工作屬於共用的基本路線、只有完整版才有的功能，還是 Lite 專屬。規格在 `docs/specs/lite_edition.md`。
+
 ```powershell
 # Windows（PowerShell 5.1 即可）
 powershell -ExecutionPolicy Bypass -File installer\install.ps1      # 有 NVIDIA 顯示卡用 -Gpu cuda，否則 -Gpu opencl
@@ -141,6 +148,8 @@ tools/        GUI 截圖與瀏覽器點擊自我測試（gui_preview.py）等
 - 每次 push 後，CI 會把各平台的測試結果貼在該 commit 的留言；被跳過的整合測試不算通過。
 
 ## English summary
+
+This repository ships two editions from one source tree and one `main` branch: the complete edition, and MD20 Lite, a size-limited edition for people outside the lab that is packaged by `tools/build_lite.py`. Developers and agents: read the section on the two editions in `CLAUDE.md` before changing anything.
 
 MD20 is a teaching workstation for molecular docking, molecular dynamics and binding free energy on a student's own
 laptop (Windows first; NVIDIA, AMD, integrated graphics or CPU only). It installs its own environment, repairs

@@ -5,6 +5,8 @@
 
 ## 0. 新 session 第一步
 
+> **2026-11-12：專案明定兩個版本架構（D-186）。** 完整版與 Lite 共用同一份源碼與同一個 main 分支。接手前先讀 `CLAUDE.md` 的「兩個版本架構：完整版與 Lite」一節，認領時寫明工作屬於完整版、Lite 還是共用。Lite 的規格在 `docs/specs/lite_edition.md`，決策 D-181、D-182，目前狀態與已知問題見 `docs/STATUS.md` 開頭。
+
 > **2026-11-11 第十個 session（session_016gcJz9BT5agmHfn8ufogo6，Opus 5.5＋2 個 Sonnet 子代理）。**
 >
 > **已推（11/12 依使用者指示）**：D-183（註解小帳）、D-184（L1 MCP）、D-185（討論紀錄），接在 Lite 第一批（D-181/D-182，另一個 session）之後。本地原號 D-181/D-182 因撞號改為 D-183/D-184。

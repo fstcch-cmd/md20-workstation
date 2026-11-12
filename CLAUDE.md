@@ -4,6 +4,7 @@
 
 ## 這個 repo 是什麼
 Docking → 建模 → OpenMM MD → SMD/傘狀採樣的單機教學版,給博士生在自己筆電上跑(Windows 優先)。擁有者 HCC Lab, NKUST。所有成果在本 repo + GitHub Actions CI 上。
+**出貨兩個版本：完整版與 Lite，共用同一份源碼（見下方「兩個版本架構」一節，接手必讀）。**
 
 ## 硬限制(違反會卡住)
 - 開發容器**連不到 RCSB 或任意網站**(只有 PyPI/conda/GitHub);需要 PDB 請用 `gh` 或請使用者附上。
@@ -16,6 +17,34 @@ Docking → 建模 → OpenMM MD → SMD/傘狀採樣的單機教學版,給博�
 - **推 GitHub 頻率 = 每週一次**(不再是「一輪 CI 跑完就推」):平時在本機累積、整合、驗證,每週彙整推一次 main。緊急修復(主線紅)例外。
 - **驗證一律在本機(local)電腦執行,執行完刪除**:真實引擎驗證(OpenMM/RDKit/Vina、heavy 流程、安裝)在使用者本機(RTX 3090/Ubuntu 工作站,見 workstation-setup)跑,**跑完刪除產生的中繼檔/暫存**,不把驗證產物留在工作區或 repo。容器仍只用 `FakeBackend` 測邏輯。
   - *備註(接手者注意)*:此規則與「真實測試交給 CI」並行——push 時 CI 仍會跑;「本機驗證+刪除」是 push 前的主要把關。若與 CI 牴觸,以本機驗證為準,並把疑點記 DECISIONS。
+
+## 兩個版本架構：完整版與 Lite（使用者 2026-11-12 指定，D-186；接手必讀）
+這個專案出貨**兩個版本**，共用**同一份源碼、同一個 main 分支**。不要為 Lite 另開長期分支或另寫一套程式。
+
+| | 完整版 | Lite（導流版） |
+|---|---|---|
+| 給誰 | 實驗室內、簽約或授權的使用者 | 實驗室以外的人，免費，需使用者簽發的授權檔 |
+| 定位 | 功能完整、規模不限 | 流程完整但規模受限，目的是讓人用過後想升級完整版 |
+| 怎麼產生 | 源碼樹本身（`tools/build_protected.py` 可選編譯核心） | `tools/build_lite.py` 從源碼樹打包：移除完整版模組、換成空殼、寫入 `md20/_edition.json`，再編譯核心（D-182） |
+| 專案格式 | 相同。Lite 專案用完整版直接打開接著跑 | 相同 |
+
+規格：`docs/specs/lite_edition.md`。決策：D-181、D-182。討論紀錄：`docs/archive/discussions/2026-11-11_lite.md`。
+
+**動手前先判斷這次的工作屬於哪一類，並在 WORKBOARD 認領時寫明「完整版」「Lite」或「共用」：**
+1. **共用的基本路線**（docking、分子動力學、快速 PMF、基本分析、報告、介面骨架）：兩個版本都會跑到。改完除了平常的測試，還要確認 Lite 樹仍然可用：`python tools/build_lite.py --src . --out <暫存資料夾> --verify --smoke-tests`（CI 的 `lite-build` 做同一件事）。
+2. **只有完整版才有的功能**（膜系統、胜肽摺疊、粗粒化、長時間模擬、多重複、完整結合自由能、大型篩選、進階分析、自動補跑，以及之後新增的進階功能）：新功能要在 `md20/edition.py` 的 `PRO_FEATURES` 登錄（四語標題、一句好處、`modules=` 列出要從 Lite 移除的原始檔），並在 `check_config` 加上入口判斷。新模組盡量獨立成檔、由基本路線**延遲 import**，這樣才能從 Lite 乾淨移除。
+3. **Lite 專屬**（上限數字、碰到上限的閘門與文字、報告附錄 D、介面的版本頁與提示、打包工具）：只改 `md20/edition.py`、`md20/edition_preview.py`、`md20/report/edition_section.py`、`md20/gui/edition_ui.py`、`tools/build_lite.py` 與它們的測試。
+
+**硬規則：**
+- 版本的唯一來源是 `md20/edition.py`。其他任何地方**不准寫死 `if lite`** 或自己判斷版本，一律問 `edition.current()`、`edition.limits()`、`edition.check_*`。
+- 完整版的行為、輸出、protocol hash 不得因為 Lite 的改動而改變。Lite 的邏輯在完整版必須是空操作。
+- 沒有任何環境變數、設定或參數可以改版本。測試裡用 monkeypatch 模擬 Lite，不用環境變數。
+- Lite 的結果在它的範圍內必須是對的。不得為了推升級而降低、隱藏或模糊結果。
+- 自動縮小只縮規模，不替使用者拿掉功能或刪配體（寧可擋也不要猜）。
+- `md20/_edition.json` 只存在於 Lite 安裝包，**絕不提交進 repo**。
+- 給外部的 Lite 必須是 `build_lite.py` 的產物並開核心編譯。帶 `lite` 字的授權裝在完整安裝包上只供內部測試。
+
+**Lite 目前的真實狀態（2026-11-12）**：容器測試與 CI `lite-build` 通過。**沒有**在真的瀏覽器看過介面、**沒有**用真實引擎跑過 Lite 樹、上限數字未校準、核心編譯新加的四個模組未真的編譯過。已知問題列在 D-181「整合後仍成立的問題」。
 
 ## 開發規則(MD20_optimization_brief)
 - 不新增 phase/step,只強化既有邏輯。

@@ -3,6 +3,8 @@
 同時有多個 Claude session 在推進本 repo。**開工前先 `git pull` 讀本檔，在「進行中」認領（寫 session 連結與時間），完成後移到「完成」並註明 commit。**
 不要動別人認領中的檔案／主題；需要時在該列下方留言。決策理由寫在 `docs/DECISIONS.md`，規格寫在 `docs/specs/`。
 
+> **認領規則補充（D-186，2026-11-12）**：這個專案有完整版與 Lite 兩個版本架構。認領時請在項目後面標明 **〔完整版〕〔Lite〕或〔共用〕**。分類方式與各類該做的檢查見 `CLAUDE.md`「兩個版本架構」一節。
+
 ## 進行中
 > 2026-11-11 21:30：session_016gcJzBMFygWvETdrK5aZY8：**D-181 MD20 Lite 第一批整合完成**（2026-11-12 依使用者指示推上 main；另含 D-182 與討論紀錄 `docs/archive/discussions/2026-11-11_lite.md`）。容器全套 1,725 passed。未驗證：真瀏覽器、真實引擎、上限校準。未決與已知問題列在 DECISIONS D-181「整合後仍成立的問題」。下一步：筆電上用 Lite 樹跑示範案例；決定是否拆 adaptive、longrun、extended 三個模組。
 > 2026-11-11 20:10：session_016gcJzBMFygWvETdrK5aZY8 **認領 MD20 Lite（D-181）**：`md20/edition.py`、`tools/build_lite.py`、流程入口與建模後的上限閘門、報告對照、GUI 版本標示。其他 session 請勿動 `md20/edition.py` 與 `docs/specs/lite_edition.md`。本 session 對 repo 只有讀取權，成果以 git bundle 交使用者每週推一次（D-180）。LLM L1 未認領，仍可由別的 session 做。

@@ -6,6 +6,19 @@
 ---
 
 ## 2026-11-12
+### D-186　專案明定兩個版本架構（完整版、Lite），接手的 agent 依類別分別開發（使用者 2026-11-12 指定）
+- **日期**：2026-11-12（session_016gcJzBMFygWvETdrK5aZY8）
+- **使用者指示**：在 GitHub 上的開發文件註明這個專案有兩個架構，一個是完整版，一個是 Lite，讓接手的 agent 可以照這個分別開發。
+- **決定**：
+  1. `CLAUDE.md` 新增「兩個版本架構：完整版與 Lite」一節，放在開發規則之前。內容：兩個版本的定位與產生方式；每次工作先判斷屬於「共用的基本路線」「只有完整版才有的功能」「Lite 專屬」哪一類，並在 WORKBOARD 認領時寫明；各類該改哪些檔、該跑哪些檢查；七條硬規則；Lite 目前的真實狀態。
+  2. `README.md` 開發一節、`docs/NEXT_SESSION_PROMPT.md`、`docs/HANDOFF.md` §0、`docs/WORKBOARD.md` 各加一段指向該節。
+  3. **兩個版本共用同一份源碼與同一個 main 分支**，不為 Lite 開長期分支。Lite 是打包產物，不是另一個程式。
+- **理由**：D-181 已否決「另寫一套精簡程式」與「另開分支」（兩份會越差越遠）。但規則只寫在 Lite 的規格裡，接手的 session 若只讀 CLAUDE.md 不會知道改基本路線要順便驗 Lite 樹、加進階功能要登錄 `PRO_FEATURES`。所以把它提到每個 session 都會讀的入口。
+- **被否決**：用兩個 repo 或兩個長期分支分開開發。理由同 D-181。
+- **證據／測試**：純文件變更，沒有程式改動。`tools/capability_manifest.py --check` 通過。
+- **相關檔案**：`CLAUDE.md`、`README.md`、`docs/NEXT_SESSION_PROMPT.md`、`docs/HANDOFF.md`、`docs/WORKBOARD.md`。
+- **未決**：無。Lite 本身的未決事項見 D-181、D-182。
+
 ### D-185　第十個 session 討論紀錄：L1 與 Lite 第一批同週推送、撞號改號、相容性檢查（session_016gcJz9BT5agmHfn8ufogo6）
 - **日期**：2026-11-12
 - **L1（D-184）問答結論**：只暴露三工具；零依賴自寫 stdio；平時只本地累積、不推備份分支。指揮者兩個判斷（`md.replicas` 豁免、專案根目錄不存在即拒）待使用者審。
