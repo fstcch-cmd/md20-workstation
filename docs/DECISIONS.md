@@ -5,6 +5,17 @@
 
 ---
 
+## 2026-11-12
+### D-185　第十個 session 討論紀錄：L1 與 Lite 第一批同週推送、撞號改號、相容性檢查（session_016gcJz9BT5agmHfn8ufogo6）
+- **日期**：2026-11-12
+- **L1（D-184）問答結論**：只暴露三工具；零依賴自寫 stdio；平時只本地累積、不推備份分支。指揮者兩個判斷（`md.replicas` 豁免、專案根目錄不存在即拒）待使用者審。
+- **Lite 範圍問答（11/11 20:03）**：使用者選本輪做 Lite ①edition＋上限檢查點、②build_lite＋CI lite-build，上限照 Project 文件 06 預設。之後發現 Project 文件 07 顯示另一個 session（session_016gcJzBMFygWvETdrK5aZY8）已完成 Lite 第一批，本 session **不重做**；申請讀取筆電 `~/MD20-sandbox` 的 bundle 被權限檢查擋下。11/12 該 session 已把 Lite（D-181、D-182）推上 main（`f14ecc4`）。
+- **撞號與改號**：本 session 本地原有 D-181（註解小帳）、D-182（L1）與 Lite 撞號；因兩者從未推上，推送前改為 **D-183、D-184**（commit 訊息、程式註解、規格、測試一併改）。Lite 的 D-181／D-182 不動。
+- **推送**：D-180 規定每週推一次；使用者 11/12 12:52 指示「將所有成果與討論內容一次推上 GitHub」。本 session 的 commit rebase 在 `f14ecc4` 之後推送。
+- **相容性檢查（整合者判斷）**：Lite 在 `workflow.DECISION_KEYS` 新增的鍵，會自動被 `validate_workflow_draft` 當人工決定鍵擋（KNOWN_DRAFT_KEYS 由 DECISION_KEYS 推出）；Lite 讀的頂層鍵 `autonomy` 是完整版功能，草稿帶它會以未知鍵 REJECTED——**刻意維持**（LLM 不該開完整版自動補跑）。`plan_workflow` 目前**不**回報 Lite 上限命中（`edition.check_config` 類資訊）；是否加入屬 L1 擴充，待使用者指示。
+- **證據**：rebase 後容器全套 pytest **1831 passed、35 skipped、0 failed**（Lite 1725＋L1 106）；CI 以本次 push 的 run 為準。
+- **未決**：L1 兩個判斷點；Lite 待決事項見 D-181「整合後仍成立的問題」與 D-182；Claude Desktop 實機連線。
+
 ## 2026-11-11
 ### D-184　LLM 編排 L1：MCP 轉接頭（零依賴 stdio server `md20 mcp`；只暴露三工具；使用者 2026-11-11 指派）
 - **日期**：2026-11-11
